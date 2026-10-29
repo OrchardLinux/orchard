@@ -16,7 +16,7 @@ board = 0x12
 
 # USB product of the Orchard recovery system ("<Board> Recovery").
 [match.linux]
-product = "J72T Recovery"
+product = "J72t Recovery"
 
 [boot]
 methods = ["checkm8-pongo"]
