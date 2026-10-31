@@ -1,0 +1,546 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sun, 1 Nov 2026 07:00:00 +0800
+Subject: [PATCH] bootmgr: Start a Boot Loader Specification entry from main
+ storage
+
+With the entries listed by m1n1 itself, the host still loaded the chosen
+one block by block over the proxy and drove kboot step by step. Let m1n1
+start it: P_BOOT_START takes the entry id, the board's DTB file name (or
+0) and flags (0 for now), checks the entries again and refuses an entry
+that isn't bootable. It loads the kernel (a 2 MiB aligned Image with room
+for its image_size, or gzip, uncompressed behind the heap as payloads
+are), the initrds concatenated in entry order and the devicetree, and
+only then shuts storage down, so a failure before that leaves storage up
+for another entry. The rest follows the payload boot: bootargs from the
+entry's options, cpufreq, secondary CPUs, mitigations, the DT fill-ins,
+kboot_boot. The reply goes out before the jump, as with P_KBOOT_BOOT.
+On failure m1n1 stays in the proxy with the reason on its console.
+
+The arguments are copied before anything is loaded, and the heap limit a
+host may have set is lifted: the kernel slot is larger than the room
+hosts usually leave m1n1, and an allocation past the limit panics.
+heapblock_set_limit(NULL) now says so instead of printing a negative
+size.
+
+Assisted-by: LLM
+---
+ Makefile        |   1 +
+ rust/src/bls.rs | 238 ++++++++++++++++++++++++++++++++++++++++++++++--
+ src/bootmgr.c   | 135 +++++++++++++++++++++++++++
+ src/bootmgr.h   |  10 ++
+ src/heapblock.c |   5 +-
+ src/proxy.c     |   9 ++
+ src/proxy.h     |   1 +
+ 7 files changed, 391 insertions(+), 8 deletions(-)
+ create mode 100644 src/bootmgr.c
+ create mode 100644 src/bootmgr.h
+
+diff --git a/Makefile b/Makefile
+index 6f51220..bb72266 100644
+--- a/Makefile
++++ b/Makefile
+@@ -132,6 +132,7 @@ OBJECTS := \
+ 	apcie_nvme.o \
+ 	asc.o \
+ 	bootlogo_48.o bootlogo_128.o bootlogo_256.o \
++	bootmgr.o \
+ 	chainload.o \
+ 	chainload_asm.o \
+ 	chickens.o \
+diff --git a/rust/src/bls.rs b/rust/src/bls.rs
+index f7eb2d9..237ef2e 100644
+--- a/rust/src/bls.rs
++++ b/rust/src/bls.rs
+@@ -13,7 +13,7 @@ use crate::storage;
+ use alloc::string::{String, ToString};
+ use alloc::vec::Vec;
+ use core::cmp::Ordering;
+-use core::ffi::{c_char, c_void, CStr};
++use core::ffi::{c_char, c_int, c_void, CStr};
+ use core::fmt::Write as _;
+ use fatfs::{FileSystem, FsOptions, Read, ReadWriteSeek, Seek, SeekFrom};
+ use uuid::{uuid, Uuid};
+@@ -230,6 +230,21 @@ fn valid_path(path: &str) -> bool {
+ /// Reads and checks every entry. `open(lba)` gives the disk from that block on;
+ /// `devicetree` is the DTB file name this board needs, if known.
+ pub fn read_entries<IO, F>(open: F, devicetree: Option<&str>) -> Result<Listing, String>
++where
++    IO: ReadWriteSeek,
++    IO::Error: core::fmt::Debug,
++    F: Fn(u64) -> IO,
++{
++    with_entries(open, devicetree, |_, entries| Ok(Listing { entries }))
++}
++
++/// Opens the boot partition, reads and checks its entries in BLS order and
++/// hands them to `then` along with the partition's root directory.
++fn with_entries<IO, F, R>(
++    open: F,
++    devicetree: Option<&str>,
++    then: impl FnOnce(&Dir<IO>, Vec<Entry>) -> Result<R, String>,
++) -> Result<R, String>
+ where
+     IO: ReadWriteSeek,
+     IO::Error: core::fmt::Debug,
+@@ -267,11 +282,7 @@ where
+     let root_dir = fs.root_dir();
+     let dir = match root_dir.open_dir(ENTRIES_DIR) {
+         Ok(dir) => dir,
+-        Err(fatfs::Error::NotFound) => {
+-            return Ok(Listing {
+-                entries: Vec::new(),
+-            })
+-        }
++        Err(fatfs::Error::NotFound) => return then(&root_dir, Vec::new()),
+         Err(err) => return Err(fs_error(ENTRIES_DIR, err)),
+     };
+ 
+@@ -314,7 +325,95 @@ where
+         entries.push(entry);
+     }
+     entries.sort_by(entry_cmp);
+-    Ok(Listing { entries })
++    then(&root_dir, entries)
++}
++
++/// An entry's files in memory, as `P_BOOT_START` needs them.
++pub struct Loaded {
++    /// The kernel as stored: gzip, or an Image with room for its `image_size`
++    /// at a `KERNEL_ALIGN` boundary.
++    pub linux: (*mut u8, usize),
++    /// All initrds, concatenated in entry order.
++    pub initrd: (*mut u8, usize),
++    pub devicetree: (*mut u8, usize),
++    pub options: String,
++}
++
++pub const KERNEL_ALIGN: usize = 2 << 20;
++
++fn read_into<IO: ReadWriteSeek>(dir: &Dir<IO>, path: &str, dst: &mut [u8]) -> Result<(), String> {
++    let mut file = dir.open_file(path).map_err(|e| fs_error(path, e))?;
++    file.read_exact(dst)
++        .map_err(|_| format!("{}: read error", path))
++}
++
++/// Checks the entries again and loads the bootable entry `id`. `alloc(size,
++/// align)` gives memory that stays valid after this returns.
++pub fn load_entry<IO, F, A>(
++    open: F,
++    id: &str,
++    devicetree: Option<&str>,
++    mut alloc: A,
++) -> Result<Loaded, String>
++where
++    IO: ReadWriteSeek,
++    IO::Error: core::fmt::Debug,
++    F: Fn(u64) -> IO,
++    A: FnMut(usize, usize) -> *mut u8,
++{
++    with_entries(open, devicetree, |dir, entries| {
++        let entry = entries
++            .iter()
++            .find(|e| e.id == id)
++            .ok_or_else(|| format!("No boot entry {}", id))?;
++        if let Some(problem) = entry.problems.first() {
++            return Err(format!("{} is not bootable: {}", id, problem));
++        }
++        let mut alloc_slice = |size: usize, align: usize| -> Result<&mut [u8], String> {
++            let ptr = alloc(size.max(1), align);
++            if ptr.is_null() {
++                return Err(format!("Out of memory for {} bytes", size));
++            }
++            Ok(unsafe { core::slice::from_raw_parts_mut(ptr, size) })
++        };
++
++        let path = entry.get("linux").unwrap_or_default();
++        let (size, head) = probe(dir, path)?;
++        let size = size as usize;
++        let linux = if head[..2] == [0x1f, 0x8b] {
++            alloc_slice(size, 64)?
++        } else {
++            let image_size = u64::from_le_bytes(head[16..24].try_into().unwrap()) as usize;
++            &mut alloc_slice(size.max(image_size), KERNEL_ALIGN)?[..size]
++        };
++        read_into(dir, path, linux)?;
++        let linux = (linux.as_mut_ptr(), size);
++
++        let mut initrds = Vec::new();
++        for path in entry.all("initrd") {
++            initrds.push((path, probe(dir, path)?.0 as usize));
++        }
++        let total = initrds.iter().map(|(_, size)| size).sum();
++        let initrd = alloc_slice(total, 4096)?;
++        let mut at = 0;
++        for (path, size) in initrds {
++            read_into(dir, path, &mut initrd[at..at + size])?;
++            at += size;
++        }
++        let initrd = (initrd.as_mut_ptr(), total);
++
++        let path = entry.get("devicetree").unwrap_or_default();
++        let size = probe(dir, path)?.0 as usize;
++        let tree = alloc_slice(size, 8)?;
++        read_into(dir, path, tree)?;
++
++        Ok(Loaded {
++            linux,
++            initrd,
++            devicetree: (tree.as_mut_ptr(), size),
++            options: entry.options(),
++        })
++    })
+ }
+ 
+ type Dir<'a, IO> = fatfs::Dir<'a, IO, fatfs::NullTimeProvider, fatfs::LossyOemCpConverter>;
+@@ -500,6 +599,68 @@ pub unsafe extern "C" fn rust_boot_entries(
+     text.leak().as_mut_ptr() as *mut c_void
+ }
+ 
++#[repr(C)]
++pub struct BootFiles {
++    kernel: *mut c_void,
++    kernel_size: c_size_t,
++    initrd: *mut c_void,
++    initrd_size: c_size_t,
++    devicetree: *mut c_void,
++    devicetree_size: c_size_t,
++    options: *mut c_char,
++}
++
++extern "C" {
++    fn heapblock_alloc_aligned(size: c_size_t, align: c_size_t) -> *mut c_void;
++}
++
++/// Loads the bootable entry `id` of main storage, which the caller has
++/// initialised, into heapblock memory. `devicetree` may be NULL. Returns 0, or
++/// -1 with the reason on the console.
++#[no_mangle]
++pub unsafe extern "C" fn rust_boot_entry_load(
++    id: *const c_char,
++    devicetree: *const c_char,
++    files: *mut BootFiles,
++) -> c_int {
++    let Ok(id) = unsafe { CStr::from_ptr(id) }.to_str() else {
++        println!("bls: the entry id is not UTF-8");
++        return -1;
++    };
++    let devicetree = match devicetree.is_null() {
++        true => None,
++        false => unsafe { CStr::from_ptr(devicetree) }.to_str().ok(),
++    };
++    let alloc = |size, align| unsafe { heapblock_alloc_aligned(size, align) as *mut u8 };
++    match load_entry(storage::MainStorage::new, id, devicetree, alloc) {
++        Err(error) => {
++            println!("bls: {}", error);
++            -1
++        }
++        Ok(loaded) => {
++            println!(
++                "bls: loaded {}: linux {} bytes, initrd {} bytes, devicetree {} bytes",
++                id, loaded.linux.1, loaded.initrd.1, loaded.devicetree.1
++            );
++            let mut options = loaded.options.into_bytes();
++            options.retain(|&b| b != 0);
++            options.push(0);
++            unsafe {
++                *files = BootFiles {
++                    kernel: loaded.linux.0 as *mut c_void,
++                    kernel_size: loaded.linux.1,
++                    initrd: loaded.initrd.0 as *mut c_void,
++                    initrd_size: loaded.initrd.1,
++                    devicetree: loaded.devicetree.0 as *mut c_void,
++                    devicetree_size: loaded.devicetree.1,
++                    options: options.leak().as_mut_ptr() as *mut c_char,
++                };
++            }
++            0
++        }
++    }
++}
++
+ #[no_mangle]
+ pub unsafe extern "C" fn rust_free_boot_entries(data: *mut c_void, size: c_size_t) {
+     if !data.is_null() {
+@@ -776,6 +937,69 @@ mod tests {
+         assert!(text.ends_with("\n\n"));
+     }
+ 
++    #[test]
++    fn loads_an_entry() {
++        let mut img = image();
++        img[16..24].copy_from_slice(&4096u64.to_le_bytes()); // image_size beyond the file
++        let a = entry_text("Omarchy", "6.18.2-orchard").replace(
++            "initrd /tok/6.18.2-orchard/initrd\n",
++            "initrd /tok/6.18.2-orchard/initrd\ninitrd /tok/6.18.2-orchard/extra\n",
++        );
++        let files: Vec<(&str, &[u8])> = vec![
++            ("/loader/entries/a.conf", a.as_bytes()),
++            ("/loader/entries/bad.conf", b"title Bad\n"),
++            ("/tok/6.18.2-orchard/linux", &img),
++            ("/tok/6.18.2-orchard/initrd", b"070701"),
++            ("/tok/6.18.2-orchard/extra", b"XYZ"),
++            ("/tok/6.18.2-orchard/t8010-j71b.dtb", DTB),
++        ];
++        let d = disk(&files, false);
++        let mut allocs = Vec::new();
++        let alloc = |size: usize, align: usize| {
++            let block = vec![0u8; size + align].leak();
++            let at = block.as_ptr().align_offset(align);
++            allocs.push((size, align));
++            block[at..].as_mut_ptr()
++        };
++        let open = |lba| Mem {
++            disk: d.clone(),
++            base: lba * BLOCK,
++            pos: 0,
++        };
++        let loaded = load_entry(open, "a", Some("t8010-j71b.dtb"), alloc).unwrap();
++        let bytes =
++            |(p, n): (*mut u8, usize)| unsafe { core::slice::from_raw_parts(p, n) }.to_vec();
++        assert_eq!(bytes(loaded.linux), img);
++        assert_eq!(loaded.linux.0 as usize % KERNEL_ALIGN, 0);
++        assert_eq!(bytes(loaded.initrd), b"070701XYZ");
++        assert_eq!(bytes(loaded.devicetree), DTB);
++        assert_eq!(loaded.options, format!("root=PARTUUID={} rw quiet", ROOT));
++        assert_eq!(allocs[0], (4096, KERNEL_ALIGN));
++
++        let open = |lba| Mem {
++            disk: d.clone(),
++            base: lba * BLOCK,
++            pos: 0,
++        };
++        let err = load_entry(open, "bad", None, |_, _| core::ptr::null_mut())
++            .err()
++            .unwrap();
++        assert!(
++            err.starts_with("bad is not bootable: needs exactly one linux"),
++            "{}",
++            err
++        );
++        let open = |lba| Mem {
++            disk: d.clone(),
++            base: lba * BLOCK,
++            pos: 0,
++        };
++        let err = load_entry(open, "nope", None, |_, _| core::ptr::null_mut())
++            .err()
++            .unwrap();
++        assert_eq!(err, "No boot entry nope");
++    }
++
+     #[test]
+     fn disk_errors() {
+         let empty = disk(&[], false);
+diff --git a/src/bootmgr.c b/src/bootmgr.c
+new file mode 100644
+index 0000000..04d7ee1
+--- /dev/null
++++ b/src/bootmgr.c
+@@ -0,0 +1,135 @@
++/* SPDX-License-Identifier: MIT */
++
++#include "../build/build_cfg.h"
++
++#include "bootmgr.h"
++#include "cpufreq.h"
++#include "heapblock.h"
++#include "kboot.h"
++#include "mitigations.h"
++#include "smp.h"
++#include "string.h"
++#include "utils.h"
++
++#include "tinf/tinf.h"
++
++#ifdef CHAINLOADING
++
++#define KERNEL_ALIGN (2 << 20)
++#define MAX_NAME     256
++#define ARM64_MAGIC  0x644d5241 /* "ARM\x64" */
++
++struct boot_files {
++    void *kernel;
++    size_t kernel_size;
++    void *initrd;
++    size_t initrd_size;
++    void *devicetree;
++    size_t devicetree_size;
++    char *options;
++};
++
++int rust_boot_entry_load(const char *id, const char *devicetree, struct boot_files *files);
++
++static bool copy_name(char *dst, const char *src)
++{
++    size_t len = strnlen(src, MAX_NAME);
++    if (len == MAX_NAME)
++        return false;
++    memcpy(dst, src, len + 1);
++    return true;
++}
++
++/* A gzip kernel goes behind the heap with room for its image_size; an Image stays. */
++static void *unpack_kernel(void *image, size_t size)
++{
++    const u8 *p = image;
++    if (size < 2 || p[0] != 0x1f || p[1] != 0x8b)
++        return image;
++
++    /* Nothing may allocate until the result is reserved below. */
++    void *dest = heapblock_alloc_aligned(0, KERNEL_ALIGN);
++    unsigned int dest_len = 1 << 30, source_len = size;
++    int ret = tinf_gzip_uncompress(dest, &dest_len, image, &source_len);
++    if (ret != TINF_OK) {
++        printf("bootmgr: kernel decompression failed (%d)\n", ret);
++        return NULL;
++    }
++    struct kernel_header *hdr = dest;
++    if (dest_len < sizeof(*hdr) || hdr->magic != ARM64_MAGIC) {
++        printf("bootmgr: the kernel is not an arm64 Image\n");
++        return NULL;
++    }
++    size_t need = max((size_t)dest_len, (size_t)hdr->image_size);
++    void *reserved = heapblock_alloc_aligned(need, KERNEL_ALIGN);
++    if (reserved != dest) {
++        printf("bootmgr: kernel space moved (%p, %p)\n", dest, reserved);
++        return NULL;
++    }
++    printf("bootmgr: kernel %zu bytes uncompressed to %u\n", size, dest_len);
++    return dest;
++}
++
++/*
++ * Loads and boots the BLS entry `id` from main storage, which must be up.
++ * Storage is shut down only once everything is loaded, so a failure before
++ * that leaves it usable for another entry. Returns 0 when the kernel is set
++ * up to run after the proxy reply, -1 with the reason on the console.
++ */
++int bootmgr_start(const char *id_arg, const char *devicetree_arg, u64 flags)
++{
++    char id[MAX_NAME], devicetree[MAX_NAME];
++
++    /* The arguments live in host memory above m1n1's heap; copy them first. */
++    if (!copy_name(id, id_arg) || (devicetree_arg && !copy_name(devicetree, devicetree_arg))) {
++        printf("bootmgr: argument too long\n");
++        return -1;
++    }
++    if (flags) {
++        printf("bootmgr: unsupported flags 0x%lx\n", flags);
++        return -1;
++    }
++
++    /* The kernel, initrd and DT are m1n1's now, past any limit the host set. */
++    heapblock_set_limit(NULL);
++
++    struct boot_files files;
++    if (rust_boot_entry_load(id, devicetree_arg ? devicetree : NULL, &files) < 0)
++        return -1;
++    void *kernel = unpack_kernel(files.kernel, files.kernel_size);
++    if (!kernel)
++        return -1;
++
++    main_storage_shutdown();
++
++    if (kboot_set_chosen("bootargs", files.options) < 0) {
++        printf("bootmgr: could not set the boot arguments; storage is shut down\n");
++        return -1;
++    }
++    if (files.initrd_size)
++        kboot_set_initrd(files.initrd, files.initrd_size);
++
++    cpufreq_init();
++    smp_start_secondaries();
++    mitigations_perform();
++
++    if (kboot_prepare_dt(files.devicetree)) {
++        printf("bootmgr: could not prepare the device tree; storage is shut down\n");
++        return -1;
++    }
++    printf("bootmgr: starting %s\n", id);
++    return kboot_boot(kernel);
++}
++
++#else
++
++int bootmgr_start(const char *id, const char *devicetree, u64 flags)
++{
++    UNUSED(id);
++    UNUSED(devicetree);
++    UNUSED(flags);
++    printf("bootmgr: not supported in this build\n");
++    return -1;
++}
++
++#endif
+diff --git a/src/bootmgr.h b/src/bootmgr.h
+new file mode 100644
+index 0000000..33b8556
+--- /dev/null
++++ b/src/bootmgr.h
+@@ -0,0 +1,10 @@
++/* SPDX-License-Identifier: MIT */
++
++#ifndef BOOTMGR_H
++#define BOOTMGR_H
++
++#include "types.h"
++
++int bootmgr_start(const char *id, const char *devicetree, u64 flags);
++
++#endif
+diff --git a/src/heapblock.c b/src/heapblock.c
+index 3a1d6ac..9c5c3a6 100644
+--- a/src/heapblock.c
++++ b/src/heapblock.c
+@@ -31,7 +31,10 @@ void heapblock_init(void)
+ void heapblock_set_limit(void *limit)
+ {
+     heap_limit = limit;
+-    printf("Heap limit: %p (%ld MiB)\n", limit, ((u8 *)limit - (u8 *)heap_base) >> 20);
++    if (limit)
++        printf("Heap limit: %p (%ld MiB)\n", limit, ((u8 *)limit - (u8 *)heap_base) >> 20);
++    else
++        printf("Heap limit: none\n");
+ }
+ 
+ void *heapblock_alloc(size_t size)
+diff --git a/src/proxy.c b/src/proxy.c
+index c629e02..b238b9e 100644
+--- a/src/proxy.c
++++ b/src/proxy.c
+@@ -4,6 +4,7 @@
+ 
+ #include "proxy.h"
+ #include "ans1.h"
++#include "bootmgr.h"
+ #include "cpufreq.h"
+ #include "dapf.h"
+ #include "dart.h"
+@@ -699,6 +700,14 @@ int proxy_process(ProxyRequest *request, ProxyReply *reply)
+             break;
+         }
+ #endif
++        /* args: entry id, DTB file name or 0, flags (0). On success the reply goes out, then
++         * the kernel runs. */
++        case P_BOOT_START:
++            if (bootmgr_start((const char *)request->args[0], (const char *)request->args[1],
++                              request->args[2]) == 0)
++                return 1;
++            reply->retval = -1;
++            break;
+ 
+         default:
+             reply->status = S_BADCMD;
+diff --git a/src/proxy.h b/src/proxy.h
+index 5c792ac..720891b 100644
+--- a/src/proxy.h
++++ b/src/proxy.h
+@@ -193,6 +193,7 @@ typedef enum {
+     /* Orchard-local until upstream assigns numbers */
+     P_BOOT_ENTRIES = 0x1500,
+     P_BOOT_ENTRIES_FREE,
++    P_BOOT_START,
+ } ProxyOp;
+ 
+ #define S_OK     0

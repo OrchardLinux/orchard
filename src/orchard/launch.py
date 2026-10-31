@@ -2,21 +2,22 @@
 
 The device carries the boot contract (hardware docs/boot-contract.md): an
 XBOOTLDR FAT32 partition with Boot Loader Specification entries. The host
-boots a storage-capable m1n1, reads the entries through m1n1's generic
-main_storage calls, lets the user choose, has m1n1 copy the chosen kernel,
-initrd and DTB from storage into memory, and boots it. Nothing is written.
+boots a storage-capable m1n1, which lists the entries; the user chooses and
+m1n1 loads and boots the entry itself. With an older m1n1 that lacks those
+ops, the host reads the partition through main_storage calls instead
+(bootdisk). Nothing is written.
 
 The host brings only Pongo and that m1n1, which ship with Orchard
 (orchard.hardware.loader) or are built from the hardware source, so any
 host with Orchard can launch any installed system, from any distro.
 """
-from .bootdisk import BootDiskError, Disk, read_boot
+from .bootdisk import BootDiskError, Disk, Entry, read_boot
 from .devices import choose
 from .progress import Clock, Progress
 from .service import ask, save_report
 from .state import exclusive_operation, private_directory
 from .state import DeviceState
-from .transports.m1n1 import BLOCK, M1n1Error, M1n1Proxy
+from .transports.m1n1 import BLOCK, M1n1Error, M1n1Proxy, M1n1Unsupported
 
 KERNEL_ALIGN = 2 << 20
 KERNEL_SPACE = 512 << 20
@@ -103,8 +104,12 @@ def launch(*, entry=None, input_fn=input, progress=None):
     path = private_directory(DeviceState(adapter.PROFILE, device['ecid']).root) / 'last-launch.json'
     with M1n1Proxy(port) as proxy:
         proxy.storage_init()
+        fat = None
         try:
-            _, fat, entries = read_boot(Disk(proxy.read_block, BLOCK), adapter.DEVICETREE)
+            try:
+                entries = [Entry(i, keys, problems) for i, keys, problems in proxy.boot_entries(adapter.DEVICETREE)]
+            except M1n1Unsupported:
+                _, fat, entries = read_boot(Disk(proxy.read_block, BLOCK), adapter.DEVICETREE)
             if not entries:
                 raise ValueError('No boot entries on this device; install a system first')
             chosen = select(entries, entry, clock, input_fn)
@@ -115,7 +120,12 @@ def launch(*, entry=None, input_fn=input, progress=None):
             raise
         report['entry'] = {'id': chosen.id, 'title': chosen.title, 'version': chosen.get('version'),
                            'root': chosen.root}
-        start(proxy, fat, chosen, progress)
+        if fat is None:
+            # m1n1 shuts storage down itself; after a failure the device stays in its proxy.
+            progress.phase('Starting ' + chosen.title)
+            proxy.boot_start(chosen.id, adapter.DEVICETREE)
+        else:
+            start(proxy, fat, chosen, progress)
     report.update(started=True, timing=clock.result())
     save_report(path, report)
     progress.phase(f'{chosen.title} is starting.')

@@ -10,6 +10,8 @@ from unittest.mock import ANY, Mock, patch
 
 from boot_image import ROOT_ARM64, XBOOTLDR, fat32, gpt_disk
 from orchard import launch
+from orchard.bootdisk import Disk, read_boot
+from orchard.transports.m1n1 import M1n1Error, M1n1Unsupported
 from orchard.progress import Progress
 
 ROOT = uuid.UUID('4d6c1a2e-0000-4000-8000-000000000001')
@@ -59,6 +61,9 @@ class FakeM1n1:
     def read_block(self, lba):
         return self.disk[lba * 4096:(lba + 1) * 4096]
 
+    def boot_entries(self, devicetree=None):
+        raise M1n1Unsupported('older m1n1')
+
     def memalign(self, align, size):
         addr = (self.heap + align - 1) & ~(align - 1)
         self.heap = addr + size
@@ -82,6 +87,28 @@ class FakeM1n1:
                                if initrd <= addr < initrd + initrd_size)
         self.booted = dict(kernel=self.memory[kernel], dtb=self.memory[dtb], initrd=initrd_data,
                            bootargs=bootargs)
+
+
+class FakeBootManager(FakeM1n1):
+    """An m1n1 with the boot manager ops (orchard 0007, 0008), modelled with the host reader."""
+
+    def __init__(self, disk, fail=None):
+        super().__init__(disk)
+        self.fail, self.started = fail, None
+
+    def read_block(self, lba):
+        raise AssertionError('the host must not read storage')
+
+    def boot_entries(self, devicetree=None):
+        self.calls.append('entries')
+        _, _, entries = read_boot(Disk(lambda lba: self.disk[lba * 4096:(lba + 1) * 4096]), devicetree)
+        return [(e.id, e.keys, e.problems) for e in entries]
+
+    def boot_start(self, entry_id, devicetree=None):
+        self.calls.append('start')
+        if self.fail:
+            raise M1n1Error(self.fail)
+        self.started = (entry_id, devicetree)
 
 
 LOADER = {'pongo': Path('/loaders/pongo.bin'), 'm1n1': Path('/loaders/j71b/m1n1.bin')}
@@ -145,6 +172,21 @@ class LaunchFlow(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'No boot entries'):
             self.run_launch(disk, proxy=proxy)
         self.assertEqual(proxy.calls, ['init', 'shutdown'])
+
+    def test_m1n1_lists_and_starts_the_entry_itself(self):
+        disk = image({'omarchy-2.conf': entry('Omarchy', '6.18.2'), 'omarchy-1.conf': entry('Omarchy', '6.17.9')})
+        proxy = FakeBootManager(disk)
+        report, _ = self.run_launch(disk, answers=('2',), proxy=proxy)
+        self.assertTrue(report['started'])
+        self.assertEqual(proxy.started, ('omarchy-1', 't8010-j71b.dtb'))
+        self.assertEqual(proxy.calls, ['init', 'entries', 'start'])
+
+    def test_m1n1_start_failure_is_reported(self):
+        disk = image({'a.conf': entry('Omarchy', '6.18.2')})
+        proxy = FakeBootManager(disk, fail='m1n1 could not start the entry: out of memory')
+        with self.assertRaisesRegex(M1n1Error, 'out of memory'):
+            self.run_launch(disk, answers=(), proxy=proxy)
+        self.assertEqual(proxy.calls, ['init', 'entries', 'start'])
 
     def test_running_systems_are_not_rebooted(self):
         with self.assertRaisesRegex(ValueError, 'DFU mode'):

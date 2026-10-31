@@ -22,7 +22,7 @@ P_SMP_START_SECONDARIES = 0x500
 P_GZDEC = 0x401
 P_MAIN_STORAGE_INIT, P_MAIN_STORAGE_SHUTDOWN, P_MAIN_STORAGE_READ = 0xf08, 0xf09, 0xf0a
 P_CPUFREQ_INIT = 0x1300
-P_BOOT_ENTRIES, P_BOOT_ENTRIES_FREE = 0x1500, 0x1501   # orchard m1n1 patch 0007, Orchard-local
+P_BOOT_ENTRIES, P_BOOT_ENTRIES_FREE, P_BOOT_START = 0x1500, 0x1501, 0x1502   # orchard m1n1 0007, 0008; Orchard-local
 BOOT_CONTRACT = 1
 
 M1N1_HEAP = 128 << 20   # room left to m1n1's own heap, as proxyclient does
@@ -33,6 +33,10 @@ MAX_BLOCKS = 256   # one NVMe command in m1n1's apcie backend (orchard m1n1 patc
 
 class M1n1Error(RuntimeError):
     pass
+
+
+class M1n1Unsupported(M1n1Error):
+    """The loader doesn't know an op: an older m1n1."""
 
 
 def checksum(data):
@@ -203,7 +207,7 @@ class M1n1Proxy:
         try:
             failed = self.call(P_BOOT_ENTRIES, out, name, signed=True)
         except M1n1Error as error:
-            raise M1n1Error('This loader cannot read boot entries itself (needs orchard m1n1 patch 0007)') from error
+            raise M1n1Unsupported('This loader cannot read boot entries itself (needs orchard m1n1 patch 0007)') from error
         addr, size = struct.unpack('<QQ', self.read(out, 16))
         if failed or not addr:
             raise M1n1Error('m1n1 could not list the boot entries')
@@ -212,6 +216,27 @@ class M1n1Proxy:
         finally:
             self.call(P_BOOT_ENTRIES_FREE, out)
         return parse_boot_entries(text)
+
+    def boot_start(self, entry_id, devicetree=None, timeout=120.0):
+        """m1n1 loads entry_id from storage, shuts storage down and boots it (orchard m1n1 patch 0008).
+
+        m1n1 replies before the jump. On failure it stays in the proxy; the reason is on its console.
+        """
+        name, tree = self.string(entry_id), self.string(devicetree) if devicetree else 0
+        mark, saved = len(self.console), self.timeout
+        self.timeout = timeout
+        try:
+            failed = self.call(P_BOOT_START, name, tree, 0, signed=True)
+        except M1n1Error as error:
+            if 'status -1' in str(error):
+                raise M1n1Unsupported('This loader cannot start boot entries itself (needs orchard m1n1 patch 0008)') from error
+            raise
+        finally:
+            self.timeout = saved
+        if failed:
+            lines = self.console[mark:].decode('utf-8', 'replace').splitlines()
+            reasons = [line.split(': ', 1)[1] for line in lines if line.startswith(('bls: ', 'bootmgr: ')) and ': ' in line]
+            raise M1n1Error('m1n1 could not start the entry: ' + ('; '.join(reasons[-2:]) or 'see its console'))
 
     # kboot
     def string(self, text):
