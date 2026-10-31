@@ -235,8 +235,10 @@ class M1n1Proxy:
             self.timeout = saved
         if failed:
             lines = self.console[mark:].decode('utf-8', 'replace').splitlines()
-            reasons = [line.split(': ', 1)[1] for line in lines if line.startswith(('bls: ', 'bootmgr: ')) and ': ' in line]
-            raise M1n1Error('m1n1 could not start the entry: ' + ('; '.join(reasons[-2:]) or 'see its console'))
+            reasons = [line.split(': ', 1)[1] for line in lines if line.startswith(('bls: ', 'bootmgr: '))]
+            storage = [line for line in lines if line.startswith(('main_storage_read', 'apcie-nvme', 'nvme'))]
+            raise M1n1Error('m1n1 could not start the entry: ' + ('; '.join(reasons[-2:]) or 'see its console')
+                            + (' (storage: ' + '; '.join(storage[-4:]) + ')' if storage else ''))
 
     # kboot
     def string(self, text):

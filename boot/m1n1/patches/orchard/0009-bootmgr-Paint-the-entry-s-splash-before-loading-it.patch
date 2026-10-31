@@ -1,0 +1,246 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sun, 1 Nov 2026 08:00:00 +0800
+Subject: [PATCH] bootmgr: Paint the entry's splash before loading it
+
+A system ships its boot splash next to its kernel (`splash` in the
+directory of the entry's linux): "OSPL", width and height as
+little-endian u32, then the pixels as b, g, r, 0. P_BOOT_START now paints
+it centred on black as soon as the entry is chosen, before the kernel and
+initrds load, so the picture shows from the start of the boot and the
+kernel keeps the frame. A missing, malformed or oversized splash only
+costs the picture. Flag bit 0 (BOOTMGR_NO_SPLASH) leaves the screen
+alone.
+
+Tested on J71b: the system's 480x480 splash painted centred through
+fb_fill and fb_blit takes 0.02 s, and m1n1 keeps answering.
+
+Assisted-by: LLM
+---
+ rust/src/bls.rs     | 66 ++++++++++++++++++++++++++++++++++++++++-----
+ rust/src/storage.rs |  5 +++-
+ src/bootmgr.c       | 21 ++++++++++++---
+ src/bootmgr.h       |  2 ++
+ 4 files changed, 83 insertions(+), 11 deletions(-)
+
+diff --git a/rust/src/bls.rs b/rust/src/bls.rs
+index 237ef2e..35ddc1b 100644
+--- a/rust/src/bls.rs
++++ b/rust/src/bls.rs
+@@ -347,13 +347,37 @@ fn read_into<IO: ReadWriteSeek>(dir: &Dir<IO>, path: &str, dst: &mut [u8]) -> Re
+         .map_err(|_| format!("{}: read error", path))
+ }
+ 
++pub const SPLASH_MAGIC: &[u8; 4] = b"OSPL";
++
++/// Reads the entry's splash (`splash` next to its kernel): `OSPL`, width and
++/// height as little-endian u32, then the pixels as b, g, r, 0.
++fn read_splash<IO: ReadWriteSeek>(
++    dir: &Dir<IO>,
++    linux: &str,
++) -> Result<(Vec<u8>, u32, u32), String> {
++    let path = format!("{}/splash", linux.rsplit_once('/').map_or("", |(d, _)| d));
++    let (size, head) = probe(dir, &path)?;
++    let width = u32::from_le_bytes(head[4..8].try_into().unwrap());
++    let height = u32::from_le_bytes(head[8..12].try_into().unwrap());
++    if &head[..4] != SPLASH_MAGIC || size != 12 + width as u64 * height as u64 * 4 {
++        return Err(format!("{}: not a splash", path));
++    }
++    let mut data = vec![0; size as usize];
++    read_into(dir, &path, &mut data)?;
++    data.drain(..12);
++    Ok((data, width, height))
++}
++
+ /// Checks the entries again and loads the bootable entry `id`. `alloc(size,
+-/// align)` gives memory that stays valid after this returns.
++/// align)` gives memory that stays valid after this returns. If `paint` is
++/// given, the entry's splash goes to it before anything else is loaded; a
++/// missing or broken splash only costs the picture.
+ pub fn load_entry<IO, F, A>(
+     open: F,
+     id: &str,
+     devicetree: Option<&str>,
+     mut alloc: A,
++    paint: Option<&mut dyn FnMut(Result<(&[u8], u32, u32), String>)>,
+ ) -> Result<Loaded, String>
+ where
+     IO: ReadWriteSeek,
+@@ -378,6 +402,12 @@ where
+         };
+ 
+         let path = entry.get("linux").unwrap_or_default();
++        if let Some(paint) = paint {
++            match read_splash(dir, path) {
++                Ok((pixels, width, height)) => paint(Ok((&pixels, width, height))),
++                Err(problem) => paint(Err(problem)),
++            }
++        }
+         let (size, head) = probe(dir, path)?;
+         let size = size as usize;
+         let linux = if head[..2] == [0x1f, 0x8b] {
+@@ -612,15 +642,18 @@ pub struct BootFiles {
+ 
+ extern "C" {
+     fn heapblock_alloc_aligned(size: c_size_t, align: c_size_t) -> *mut c_void;
++    fn bootmgr_paint_splash(pixels: *const c_void, width: u32, height: u32);
+ }
+ 
+ /// Loads the bootable entry `id` of main storage, which the caller has
+-/// initialised, into heapblock memory. `devicetree` may be NULL. Returns 0, or
+-/// -1 with the reason on the console.
++/// initialised, into heapblock memory, after painting its splash with
++/// `bootmgr_paint_splash` if `splash` is set. `devicetree` may be NULL.
++/// Returns 0, or -1 with the reason on the console.
+ #[no_mangle]
+ pub unsafe extern "C" fn rust_boot_entry_load(
+     id: *const c_char,
+     devicetree: *const c_char,
++    splash: bool,
+     files: *mut BootFiles,
+ ) -> c_int {
+     let Ok(id) = unsafe { CStr::from_ptr(id) }.to_str() else {
+@@ -632,7 +665,15 @@ pub unsafe extern "C" fn rust_boot_entry_load(
+         false => unsafe { CStr::from_ptr(devicetree) }.to_str().ok(),
+     };
+     let alloc = |size, align| unsafe { heapblock_alloc_aligned(size, align) as *mut u8 };
+-    match load_entry(storage::MainStorage::new, id, devicetree, alloc) {
++    let mut paint = |splash: Result<(&[u8], u32, u32), String>| match splash {
++        Ok((pixels, width, height)) => unsafe {
++            bootmgr_paint_splash(pixels.as_ptr() as *const c_void, width, height)
++        },
++        Err(problem) => println!("bls: no splash: {}", problem),
++    };
++    let paint: Option<&mut dyn FnMut(Result<(&[u8], u32, u32), String>)> =
++        if splash { Some(&mut paint) } else { None };
++    match load_entry(storage::MainStorage::new, id, devicetree, alloc, paint) {
+         Err(error) => {
+             println!("bls: {}", error);
+             -1
+@@ -951,6 +992,10 @@ mod tests {
+             ("/tok/6.18.2-orchard/linux", &img),
+             ("/tok/6.18.2-orchard/initrd", b"070701"),
+             ("/tok/6.18.2-orchard/extra", b"XYZ"),
++            (
++                "/tok/6.18.2-orchard/splash",
++                b"OSPL\x02\0\0\0\x01\0\0\0\x01\x02\x03\0\x04\x05\x06\0",
++            ),
+             ("/tok/6.18.2-orchard/t8010-j71b.dtb", DTB),
+         ];
+         let d = disk(&files, false);
+@@ -966,7 +1011,14 @@ mod tests {
+             base: lba * BLOCK,
+             pos: 0,
+         };
+-        let loaded = load_entry(open, "a", Some("t8010-j71b.dtb"), alloc).unwrap();
++        let mut painted = Vec::new();
++        let mut paint = |s: Result<(&[u8], u32, u32), String>| {
++            let (p, w, h) = s.unwrap();
++            painted.push((p.to_vec(), w, h))
++        };
++        let loaded =
++            load_entry(open, "a", Some("t8010-j71b.dtb"), alloc, Some(&mut paint)).unwrap();
++        assert_eq!(painted, [(vec![1, 2, 3, 0, 4, 5, 6, 0], 2, 1)]);
+         let bytes =
+             |(p, n): (*mut u8, usize)| unsafe { core::slice::from_raw_parts(p, n) }.to_vec();
+         assert_eq!(bytes(loaded.linux), img);
+@@ -981,7 +1033,7 @@ mod tests {
+             base: lba * BLOCK,
+             pos: 0,
+         };
+-        let err = load_entry(open, "bad", None, |_, _| core::ptr::null_mut())
++        let err = load_entry(open, "bad", None, |_, _| core::ptr::null_mut(), None)
+             .err()
+             .unwrap();
+         assert!(
+@@ -994,7 +1046,7 @@ mod tests {
+             base: lba * BLOCK,
+             pos: 0,
+         };
+-        let err = load_entry(open, "nope", None, |_, _| core::ptr::null_mut())
++        let err = load_entry(open, "nope", None, |_, _| core::ptr::null_mut(), None)
+             .err()
+             .unwrap();
+         assert_eq!(err, "No boot entry nope");
+diff --git a/rust/src/storage.rs b/rust/src/storage.rs
+index 56008d0..592479b 100644
+--- a/rust/src/storage.rs
++++ b/rust/src/storage.rs
+@@ -56,7 +56,10 @@ impl fatfs::Read for MainStorage {
+                 self.lba = Some(lba);
+                 let lba = lba + self.offset;
+                 if !unsafe { main_storage_read(lba, self.buf.0.as_mut_ptr() as *mut c_void) } {
+-                    println!("main_storage_read({}) failed", lba);
++                    println!(
++                        "main_storage_read({}) failed (partition at block {}, byte {})",
++                        lba, self.offset, self.pos
++                    );
+                     return Err(());
+                 }
+             }
+diff --git a/src/bootmgr.c b/src/bootmgr.c
+index 04d7ee1..b91b6a6 100644
+--- a/src/bootmgr.c
++++ b/src/bootmgr.c
+@@ -4,6 +4,7 @@
+ 
+ #include "bootmgr.h"
+ #include "cpufreq.h"
++#include "fb.h"
+ #include "heapblock.h"
+ #include "kboot.h"
+ #include "mitigations.h"
+@@ -29,7 +30,20 @@ struct boot_files {
+     char *options;
+ };
+ 
+-int rust_boot_entry_load(const char *id, const char *devicetree, struct boot_files *files);
++int rust_boot_entry_load(const char *id, const char *devicetree, bool splash,
++                         struct boot_files *files);
++
++/* Called from Rust: the entry's splash, pixels as b, g, r, 0, centred on black. */
++void bootmgr_paint_splash(const void *pixels, u32 width, u32 height)
++{
++    if (!fb.ptr || width > fb.width || height > fb.height) {
++        printf("bootmgr: splash %ux%u does not fit the screen\n", width, height);
++        return;
++    }
++    fb_fill(0, 0, fb.width, fb.height, int2rgb(0));
++    fb_blit((fb.width - width) / 2, (fb.height - height) / 2, width, height, (void *)pixels, width,
++            PIX_FMT_XBGR);
++}
+ 
+ static bool copy_name(char *dst, const char *src)
+ {
+@@ -85,7 +99,7 @@ int bootmgr_start(const char *id_arg, const char *devicetree_arg, u64 flags)
+         printf("bootmgr: argument too long\n");
+         return -1;
+     }
+-    if (flags) {
++    if (flags & ~BOOTMGR_NO_SPLASH) {
+         printf("bootmgr: unsupported flags 0x%lx\n", flags);
+         return -1;
+     }
+@@ -94,7 +108,8 @@ int bootmgr_start(const char *id_arg, const char *devicetree_arg, u64 flags)
+     heapblock_set_limit(NULL);
+ 
+     struct boot_files files;
+-    if (rust_boot_entry_load(id, devicetree_arg ? devicetree : NULL, &files) < 0)
++    if (rust_boot_entry_load(id, devicetree_arg ? devicetree : NULL, !(flags & BOOTMGR_NO_SPLASH),
++                             &files) < 0)
+         return -1;
+     void *kernel = unpack_kernel(files.kernel, files.kernel_size);
+     if (!kernel)
+diff --git a/src/bootmgr.h b/src/bootmgr.h
+index 33b8556..8a03baa 100644
+--- a/src/bootmgr.h
++++ b/src/bootmgr.h
+@@ -5,6 +5,8 @@
+ 
+ #include "types.h"
+ 
++#define BOOTMGR_NO_SPLASH BIT(0)
++
+ int bootmgr_start(const char *id, const char *devicetree, u64 flags);
+ 
+ #endif

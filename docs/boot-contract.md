@@ -142,7 +142,7 @@ proper numbers when they go upstream.
 | `P_MAIN_STORAGE_INIT`, `_SHUTDOWN` (`0xf08`, `0xf09`) | exists | – | ok or error |
 | `P_BOOT_ENTRIES` (`0x1500`) | **done** (0007) | `args[0]`: a 16-byte buffer; `args[1]`: the board's DTB file name, or 0 | m1n1 writes the text's address and size into the buffer |
 | `P_BOOT_ENTRIES_FREE` (`0x1501`) | **done** (0007) | `args[0]`: the same buffer | – |
-| `P_BOOT_START` (`0x1502`) | **done** (0008), splash open | `args[0]`: the entry id; `args[1]`: the board's DTB file name, or 0; `args[2]`: flags, 0 (a splash flag comes with the splash) | replies OK, then starts the kernel; on failure -1, the reason as a `bls:` or `bootmgr:` line on m1n1's console, and the proxy stays |
+| `P_BOOT_START` (`0x1502`) | **done** (0008, splash 0009) | `args[0]`: the entry id; `args[1]`: the board's DTB file name, or 0; `args[2]`: flags, bit 0 = no splash | replies OK, then starts the kernel; on failure -1, the reason as a `bls:` or `bootmgr:` line on m1n1's console, and the proxy stays |
 
 `P_BOOT_ENTRIES` needs `P_MAIN_STORAGE_INIT` first. Its text is BLS syntax:
 
@@ -170,10 +170,10 @@ problem devicetree is not t8010-j71b.dtb
 - If the disk itself can't be read (no GPT, not exactly one XBOOTLDR, no FAT), a single `error TEXT` line follows the contract line instead.
 - Order is systemd-boot's: entries with a sort-key first, by sort-key, machine-id and newest version (UAPI version comparison), then by id, newest first.
 
-`P_BOOT_START` (0008; step 1 is still open), in this order:
-1. Paint the entry's splash (`splash` in the directory of its `linux`, see [Splash](#splash)) unless the flag says not to. Painting in m1n1 gets its own device test first: the host painting over the proxy (`P_FB_BLIT`) crashed m1n1 on J71b.
+`P_BOOT_START` (0008, 0009), in this order:
+1. Paint the entry's splash (`splash` in the directory of its `linux`, see [Splash](#splash)) centred on black, unless flag bit 0 is set. A missing or broken splash only costs the picture. The initrd still paints it again after mounting the root; that goes once m1n1's painting has run for a while.
 2. Check the entries again and load the bootable entry: linux (an Image at a 2 MiB boundary with room for its `image_size`, or gzip, uncompressed behind the heap), the initrds (concatenated) and the devicetree. The arguments are copied first, then m1n1 lifts any heap limit the host set (`P_HEAPBLOCK_SET_LIMIT`; today's client sets 128 MiB when it connects): an allocation past the limit panics m1n1, and memory above m1n1's heap is m1n1's from here on.
-3. Shut storage down. Only now, so a failure before it leaves storage up for another entry: a second `main_storage_init` on A10 has never been tested. The NVMe strap release (0006) stays the backend's job.
+3. Shut storage down. Only now, so a failure before it leaves storage up for another entry. A second `main_storage_init` in one m1n1 session hangs on A10 (J71b, 2026-11-01: the init answers, the next read never returns and m1n1 stops answering), so a host initialises storage once per session. The NVMe strap release (0006) stays the backend's job.
 4. Set the entry's options as bootargs, start cpufreq, the secondary CPUs and the mitigations (as m1n1's payload boot does), prepare the DT, reply OK, boot.
 
 Tested on J71b over Pongo (`orchard launch`) and iBoot (`launcher-kit`, `./launch boot --bare`): Linux runs the entry's kernel with its options and mounts its root from NVMe.

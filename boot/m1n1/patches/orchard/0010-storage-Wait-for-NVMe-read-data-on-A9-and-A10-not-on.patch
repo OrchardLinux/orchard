@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sun, 1 Nov 2026 09:00:00 +0800
+Subject: [PATCH] storage: Wait for NVMe read data on A9 and A10, not only its
+ completion
+
+The completion reaches memory through the DART and the read data through
+the NVMMU, and nothing orders the two. On J71b the last bytes of a read
+land up to ~10 us after its completion. With reads close together, as
+when m1n1 loads a boot entry itself, the FAT walk then saw the previous
+block in its sector buffer and asked for a block ~900 GB past the end of
+the disk ("opcode 0x2 failed: status 0x80"), in about half of the boots.
+
+Mark the last 16 bytes of the buffer before the command and wait, at most
+100 ms, until the data has overwritten them; a read whose data never
+arrives fails. A barrier on the NVMMU path would be cleaner once one is
+known.
+
+Tested on J71b: a probe saw 12 late reads in one entry load (0-10 us),
+all caught.
+
+Assisted-by: LLM
+---
+ src/apcie_nvme.c | 28 +++++++++++++++++++++++++++-
+ 1 file changed, 27 insertions(+), 1 deletion(-)
+
+diff --git a/src/apcie_nvme.c b/src/apcie_nvme.c
+index 21cb144..6a06676 100644
+--- a/src/apcie_nvme.c
++++ b/src/apcie_nvme.c
+@@ -970,15 +970,41 @@ static bool submit(struct queue *q, struct nvme_sqe *cmd)
+     return true;
+ }
+ 
++/*
++ * The completion reaches memory through the DART, the data through the NVMMU,
++ * and nothing orders the two: on T8010 the last bytes of a read land up to
++ * ~10 us after its completion. Mark the end of the buffer and wait until the
++ * data has overwritten the mark.
++ */
++#define DATA_MARK         0x4f52434841524421UL
++#define DATA_WAIT_TIMEOUT 100000
++
+ static bool flatdma_read_cmd(struct queue *q, struct nvme_sqe *cmd, u32 tag, void *buf, u32 npages)
+ {
++    volatile u64 *mark = (u64 *)((u8 *)buf + npages * SZ_4K) - 2;
++
++    mark[0] = DATA_MARK;
++    mark[1] = ~DATA_MARK;
+     dc_civac_range(buf, npages * SZ_4K);
+     cmd->flags = NVME_FLAG_FLATDMA;
+     cmd->prp1 = tcb_map(tag, buf, npages, true);
+     bool ok = submit(q, cmd);
+     tcb_retire(tag);
+     dc_civac_range(buf, npages * SZ_4K);
+-    return ok;
++    if (!ok)
++        return false;
++
++    u64 timeout = timeout_calculate(DATA_WAIT_TIMEOUT);
++    while (mark[0] == DATA_MARK && mark[1] == ~DATA_MARK) {
++        if (timeout_expired(timeout)) {
++            printf("apcie-nvme: read of lba 0x%x: no data %u us after completion\n", cmd->cdw10,
++                   DATA_WAIT_TIMEOUT);
++            return false;
++        }
++        dc_civac_range((void *)mark, 16);
++    }
++    dc_civac_range(buf, npages * SZ_4K);
++    return true;
+ }
+ 
+ static int enable_controller(void)
