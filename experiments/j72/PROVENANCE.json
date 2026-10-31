@@ -53,6 +53,30 @@
     "LICENSES/GPL-2.0.txt": {
       "sha256": "8780e78a1a737e127f25a65f6d95269bffd36158dc261114de7859b490bfc5aa",
       "status": "reference/base source"
+    },
+    "charging/hub1050/module/Makefile": {
+      "sha256": "859131381b61a68a11d6aa6039b47bcb65664cdb4b8fd6acdc4cea4ef408065e",
+      "status": "source copied byte-for-byte from local measured1050mA/30s implementation; validation charging/hub1050/VALIDATION.json"
+    },
+    "charging/hub1050/module/j72-limit-core.h": {
+      "sha256": "0ef270b4ecfa8febd29d6c8fa735af0ba534e669c3c0c622b289c6ea98411cd7",
+      "status": "source copied byte-for-byte from local measured1050mA/30s implementation; validation charging/hub1050/VALIDATION.json"
+    },
+    "charging/hub1050/module/j72_input_limit_trial1050.c": {
+      "sha256": "e572e384d1306540913fb89435448e67947c24613352fa9a225ab22f58a6f54e",
+      "status": "source copied byte-for-byte from local measured1050mA/30s implementation; validation charging/hub1050/VALIDATION.json"
+    },
+    "charging/hub1050/test-core.c": {
+      "sha256": "485c74930e8515cba652e210e1a2c6bb6e643c304cc3453564f57f1e209eaee5",
+      "status": "source copied byte-for-byte from local measured1050mA/30s implementation; validation charging/hub1050/VALIDATION.json"
+    },
+    "charging/hub1050/test-guard-faults.c": {
+      "sha256": "b1b530d029aa61092eb95456864da823beaa15ec64a967247ce58b9ef2dd8b82",
+      "status": "source copied byte-for-byte from local measured1050mA/30s implementation; validation charging/hub1050/VALIDATION.json"
+    },
+    "charging/hub1050/test-worker-source.py": {
+      "sha256": "f920686ea9a9dc4864d497b669b93db6b461505f820ff75ee2536b55c5348e1b",
+      "status": "source copied byte-for-byte from local measured1050mA/30s implementation; validation charging/hub1050/VALIDATION.json"
     }
   },
   "upstream_reference": {
