@@ -46,10 +46,16 @@ def main():
             ('hdq', build / 'test-hdq.c', []),
             ('rollback', ROOT / 'charging/test-core.c', []),
         ]
+        for folder in ('hub1050', 'hub1050-long'):
+            for test in ('test-core.c', 'test-guard-faults.c'):
+                cases.append((folder + '-' + test[:-2], ROOT / 'charging' / folder / test,
+                              ['-Wno-unused-function']))
         for name, source, extra in cases:
             binary = build / name
             subprocess.run([cc, *flags, *extra, str(source), '-o', str(binary)], check=True)
             subprocess.run([str(binary)], stdin=subprocess.DEVNULL, check=True)
+        for folder in ('hub1050', 'hub1050-long'):
+            subprocess.run(['python3', str(ROOT / 'charging' / folder / 'test-worker-source.py')], check=True)
         subprocess.run(['python3', str(ROOT / 'touch/test-private-includes.py'), '-v'], check=True)
     print('PASS: all public-source offline checks; synthetic inputs only, no device contacted.')
 

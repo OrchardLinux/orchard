@@ -77,6 +77,30 @@
     "charging/hub1050/test-worker-source.py": {
       "sha256": "f920686ea9a9dc4864d497b669b93db6b461505f820ff75ee2536b55c5348e1b",
       "status": "source copied byte-for-byte from local measured1050mA/30s implementation; validation charging/hub1050/VALIDATION.json"
+    },
+    "charging/hub1050-long/module/j72_input_limit_trial1050_long.c": {
+      "sha256": "6cef9907f6089ed7d7b03b0d24b4f1212e27c09eab5641ec7e216fb0353fced2",
+      "status": "source copied byte-for-byte from measured1050mA300s implementation; validation charging/hub1050-long/VALIDATION.json"
+    },
+    "charging/hub1050-long/module/j72-limit-core.h": {
+      "sha256": "d4fa6f5ec45a383e0987b01665f6f8f23fe476090415be0e7c0a6a58048df657",
+      "status": "source copied byte-for-byte from measured1050mA300s implementation; validation charging/hub1050-long/VALIDATION.json"
+    },
+    "charging/hub1050-long/module/Makefile": {
+      "sha256": "57cadcd67d73a90e36b6bb3046e6910d92ece596a93a819c215cfd44676b50f2",
+      "status": "source copied byte-for-byte from measured1050mA300s implementation; validation charging/hub1050-long/VALIDATION.json"
+    },
+    "charging/hub1050-long/test-core.c": {
+      "sha256": "1b0efb350da23b039aaf598f4d031db07b1f1ec28b50fdca6fb3bd595f7f359e",
+      "status": "source copied byte-for-byte from measured1050mA300s implementation; validation charging/hub1050-long/VALIDATION.json"
+    },
+    "charging/hub1050-long/test-guard-faults.c": {
+      "sha256": "b1b530d029aa61092eb95456864da823beaa15ec64a967247ce58b9ef2dd8b82",
+      "status": "source copied byte-for-byte from measured1050mA300s implementation; validation charging/hub1050-long/VALIDATION.json"
+    },
+    "charging/hub1050-long/test-worker-source.py": {
+      "sha256": "b0057300d1e96ac473d5d015c300ec8bdb54b5b4fb7ca27b7ae398c32e282d2f",
+      "status": "source copied byte-for-byte from measured1050mA300s implementation; validation charging/hub1050-long/VALIDATION.json"
     }
   },
   "upstream_reference": {

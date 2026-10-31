@@ -1,8 +1,9 @@
 # Implementation contribution after the lab code release
 
-PR #43 is held in draft at the owner's request. It now contains this development implementation and its report;
-it does not yet boot J72 through Orchard. The sources in this directory make the working development
-path available for review and reuse now.
+PR #43 is submitted for interim review of the measured implementation and
+bring-up evidence at the owner's request. It does not yet boot J72 through
+Orchard's normal path. Native integration remains follow-up work; working
+Wi-Fi will be proposed separately once qualified.
 
 ## Required production form
 
@@ -42,9 +43,10 @@ path available for review and reuse now.
 ## Charging remains experimental
 
 The shared 425 mA worker is a recorded development experiment, not a charger
-driver. Source identification, protections, sustainable net charging,
-USB reconnect behavior and a desktop regression remain qualification work.
+driver. Source identification, protections, USB reconnect behavior and a desktop regression remain qualification work.
+A fixed 1,050 mA / five-minute powered-hub diagnostic now passed with 140
+positive samples at +153..+209 mA, live USB data and verified restoration.
 The 850 mA follow-up now demonstrates brief positive net battery current
-and automatic restoration. Its result is documented separately; sustained
-charging and the production policy remain unqualified. Publishing this
+and automatic restoration. Its result is documented separately; the production policy remains
+unqualified, as do source transitions and the desktop workload. Publishing this
 source does not qualify a charger driver or internal-storage installation.

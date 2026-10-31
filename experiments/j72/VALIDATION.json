@@ -30,5 +30,11 @@
     "serdev/build/capacity reverse dry-run against measured kernel source"
   ],
   "privacy": "Firmware/calibration/.inc/ko/images/raw logs omitted; code source and synthetic tests only",
-  "upstream_status": "Development source release; PR43 draft; native Orchard7.3 integration and exact revision device test remain."
+  "upstream_status": "Development source release; PR43 draft; native Orchard7.3 integration and exact revision device test remain.",
+  "additional_hub_workers": {
+    "short": "charging/hub1050/VALIDATION.json",
+    "five_minute": "charging/hub1050-long/VALIDATION.json",
+    "public_policy_tests": "15 rollback + 10 pack cases per worker; 8 guard-fault cases per worker; 10 actual-source USB lifetime/state cases per worker",
+    "hardware": "30s and300s measured on exact#33; USBdata retained and original02 restored; fixedsource/diagnosticworkload only"
+  }
 }
