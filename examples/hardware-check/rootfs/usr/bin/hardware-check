@@ -190,8 +190,9 @@ watch_input() {
     event=$(input_device "$1")
     [ -n "$event" ] || { result SKIP "no $2 input device"; return; }
     echo "$3 for 20 seconds."
-    timeout 20 hexdump -v -e '24/1 "%02x " "\n"' "/dev/input/$event" > "/run/$2.txt" 2>/dev/null
-    events=$(wc -l < "/run/$2.txt")
+    timeout 20 dd if="/dev/input/$event" of="/run/$2.bin" bs=24 2>/dev/null
+    events=$(( $(wc -c < "/run/$2.bin" 2>/dev/null || echo 0) / 24 ))
+    hexdump -v -e '24/1 "%02x " "\n"' "/run/$2.bin" > "/run/$2.txt" 2>/dev/null
     if [ "$events" -gt 0 ]; then result PASS "$2: $events input events"
     else result FAIL "$2: no input events"; fi
 }
