@@ -103,6 +103,96 @@ The host lists every valid entry in BLS order and boots the one the user picks. 
 
 Without a choice, the host boots the first entry in BLS order. A remembered default, like systemd-boot's `loader.conf`, can come later.
 
-## Reading it
+## Host and m1n1
 
-The host reads the boot partition through m1n1's generic `main_storage_*` proxy calls and parses GPT, FAT32 and the entries itself, so the host needs no device-specific code. Which SoCs have an m1n1 storage backend is in [bring-up/bootloader/experiments.md](bring-up/bootloader/experiments.md#per-device-menu). The same contract can later be read by m1n1 alone: its Rust side already has GPT and FAT readers.
+m1n1 does the storage boot and the host only chooses (bootloader decision of
+2026-10-29). This section is the interface between them; the Rust launcher and
+`transports/m1n1.py` implement the host side against it. Status per item:
+**done** (in `boot/m1n1/patches/orchard`) or **open**.
+
+### Transport
+
+m1n1's USB proxy (CDC-ACM `1209:316d`, interface 0) with m1n1's own request and
+reply framing and checksums. The host speaks it with its own small client, not
+Asahi's proxyclient.
+
+**Open:** m1n1 puts the device's identity into its USB serial string, as
+Orchard's gadgets do (`ECID:… CPID:… BDID:… BOARD:j71b`), so `orchard devices`
+recognises the m1n1 stage as the same device. First check what Hoolock's DWC2
+sends today.
+
+### Who does what
+
+| m1n1 | Host |
+|---|---|
+| Reads storage (read-only), finds XBOOTLDR, parses and checks the entries, sorts them | Chooses an entry, or takes the first one |
+| Paints the splash, loads the entry, applies the DT fill-ins, shuts storage down, boots | Shows entries, problems and progress |
+| Reports problems as text | Writes nothing, parses no disk structures, doesn't touch the framebuffer |
+
+Nothing here needs a host: m1n1 can later boot the first (or a remembered)
+entry by itself, as in Asahi's model.
+
+### Operations
+
+The `0x15xx` ops are Orchard-local (Asahi and Hoolock end at `0x14xx`) and get
+proper numbers when they go upstream.
+
+| Op | Status | Arguments | Result |
+|---|---|---|---|
+| `P_MAIN_STORAGE_INIT`, `_SHUTDOWN` (`0xf08`, `0xf09`) | exists | – | ok or error |
+| `P_BOOT_ENTRIES` (`0x1500`) | **done** (0007) | `args[0]`: a 16-byte buffer; `args[1]`: the board's DTB file name, or 0 | m1n1 writes the text's address and size into the buffer |
+| `P_BOOT_ENTRIES_FREE` (`0x1501`) | **done** (0007) | `args[0]`: the same buffer | – |
+| `P_BOOT_START` | **open** | the entry id; a splash flag | replies OK, then starts the kernel; on failure an error text and the proxy stays |
+
+`P_BOOT_ENTRIES` needs `P_MAIN_STORAGE_INIT` first. Its text is BLS syntax:
+
+```
+contract 1
+entry omarchy-4d6c1a2b-6.18.2-orchard
+title Omarchy
+version 6.18.2-orchard
+sort-key omarchy
+linux /omarchy-4d6c1a2b/6.18.2-orchard/linux
+initrd /omarchy-4d6c1a2b/6.18.2-orchard/initrd
+devicetree /omarchy-4d6c1a2b/6.18.2-orchard/t8010-j71b.dtb
+options root=PARTUUID=4d6c…-… rw quiet
+root 4d6c…-…
+problem devicetree is not t8010-j71b.dtb
+
+```
+
+- The first line is `contract N`. A host refuses a contract it doesn't know.
+- Then one block per entry, in boot order, each ended by an empty line:
+  - the `entry` id: the file name without `.conf` and without a boot counter;
+  - the entry's BLS keys in file order (keys BLS doesn't define are left out, so they can't pose as the lines below);
+  - `root` if the options name a partition;
+  - a `problem` line per reason the entry can't boot, using the rules of [Entries](#entries) and [Selection](#selection). An entry without problems is bootable.
+- If the disk itself can't be read (no GPT, not exactly one XBOOTLDR, no FAT), a single `error TEXT` line follows the contract line instead.
+- Order is systemd-boot's: entries with a sort-key first, by sort-key, machine-id and newest version (UAPI version comparison), then by id, newest first.
+
+`P_BOOT_START` (open), in this order:
+1. Paint the entry's splash (`splash` in the directory of its `linux`, see [Splash](#splash)) unless the flag says not to. Painting in m1n1 gets its own device test first: the host painting over the proxy (`P_FB_BLIT`) crashed m1n1 on J71b.
+2. Load linux (gunzipped if needed), the initrds (concatenated) and the devicetree. m1n1 makes room for the kernel slot (512 MiB) itself. A heap allocation past the limit panics m1n1, so a host that uses the boot manager doesn't set a heap limit (`P_HEAPBLOCK_SET_LIMIT`); today's client sets 128 MiB as soon as it connects.
+3. Shut storage down. Only now, so a failure before it leaves storage up for another entry: a second `main_storage_init` on A10 has never been tested. The NVMe strap release (0006) stays the backend's job.
+4. Set the entry's options as bootargs, start cpufreq and the secondary CPUs, prepare the DT, reply OK, boot.
+
+The entry's own `options` decide quiet or verbose; the host has no flag for that.
+
+Boots from RAM keep the existing ops (memory writes, `P_GZDEC`, `P_KBOOT_SET_CHOSEN`,
+`_SET_INITRD`, `_PREPARE_DT`, `_BOOT`), as `linux.py` uses them. **Open:** one
+`P_BOOT_SPEC` op (kernel, DTB, initrd, arguments) later, so both kinds of boot end in
+the same m1n1 code, splash included.
+
+### Versions
+
+- An op m1n1 doesn't know gets its "bad command" status. Then the host falls back to its own reader (`bootdisk.py`) until that is deleted.
+- Changes to the text change the `contract` line, not the op numbers.
+
+### Guarantees
+
+- No op here writes to storage.
+- Every op returns in bounded time, except a successful `P_BOOT_START` after its reply.
+- After a failure m1n1 stays in the proxy, so the host can report it or offer another entry. The host doesn't retry on its own.
+- Every change must be tested on both ways into m1n1: Pongo, and iBoot (`launcher-kit`, `./launch boot --bare`, then the client over the proxy). Device time goes through the user.
+
+Which SoCs have an m1n1 storage backend is in [bring-up/bootloader/experiments.md](bring-up/bootloader/experiments.md#per-device-menu).

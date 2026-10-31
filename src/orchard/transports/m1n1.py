@@ -22,6 +22,8 @@ P_SMP_START_SECONDARIES = 0x500
 P_GZDEC = 0x401
 P_MAIN_STORAGE_INIT, P_MAIN_STORAGE_SHUTDOWN, P_MAIN_STORAGE_READ = 0xf08, 0xf09, 0xf0a
 P_CPUFREQ_INIT = 0x1300
+P_BOOT_ENTRIES, P_BOOT_ENTRIES_FREE = 0x1500, 0x1501   # orchard m1n1 patch 0007, Orchard-local
+BOOT_CONTRACT = 1
 
 M1N1_HEAP = 128 << 20   # room left to m1n1's own heap, as proxyclient does
 HOST_HEAP = 1 << 30
@@ -191,6 +193,26 @@ class M1n1Proxy:
                 start, length, offset = start + count, length - count, offset + count
         return offset
 
+    def boot_entries(self, devicetree=None):
+        """m1n1's own reading of the boot partition: (id, keys, problems) per entry, in BLS order.
+
+        Needs storage_init first. The reply format is in docs/boot-contract.md.
+        """
+        out = self.memalign(8, 16)
+        name = self.string(devicetree) if devicetree else 0
+        try:
+            failed = self.call(P_BOOT_ENTRIES, out, name, signed=True)
+        except M1n1Error as error:
+            raise M1n1Error('This loader cannot read boot entries itself (needs orchard m1n1 patch 0007)') from error
+        addr, size = struct.unpack('<QQ', self.read(out, 16))
+        if failed or not addr:
+            raise M1n1Error('m1n1 could not list the boot entries')
+        try:
+            text = self.read(addr, size).decode('utf-8', 'replace') if size else ''
+        finally:
+            self.call(P_BOOT_ENTRIES_FREE, out)
+        return parse_boot_entries(text)
+
     # kboot
     def string(self, text):
         data = text.encode() + b'\0'
@@ -219,3 +241,26 @@ class M1n1Proxy:
             self._reply(REQ_PROXY)
         except M1n1Error:
             pass
+
+
+def parse_boot_entries(text):
+    """The text of P_BOOT_ENTRIES: [(id, {key: [values]}, [problems])]; an `error` line raises."""
+    lines = text.splitlines()
+    if not lines or lines[0] != f'contract {BOOT_CONTRACT}':
+        raise M1n1Error('This loader speaks another boot contract: ' + (lines[0] if lines else 'no reply'))
+    entries = []
+    for line in lines[1:]:
+        if not line:
+            continue
+        key, _, value = line.partition(' ')
+        if key == 'error':
+            raise M1n1Error(value)
+        if key == 'entry':
+            entries.append((value, {}, []))
+        elif not entries:
+            raise M1n1Error(f'Unexpected boot entry line {line!r}')
+        elif key == 'problem':
+            entries[-1][2].append(value)
+        else:
+            entries[-1][1].setdefault(key, []).append(value)
+    return entries
