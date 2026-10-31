@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Duke Eagleman <301139544+jerricky26@users.noreply.github.com>
+Date: Sat, 31 Oct 2026 18:16:55 -0400
+Subject: [PATCH] arm64: dts: apple: t8010-ipad7: Point als0 at the light
+ sensor
+
+m1n1's dt_set_als() copies the ADT's alsCalibration (SysCfg LSCI) into
+the node named by the als0 alias, as s800x-ipad5.dtsi does for the
+iPad 5. The iPad 7 light sensor had no label and no als0 alias, so the
+property was never set and tsl2583 failed with "failed to read LSCI
+calibration" (-ENOENT).
+
+Label the sensor and add the alias. Checked on an iPad 7 (J171): tsl2583
+loads its LSCI v2 calibration and reads 0 to about 3100 lux. The J172
+shares t8010-ipad7.dtsi and gets the same alias; not tested there.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8010-ipad7.dtsi | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8010-ipad7.dtsi b/arch/arm64/boot/dts/apple/t8010-ipad7.dtsi
+index 8955e04..3401688 100644
+--- a/arch/arm64/boot/dts/apple/t8010-ipad7.dtsi
++++ b/arch/arm64/boot/dts/apple/t8010-ipad7.dtsi
+@@ -13,6 +13,12 @@
+  */
+ #include "t8010-ipad6.dtsi"
+ 
++/ {
++	aliases {
++		als0 = &als;
++	};
++};
++
+ /* The iPad 7 port controller is Bellatrix, with its own charger policy. */
+ /delete-node/ &tristar_charger;
+ /delete-node/ &tristar;
+@@ -87,7 +93,8 @@
+ &i2c2 {
+ 	status = "okay";
+ 
+-	light-sensor@39 {
++	/* m1n1 adds apple,als-calibration from the ADT */
++	als: light-sensor@39 {
+ 		compatible = "apple,ct819", "amstaos,tsl2581";
+ 		reg = <0x39>;
+ 		interrupts-extended = <&pinctrl_ap 27 IRQ_TYPE_LEVEL_LOW>;
+-- 
+2.53.0
+
