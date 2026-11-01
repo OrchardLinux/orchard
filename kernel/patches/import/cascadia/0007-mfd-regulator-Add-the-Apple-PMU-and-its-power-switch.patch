@@ -1,0 +1,618 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rzxvx <rrzxznewid@gmail.com>
+Date: Sat, 3 Oct 2026 03:21:53 +0300
+Subject: [PATCH] mfd: regulator: Add the Apple PMU and its power switches
+
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at c20b85e:
+  patches/files-sandcastle-port/drivers/mfd/apple-pmu-i2c.c
+  patches/files-sandcastle-port/drivers/regulator/apple-pmu-pwrsw.c
+  patches/files-sandcastle-port/include/linux/apple-pmu-i2c.h
+  patches/tree/0001-cascadia.patch
+
+Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (10 commits).
+
+The S5L8940X drivers here are Cascadia ports of Corellium's Project
+Sandcastle (https://github.com/corellium/linux-sandcastle,
+sandcastle-5.4, GPL-2.0); their copyright headers name Corellium and the
+drivers they were based on.
+
+[Orchard: imported for the armv7-a5 platform; see kernel/sources.toml]
+---
+ drivers/mfd/Kconfig                 |  15 ++
+ drivers/mfd/Makefile                |   1 +
+ drivers/mfd/apple-pmu-i2c.c         | 311 ++++++++++++++++++++++++++++
+ drivers/regulator/Kconfig           |   4 +
+ drivers/regulator/Makefile          |   1 +
+ drivers/regulator/apple-pmu-pwrsw.c | 168 +++++++++++++++
+ include/linux/apple-pmu-i2c.h       |  19 ++
+ 7 files changed, 519 insertions(+)
+ create mode 100644 drivers/mfd/apple-pmu-i2c.c
+ create mode 100644 drivers/regulator/apple-pmu-pwrsw.c
+ create mode 100644 include/linux/apple-pmu-i2c.h
+
+diff --git a/drivers/mfd/Kconfig b/drivers/mfd/Kconfig
+index f9325bcce..afe8fccdf 100644
+--- a/drivers/mfd/Kconfig
++++ b/drivers/mfd/Kconfig
+@@ -1481,6 +1481,11 @@ config STMPE_SPI
+ 	depends on SPI_MASTER
+ 	help
+ 	  This is used to enable SPI interface of STMPE
++config MFD_APPLE_PMU_I2C
++	tristate "Apple I2C PMU (Dialog D2333 / Chestnut)"
++	depends on I2C && OF
++	select REGMAP_I2C
++	default y
+ endmenu
+ 
+ config MFD_STA2X11
+@@ -2279,6 +2284,11 @@ config MCP_UCB1200_TS
+ 	tristate "Touchscreen interface support"
+ 	depends on MCP_UCB1200 && INPUT
+ 
++config MFD_APPLE_PMU_I2C
++	tristate "Apple I2C PMU (Dialog D2333 / Chestnut)"
++	depends on I2C && OF
++	select REGMAP_I2C
++	default y
+ endmenu
+ 
+ config MFD_CS40L50_CORE
+@@ -2402,5 +2412,10 @@ config MFD_RSMU_SPI
+ 	  Additional drivers must be enabled in order to use the functionality
+ 	  of the device.
+ 
++config MFD_APPLE_PMU_I2C
++	tristate "Apple I2C PMU (Dialog D2333 / Chestnut)"
++	depends on I2C && OF
++	select REGMAP_I2C
++	default y
+ endmenu
+ endif
+diff --git a/drivers/mfd/Makefile b/drivers/mfd/Makefile
+index 2a9f91e81..ca986f254 100644
+--- a/drivers/mfd/Makefile
++++ b/drivers/mfd/Makefile
+@@ -289,3 +289,4 @@ obj-$(CONFIG_MFD_ATC260X_I2C)	+= atc260x-i2c.o
+ 
+ obj-$(CONFIG_MFD_RSMU_I2C)	+= rsmu_i2c.o rsmu_core.o
+ obj-$(CONFIG_MFD_RSMU_SPI)	+= rsmu_spi.o rsmu_core.o
++obj-$(CONFIG_MFD_APPLE_PMU_I2C)    += apple-pmu-i2c.o
+diff --git a/drivers/mfd/apple-pmu-i2c.c b/drivers/mfd/apple-pmu-i2c.c
+new file mode 100644
+index 000000000..e8b62b290
+--- /dev/null
++++ b/drivers/mfd/apple-pmu-i2c.c
+@@ -0,0 +1,311 @@
++/*
++ * Driver for I2C-based PMUs found on mobile devices with S5L8940X (Apple A5) SoCs.
++ *
++ * Copyright (C) 2020 Corellium LLC
++ */
++
++#include <linux/interrupt.h>
++#include <linux/irq.h>
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/err.h>
++#include <linux/slab.h>
++#include <linux/i2c.h>
++#include <linux/of.h>
++#include <linux/of_platform.h>
++#include <linux/of_device.h>
++#include <linux/regmap.h>
++#include <linux/reboot.h>
++#include <linux/delay.h>
++#include <linux/gpio/driver.h>
++#include <linux/apple-pmu-i2c.h>
++
++struct apple_pmu_i2c_info {
++    unsigned reg_bits, val_bits;
++};
++
++static const struct apple_pmu_i2c_info apple_pmu_i2c_d2333_info = { .reg_bits = 16, .val_bits = 8 };
++static const struct apple_pmu_i2c_info apple_pmu_i2c_chestnut_info = { .reg_bits = 8, .val_bits = 8 };
++/*
++ * The PMU on this board is a D1946 -- the ADT node is "pmu,d1946" and the only
++ * PMU driver in the 12H321 cache is AppleD1946PMU -- and it takes an 8-bit
++ * register address, not 16.  iBoot settles it: its PMU register write (iBEC
++ * 2261.30.37, 0xbe6c) builds a two-byte buffer of [reg, value] and calls
++ * i2c_write with txlen 2 to address 0x78, and the read beside it uses txlen 1.
++ *
++ * We had this node on the d2333 profile, so every access sent two address
++ * bytes.  Asking for "register 0x020c" put 0x02 on the bus as the register
++ * number and 0x0c as data -- which is why every register in 0x00..0xff read
++ * back the same byte and why none of the rail writes ever stuck.
++ *
++ * It also explains the kernelcache offsets, which are all single-byte:
++ * _setGPIOFunction uses gpio + 0x61, _setLDO uses ldo + 0x2f with a shared
++ * enable at 0x7c.  And it means the ADT's 0x020c and 0x0213 are not addresses
++ * at all but flags 0x02 plus an index -- LDO 12 and LDO 19, both inside
++ * _setLDO's bounds check of 0x16.
++ */
++static const struct apple_pmu_i2c_info apple_pmu_i2c_d1946_info = { .reg_bits = 8, .val_bits = 8 };
++/*
++ * Power-off, the way AppleD1946PMU::_shutdownGated does it (kernelcache
++ * 12H321, 0x80ecec80; vtable slot 0x3a4).  In order:
++ *
++ *   0xd2 = 0                  the backlight's strings off
++ *   read 0x01..0x09           the event registers, which clears them, so
++ *                             a stale event does not wake it at once
++ *   0x12..0x1a = mask table   the events allowed to wake it: iOS's table
++ *   0x5b = 0x01               no RTC wake alarm (0x41 with one)
++ *   0xa1 = 0
++ *   0xaf &= ~0xd0             flags for iBoot; a restart sets 0x90 instead
++ *   0x61..0x72: bit 1 off     wake off on every PMU GPIO configured as an
++ *                             input (config >= 0x60) -- "cannot turn off GPIO
++ *                             wakes" is iOS's message when this fails
++ *   0x1b |= 1                 "pmu go stdby": the PMU drops every rail
++ *
++ * Read on this iPad under Linux before any of it: the masks all 0x00, 0x5b
++ * 0x03, 0xaf 0x40, 0x1b 0x00.  iOS's other branch, an external shutdown
++ * function, needs function-external_shutdown in the ADT, which P105's PMU
++ * does not have.  Hold starts the iPad again, into iOS.
++ *
++ * All of it but the last write runs in the power-off prepare stage, where
++ * regmap may still sleep; the last one runs with interrupts off, straight
++ * through the I2C adapter's atomic transfer.
++ */
++#define D1946_EVENTS        0x01
++#define D1946_EVENT_MASKS   0x12
++#define D1946_NEVENTS       9
++#define D1946_STANDBY       0x1b
++#define D1946_ALARM_CTRL    0x5b
++#define D1946_GPIO_CFG      0x61
++#define D1946_NGPIO         18
++#define D1946_GPIO_WAKE     0x02
++#define D1946_REG_A1        0xa1
++#define D1946_BOOT_FLAGS    0xaf
++#define D1946_WLED_ENABLE   0xd2
++
++static const u8 d1946_off_masks[D1946_NEVENTS] = {
++    0x88, 0xff, 0xff, 0xff, 0xff, 0xff, 0xae, 0xff, 0xff,
++};
++
++static int apple_pmu_d1946_power_off_prepare(struct sys_off_data *data)
++{
++    struct regmap *map = ((struct apple_pmu_i2c *)data->cb_data)->regmap;
++    unsigned int i, v;
++
++    regmap_write(map, D1946_WLED_ENABLE, 0);
++    for (i = 0; i < D1946_NEVENTS; i++)
++        regmap_read(map, D1946_EVENTS + i, &v);
++    for (i = 0; i < D1946_NEVENTS; i++)
++        regmap_write(map, D1946_EVENT_MASKS + i, d1946_off_masks[i]);
++    regmap_write(map, D1946_ALARM_CTRL, 0x01);
++    regmap_write(map, D1946_REG_A1, 0);
++    regmap_update_bits(map, D1946_BOOT_FLAGS, 0xd0, 0);
++    for (i = 0; i < D1946_NGPIO; i++)
++        if (!regmap_read(map, D1946_GPIO_CFG + i, &v) && v >= 0x60 && (v & D1946_GPIO_WAKE))
++            regmap_write(map, D1946_GPIO_CFG + i, v & ~D1946_GPIO_WAKE);
++    return NOTIFY_DONE;
++}
++
++static int apple_pmu_d1946_power_off(struct sys_off_data *data)
++{
++    struct i2c_client *client = to_i2c_client(((struct apple_pmu_i2c *)data->cb_data)->dev);
++    int v = i2c_smbus_read_byte_data(client, D1946_STANDBY);
++
++    if (v >= 0)
++        i2c_smbus_write_byte_data(client, D1946_STANDBY, v | 0x01);
++    mdelay(1000);
++    pr_emerg("apple-pmu-i2c: the PMU did not power off (standby %d)\n", v);
++    return NOTIFY_DONE;
++}
++
++/*
++ * The PMU's GPIOs, as far as Linux needs them: outputs, their level in bit 1
++ * of each pin's configuration register, 0x61 + n.  The ADT names them by
++ * that n -- the Wi-Fi chip's REG_ON is GPIO 3 (0x64), the Bluetooth chip's
++ * GPIO 2 (0x63) -- and iBoot leaves both configured as outputs, low (0x09).
++ * A pin configured as an input (0x60 and up) stays one: this only drives
++ * what is already an output, it never turns a pin around.
++ */
++#define D1946_GPIO_IS_INPUT(cfg)    ((cfg) >= 0x60)
++#define D1946_GPIO_LEVEL            0x02
++
++static int apple_pmu_gpio_cfg(struct gpio_chip *gc, unsigned int n, unsigned int *cfg)
++{
++    struct apple_pmu_i2c *pmu = gpiochip_get_data(gc);
++
++    return regmap_read(pmu->regmap, D1946_GPIO_CFG + n, cfg);
++}
++
++static int apple_pmu_gpio_get_direction(struct gpio_chip *gc, unsigned int n)
++{
++    unsigned int cfg;
++    int ret = apple_pmu_gpio_cfg(gc, n, &cfg);
++
++    if (ret)
++        return ret;
++    return D1946_GPIO_IS_INPUT(cfg) ? GPIO_LINE_DIRECTION_IN : GPIO_LINE_DIRECTION_OUT;
++}
++
++static int apple_pmu_gpio_get(struct gpio_chip *gc, unsigned int n)
++{
++    unsigned int cfg;
++    int ret = apple_pmu_gpio_cfg(gc, n, &cfg);
++
++    return ret ? ret : !!(cfg & D1946_GPIO_LEVEL);
++}
++
++static void apple_pmu_gpio_set(struct gpio_chip *gc, unsigned int n, int val)
++{
++    struct apple_pmu_i2c *pmu = gpiochip_get_data(gc);
++
++    regmap_update_bits(pmu->regmap, D1946_GPIO_CFG + n, D1946_GPIO_LEVEL,
++                       val ? D1946_GPIO_LEVEL : 0);
++}
++
++static int apple_pmu_gpio_direction_output(struct gpio_chip *gc, unsigned int n, int val)
++{
++    unsigned int cfg;
++    int ret = apple_pmu_gpio_cfg(gc, n, &cfg);
++
++    if (ret)
++        return ret;
++    if (D1946_GPIO_IS_INPUT(cfg))
++        return -EPERM;
++    apple_pmu_gpio_set(gc, n, val);
++    return 0;
++}
++
++static int apple_pmu_gpio_direction_input(struct gpio_chip *gc, unsigned int n)
++{
++    return apple_pmu_gpio_get_direction(gc, n) == GPIO_LINE_DIRECTION_IN ? 0 : -EPERM;
++}
++
++static int apple_pmu_gpio_register(struct apple_pmu_i2c *pmu)
++{
++    struct gpio_chip *gc = devm_kzalloc(pmu->dev, sizeof(*gc), GFP_KERNEL);
++
++    if (!gc)
++        return -ENOMEM;
++    gc->label = "apple-pmu-gpio";
++    gc->parent = pmu->dev;
++    gc->owner = THIS_MODULE;
++    gc->base = -1;
++    gc->ngpio = D1946_NGPIO;
++    gc->can_sleep = true;
++    gc->get_direction = apple_pmu_gpio_get_direction;
++    gc->direction_input = apple_pmu_gpio_direction_input;
++    gc->direction_output = apple_pmu_gpio_direction_output;
++    gc->get = apple_pmu_gpio_get;
++    gc->set = apple_pmu_gpio_set;
++    return devm_gpiochip_add_data(pmu->dev, gc, pmu);
++}
++
++static const struct of_device_id apple_pmu_i2c_of_match[] = {
++    { .compatible = "apple,pmu-d1946", .data = &apple_pmu_i2c_d1946_info },
++    { .compatible = "apple,pmu-d2333", .data = &apple_pmu_i2c_d2333_info },
++    { .compatible = "apple,pmu-chestnut", .data = &apple_pmu_i2c_chestnut_info },
++    { },
++};
++
++static int apple_pmu_i2c_probe(struct i2c_client *i2c)
++{
++    struct device_node *node = i2c->dev.of_node, *child;
++    const struct of_device_id *of_id;
++    const struct apple_pmu_i2c_info *info;
++    struct apple_pmu_i2c *pmu;
++    int ret;
++
++    pmu = devm_kzalloc(&i2c->dev, sizeof(*pmu), GFP_KERNEL);
++    if(!pmu)
++        return -ENOMEM;
++
++    of_id = of_match_device(apple_pmu_i2c_of_match, &i2c->dev);
++    if(!of_id) {
++        dev_err(&i2c->dev, "failed to match device.\n");
++        return -ENODEV;
++    }
++    info = of_id->data;
++
++    pmu->dev = &i2c->dev;
++    i2c_set_clientdata(i2c, pmu);
++
++    pmu->config.reg_bits = info->reg_bits;
++    pmu->config.val_bits = info->val_bits;
++    pmu->config.max_register = (1u << pmu->config.reg_bits) - 1u;
++
++    pmu->regmap = devm_regmap_init_i2c(i2c, &pmu->config);
++    if(IS_ERR(pmu->regmap)) {
++        ret = PTR_ERR(pmu->regmap);
++        dev_err(&i2c->dev, "failed to create regmap: %d.\n", ret);
++        return ret;
++    }
++
++    /* Bring-up: with the bus finally working, dump the chip once.  This is
++     * cheap now -- it only cost eighteen seconds of boot back when every
++     * transfer ran into the 100 ms timeout.
++     *
++     * What we are looking for: the ADT calls power_ana and power_ldo with
++     * 0x020c and 0x0213, which this tree reads as register addresses.  Both
++     * read 0x00 and stay 0x00 after a write, which is how a register that
++     * does not exist behaves.  AppleD1946PMU::_setLDO takes an LDO *index*
++     * (bounds-checked at 0x16) whose voltage register is index + 0x2f, with
++     * a shared enable bit at 0x7c for a few of them; read as index + flags,
++     * 0x20c and 0x213 are LDO 12 and LDO 19, both in range -- so the real
++     * registers would be 0x3b and 0x42.  The dump settles it. */
++    {
++        static const struct { unsigned first, last; } banks[] = {
++            { 0x00, 0xff },
++        };
++        unsigned b, r, c;
++        char line[80];
++
++        for (b = 0; b < ARRAY_SIZE(banks); b++)
++            for (r = banks[b].first; r <= banks[b].last; r += 16) {
++                int n = 0;
++                for (c = 0; c < 16 && r + c <= banks[b].last; c++) {
++                    unsigned int v = 0;
++                    n += scnprintf(line + n, sizeof(line) - n, "%s%02x",
++                                   c ? " " : "",
++                                   regmap_read(pmu->regmap, r + c, &v) ? 0xff : (v & 0xff));
++                }
++                dev_info(&i2c->dev, "PMU %03x: %s\n", r, line);
++            }
++    }
++
++    if (info == &apple_pmu_i2c_d1946_info && of_device_is_system_power_controller(node)) {
++        ret = devm_register_sys_off_handler(&i2c->dev, SYS_OFF_MODE_POWER_OFF_PREPARE,
++                                            SYS_OFF_PRIO_DEFAULT,
++                                            apple_pmu_d1946_power_off_prepare, pmu);
++        if (!ret)
++            ret = devm_register_sys_off_handler(&i2c->dev, SYS_OFF_MODE_POWER_OFF,
++                                                SYS_OFF_PRIO_DEFAULT,
++                                                apple_pmu_d1946_power_off, pmu);
++        if (ret)
++            dev_warn(&i2c->dev, "no power-off: %d\n", ret);
++    }
++
++    if (info == &apple_pmu_i2c_d1946_info && of_property_read_bool(node, "gpio-controller")) {
++        ret = apple_pmu_gpio_register(pmu);
++        if (ret)
++            dev_warn(&i2c->dev, "no GPIOs: %d\n", ret);
++    }
++
++    for_each_child_of_node(node, child)
++        of_platform_device_create(child, NULL, &i2c->dev);
++
++    return 0;
++}
++
++static struct i2c_driver apple_pmu_i2c_driver = {
++    .driver = {
++        .name = "apple-pmu-i2c",
++        .of_match_table = of_match_ptr(apple_pmu_i2c_of_match),
++    },
++    .probe = apple_pmu_i2c_probe,
++};
++
++static int __init apple_pmu_i2c_init(void)
++{
++    return i2c_add_driver(&apple_pmu_i2c_driver);
++}
++
++subsys_initcall(apple_pmu_i2c_init);
+diff --git a/drivers/regulator/Kconfig b/drivers/regulator/Kconfig
+index 39297f7d8..462888772 100644
+--- a/drivers/regulator/Kconfig
++++ b/drivers/regulator/Kconfig
+@@ -1720,4 +1720,8 @@ config REGULATOR_QCOM_LABIBB
+ 	  boost regulator and IBB can be used as a negative boost regulator
+ 	  for LCD display panel.
+ 
++config REGULATOR_APPLE_PMU_PWRSW
++	tristate "Apple PMU power switch"
++	depends on MFD_APPLE_PMU_I2C
++	default y
+ endif
+diff --git a/drivers/regulator/Makefile b/drivers/regulator/Makefile
+index 3d5a803dc..1bafbf11a 100644
+--- a/drivers/regulator/Makefile
++++ b/drivers/regulator/Makefile
+@@ -203,3 +203,4 @@ obj-$(CONFIG_REGULATOR_WM8400) += wm8400-regulator.o
+ obj-$(CONFIG_REGULATOR_WM8994) += wm8994-regulator.o
+ 
+ ccflags-$(CONFIG_REGULATOR_DEBUG) += -DDEBUG
++obj-$(CONFIG_REGULATOR_APPLE_PMU_PWRSW)    += apple-pmu-pwrsw.o
+diff --git a/drivers/regulator/apple-pmu-pwrsw.c b/drivers/regulator/apple-pmu-pwrsw.c
+new file mode 100644
+index 000000000..7427b451d
+--- /dev/null
++++ b/drivers/regulator/apple-pmu-pwrsw.c
+@@ -0,0 +1,168 @@
++#include <linux/delay.h>
++/*
++ * Driver for power switches in PMU of S5L8940X (Apple A5) SoC-based mobile devices.
++ *
++ * Copyright (C) 2020 Corellium LLC
++ */
++
++#include <linux/kernel.h>
++#include <linux/errno.h>
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/types.h>
++#include <linux/platform_device.h>
++#include <linux/regulator/driver.h>
++#include <linux/regulator/machine.h>
++#include <linux/regulator/of_regulator.h>
++#include <linux/regulator/consumer.h>
++#include <linux/of.h>
++#include <linux/regmap.h>
++#include <linux/apple-pmu-i2c.h>
++
++struct apple_pmu_i2c_pwrsw {
++    struct device *dev;
++    struct regulator_dev *regu;
++    struct regulator_desc desc;
++    struct regulator_config config;
++    struct regulator_init_data init_data;
++    u32 base, mask, enable;
++    int was_enabled;
++};
++
++/*
++ * The D1946 now and then ignores a write to a GPIO's config register.  With
++ * the Wi-Fi chip's REG_ON (0x64) the write that clears the level bit read
++ * back unchanged in 4 of 10 power cycles (regmap trace, 2026-10-02): the
++ * chip was never powered off, and after the next power-on it did not come
++ * back on the bus.  Each time, the next write took.  (An enable of PMU GPIO0
++ * at 0x61 was seen not to stick either.)  So write until it reads back.
++ */
++static int apple_pmu_i2c_pwrsw_set(struct regulator_dev *rdev, bool on)
++{
++    struct apple_pmu_i2c_pwrsw *pwrsw = rdev->reg_data;
++    struct regmap *map = rdev_get_regmap(rdev);
++    unsigned int want = on ? pwrsw->enable : (pwrsw->enable ^ pwrsw->mask);
++    unsigned int v = 0;
++    int i, ret;
++
++    for (i = 1; i <= 5; i++) {
++        ret = regmap_update_bits(map, pwrsw->base, pwrsw->mask, want);
++        if (ret)
++            return ret;
++        ret = regmap_read(map, pwrsw->base, &v);
++        if (ret)
++            return ret;
++        if ((v & pwrsw->mask) == want) {
++            if (i > 1)
++                dev_info(pwrsw->dev, "0x%02x %s: took %d writes\n",
++                         pwrsw->base, on ? "on" : "off", i);
++            return 0;
++        }
++        msleep(1);
++    }
++    dev_err(pwrsw->dev, "0x%02x %s: still 0x%02x after %d writes\n",
++            pwrsw->base, on ? "on" : "off", v, i - 1);
++    return -EIO;
++}
++
++static int apple_pmu_i2c_pwrsw_enable(struct regulator_dev *rdev)
++{
++    struct apple_pmu_i2c_pwrsw *pwrsw = rdev->reg_data;
++    int ret = apple_pmu_i2c_pwrsw_set(rdev, true);
++
++    if (!ret) {
++        pwrsw->was_enabled = 1;
++        mdelay(1);  /* HACK: hrtimer broken, do enable delay ourselves */
++    }
++    return ret;
++}
++
++static int apple_pmu_i2c_pwrsw_disable(struct regulator_dev *rdev)
++{
++    return apple_pmu_i2c_pwrsw_set(rdev, false);
++}
++
++static int apple_pmu_i2c_pwrsw_is_enabled(struct regulator_dev *rdev)
++{
++    struct apple_pmu_i2c_pwrsw *pwrsw = rdev->reg_data;
++    int ret;
++    if(!pwrsw->was_enabled)
++        ret = 0;
++    else
++        ret = regulator_is_enabled_regmap(rdev);
++    return ret;
++}
++
++static const struct regulator_ops apple_pmu_i2c_pwrsw_ops = {
++    .enable = apple_pmu_i2c_pwrsw_enable,
++    .disable = apple_pmu_i2c_pwrsw_disable,
++    .is_enabled = apple_pmu_i2c_pwrsw_is_enabled,
++};
++
++static int apple_pmu_i2c_pwrsw_probe(struct platform_device *pdev)
++{
++    struct device_node *node = pdev->dev.of_node;
++    struct apple_pmu_i2c *pmu = dev_get_drvdata(pdev->dev.parent);
++    struct apple_pmu_i2c_pwrsw *pwrsw;
++    const char *supply_name = NULL;
++
++    pwrsw = devm_kzalloc(&pdev->dev, sizeof(struct apple_pmu_i2c_pwrsw), GFP_KERNEL);
++    if(!pwrsw)
++        return -ENOMEM;
++
++    if(of_property_read_u32_index(node, "reg", 0, &pwrsw->base) ||
++       of_property_read_u32_index(node, "mask", 0, &pwrsw->mask) ||
++       of_property_read_u32_index(node, "enable", 0, &pwrsw->enable)) {
++        dev_err(&pdev->dev, "power switch requires 'reg', 'mask' and 'enable' properties.\n");
++        return -ENODEV;
++    }
++
++    if(of_property_read_string(node, "supply-name", &supply_name))
++        supply_name = NULL;
++
++    pwrsw->dev = &pdev->dev;
++    platform_set_drvdata(pdev, pwrsw);
++
++    pwrsw->desc.name = node->name;
++    pwrsw->desc.supply_name = supply_name;
++    pwrsw->desc.ops = &apple_pmu_i2c_pwrsw_ops;
++    pwrsw->desc.type = REGULATOR_VOLTAGE;
++    pwrsw->desc.owner = THIS_MODULE;
++    pwrsw->desc.enable_time = 0;
++    pwrsw->desc.off_on_delay = 0;
++    pwrsw->desc.enable_reg = pwrsw->base;
++    pwrsw->desc.enable_mask = pwrsw->mask;
++    pwrsw->desc.enable_val = pwrsw->enable;
++    pwrsw->desc.disable_val = pwrsw->enable ^ pwrsw->mask;
++    pwrsw->init_data.constraints.valid_ops_mask = REGULATOR_CHANGE_STATUS;
++    pwrsw->config.dev = &pdev->dev;
++    pwrsw->config.driver_data = pwrsw;
++    pwrsw->config.init_data = &pwrsw->init_data;
++    pwrsw->config.of_node = node;
++    pwrsw->config.regmap = pmu->regmap;
++
++    pwrsw->regu = devm_regulator_register(&pdev->dev, &pwrsw->desc, &pwrsw->config);
++    if(IS_ERR(pwrsw->regu)) {
++        dev_err(&pdev->dev, "failed to register regulator: %ld.", PTR_ERR(pwrsw->regu));
++        return PTR_ERR(pwrsw->regu);
++    }
++
++    return 0;
++}
++
++static const struct of_device_id apple_pmu_i2c_pwrsw_of_match[] = {
++    { .compatible = "apple,pmu-pwrsw" },
++    { },
++};
++
++static struct platform_driver apple_pmu_i2c_pwrsw_driver = {
++    .driver = {
++        .name = "apple-pmu-pwrsw",
++        .of_match_table = of_match_ptr(apple_pmu_i2c_pwrsw_of_match),
++    },
++    .probe = apple_pmu_i2c_pwrsw_probe,
++};
++
++module_platform_driver(apple_pmu_i2c_pwrsw_driver);
++MODULE_AUTHOR("Corellium LLC");
++MODULE_LICENSE("GPL v2");
+diff --git a/include/linux/apple-pmu-i2c.h b/include/linux/apple-pmu-i2c.h
+new file mode 100644
+index 000000000..8d227b3d5
+--- /dev/null
++++ b/include/linux/apple-pmu-i2c.h
+@@ -0,0 +1,19 @@
++/*
++ * Driver for I2C-based PMUs found on mobile devices with S5L8940X (Apple A5) SoCs.
++ *
++ * Copyright (C) 2020 Corellium LLC
++ */
++
++#ifndef _LINUX_INCLUDE_HX_PMU_I2C_H_
++#define _LINUX_INCLUDE_HX_PMU_I2C_H_
++
++#include <linux/device.h>
++#include <linux/regmap.h>
++
++struct apple_pmu_i2c {
++    struct device *dev;
++    struct regmap *regmap;
++    struct regmap_config config;
++};
++
++#endif

@@ -1,0 +1,2086 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rzxvx <rrzxznewid@gmail.com>
+Date: Sun, 27 Sep 2026 14:33:19 +0300
+Subject: [PATCH] ARM: apple: Add the S5L (A5) platform
+
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at c20b85e:
+  patches/files/arch/arm/include/asm/apple_boot.h
+  patches/files/arch/arm/mach-apple/Kconfig
+  patches/files/arch/arm/mach-apple/Makefile
+  patches/files/arch/arm/mach-apple/apple.c
+  patches/files/arch/arm/mach-apple/apple_pmu_clkevt.c
+  patches/files/arch/arm/mach-apple/apple_sof_clkevt.c
+  patches/files/arch/arm/mach-apple/apple_wdt_clkevt.c
+  patches/files/arch/arm/mach-apple/font8x8.h
+  patches/files/arch/arm/mach-apple/headsmp.S
+  patches/files/arch/arm/mach-apple/p105_fb_dbg.c
+  patches/files/arch/arm/mach-apple/p105_fb_dbg.h
+  patches/files/arch/arm/mach-apple/platsmp.c
+  patches/files/arch/arm/mach-apple/pmccntr.c
+  patches/tree/0001-cascadia.patch
+
+Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (6 commits);
+  K <k@Ks-MacBook-Pro-4.local> (3dc80cf)
+
+[Orchard: imported for the armv7-a5 platform; see kernel/sources.toml]
+---
+ arch/arm/Kconfig                       |   2 +
+ arch/arm/Makefile                      |   1 +
+ arch/arm/boot/dts/Makefile             |   1 +
+ arch/arm/include/asm/apple_boot.h      |  50 +++
+ arch/arm/mach-apple/Kconfig            |  30 ++
+ arch/arm/mach-apple/Makefile           |   3 +
+ arch/arm/mach-apple/apple.c            | 441 +++++++++++++++++++++++++
+ arch/arm/mach-apple/apple_pmu_clkevt.c | 271 +++++++++++++++
+ arch/arm/mach-apple/apple_sof_clkevt.c | 201 +++++++++++
+ arch/arm/mach-apple/apple_wdt_clkevt.c | 175 ++++++++++
+ arch/arm/mach-apple/font8x8.h          | 109 ++++++
+ arch/arm/mach-apple/headsmp.S          |  62 ++++
+ arch/arm/mach-apple/p105_fb_dbg.c      | 212 ++++++++++++
+ arch/arm/mach-apple/p105_fb_dbg.h      |  22 ++
+ arch/arm/mach-apple/platsmp.c          | 224 +++++++++++++
+ arch/arm/mach-apple/pmccntr.c          | 117 +++++++
+ 16 files changed, 1921 insertions(+)
+ create mode 100644 arch/arm/include/asm/apple_boot.h
+ create mode 100644 arch/arm/mach-apple/Kconfig
+ create mode 100644 arch/arm/mach-apple/Makefile
+ create mode 100644 arch/arm/mach-apple/apple.c
+ create mode 100644 arch/arm/mach-apple/apple_pmu_clkevt.c
+ create mode 100644 arch/arm/mach-apple/apple_sof_clkevt.c
+ create mode 100644 arch/arm/mach-apple/apple_wdt_clkevt.c
+ create mode 100644 arch/arm/mach-apple/font8x8.h
+ create mode 100644 arch/arm/mach-apple/headsmp.S
+ create mode 100644 arch/arm/mach-apple/p105_fb_dbg.c
+ create mode 100644 arch/arm/mach-apple/p105_fb_dbg.h
+ create mode 100644 arch/arm/mach-apple/platsmp.c
+ create mode 100644 arch/arm/mach-apple/pmccntr.c
+
+diff --git a/arch/arm/Kconfig b/arch/arm/Kconfig
+index 202397be7..e925dc556 100644
+--- a/arch/arm/Kconfig
++++ b/arch/arm/Kconfig
+@@ -359,6 +359,8 @@ source "arch/arm/mach-actions/Kconfig"
+ 
+ source "arch/arm/mach-alpine/Kconfig"
+ 
++source "arch/arm/mach-apple/Kconfig"
++
+ source "arch/arm/mach-artpec/Kconfig"
+ 
+ source "arch/arm/mach-aspeed/Kconfig"
+diff --git a/arch/arm/Makefile b/arch/arm/Makefile
+index aafebf145..173205729 100644
+--- a/arch/arm/Makefile
++++ b/arch/arm/Makefile
+@@ -173,6 +173,7 @@ textofs-$(CONFIG_ARCH_AXXIA) := 0x00308000
+ # by CONFIG_* macro name.
+ machine-$(CONFIG_ARCH_ACTIONS)		+= actions
+ machine-$(CONFIG_ARCH_ALPINE)		+= alpine
++machine-$(CONFIG_ARCH_APPLE_S5L)	+= apple
+ machine-$(CONFIG_ARCH_ARTPEC)		+= artpec
+ machine-$(CONFIG_ARCH_ASPEED)           += aspeed
+ machine-$(CONFIG_ARCH_AT91)		+= at91
+diff --git a/arch/arm/boot/dts/Makefile b/arch/arm/boot/dts/Makefile
+index efe38eb25..4a49736c3 100644
+--- a/arch/arm/boot/dts/Makefile
++++ b/arch/arm/boot/dts/Makefile
+@@ -39,3 +39,4 @@ subdir-y += unisoc
+ subdir-y += vt8500
+ subdir-y += xen
+ subdir-y += xilinx
++dtb-$(CONFIG_ARCH_APPLE_S5L) += ipad-mini1.dtb
+diff --git a/arch/arm/include/asm/apple_boot.h b/arch/arm/include/asm/apple_boot.h
+new file mode 100644
+index 000000000..61c7908a5
+--- /dev/null
++++ b/arch/arm/include/asm/apple_boot.h
+@@ -0,0 +1,50 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef __ASM_ARM_APPLE_BOOT_H
++#define __ASM_ARM_APPLE_BOOT_H
++
++#include <linux/gfp.h>
++#include <linux/irqflags.h>
++#include <linux/rwlock.h>
++#include <linux/spinlock.h>
++
++extern bool early_boot_irqs_disabled;
++
++static inline bool apple_boot_irqs_off(void)
++{
++	return early_boot_irqs_disabled;
++}
++
++static inline gfp_t apple_boot_gfp(gfp_t gfp)
++{
++	if (apple_boot_irqs_off() || irqs_disabled())
++		return (gfp & (__GFP_ZERO | __GFP_ACCOUNT | __GFP_COMP |
++			       __GFP_NOWARN)) | GFP_ATOMIC;
++	return gfp;
++}
++
++/*
++ * Never use *_irq() variants here.  Sticky nIRQ means spin_unlock_irq() /
++ * write_unlock_irq() → cpsie → infinite IRQ storm once early_irq_escape is
++ * off (cp_sig hang).  Plain lock/unlock; caller already manages CPSR.I.
++ */
++static inline void apple_spin_lock(spinlock_t *lock)
++{
++	spin_lock(lock);
++}
++
++static inline void apple_spin_unlock(spinlock_t *lock)
++{
++	spin_unlock(lock);
++}
++
++static inline void apple_write_lock(rwlock_t *lock)
++{
++	write_lock(lock);
++}
++
++static inline void apple_write_unlock(rwlock_t *lock)
++{
++	write_unlock(lock);
++}
++
++#endif
+diff --git a/arch/arm/mach-apple/Kconfig b/arch/arm/mach-apple/Kconfig
+new file mode 100644
+index 000000000..63f344f29
+--- /dev/null
++++ b/arch/arm/mach-apple/Kconfig
+@@ -0,0 +1,30 @@
++# SPDX-License-Identifier: GPL-2.0-only
++#
++# Deliberately NOT called ARCH_APPLE.  Kconfig symbol names are global, and
++# arm64 already uses ARCH_APPLE for Apple silicon Macs.  Reusing it here does
++# make SERIAL_SAMSUNG's existing "depends on ... ARCH_APPLE" apply for free,
++# but it also switches on every other driver that keys off it -- APPLE_DART,
++# the RTKit mailbox, ADMAC, apple-nvme -- all of which are arm64-only and fail
++# to build on ARMv7 (writeq_relaxed does not exist on 32-bit).  A separate
++# symbol plus two one-line dependency patches is much cheaper than fighting
++# that.
++menuconfig ARCH_APPLE_S5L
++	bool "Apple SoCs (32-bit S5L)"
++	depends on ARCH_MULTI_V7
++	select APPLE_AIC1
++	select ARM_GLOBAL_TIMER if !SMP
++	select CACHE_L2X0
++	select CLKSRC_MMIO
++	select COMMON_CLK
++	select GENERIC_IRQ_CHIP
++	select HAVE_ARM_TWD if SMP
++	help
++	  Support for Apple's 32-bit ARM application processors, as used in
++	  iOS devices from the A4 through the A6X.
++
++	  Only S5L8940X / S5L8942X (A5, e.g. iPad2,5 "iPad mini") is described
++	  today: interrupt controller, UART, framebuffer, and dual-core SMP via
++	  PMGR Core(n) + AIC IPI (see docs/p105-smp-bringup.md).  There is no
++	  NAND or GPU driver, and nothing here can write to the device's flash.
++
++	  Say N unless you are building a kernel for one of these devices.
+diff --git a/arch/arm/mach-apple/Makefile b/arch/arm/mach-apple/Makefile
+new file mode 100644
+index 000000000..f739fe927
+--- /dev/null
++++ b/arch/arm/mach-apple/Makefile
+@@ -0,0 +1,3 @@
++# SPDX-License-Identifier: GPL-2.0-only
++obj-$(CONFIG_ARCH_APPLE_S5L)	+= apple.o pmccntr.o p105_fb_dbg.o apple_wdt_clkevt.o apple_pmu_clkevt.o apple_sof_clkevt.o
++obj-$(CONFIG_SMP)		+= platsmp.o headsmp.o
+diff --git a/arch/arm/mach-apple/apple.c b/arch/arm/mach-apple/apple.c
+new file mode 100644
+index 000000000..e4aaa6c00
+--- /dev/null
++++ b/arch/arm/mach-apple/apple.c
+@@ -0,0 +1,441 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Apple 32-bit S5L SoC support (S5L8940X / S5L8942X, "A5").
++ */
++
++#include <linux/init.h>
++#include <linux/io.h>
++#include <linux/irqchip.h>
++#include <linux/sizes.h>
++#include <linux/irq.h>
++#include <linux/bits.h>
++#include <linux/memblock.h>
++#include <linux/of.h>
++#include <linux/of_address.h>
++#include <linux/sched.h>
++#include <linux/sched/task.h>
++#include <asm/cputype.h>
++#include <asm/barrier.h>
++#include <asm/thread_info.h>
++#include <asm/exception.h>
++#include <asm/mach/arch.h>
++#include <asm/mach/map.h>
++#include <asm/memory.h>
++
++#include "p105_fb_dbg.h"
++
++extern bool early_boot_irqs_disabled;
++extern pid_t user_mode_thread(int (*fn)(void *), void *arg, unsigned long flags);
++void apple_aic1_quiesce(void);
++void apple_aic1_enable(void);
++void apple_aic1_arm_cpu0(void);
++void apple_aic1_release_escape(void);
++void apple_aic1_hw_quiesce(void);
++void apple_aic1_hw_quiesce_quiet(void);
++
++/* Bump when changing rest_init spawn path so FB confirms the flashed image. */
++#define APPLE_BOOT_STAMP	0x26082634ul
++
++/*
++ * Lab IRQ stub forced SPSR.I on return against sticky nIRQ.  Keep true through
++ * first enables; apple_aic1_release_escape() clears it after 0x5004 drain +
++ * successful irq_thaw (aic1-lab v30: I0 HOLD OK without force).
++ */
++bool apple_aic1_early_irq_escape = true;
++
++void __init apple_s5l_pmccntr_enable_counter(void);
++void __init apple_s5l_pmccntr_init(unsigned long rate);
++unsigned long __init apple_s5l_calibrate_cpu_hz(void);
++void __init apple_s5l_wdt_clocksource_init(void);
++void __init apple_s5l_pmu_clkevt_init(unsigned long cpu_hz);
++
++/*
++ * P105AP Recovery live scanout (confirmed): phys 0x9F6FC000, portrait
++ * 768x1024, stride 3072 (=768*4), BGRA.
++ */
++#define P105_FB_PHYS	0x9f6fc000
++#define P105_FB_STRIDE	3072
++
++unsigned long p105_fb_phys = P105_FB_PHYS;
++unsigned long p105_fb_stride = P105_FB_STRIDE;
++unsigned p105_vis_row0 = 4;
++
++#define P105_AIC_PHYS	0x3f200000
++#define P105_AIC_VIRT	0xF0500000UL
++
++/* aic1-lab v30: EVENT is per-CPU @ 0x5004; 0x2004 stays idle on aic,1 */
++#define P105_AIC_CONFIG		0x0010
++#define P105_AIC_EVENT		0x2004
++#define P105_AIC_EVENT_CPU0	0x5004
++#define P105_AIC_IPI_ACK	0x200c
++#define P105_AIC_IPI_MASK_SET	0x2024
++#define P105_AIC_SW_CLR		0x4080
++#define P105_AIC_MASK_SET	0x4100
++#define P105_AIC_TARGET_CPU	0x3000
++#define P105_AIC_NR_IRQ		192
++#define P105_AIC_NR_WORDS	6
++
++/*
++ * For the early quiesce/rearm code only.  The AIC driver maps the block again
++ * itself, strongly-ordered -- see aic1_of_init() in irq-apple-aic1.c.  (Made
++ * MT_UNCACHED here, this static map came out without page tables and the
++ * driver, reusing it, faulted at the first read.)
++ */
++static struct map_desc apple_aic_desc __initdata = {
++	.virtual	= P105_AIC_VIRT,
++	.pfn		= __phys_to_pfn(P105_AIC_PHYS),
++	.length		= SZ_1M,
++	.type		= MT_DEVICE,
++};
++
++/*
++ * Lab: CBAR phys 0x3E100000 R/W is fine bare-metal.  Under Linux, both
++ * ioremap and static MT_DEVICE map of that window hang (aic1q33 stuck after
++ * printing CP15 CBAR).  Skip GIC MMIO; rely on AIC EVENT@0x5004 drain.
++ */
++static bool apple_aic_quiesce_silent;
++
++void apple_a9_periph_quiesce(void)
++{
++	u32 cbar;
++
++	asm volatile("mrc p15, 4, %0, c15, c0, 0" : "=r"(cbar));
++	if (!apple_aic_quiesce_silent) {
++		p105_fb_dbg_hex("cbar", cbar & 0xffffe000u);
++		p105_fb_dbg("cbar_skip");
++	}
++}
++
++void apple_a9_gic_drain(void)
++{
++	/* no CBAR map — AIC drain only */
++}
++
++/*
++ * Early aic,1 quiesce (aic1-lab v30 P0 + E5 drain):
++ * TARGET=0, MASK, IPI, drain EVENT@0x5004 (and 0x2004), CFG.enable=0.
++ * Never PMGR gate 0x4D while AIC must live.
++ */
++void apple_aic1_hw_quiesce(void)
++{
++	void __iomem *base = (void __iomem *)P105_AIC_VIRT;
++	unsigned int i, n, cpu;
++	u32 cfg;
++
++	apple_a9_periph_quiesce();
++
++	for (i = 0; i < P105_AIC_NR_WORDS; i++) {
++		writel_relaxed(~0U, base + P105_AIC_MASK_SET + i * 4);
++		writel_relaxed(~0U, base + P105_AIC_SW_CLR + i * 4);
++	}
++
++	for (i = 0; i < P105_AIC_NR_IRQ; i++)
++		writel_relaxed(0, base + P105_AIC_TARGET_CPU + i * 4);
++
++	writel_relaxed(~0U, base + P105_AIC_IPI_MASK_SET);
++	writel_relaxed(BIT(31) | BIT(0), base + P105_AIC_IPI_ACK);
++	writel_relaxed(~0U, base + P105_AIC_IPI_MASK_SET);
++	for (i = 0; i < 2; i++) {
++		writel_relaxed(BIT(31) | BIT(0), base + 0x500c + (i << 7));
++		writel_relaxed(~0U, base + 0x5024 + (i << 7));
++	}
++
++	for (n = 0; n < 512; n++) {
++		u32 any = readl_relaxed(base + P105_AIC_EVENT);
++
++		for (cpu = 0; cpu < 2; cpu++)
++			any |= readl_relaxed(base + P105_AIC_EVENT_CPU0 +
++					     (cpu << 7));
++		if (!any)
++			break;
++	}
++
++	for (i = 0; i < P105_AIC_NR_WORDS; i++)
++		writel_relaxed(~0U, base + P105_AIC_MASK_SET + i * 4);
++
++	cfg = readl_relaxed(base + P105_AIC_CONFIG);
++	cfg |= 0xE0000000U;
++	cfg &= ~BIT(0);
++	writel_relaxed(cfg, base + P105_AIC_CONFIG);
++	dsb(sy);
++
++	if (!apple_aic_quiesce_silent) {
++		p105_fb_dbg_hex("cfg", readl_relaxed(base + P105_AIC_CONFIG));
++		p105_fb_dbg_hex("e5", readl_relaxed(base + P105_AIC_EVENT_CPU0));
++		p105_fb_dbg_hex("tgt", readl_relaxed(base + P105_AIC_TARGET_CPU));
++	}
++}
++
++/** Silent P0 quiesce for irq_thaw (no FB dump flood). */
++void apple_aic1_hw_quiesce_quiet(void)
++{
++	apple_aic_quiesce_silent = true;
++	apple_aic1_hw_quiesce();
++	apple_aic_quiesce_silent = false;
++}
++
++/* Affinity to CPU0 after IRQs are on; drain per-CPU EVENT. */
++void apple_aic1_arm_cpu0(void)
++{
++	void __iomem *base = (void __iomem *)P105_AIC_VIRT;
++	unsigned int i, n, cpu;
++
++	for (i = 0; i < P105_AIC_NR_WORDS; i++) {
++		writel_relaxed(~0U, base + P105_AIC_MASK_SET + i * 4);
++		writel_relaxed(~0U, base + P105_AIC_SW_CLR + i * 4);
++	}
++	for (i = 0; i < P105_AIC_NR_IRQ; i++)
++		writel_relaxed(BIT(0), base + P105_AIC_TARGET_CPU + i * 4);
++	for (i = 0; i < P105_AIC_NR_WORDS; i++)
++		writel_relaxed(~0U, base + P105_AIC_MASK_SET + i * 4);
++	for (n = 0; n < 512; n++) {
++		u32 any = readl_relaxed(base + P105_AIC_EVENT);
++
++		for (cpu = 0; cpu < 2; cpu++)
++			any |= readl_relaxed(base + P105_AIC_EVENT_CPU0 +
++					     (cpu << 7));
++		if (!any)
++			break;
++	}
++}
++
++struct apple_spawn_args {
++	int (*fn)(void *);
++	void *arg;
++	unsigned long flags;
++	pid_t pid;
++	unsigned long old_sp;
++};
++
++static void __noclone noinline apple_spawn_fn(void *a)
++{
++	struct apple_spawn_args *s = a;
++
++	s->pid = user_mode_thread(s->fn, s->arg, s->flags);
++}
++
++static noinline pid_t apple_spawn_on_alt_stack(int (*fn)(void *), void *arg,
++					       unsigned long flags)
++{
++	struct apple_spawn_args s = {
++		.fn = fn,
++		.arg = arg,
++		.flags = flags,
++		.pid = -ENOMEM,
++	};
++	unsigned long sp, old_sp;
++	u8 *stk;
++	void (*spawn)(void *) = apple_spawn_fn;
++
++	stk = memblock_alloc(THREAD_SIZE, THREAD_SIZE);
++	if (!stk)
++		return -ENOMEM;
++
++	sp = (unsigned long)stk + THREAD_SIZE - 8;
++	sp &= ~7UL;
++
++	asm volatile(
++		"mov	%0, sp\n"
++		"mov	sp, %1\n"
++		"mov	r0, %2\n"
++		"blx	%3\n"
++		"mov	sp, %0\n"
++		: "=&r" (old_sp)
++		: "r" (sp), "r" (&s), "r" (spawn)
++		: "r0", "lr", "memory");
++
++	s.old_sp = old_sp;
++	return s.pid;
++}
++
++static unsigned long apple_current_sp(void)
++{
++	unsigned long sp;
++
++	asm volatile("mov %0, sp" : "=r" (sp));
++	return sp;
++}
++
++pid_t __init apple_s5l_rest_spawn_init(int (*fn)(void *), void *arg,
++				       unsigned long flags)
++{
++	unsigned long top = (unsigned long)current->stack + THREAD_SIZE;
++	pid_t pid;
++
++	p105_fb_dbg_hex("bld", APPLE_BOOT_STAMP);
++	p105_fb_dbg_hex("sp", apple_current_sp());
++	p105_fb_dbg_hex("stk", top - apple_current_sp());
++
++	/*
++	 * IRQs already probed+frozen in start_kernel (irq_frz).  Do not
++	 * re-quiesce/enable here.  Spawn on the normal task stack — alt-stack
++	 * SP breaks on_accessible_stack()/canary checks on the way out of
++	 * kernel_clone (hang after kc_woke).
++	 */
++	p105_fb_dbg("irq_ok");
++
++	p105_fb_dbg("umt_go");
++	flags |= CLONE_FILES;
++	pid = user_mode_thread(fn, arg, flags);
++	p105_fb_dbg("umt_ret");
++	p105_fb_dbg_hex("pid", (unsigned long)pid);
++
++	return pid;
++}
++
++static phys_addr_t p105_fb_section(void)
++{
++	phys_addr_t phys = (phys_addr_t)p105_fb_phys & ~(SZ_1M - 1);
++
++	if (phys < 0x9f000000 || phys >= 0x9ff00000)
++		phys = P105_FB_PHYS & ~(SZ_1M - 1);
++	return phys;
++}
++
++static void __init apple_s5l_reserve(void)
++{
++	phys_addr_t phys = p105_fb_section();
++
++	memblock_remove(phys, 0x9f6fc000 - phys);
++}
++
++static void __init apple_s5l_map_io(void)
++{
++	/*
++	 * Do not iotable_init the framebuffer. Mapping 0x9f6fxxxx as
++	 * MT_DEVICE_WC at 0xF0000000 hung at mio_fb (create_mapping /
++	 * memblock for the static VM). Early identity map of
++	 * 0x9f000000–0xa0000000 (kept in prepare_page_table) is enough
++	 * for p105_fb_dbg; simplefb can ioremap later.
++	 */
++	p105_fb_dbg("mio_enter");
++	p105_fb_dbg("aic1q34");	/* EVENT@0x5004; CBAR map skipped; release escape */
++	p105_fb_phys = P105_FB_PHYS;
++	p105_fb_stride = P105_FB_STRIDE;
++
++	p105_fb_dbg("mio_aic");
++	iotable_init(&apple_aic_desc, 1);
++	p105_fb_dbg("mio_nocbar");
++
++	p105_vis_row0 = 4;
++	/* Stay on phys identity — never p105_fb_dbg_use_virt(). */
++	p105_fb_dbg("map_io");
++	p105_fb_dbg_hex("fb", p105_fb_phys);
++	p105_fb_dbg_hex("str", p105_fb_stride);
++}
++
++/*
++ * Cortex-A9 errata that multi_v7 cannot apply for us -- the workaround is a
++ * write to the diagnostic register, which only secure code may make, and
++ * this kernel runs secure.  The A5's cores are r2p8:
++ *   743622 (r2p*): faulty hazard checking in the store buffer can corrupt
++ *                  data -- diagnostic bit 6;
++ *   751472 (before r3p0, SMP): an interrupted ICIALLUIS may never complete,
++ *                  and the core waiting on it hangs -- bit 11.
++ * CPU1 sets the same bits in headsmp.S; cpu_resume restores the register
++ * after power-down idle.
++ */
++static void __init apple_s5l_a9_errata(void)
++{
++	u32 midr = read_cpuid_id(), variant = (midr >> 20) & 0xf, diag;
++
++	if (read_cpuid_part() != ARM_CPU_PART_CORTEX_A9)
++		return;
++	asm volatile("mrc p15, 0, %0, c15, c0, 1" : "=r" (diag));
++	if (variant == 2)
++		diag |= BIT(6);
++	if (variant < 3)
++		diag |= BIT(11);
++	asm volatile("mcr p15, 0, %0, c15, c0, 1" : : "r" (diag));
++	pr_info("Cortex-A9 r%up%u: errata 743622/751472, diagnostic register %#x\n",
++		variant, midr & 0xf, diag);
++}
++
++static void __init apple_s5l_init_early(void)
++{
++	p105_fb_dbg("init_early");
++	apple_s5l_a9_errata();
++}
++
++/*
++ * The L2's other half.  The ADT's pl310 node has two register blocks: the
++ * PL310 itself and Apple's CIF at 0x3fd00000.  iOS 6.1's AppleS5L8940XPL310,
++ * enabling the L2 (its 'pmtc' platform function), configures the PL310 and
++ * then, right before the enable bit, writes CIF+0x1020 = 1 and CIF+0x1120 =
++ * 0x80000100.  Without them one core ran fine with the L2 on, and two cores
++ * under load froze the whole machine, silently, within a minute.
++ * init_IRQ() enables the L2 as soon as the machine's init_irq returns.
++ */
++static void __init apple_s5l_cif_l2_on(void)
++{
++	struct device_node *np;
++	void __iomem *cif;
++
++	np = of_find_compatible_node(NULL, NULL, "arm,pl310-cache");
++	if (!np || !of_device_is_available(np))
++		goto out;
++	cif = of_iomap(np, 1);
++	if (!cif) {
++		pr_warn("L2 CIF: no second reg in the cache-controller node\n");
++		goto out;
++	}
++	pr_info("L2 CIF: +0x1020 %#x -> 0x1, +0x1120 %#x -> 0x80000100\n",
++		readl_relaxed(cif + 0x1020), readl_relaxed(cif + 0x1120));
++	writel(1, cif + 0x1020);
++	writel(0x80000100, cif + 0x1120);
++	iounmap(cif);
++out:
++	of_node_put(np);
++}
++
++static void __init apple_s5l_init_irq(void)
++{
++	p105_fb_dbg("irqchip_init");
++	irqchip_init();
++	p105_fb_dbg("irqchip_done");
++	apple_s5l_cif_l2_on();
++}
++
++static void __init apple_s5l_init_time(void)
++{
++	unsigned long cpu_hz;
++
++	/* Enable the cycle counter first, then measure it against the watchdog's
++	 * exact 24 MHz reference, and only then register the clocksource -- its
++	 * rate used to be a hardcoded 1 GHz guess, which made all wall-clock time
++	 * wrong.  The same measured figure is what the PMU tick is scaled by. */
++	p105_fb_dbg("pmccntr_init");
++	apple_s5l_pmccntr_enable_counter();
++	cpu_hz = apple_s5l_calibrate_cpu_hz();
++
++	/* Wall time comes from the 24 MHz watchdog counter, NOT from PMCCNTR:
++	 * PMCCNTR stops in WFI, so with it as the clocksource ktime only advanced
++	 * while the CPU was busy and sleep(1) took ~13 real seconds. */
++	apple_s5l_wdt_clocksource_init();
++	apple_s5l_pmccntr_init(cpu_hz);
++
++	/* Tick from the PMU overflow interrupt; it self-tests at late_initcall and
++	 * leaves the system exactly as tickless as before if the IRQ never lands. */
++	p105_fb_dbg("pmu_timer");
++	apple_s5l_pmu_clkevt_init(cpu_hz);
++	p105_fb_dbg("pmccntr_done");
++}
++
++static const char * const apple_s5l_dt_compat[] __initconst = {
++	"apple,s5l8940x",
++	"apple,s5l8942x",
++	NULL
++};
++
++DT_MACHINE_START(APPLE_S5L, "Apple S5L (Device Tree)")
++	.dt_compat	= apple_s5l_dt_compat,
++	.reserve	= apple_s5l_reserve,
++	.map_io		= apple_s5l_map_io,
++	.init_early	= apple_s5l_init_early,
++	.init_irq	= apple_s5l_init_irq,
++	.init_time	= apple_s5l_init_time,
++	/* Keep iBoot's AUX (16 x 64 KB); a mask at all is what makes
++	 * init_IRQ() bring the PL310 up from the DT (dts: cache-controller). */
++	.l2c_aux_val	= 0,
++	.l2c_aux_mask	= ~0,
++MACHINE_END
+diff --git a/arch/arm/mach-apple/apple_pmu_clkevt.c b/arch/arm/mach-apple/apple_pmu_clkevt.c
+new file mode 100644
+index 000000000..9f66b8bf6
+--- /dev/null
++++ b/arch/arm/mach-apple/apple_pmu_clkevt.c
+@@ -0,0 +1,271 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Clockevent from the Cortex-A9 PMU overflow interrupt (P105AP / A5).
++ *
++ * Why this and not a timer block
++ * ------------------------------
++ * There is no usable timer peripheral on this SoC as far as we can reach it.
++ * The A9 private timer lives in the PERIPHBASE window, and any MMIO mapping of
++ * it hangs the machine.  The watchdog at 0x3F103020 counts and its comparator
++ * provably works (it resets the machine on schedule), but its interrupt half is
++ * not wired -- no CTRL bit combination ever latched IRQ_STATUS or raised AIC
++ * hwirq 4.  A scan of all 28 KB of the PMGR window found exactly one
++ * free-running register in it, that same watchdog counter.
++ *
++ * The PMU is the way out because it needs no MMIO at all: everything here is
++ * CP15, the same coprocessor space PMCCNTR already runs in.
++ *
++ * Why hwirq 135
++ * -------------
++ * The ADT decodes cleanly.  cpu0 has interrupts = <192, 135, 193> and cpu1 has
++ * <194, 139, 195>; function-ipi_dispatch points at 192 and ipi_dispatch_other
++ * at 193, so the outer two are the IPIs and the middle one is the per-CPU
++ * interrupt.  aic target-destinations = <135 cpu0, 139 cpu1> pins each to its
++ * own core.  On a Cortex-A9 with no architected timer, the per-CPU interrupt
++ * that is left is nPMUIRQ.
++ *
++ * Idle
++ * ----
++ * The PMU counts CPU cycles, and WFI stops the core clock, so the tick would
++ * die the moment the system went idle.  cpu_idle_poll_ctrl(true) keeps the idle
++ * loop spinning instead.  That is a bring-up trade -- it costs power and heat --
++ * and it is only switched on if the clockevent actually registers.
++ *
++ * CONFIG_ARM_PMU is built in, but there is no arm,cortex-a9-pmu node in the DT,
++ * so the perf driver never probes and the counters are ours.
++ */
++
++#define pr_fmt(fmt) "apple-pmu-timer: " fmt
++
++#include <linux/bits.h>
++#include <linux/clockchips.h>
++#include <linux/cpu.h>
++#include <linux/cpumask.h>
++#include <linux/init.h>
++#include <linux/interrupt.h>
++#include <linux/kernel.h>
++#include <linux/of.h>
++#include <linux/of_irq.h>
++#include <linux/printk.h>
++#include <linux/processor.h>
++
++#include <asm/barrier.h>
++
++/* ARMv7 PMU, CP15 c9.  Counter 0 is used as the tick; PMCCNTR stays the
++ * clocksource and is never reprogrammed here. */
++#define ARMV7_EVT_CPU_CYCLES	0x11
++#define PMU_TICK_CTR		0
++#define PMU_TICK_BIT		BIT(PMU_TICK_CTR)
++
++#define PMCR_E			BIT(0)	/* enable all counters */
++
++static inline u32 pmu_rd_pmcr(void)
++{ u32 v; asm volatile("mrc p15, 0, %0, c9, c12, 0" : "=r"(v)); return v; }
++static inline void pmu_wr_pmcr(u32 v)
++{ asm volatile("mcr p15, 0, %0, c9, c12, 0" :: "r"(v)); }
++static inline void pmu_cntenset(u32 v)
++{ asm volatile("mcr p15, 0, %0, c9, c12, 1" :: "r"(v)); }
++static inline void pmu_cntenclr(u32 v)
++{ asm volatile("mcr p15, 0, %0, c9, c12, 2" :: "r"(v)); }
++static inline u32 pmu_rd_ovsr(void)
++{ u32 v; asm volatile("mrc p15, 0, %0, c9, c12, 3" : "=r"(v)); return v; }
++static inline void pmu_wr_ovsr(u32 v)
++{ asm volatile("mcr p15, 0, %0, c9, c12, 3" :: "r"(v)); }
++static inline void pmu_selr(u32 v)
++{ asm volatile("mcr p15, 0, %0, c9, c12, 5" :: "r"(v)); }
++static inline void pmu_evtyper(u32 v)
++{ asm volatile("mcr p15, 0, %0, c9, c13, 1" :: "r"(v)); }
++static inline void pmu_evcntr(u32 v)
++{ asm volatile("mcr p15, 0, %0, c9, c13, 2" :: "r"(v)); }
++static inline void pmu_intenset(u32 v)
++{ asm volatile("mcr p15, 0, %0, c9, c14, 1" :: "r"(v)); }
++static inline void pmu_intenclr(u32 v)
++{ asm volatile("mcr p15, 0, %0, c9, c14, 2" :: "r"(v)); }
++static inline u32 pmccntr(void)
++{ u32 v; asm volatile("mrc p15, 0, %0, c9, c13, 0" : "=r"(v)); return v; }
++
++static unsigned long pmu_rate;
++static unsigned long pmu_periodic_delta;
++static unsigned int pmu_irq;
++static unsigned int pmu_irq_count;
++
++static void pmu_tick_arm(unsigned long delta)
++{
++	pmu_cntenclr(PMU_TICK_BIT);
++	pmu_selr(PMU_TICK_CTR);
++	isb();
++	pmu_evtyper(ARMV7_EVT_CPU_CYCLES);
++	/* Count up to wrap: preload so that exactly `delta` cycles remain. */
++	pmu_evcntr((u32)-(u32)delta);
++	pmu_wr_ovsr(PMU_TICK_BIT);	/* drop any stale overflow */
++	pmu_intenset(PMU_TICK_BIT);
++	pmu_cntenset(PMU_TICK_BIT);
++	pmu_wr_pmcr(pmu_rd_pmcr() | PMCR_E);
++	isb();
++}
++
++static void pmu_tick_disarm(void)
++{
++	pmu_intenclr(PMU_TICK_BIT);
++	pmu_cntenclr(PMU_TICK_BIT);
++	pmu_wr_ovsr(PMU_TICK_BIT);
++	isb();
++}
++
++static int pmu_set_next_event(unsigned long delta, struct clock_event_device *e)
++{
++	pmu_tick_arm(delta);
++	return 0;
++}
++
++static int pmu_state_shutdown(struct clock_event_device *e)
++{
++	pmu_tick_disarm();
++	return 0;
++}
++
++static int pmu_state_oneshot(struct clock_event_device *e)
++{
++	pmu_tick_disarm();
++	return 0;
++}
++
++static int pmu_state_periodic(struct clock_event_device *e)
++{
++	pmu_tick_arm(pmu_periodic_delta);
++	return 0;
++}
++
++static irqreturn_t pmu_tick_isr(int irq, void *dev_id)
++{
++	struct clock_event_device *evt = dev_id;
++
++	if (!(pmu_rd_ovsr() & PMU_TICK_BIT))
++		return IRQ_NONE;
++
++	pmu_wr_ovsr(PMU_TICK_BIT);
++	pmu_cntenclr(PMU_TICK_BIT);
++	pmu_irq_count++;
++
++	if (clockevent_state_periodic(evt))
++		pmu_tick_arm(pmu_periodic_delta);
++
++	if (evt->event_handler)
++		evt->event_handler(evt);
++
++	return IRQ_HANDLED;
++}
++
++static struct clock_event_device pmu_clkevt = {
++	.name			= "apple-pmu-timer",
++	.features		= CLOCK_EVT_FEAT_ONESHOT | CLOCK_EVT_FEAT_PERIODIC,
++	.rating			= 400,
++	.set_next_event		= pmu_set_next_event,
++	.set_state_shutdown	= pmu_state_shutdown,
++	.set_state_oneshot	= pmu_state_oneshot,
++	.set_state_periodic	= pmu_state_periodic,
++};
++
++void __init apple_s5l_pmu_clkevt_init(unsigned long cpu_hz)
++{
++	struct device_node *np;
++
++	if (!cpu_hz) {
++		pr_err("no CPU rate, refusing to build a tick on a guess\n");
++		return;
++	}
++
++	np = of_find_compatible_node(NULL, NULL, "apple,s5l8940x-pmu-timer");
++	if (!np || !of_device_is_available(np)) {
++		of_node_put(np);
++		pr_info("no pmu-timer node, staying tickless\n");
++		return;
++	}
++
++	pmu_irq = irq_of_parse_and_map(np, 0);
++	of_node_put(np);
++	if (!pmu_irq) {
++		pr_err("failed to map IRQ\n");
++		return;
++	}
++
++	pmu_rate = cpu_hz;
++	pmu_periodic_delta = pmu_rate / HZ;
++
++	pmu_tick_disarm();
++
++	if (request_irq(pmu_irq, pmu_tick_isr, IRQF_TIMER | IRQF_NOBALANCING,
++			"apple-pmu-timer", &pmu_clkevt)) {
++		pr_err("request_irq %u failed\n", pmu_irq);
++		return;
++	}
++
++	{
++		u32 pmcr = pmu_rd_pmcr();
++		u32 ceid0;
++
++		asm volatile("mrc p15, 0, %0, c9, c12, 6" : "=r"(ceid0));
++		/* PMCR[15:11] is N, the number of programmable event counters.  The
++		 * 2026-09-15 attempt failed with PMOVSR=0, i.e. counter 0 never
++		 * overflowed -- if N is 0 the counter does not exist and that is the
++		 * whole story, independent of any interrupt routing. */
++		pr_err("PMU-TIMER: PMCR=%#x N=%u programmable counters, PMCEID0=%#x (CPU_CYCLES %s)\n",
++		       pmcr, (pmcr >> 11) & 0x1f, ceid0,
++		       (ceid0 & BIT(ARMV7_EVT_CPU_CYCLES)) ? "implemented" : "MISSING");
++	}
++
++	pr_err("PMU-TIMER: irq=%u cpu=%lu Hz HZ=%d delta=%lu\n",
++	       pmu_irq, pmu_rate, HZ, pmu_periodic_delta);
++}
++
++/*
++ * Registration waits for interrupts to be live, exactly like the AIC
++ * LATE-SMOKE test: time_init() runs from start_kernel() long before
++ * local_irq_enable(), and on this port IRQs only come up in kernel_init()
++ * after the AIC re-arm, so an ISR-witnessed self-test cannot pass any earlier.
++ *
++ * Nothing is registered unless the interrupt is observed: a kernel with no
++ * clockevent boots (that is today's status quo), a kernel whose tick never
++ * fires does not.
++ */
++static int __init apple_pmu_clkevt_register(void)
++{
++	unsigned int before;
++	u32 start;
++
++	if (!pmu_irq || !pmu_rate)
++		return 0;
++
++	before = pmu_irq_count;
++	pmu_tick_arm(pmu_rate / 200);		/* overflow in ~5 ms */
++
++	/* jiffies are frozen by definition here, so spin on the cycle counter. */
++	start = pmccntr();
++	while ((u32)(pmccntr() - start) < pmu_rate / 10) {	/* ~100 ms */
++		if (READ_ONCE(pmu_irq_count) != before)
++			break;
++		cpu_relax();
++	}
++
++	if (READ_ONCE(pmu_irq_count) == before) {
++		pmu_tick_disarm();
++		pr_err("PMU-TIMER: FAIL -- no overflow interrupt on irq %u (PMOVSR=%#x). hwirq 135 is not nPMUIRQ, or the PMU IRQ is not routed to the AIC. Staying tickless.\n",
++		       pmu_irq, pmu_rd_ovsr());
++		return 0;
++	}
++
++	pmu_tick_disarm();
++
++	/* WFI stops the cycle counter, which would stop the tick.  Only pay this
++	 * cost once we know the tick is real. */
++	cpu_idle_poll_ctrl(true);
++
++	pmu_clkevt.cpumask = cpumask_of(0);
++	pmu_clkevt.irq = pmu_irq;
++	clockevents_config_and_register(&pmu_clkevt, pmu_rate, 0x1000, 0x7fffffff);
++
++	pr_err("PMU-TIMER: PASS -- %u overflow IRQ(s) delivered. Clockevent registered at %lu Hz, idle forced to poll. jiffies are live.\n",
++	       pmu_irq_count, pmu_rate);
++	return 0;
++}
++late_initcall(apple_pmu_clkevt_register);
+diff --git a/arch/arm/mach-apple/apple_sof_clkevt.c b/arch/arm/mach-apple/apple_sof_clkevt.c
+new file mode 100644
+index 000000000..6c4b46948
+--- /dev/null
++++ b/arch/arm/mach-apple/apple_sof_clkevt.c
+@@ -0,0 +1,201 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * System tick from the USB Start-of-Frame interrupt (P105AP / A5).
++ *
++ * SUPERSEDED 2026-09-18, and kept as the fallback.  The AIC has a timer of its
++ * own, found by reading iBoot's AIC driver, and irq-apple-aic1.c registers a
++ * clockevent on it once it has seen it fire.  When that happens it calls
++ * apple_s5l_real_tick() before dwc2 first initialises, and from then on dwc2
++ * leaves GINTSTS_SOF out of its interrupt mask and nothing here registers.
++ * Everything below still describes the boot where the AIC timer fails its
++ * self-test -- which has not happened on hardware, but costs nothing to keep.
++ *
++ * This is a bring-up expedient, and it is deliberate.  Every proper timer on
++ * this SoC has been chased down and ruled out from the running system:
++ *
++ *   - Apple watchdog @0x3F103020: the counter runs at 24 MHz and the comparator
++ *     provably works (armed with RESET_EN it reset the machine on schedule),
++ *     but the interrupt half is not wired.  No combination of {compare at +0x04
++ *     or +0x08} x {CTRL 0x1, 0x8, 0x9, 0xc} ever latched IRQ_STATUS or raised
++ *     AIC hwirq 4, and the PMGR gate for its clock-id reads on.
++ *   - The rest of PMGR: a scan of all 7168 words found that watchdog counter to
++ *     be the only free-running register in the entire 28 KB window.
++ *   - Cortex-A9 private timer @PERIPHBASE+0x600 and global timer @+0x200: both
++ *     read as zero and refuse writes.  The SCU @+0x000 and the GIC CPU
++ *     interface @+0x100 in the same window answer with sane, self-consistent
++ *     values (SCU enabled, config 0x511 = two CPUs, CPU0 in SMP), so the window
++ *     itself is alive -- PERIPHCLK simply is not supplied to the timer block.
++ *   - PMU event counter overflow: PMOVSR never set, so counter 0 never even
++ *     counted.  PMCCNTR works, so the cycle counter half is fine.
++ *
++ * What is left that demonstrably fires is the USB controller.  At high speed
++ * the host sends a Start-of-Frame every 125 us, dwc2 can raise GINTSTS_SOF on
++ * each one, and AIC hwirq 11 has been delivering interrupts reliably since the
++ * AIC re-arm fix.  So: count SOFs, and hand the kernel a clockevent at 8 kHz.
++ *
++ * The honest limitations:
++ *   - No tick until USB is enumerated.  That is exactly how the system boots
++ *     today, so nothing regresses; jiffies simply start when the cable does.
++ *   - If the host suspends the bus, SOFs stop and so does the tick.
++ *   - 8000 interrupts/s is real overhead on a 1 GHz A9, a few percent.
++ *
++ * For a board that lives permanently tethered to a laptop -- which is how this
++ * one is developed and how its console works at all -- that is a fair trade for
++ * working sleep(), timeouts, preemption and, in turn, USB host and SMP.
++ */
++
++#define pr_fmt(fmt) "apple-sof-timer: " fmt
++
++#include <linux/clockchips.h>
++#include <linux/cpumask.h>
++#include <linux/init.h>
++#include <linux/kernel.h>
++#include <linux/printk.h>
++#include <linux/processor.h>
++
++/* One SOF per 125 us microframe at high speed. */
++#define SOF_TICK_HZ		8000
++
++static struct clock_event_device sof_clkevt;
++static unsigned int sof_countdown;	/* SOFs left until the next event; 0 = idle */
++static unsigned int sof_reload;		/* non-zero while periodic */
++static unsigned int sof_seen;
++static bool sof_live;
++static bool sof_superseded;
++
++/* Called by irq-apple-aic1.c when its own timer has registered. */
++void apple_s5l_real_tick(void)
++{
++	sof_superseded = true;
++}
++
++/*
++ * Asked by dwc2 every time it builds its interrupt mask.  8000 interrupts a
++ * second are a few percent of the CPU and all of the reason this port's USB
++ * line dominated /proc/interrupts; with a real timer they buy nothing.
++ */
++bool apple_s5l_usb_sof_wanted(void)
++{
++	return !sof_superseded;
++}
++
++static inline u32 pmccntr(void)
++{
++	u32 v;
++
++	asm volatile("mrc p15, 0, %0, c9, c13, 0" : "=r"(v));
++	return v;
++}
++
++/**
++ * apple_s5l_usb_sof_tick - called by dwc2 for every Start-of-Frame
++ *
++ * Runs in hard interrupt context, and deliberately OUTSIDE dwc2's own
++ * hsotg->lock: the clockevent handler walks into the timer and scheduler code,
++ * and holding a USB driver lock across that is asking for a lock-order
++ * surprise.  Everything touched here is private to this file.
++ */
++void apple_s5l_usb_sof_tick(void)
++{
++	unsigned int n;
++
++	sof_seen++;
++
++	n = READ_ONCE(sof_countdown);
++	if (!n)
++		return;
++
++	if (--n) {
++		WRITE_ONCE(sof_countdown, n);
++		return;
++	}
++
++	/* Re-arm before calling the handler: in periodic mode the handler does
++	 * not call back into set_next_event. */
++	WRITE_ONCE(sof_countdown, READ_ONCE(sof_reload));
++
++	if (sof_clkevt.event_handler)
++		sof_clkevt.event_handler(&sof_clkevt);
++}
++
++static int sof_set_next_event(unsigned long delta, struct clock_event_device *e)
++{
++	WRITE_ONCE(sof_reload, 0);
++	WRITE_ONCE(sof_countdown, delta ? (unsigned int)delta : 1);
++	return 0;
++}
++
++static int sof_state_shutdown(struct clock_event_device *e)
++{
++	WRITE_ONCE(sof_reload, 0);
++	WRITE_ONCE(sof_countdown, 0);
++	return 0;
++}
++
++static int sof_state_oneshot(struct clock_event_device *e)
++{
++	WRITE_ONCE(sof_reload, 0);
++	WRITE_ONCE(sof_countdown, 0);
++	return 0;
++}
++
++static int sof_state_periodic(struct clock_event_device *e)
++{
++	WRITE_ONCE(sof_reload, SOF_TICK_HZ / HZ);
++	WRITE_ONCE(sof_countdown, SOF_TICK_HZ / HZ);
++	return 0;
++}
++
++static struct clock_event_device sof_clkevt = {
++	.name			= "apple-usb-sof",
++	.features		= CLOCK_EVT_FEAT_ONESHOT | CLOCK_EVT_FEAT_PERIODIC,
++	/* Below the PMU and watchdog attempts on purpose: if a real timer is
++	 * ever found, it should win without anyone editing this file. */
++	.rating			= 250,
++	.set_next_event		= sof_set_next_event,
++	.set_state_shutdown	= sof_state_shutdown,
++	.set_state_oneshot	= sof_state_oneshot,
++	.set_state_periodic	= sof_state_periodic,
++};
++
++/*
++ * Register only once SOFs are demonstrably arriving.  A kernel with no
++ * clockevent boots -- that is the status quo -- but a kernel whose tick never
++ * fires does not, so this never registers on hope.
++ *
++ * By late_initcall dwc2 has probed and the host has normally reset the bus,
++ * which is what starts SOFs; they do not wait for enumeration to finish.
++ * jiffies are frozen here by definition, so the wait spins on the cycle
++ * counter rather than using any timeout API.
++ */
++static int __init apple_sof_clkevt_register(void)
++{
++	unsigned int before = READ_ONCE(sof_seen);
++	u32 start = pmccntr();
++	unsigned long cpu_hz = 1000000000UL;	/* only used to size the spin */
++
++	if (sof_superseded) {
++		pr_err("SOF-TIMER: not needed -- the AIC timer is the tick, SOF interrupts stay off.\n");
++		return 0;
++	}
++
++	while ((u32)(pmccntr() - start) < cpu_hz * 2) {	/* up to ~2 s */
++		if (READ_ONCE(sof_seen) != before)
++			break;
++		cpu_relax();
++	}
++
++	if (READ_ONCE(sof_seen) == before) {
++		pr_err("SOF-TIMER: FAIL -- no Start-of-Frame seen in ~2 s. Is the cable in and dwc2 enumerated? Staying tickless.\n");
++		return 0;
++	}
++
++	sof_live = true;
++	sof_clkevt.cpumask = cpumask_of(0);
++	clockevents_config_and_register(&sof_clkevt, SOF_TICK_HZ, 1, 0xffff);
++
++	pr_err("SOF-TIMER: PASS -- %u SOFs counted, clockevent registered at %d Hz (%d SOFs per jiffy). jiffies are live.\n",
++	       sof_seen, SOF_TICK_HZ, SOF_TICK_HZ / HZ);
++	return 0;
++}
++late_initcall(apple_sof_clkevt_register);
+diff --git a/arch/arm/mach-apple/apple_wdt_clkevt.c b/arch/arm/mach-apple/apple_wdt_clkevt.c
+new file mode 100644
+index 000000000..1b3bcf6c7
+--- /dev/null
++++ b/arch/arm/mach-apple/apple_wdt_clkevt.c
+@@ -0,0 +1,175 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Apple S5L894x watchdog counter -- CPU frequency calibration.
++ *
++ * This file used to try to build a clockevent out of the watchdog's bark.  That
++ * is a dead end on this silicon, and the negative result is worth keeping:
++ *
++ *   0x3F103020 is the WHOLE watchdog.  WD0/WD1 at +0x000/+0x010, which later
++ *   revisions of this IP have, do not exist here: writes are dropped and reads
++ *   return 0.  The ADT's reg = 0x0F103020 size 0x10 was literally the device.
++ *
++ *   +0x00 CUR_TIME   free-running at 24 MHz, writable
++ *   +0x04 BITE_TIME  works: armed with CTRL bit 2 and a 30 s compare, the
++ *                    machine reset on schedule -- so the COMPARATOR IS FINE
++ *   +0x08 BARK_TIME  second compare
++ *   +0x0c CTRL       implemented-bit mask 0x0d; bit 1 is write-1-clear status,
++ *                    bit 2 is RESET_EN (proven), bits 0 and 3 stick but do
++ *                    nothing observable
++ *
++ *   Every combination of {compare at +0x04 or +0x08} x {CTRL 0x1, 0x8, 0x9,
++ *   0xc} was tried: IRQ_STATUS never latched and AIC hwirq 4 never fired.  The
++ *   PMGR gate for the wdt's clock-id 4 reads 0x2ff (on), so it is not gating,
++ *   and a scan of all 7168 words of the PMGR window found this counter to be
++ *   the only free-running register in the entire 28 KB.  The compare and reset
++ *   halves work; the interrupt half simply is not wired on wdt-version 1.
++ *
++ * What the counter is still good for: it is an exact, known 24 MHz reference,
++ * which is precisely what this platform lacked.  PMCCNTR's rate was a hardcoded
++ * "fixed 1 GHz guess" that made all wall-clock time wrong.  Measuring PMCCNTR
++ * against this counter gives the real CPU frequency, which then feeds both the
++ * clocksource and the PMU clockevent.
++ *
++ * The 24 MHz figure is not a datasheet number: BITE_TIME = 0x2aea5400
++ * (719,479,296 ticks) reset the machine in exactly 30 s => 23.98 MHz.
++ */
++
++#define pr_fmt(fmt) "apple-wdt: " fmt
++
++#include <linux/clocksource.h>
++#include <linux/init.h>
++#include <linux/io.h>
++#include <linux/kernel.h>
++#include <linux/math64.h>
++#include <linux/of.h>
++#include <linux/of_address.h>
++#include <linux/printk.h>
++#include <linux/sched_clock.h>
++
++#include <asm/delay.h>
++#include <linux/processor.h>
++
++#define WDT_CUR_TIME		0x00
++#define APPLE_WDT_REF_HZ	24000000UL
++
++static inline u32 apple_pmccntr(void)
++{
++	u32 v;
++
++	asm volatile("mrc p15, 0, %0, c9, c13, 0" : "=r"(v));
++	return v;
++}
++
++/*
++ * The mapping is kept for the lifetime of the system: this counter is the
++ * clocksource.  NOTHING writes CUR_TIME any more -- the clockevent attempt that
++ * used to zero it on every arm is gone -- so it is a pure free-running counter.
++ * Do not poke 0x3F103020 from userspace unless you want to break wall time.
++ */
++static void __iomem *wdt_base;
++
++static u64 notrace apple_wdt_sched_read(void)
++{
++	return readl_relaxed(wdt_base + WDT_CUR_TIME);
++}
++
++static u64 apple_wdt_cs_read(struct clocksource *cs)
++{
++	return readl_relaxed(wdt_base + WDT_CUR_TIME);
++}
++
++static struct clocksource apple_wdt_cs = {
++	.name	= "apple-wdt-24m",
++	/* Above pmccntr (250).  PMCCNTR counts CPU cycles and therefore STOPS in
++	 * WFI: with it as the clocksource, ktime only advanced while the system
++	 * was busy, so sleep(1) took 13 real seconds of mostly-idle time before
++	 * the kernel agreed a second had passed.  This counter runs off the 24 MHz
++	 * reference and does not care what the core is doing. */
++	.rating	= 350,
++	.read	= apple_wdt_cs_read,
++	.mask	= CLOCKSOURCE_MASK(32),
++	.flags	= CLOCK_SOURCE_IS_CONTINUOUS,
++};
++
++static unsigned long apple_wdt_delay_read(void)
++{
++	return readl_relaxed(wdt_base + WDT_CUR_TIME);
++}
++
++/* udelay's timer too: one counter for every CPU.  PMCCNTR, which had this job,
++ * is each core's own cycle counter -- and not even running on CPU1, whose
++ * first udelay would then spin for ever. */
++static struct delay_timer apple_wdt_delay = {
++	.read_current_timer	= apple_wdt_delay_read,
++	.freq			= APPLE_WDT_REF_HZ,
++};
++
++/**
++ * apple_s5l_wdt_clocksource_init - wall time that survives idle
++ *
++ * Also takes over sched_clock for the same reason.  sched_clock_register()
++ * refuses a lower rate than one already registered, so pmccntr.c must not
++ * register it first -- see the comment there.
++ */
++void __init apple_s5l_wdt_clocksource_init(void)
++{
++	if (!wdt_base) {
++		pr_err("CS: counter not mapped, wall time stays on PMCCNTR (wrong in idle)\n");
++		return;
++	}
++
++	clocksource_register_hz(&apple_wdt_cs, APPLE_WDT_REF_HZ);
++	sched_clock_register(apple_wdt_sched_read, 32, APPLE_WDT_REF_HZ);
++	register_current_timer_delay(&apple_wdt_delay);
++	pr_err("CS: 24 MHz watchdog counter is now the clocksource, sched_clock and delay timer\n");
++}
++
++/**
++ * apple_s5l_calibrate_cpu_hz - measure PMCCNTR against the 24 MHz watchdog counter
++ *
++ * Must run with the cycle counter already enabled.  Returns 0 if the watchdog
++ * node is missing, in which case the caller should fall back to its guess.
++ */
++unsigned long __init apple_s5l_calibrate_cpu_hz(void)
++{
++	struct device_node *np;
++	u32 w0, w1, c0, c1, wd, cd;
++	u64 hz;
++
++	np = of_find_compatible_node(NULL, NULL, "apple,s5l8940x-wdt-timer");
++	if (!np) {
++		pr_err("CALIB: no wdt node; CPU rate stays a guess\n");
++		return 0;
++	}
++
++	wdt_base = of_iomap(np, 0);
++	of_node_put(np);
++	if (!wdt_base) {
++		pr_err("CALIB: cannot map wdt counter\n");
++		return 0;
++	}
++
++	/* ~50 ms of reference ticks is plenty and costs nothing at boot. */
++	w0 = readl_relaxed(wdt_base + WDT_CUR_TIME);
++	c0 = apple_pmccntr();
++	while ((u32)(readl_relaxed(wdt_base + WDT_CUR_TIME) - w0) < APPLE_WDT_REF_HZ / 20)
++		cpu_relax();
++	w1 = readl_relaxed(wdt_base + WDT_CUR_TIME);
++	c1 = apple_pmccntr();
++	/* deliberately not unmapped: the clocksource lives on this counter */
++
++	wd = w1 - w0;
++	cd = c1 - c0;
++	if (!wd) {
++		pr_err("CALIB: watchdog counter is not running\n");
++		return 0;
++	}
++
++	hz = mul_u32_u32(cd, APPLE_WDT_REF_HZ);
++	do_div(hz, wd);
++
++	pr_err("CALIB: %u CPU cycles per %u ticks of 24 MHz => CPU = %llu Hz\n",
++	       cd, wd, hz);
++
++	return (unsigned long)hz;
++}
+diff --git a/arch/arm/mach-apple/font8x8.h b/arch/arm/mach-apple/font8x8.h
+new file mode 100644
+index 000000000..ef1b89667
+--- /dev/null
++++ b/arch/arm/mach-apple/font8x8.h
+@@ -0,0 +1,109 @@
++/* ASCII 32-127 — same glyphs as pongo/font8x8.h */
++#ifndef FONT8X8_H
++#define FONT8X8_H
++
++#define FONT8_FIRST 32
++#define FONT8_LAST  127
++#define FONT8_W 8
++#define FONT8_H 8
++
++static const unsigned char font8x8[(FONT8_LAST - FONT8_FIRST + 1) * FONT8_H] = {
++	/*  32 ' ' */ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	/*  33 '!' */ 0x18, 0x3c, 0x3c, 0x18, 0x18, 0x00, 0x18, 0x00,
++	/*  34 '"' */ 0x36, 0x36, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	/*  35 '#' */ 0x36, 0x36, 0x7f, 0x36, 0x7f, 0x36, 0x36, 0x00,
++	/*  36 '$' */ 0x0c, 0x3e, 0x03, 0x1e, 0x30, 0x1f, 0x0c, 0x00,
++	/*  37 '%' */ 0x00, 0x63, 0x33, 0x18, 0x0c, 0x66, 0x63, 0x00,
++	/*  38 '&' */ 0x1c, 0x36, 0x1c, 0x6e, 0x3b, 0x33, 0x6e, 0x00,
++	/*  39 "'" */ 0x06, 0x06, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00,
++	/*  40 '(' */ 0x18, 0x0c, 0x06, 0x06, 0x06, 0x0c, 0x18, 0x00,
++	/*  41 ')' */ 0x06, 0x0c, 0x18, 0x18, 0x18, 0x0c, 0x06, 0x00,
++	/*  42 '*' */ 0x00, 0x66, 0x3c, 0xff, 0x3c, 0x66, 0x00, 0x00,
++	/*  43 '+' */ 0x00, 0x0c, 0x0c, 0x3f, 0x0c, 0x0c, 0x00, 0x00,
++	/*  44 ',' */ 0x00, 0x00, 0x00, 0x00, 0x00, 0x0c, 0x0c, 0x06,
++	/*  45 '-' */ 0x00, 0x00, 0x00, 0x3f, 0x00, 0x00, 0x00, 0x00,
++	/*  46 '.' */ 0x00, 0x00, 0x00, 0x00, 0x00, 0x0c, 0x0c, 0x00,
++	/*  47 '/' */ 0x60, 0x30, 0x18, 0x0c, 0x06, 0x03, 0x01, 0x00,
++	/*  48 '0' */ 0x3e, 0x63, 0x73, 0x7b, 0x6f, 0x67, 0x3e, 0x00,
++	/*  49 '1' */ 0x0c, 0x0e, 0x0c, 0x0c, 0x0c, 0x0c, 0x3f, 0x00,
++	/*  50 '2' */ 0x1e, 0x33, 0x30, 0x1c, 0x06, 0x33, 0x3f, 0x00,
++	/*  51 '3' */ 0x1e, 0x33, 0x30, 0x1c, 0x30, 0x33, 0x1e, 0x00,
++	/*  52 '4' */ 0x38, 0x3c, 0x36, 0x33, 0x7f, 0x30, 0x78, 0x00,
++	/*  53 '5' */ 0x3f, 0x03, 0x1f, 0x30, 0x30, 0x33, 0x1e, 0x00,
++	/*  54 '6' */ 0x1c, 0x06, 0x03, 0x1f, 0x33, 0x33, 0x1e, 0x00,
++	/*  55 '7' */ 0x3f, 0x33, 0x30, 0x18, 0x0c, 0x0c, 0x0c, 0x00,
++	/*  56 '8' */ 0x1e, 0x33, 0x33, 0x1e, 0x33, 0x33, 0x1e, 0x00,
++	/*  57 '9' */ 0x1e, 0x33, 0x33, 0x3e, 0x30, 0x18, 0x0e, 0x00,
++	/*  58 ':' */ 0x00, 0x0c, 0x0c, 0x00, 0x00, 0x0c, 0x0c, 0x00,
++	/*  59 ';' */ 0x00, 0x0c, 0x0c, 0x00, 0x00, 0x0c, 0x0c, 0x06,
++	/*  60 '<' */ 0x18, 0x0c, 0x06, 0x03, 0x06, 0x0c, 0x18, 0x00,
++	/*  61 '=' */ 0x00, 0x00, 0x3f, 0x00, 0x00, 0x3f, 0x00, 0x00,
++	/*  62 '>' */ 0x06, 0x0c, 0x18, 0x30, 0x18, 0x0c, 0x06, 0x00,
++	/*  63 '?' */ 0x1e, 0x33, 0x30, 0x18, 0x0c, 0x00, 0x0c, 0x00,
++	/*  64 '@' */ 0x3e, 0x63, 0x7b, 0x7b, 0x7b, 0x03, 0x1e, 0x00,
++	/*  65 'A' */ 0x0c, 0x1e, 0x33, 0x33, 0x3f, 0x33, 0x33, 0x00,
++	/*  66 'B' */ 0x3f, 0x66, 0x66, 0x3e, 0x66, 0x66, 0x3f, 0x00,
++	/*  67 'C' */ 0x3c, 0x66, 0x03, 0x03, 0x03, 0x66, 0x3c, 0x00,
++	/*  68 'D' */ 0x1f, 0x36, 0x66, 0x66, 0x66, 0x36, 0x1f, 0x00,
++	/*  69 'E' */ 0x7f, 0x46, 0x16, 0x1e, 0x16, 0x46, 0x7f, 0x00,
++	/*  70 'F' */ 0x7f, 0x46, 0x16, 0x1e, 0x16, 0x06, 0x0f, 0x00,
++	/*  71 'G' */ 0x3c, 0x66, 0x03, 0x03, 0x73, 0x66, 0x7c, 0x00,
++	/*  72 'H' */ 0x33, 0x33, 0x33, 0x3f, 0x33, 0x33, 0x33, 0x00,
++	/*  73 'I' */ 0x1e, 0x0c, 0x0c, 0x0c, 0x0c, 0x0c, 0x1e, 0x00,
++	/*  74 'J' */ 0x78, 0x30, 0x30, 0x30, 0x33, 0x33, 0x1e, 0x00,
++	/*  75 'K' */ 0x67, 0x66, 0x36, 0x1e, 0x36, 0x66, 0x67, 0x00,
++	/*  76 'L' */ 0x0f, 0x06, 0x06, 0x06, 0x46, 0x66, 0x7f, 0x00,
++	/*  77 'M' */ 0x63, 0x77, 0x7f, 0x7f, 0x6b, 0x63, 0x63, 0x00,
++	/*  78 'N' */ 0x63, 0x67, 0x6f, 0x7b, 0x73, 0x63, 0x63, 0x00,
++	/*  79 'O' */ 0x1c, 0x36, 0x63, 0x63, 0x63, 0x36, 0x1c, 0x00,
++	/*  80 'P' */ 0x3f, 0x66, 0x66, 0x3e, 0x06, 0x06, 0x0f, 0x00,
++	/*  81 'Q' */ 0x1e, 0x33, 0x33, 0x33, 0x3b, 0x1e, 0x38, 0x00,
++	/*  82 'R' */ 0x3f, 0x66, 0x66, 0x3e, 0x36, 0x66, 0x67, 0x00,
++	/*  83 'S' */ 0x1e, 0x33, 0x07, 0x0e, 0x38, 0x33, 0x1e, 0x00,
++	/*  84 'T' */ 0x3f, 0x2d, 0x0c, 0x0c, 0x0c, 0x0c, 0x1e, 0x00,
++	/*  85 'U' */ 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x3f, 0x00,
++	/*  86 'V' */ 0x33, 0x33, 0x33, 0x33, 0x33, 0x1e, 0x0c, 0x00,
++	/*  87 'W' */ 0x63, 0x63, 0x63, 0x6b, 0x7f, 0x77, 0x63, 0x00,
++	/*  88 'X' */ 0x63, 0x63, 0x36, 0x1c, 0x1c, 0x36, 0x63, 0x00,
++	/*  89 'Y' */ 0x33, 0x33, 0x33, 0x1e, 0x0c, 0x0c, 0x1e, 0x00,
++	/*  90 'Z' */ 0x7f, 0x63, 0x31, 0x18, 0x4c, 0x66, 0x7f, 0x00,
++	/*  91 '[' */ 0x1e, 0x06, 0x06, 0x06, 0x06, 0x06, 0x1e, 0x00,
++	/*  92 '\\' */ 0x03, 0x06, 0x0c, 0x18, 0x30, 0x60, 0x40, 0x00,
++	/*  93 ']' */ 0x1e, 0x18, 0x18, 0x18, 0x18, 0x18, 0x1e, 0x00,
++	/*  94 '^' */ 0x08, 0x1c, 0x36, 0x63, 0x00, 0x00, 0x00, 0x00,
++	/*  95 '_' */ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff,
++	/*  96 '`' */ 0x0c, 0x0c, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00,
++	/*  97 'a' */ 0x00, 0x00, 0x1e, 0x30, 0x3e, 0x33, 0x6e, 0x00,
++	/*  98 'b' */ 0x07, 0x06, 0x06, 0x3e, 0x66, 0x66, 0x3b, 0x00,
++	/*  99 'c' */ 0x00, 0x00, 0x1e, 0x33, 0x03, 0x33, 0x1e, 0x00,
++	/* 100 'd' */ 0x38, 0x30, 0x30, 0x3e, 0x33, 0x33, 0x6e, 0x00,
++	/* 101 'e' */ 0x00, 0x00, 0x1e, 0x33, 0x3f, 0x03, 0x1e, 0x00,
++	/* 102 'f' */ 0x1c, 0x36, 0x06, 0x0f, 0x06, 0x06, 0x0f, 0x00,
++	/* 103 'g' */ 0x00, 0x00, 0x6e, 0x33, 0x33, 0x3e, 0x30, 0x1f,
++	/* 104 'h' */ 0x07, 0x06, 0x36, 0x6e, 0x66, 0x66, 0x67, 0x00,
++	/* 105 'i' */ 0x0c, 0x00, 0x0e, 0x0c, 0x0c, 0x0c, 0x1e, 0x00,
++	/* 106 'j' */ 0x30, 0x00, 0x30, 0x30, 0x30, 0x33, 0x33, 0x1e,
++	/* 107 'k' */ 0x07, 0x06, 0x66, 0x36, 0x1e, 0x36, 0x67, 0x00,
++	/* 108 'l' */ 0x0e, 0x0c, 0x0c, 0x0c, 0x0c, 0x0c, 0x1e, 0x00,
++	/* 109 'm' */ 0x00, 0x00, 0x33, 0x7f, 0x7f, 0x6b, 0x63, 0x00,
++	/* 110 'n' */ 0x00, 0x00, 0x1f, 0x33, 0x33, 0x33, 0x33, 0x00,
++	/* 111 'o' */ 0x00, 0x00, 0x1e, 0x33, 0x33, 0x33, 0x1e, 0x00,
++	/* 112 'p' */ 0x00, 0x00, 0x3b, 0x66, 0x66, 0x3e, 0x06, 0x0f,
++	/* 113 'q' */ 0x00, 0x00, 0x6e, 0x33, 0x33, 0x3e, 0x30, 0x78,
++	/* 114 'r' */ 0x00, 0x00, 0x3b, 0x6e, 0x66, 0x06, 0x0f, 0x00,
++	/* 115 's' */ 0x00, 0x00, 0x3e, 0x03, 0x1e, 0x30, 0x1f, 0x00,
++	/* 116 't' */ 0x08, 0x0c, 0x3e, 0x0c, 0x0c, 0x2c, 0x18, 0x00,
++	/* 117 'u' */ 0x00, 0x00, 0x33, 0x33, 0x33, 0x33, 0x6e, 0x00,
++	/* 118 'v' */ 0x00, 0x00, 0x33, 0x33, 0x33, 0x1e, 0x0c, 0x00,
++	/* 119 'w' */ 0x00, 0x00, 0x63, 0x6b, 0x7f, 0x7f, 0x36, 0x00,
++	/* 120 'x' */ 0x00, 0x00, 0x63, 0x36, 0x1c, 0x36, 0x63, 0x00,
++	/* 121 'y' */ 0x00, 0x00, 0x33, 0x33, 0x33, 0x3e, 0x30, 0x1f,
++	/* 122 'z' */ 0x00, 0x00, 0x3f, 0x19, 0x0c, 0x26, 0x3f, 0x00,
++	/* 123 '{' */ 0x38, 0x0c, 0x0c, 0x07, 0x0c, 0x0c, 0x38, 0x00,
++	/* 124 '|' */ 0x18, 0x18, 0x18, 0x00, 0x18, 0x18, 0x18, 0x00,
++	/* 125 '}' */ 0x07, 0x0c, 0x0c, 0x38, 0x0c, 0x0c, 0x07, 0x00,
++	/* 126 '~' */ 0x6e, 0x3b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	/* 127 '?' */ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++
++#endif
+diff --git a/arch/arm/mach-apple/headsmp.S b/arch/arm/mach-apple/headsmp.S
+new file mode 100644
+index 000000000..50cc1d53b
+--- /dev/null
++++ b/arch/arm/mach-apple/headsmp.S
+@@ -0,0 +1,62 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Where a core coming out of reset lands, through the trampoline in the first
++ * page of DRAM (platsmp.c).  MMU and caches are off; the core is not in SMP
++ * mode yet.
++ */
++#include <linux/linkage.h>
++#include <asm/assembler.h>
++
++	.arm
++
++/*
++ * Invalidate this core's duplicate tags in the SCU (SCU + 0x0c, four bits
++ * per core), as iBoot does when it resets a core: nothing the SCU remembers
++ * about this core's L1 from before the power went is true any more.
++ * Corrupts r0-r2.
++ */
++apple_s5l_scu_inv_self:
++	mrc	p15, 4, r0, c15, c0, 0		@ CBAR: the SCU
++	mrc	p15, 0, r1, c0, c0, 5		@ MPIDR
++	and	r1, r1, #3
++	lsl	r1, r1, #2
++	mov	r2, #0xf
++	lsl	r2, r2, r1
++	str	r2, [r0, #0x0c]
++	dsb
++	ret	lr
++
++/*
++ * Cortex-A9 errata 743622 (r2p*, diagnostic bit 6) and 751472 (before r3p0,
++ * bit 11), which multi_v7 leaves out: the diagnostic register is secure-only,
++ * and this kernel runs secure.  apple.c does the same for CPU0.  Corrupts
++ * r0-r2.
++ */
++apple_s5l_a9_errata:
++	mrc	p15, 0, r0, c0, c0, 0		@ MIDR
++	ubfx	r1, r0, #20, #4			@ variant
++	mrc	p15, 0, r2, c15, c0, 1		@ diagnostic register
++	cmp	r1, #2
++	orreq	r2, r2, #(1 << 6)
++	cmp	r1, #3
++	orrlt	r2, r2, #(1 << 11)
++	mcr	p15, 0, r2, c15, c0, 1
++	ret	lr
++
++/* First start of a secondary: __v7_ca9mp_setup cleans its L1 itself. */
++ENTRY(apple_s5l_secondary_startup)
++	bl	apple_s5l_a9_errata
++	bl	apple_s5l_scu_inv_self
++	b	secondary_startup
++ENDPROC(apple_s5l_secondary_startup)
++
++/*
++ * Back from power-down idle: L1 holds garbage (an A9's L1 is not cleared by
++ * reset), so invalidate it before cpu_resume turns SMP and the caches on.
++ */
++ENTRY(apple_s5l_cpu_resume)
++	bl	apple_s5l_a9_errata
++	bl	v7_invalidate_l1
++	bl	apple_s5l_scu_inv_self
++	b	cpu_resume
++ENDPROC(apple_s5l_cpu_resume)
+diff --git a/arch/arm/mach-apple/p105_fb_dbg.c b/arch/arm/mach-apple/p105_fb_dbg.c
+new file mode 100644
+index 000000000..8eb7f5771
+--- /dev/null
++++ b/arch/arm/mach-apple/p105_fb_dbg.c
+@@ -0,0 +1,212 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * P105AP early FB text debug (phys identity map + WC virt after map_io).
++ *
++ * Live Recovery scanout: 0x9F6FC000, 768x1024, stride 3072, BGRA.
++ *
++ * Lifetime: not __init (rest_init can race free_initmem).  Phys identity
++ * writes are only safe while early maps live — call p105_fb_dbg_shutdown()
++ * before free_initmem; do not stamp FB after schedule_preempt_disabled().
++ */
++
++#include <linux/init.h>
++#include <linux/kernel.h>
++#include <linux/sizes.h>
++#include <linux/types.h>
++
++#include "font8x8.h"
++#include "p105_fb_dbg.h"
++
++#define P105_FB_PHYS	0x9f6fc000ul
++#define P105_FB_WIDTH	768
++#define P105_FB_HEIGHT	1024
++#define P105_FB_STRIDE	3072
++#define P105_FB_VIRT	0xF0000000UL
++
++#define P105_FG		0xffffffffu
++#define P105_BG		0xff102030u
++#define P105_SCALE	2
++#define P105_LINE_PX	((FONT8_H * P105_SCALE) + 2)
++#define P105_MARGIN_X	8
++#define P105_MARGIN_Y	8
++
++extern unsigned long p105_fb_phys;
++extern unsigned long p105_fb_stride;
++
++/* Non-zero after apple_s5l_map_io installs WC map at P105_FB_VIRT. */
++static int p105_fb_use_virt;
++static unsigned p105_dbg_row;
++/* Cleared before free_initmem — phys identity map is not safe once idle runs. */
++static bool p105_fb_dbg_alive = false;
++
++void p105_fb_dbg_shutdown(void)
++{
++	p105_fb_dbg_alive = false;
++}
++
++void __init p105_fb_dbg_use_virt(void)
++{
++	p105_fb_use_virt = 1;
++}
++
++static unsigned long p105_dbg_base(void)
++{
++	phys_addr_t section;
++
++	if (!p105_fb_use_virt)
++		return P105_FB_PHYS;
++
++	section = (phys_addr_t)p105_fb_phys & ~(SZ_1M - 1);
++	if (section < 0x9f000000 || section >= 0x9ff00000)
++		section = P105_FB_PHYS & ~(SZ_1M - 1);
++	return P105_FB_VIRT + (p105_fb_phys - section);
++}
++
++static u32 p105_dbg_stride(void)
++{
++	u32 s = (u32)p105_fb_stride;
++
++	if (s < 2048 || s > 8192 || (s & 3))
++		return P105_FB_STRIDE;
++	return s;
++}
++
++static void p105_px(unsigned long base, u32 stride, int x, int y, u32 c)
++{
++	if ((unsigned)x >= P105_FB_WIDTH || (unsigned)y >= P105_FB_HEIGHT)
++		return;
++	*(volatile u32 *)(base + (unsigned long)y * stride + (unsigned)x * 4) = c;
++}
++
++static void p105_fill_rect(unsigned long base, u32 stride,
++			   int x, int y, int w, int h, u32 c)
++{
++	int i, j;
++
++	for (j = 0; j < h; j++)
++		for (i = 0; i < w; i++)
++			p105_px(base, stride, x + i, y + j, c);
++}
++
++static void p105_draw_char(unsigned long base, u32 stride,
++			   int x, int y, int ch, u32 c)
++{
++	const unsigned char *g;
++	int row, col, dy, dx;
++
++	if (ch < FONT8_FIRST || ch > FONT8_LAST)
++		ch = FONT8_FIRST;
++	g = &font8x8[(ch - FONT8_FIRST) * FONT8_H];
++	for (row = 0; row < FONT8_H; row++) {
++		unsigned char bits = g[row];
++
++		for (col = 0; col < FONT8_W; col++) {
++			if (bits & 1u) {
++				for (dy = 0; dy < P105_SCALE; dy++)
++					for (dx = 0; dx < P105_SCALE; dx++)
++						p105_px(base, stride,
++							x + col * P105_SCALE + dx,
++							y + row * P105_SCALE + dy, c);
++			}
++			bits >>= 1;
++		}
++	}
++}
++
++void p105_fb_dbg_clear(void)
++{
++	unsigned long base = p105_dbg_base();
++	u32 stride = p105_dbg_stride();
++	unsigned y, x;
++	u32 *row;
++
++	if (!p105_fb_dbg_alive)
++		return;
++
++	p105_fb_phys = P105_FB_PHYS;
++	p105_fb_stride = P105_FB_STRIDE;
++
++	for (y = 0; y < P105_FB_HEIGHT; y++) {
++		row = (u32 *)(base + (unsigned long)y * stride);
++		for (x = 0; x < P105_FB_WIDTH; x++)
++			row[x] = P105_BG;
++	}
++	p105_dbg_row = 0;
++}
++
++void p105_fb_dbg(const char *msg)
++{
++	unsigned long base = p105_dbg_base();
++	u32 stride = p105_dbg_stride();
++	int x, y, step = FONT8_W * P105_SCALE;
++	unsigned max_rows;
++
++	if (!p105_fb_dbg_alive || !msg)
++		return;
++
++	max_rows = (P105_FB_HEIGHT - P105_MARGIN_Y) / P105_LINE_PX;
++	if (max_rows < 1)
++		max_rows = 1;
++	if (p105_dbg_row >= max_rows) {
++		p105_fb_dbg_clear();
++		base = p105_dbg_base();
++		stride = p105_dbg_stride();
++	}
++
++	y = P105_MARGIN_Y + (int)p105_dbg_row * P105_LINE_PX;
++	p105_fill_rect(base, stride, 0, y, P105_FB_WIDTH, P105_LINE_PX, P105_BG);
++
++	x = P105_MARGIN_X;
++	while (*msg && x + step <= P105_FB_WIDTH - P105_MARGIN_X) {
++		p105_draw_char(base, stride, x, y + 1, (unsigned char)*msg++, P105_FG);
++		x += step;
++	}
++	p105_dbg_row++;
++}
++
++void p105_fb_dbg_hex(const char *tag, unsigned long val)
++{
++	static const char hexd[] = "0123456789ABCDEF";
++	char buf[48];
++	unsigned i = 0, j;
++
++	if (tag) {
++		while (*tag && i < 24)
++			buf[i++] = *tag++;
++		if (i < 24)
++			buf[i++] = ' ';
++	}
++	for (j = 0; j < 8 && i < sizeof(buf) - 1; j++)
++		buf[i++] = hexd[(val >> (28 - j * 4)) & 0xf];
++	buf[i] = '\0';
++	p105_fb_dbg(buf);
++}
++
++void __init p105_ioremap_paint(u32 color, unsigned row0, unsigned nrows)
++{
++	(void)color;
++	(void)row0;
++	(void)nrows;
++}
++
++void __init p105_stamp_row(unsigned row, u32 color)
++{
++	(void)row;
++	(void)color;
++}
++
++void __init p105_stamp_step(unsigned step, u32 color)
++{
++	char buf[12];
++
++	(void)color;
++	buf[0] = 's';
++	buf[1] = 't';
++	buf[2] = 'e';
++	buf[3] = 'p';
++	buf[4] = ' ';
++	buf[5] = '0' + (step / 10) % 10;
++	buf[6] = '0' + step % 10;
++	buf[7] = '\0';
++	p105_fb_dbg(buf);
++}
+diff --git a/arch/arm/mach-apple/p105_fb_dbg.h b/arch/arm/mach-apple/p105_fb_dbg.h
+new file mode 100644
+index 000000000..1880315dc
+--- /dev/null
++++ b/arch/arm/mach-apple/p105_fb_dbg.h
+@@ -0,0 +1,22 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _MACH_APPLE_P105_FB_DBG_H
++#define _MACH_APPLE_P105_FB_DBG_H
++
++#include <linux/types.h>
++
++/*
++ * Early framebuffer text for P105AP (iPad mini 1) Recovery scanout.
++ * Panel is portrait 768x1024, stride 3072, BGRA @ 0x9F6FC000.
++ */
++void p105_fb_dbg_clear(void);
++void p105_fb_dbg(const char *msg);
++void p105_fb_dbg_hex(const char *tag, unsigned long val);
++void p105_fb_dbg_use_virt(void);
++/* Stop phys-FB writes before free_initmem / idle (identity map goes away). */
++void p105_fb_dbg_shutdown(void);
++
++/* Spawn init on alt stack with IRQs on; returns init pid or negative errno. */
++pid_t __init apple_s5l_rest_spawn_init(int (*fn)(void *), void *arg,
++				       unsigned long flags);
++
++#endif
+diff --git a/arch/arm/mach-apple/platsmp.c b/arch/arm/mach-apple/platsmp.c
+new file mode 100644
+index 000000000..6245ac72c
+--- /dev/null
++++ b/arch/arm/mach-apple/platsmp.c
+@@ -0,0 +1,224 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Apple S5L8942X (A5) SMP -- the second core started the way iOS starts it.
++ *
++ * Read out of iOS 6.1's kernelcache (docs/research/p105-smp-bringup.md):
++ *
++ *  - The ADT's function-enable_core is the 'Core' function of
++ *    AppleS5L8940XPerformanceController on the pmgr node, called with a core
++ *    mask: cpu0 1, cpu1 2.  To start a core it writes the mask to PMGR+0x1214
++ *    and then PMGR+0x1220 (and 0 to +0x1204, which is not needed here and
++ *    whose other bits are unknown).
++ *  - The core then comes out of reset at physical 0, an alias of the first
++ *    page of DRAM, where XNU's cpu_start() has put its exception vectors.
++ *
++ * Here that page is reserved (dts: cpu-reset@80000000, no-map, the cpus
++ * node's apple,cpu-reset-page) and holds a trampoline: ldr pc, [pc, #-4]
++ * and the physical address to go to.
++ *
++ * The PMGR also powers CPU1 off as soon as it sits in WFI, and powers it
++ * back on -- through reset, so through the trampoline -- when an interrupt
++ * comes for it: XNU's deep idle.  CPU0 is left alone.  (Seen with
++ * tools/cpu1probe and tools/cpudbg: on WFI CPU1's debug block goes dark and
++ * its SMP bit drops out of the SCU; an IPI then restarts it from the reset
++ * vector.  WFE keeps it on.)  Linux idling in a plain WFI therefore lost
++ * CPU1's L1, dirty lines and all, and the next interrupt sent it through
++ * secondary_startup a second time -- the whole system died within
++ * milliseconds.  So CPU1 idles the XNU way: its state saved by
++ * cpu_suspend(), L1 cleaned and out of coherency, WFI, and the trampoline
++ * points at apple_s5l_cpu_resume, which brings it back.
++ */
++
++#include <linux/bits.h>
++#include <linux/cpu_pm.h>
++#include <linux/init.h>
++#include <linux/io.h>
++#include <linux/moduleparam.h>
++#include <linux/of.h>
++#include <linux/of_address.h>
++#include <linux/smp.h>
++
++#include <asm/barrier.h>
++#include <asm/cacheflush.h>
++#include <asm/cp15.h>
++#include <asm/cputype.h>
++#include <asm/proc-fns.h>
++#include <asm/smp_plat.h>
++#include <asm/suspend.h>
++#include <asm/system_misc.h>
++
++#define PMGR_CORE_STOP		0x1210
++#define PMGR_CORE_START		0x1214
++#define PMGR_CORE_RUN		0x1220
++
++/* The reset page: trampoline at 0, the address it jumps to at 4, and a
++ * WFI loop for a core that is offline, should anything wake it. */
++#define TRAMP_TARGET		0x04
++#define TRAMP_PARK		0x40
++#define ARM_LDR_PC_PC_M4	0xe51ff004	/* ldr pc, [pc, #-4] */
++#define ARM_WFI			0xe320f003
++#define ARM_B_MINUS_4		0xeafffffd	/* b . - 4 */
++
++#undef MODULE_PARAM_PREFIX
++#define MODULE_PARAM_PREFIX "apple_smp."
++
++/*
++ * How a core that the PMGR powers off in WFI idles:
++ *   0  power down: cpu_suspend, L1 cleaned, WFI; back through reset
++ *   1  poll: never WFI (for comparison -- burns the core while idle)
++ *   2  plain WFI, as if the core stayed on (breaks it; for experiments)
++ */
++static int idle_mode;
++module_param_named(idle, idle_mode, int, 0644);
++
++/* Power-down idles that did power the core off, and those whose WFI fell
++ * through (an interrupt already pending). */
++static unsigned int powerdowns, wfi_returns;
++module_param(powerdowns, uint, 0444);
++module_param(wfi_returns, uint, 0444);
++
++static void __iomem *pmgr_base;
++static void __iomem *tramp;
++static phys_addr_t reset_page;
++
++void apple_aic1_secondary_init(unsigned int cpu);
++void apple_s5l_secondary_startup(void);
++void apple_s5l_cpu_resume(void);
++
++static u32 core_mask(unsigned int cpu)
++{
++	return BIT(MPIDR_AFFINITY_LEVEL(cpu_logical_map(cpu), 0));
++}
++
++static void tramp_target(phys_addr_t pa)
++{
++	writel_relaxed(pa, tramp + TRAMP_TARGET);
++	dsb(st);
++}
++
++/* On the core going down: clean L1, leave coherency, WFI.  Returns only if
++ * the core was not powered off after all (an interrupt already pending). */
++static int apple_s5l_powerdown(unsigned long arg)
++{
++	v7_exit_coherency_flush(louis);
++	wfi();
++	asm volatile(
++	"	mrc	p15, 0, r0, c1, c0, 1\n"
++	"	orr	r0, r0, #(1 << 6)\n"		/* ACTLR.SMP */
++	"	mcr	p15, 0, r0, c1, c0, 1\n"
++	"	isb\n"
++	"	mrc	p15, 0, r0, c1, c0, 0\n"
++	"	orr	r0, r0, #(1 << 2)\n"		/* SCTLR.C */
++	"	mcr	p15, 0, r0, c1, c0, 0\n"
++	"	isb\n"
++	: : : "r0", "memory");
++	return 1;
++}
++
++static void apple_s5l_idle(void)
++{
++	/* CPU0 stays on in WFI. */
++	if (core_mask(smp_processor_id()) == BIT(0) || idle_mode == 2) {
++		cpu_do_idle();
++		return;
++	}
++	if (idle_mode == 1 || cpu_pm_enter())
++		return;
++	tramp_target(__pa_symbol(apple_s5l_cpu_resume));
++	if (cpu_suspend(0, apple_s5l_powerdown))
++		wfi_returns++;
++	else
++		powerdowns++;
++	cpu_pm_exit();
++}
++
++static void __init apple_smp_prepare_cpus(unsigned int max_cpus)
++{
++	struct device_node *cpus, *page, *pmgr;
++	struct resource res;
++
++	cpus = of_find_node_by_path("/cpus");
++	page = cpus ? of_parse_phandle(cpus, "apple,cpu-reset-page", 0) : NULL;
++	if (page && !of_address_to_resource(page, 0, &res))
++		reset_page = res.start;
++	of_node_put(page);
++	of_node_put(cpus);
++
++	pmgr = of_find_compatible_node(NULL, NULL, "apple,s5l8940x-pmgr");
++	if (pmgr)
++		pmgr_base = of_iomap(pmgr, 0);
++	of_node_put(pmgr);
++
++	if (reset_page)
++		tramp = ioremap(reset_page, 0x100);
++	if (!tramp || !pmgr_base) {
++		pr_err("apple-smp: no %s -- CPU1 stays off\n",
++		       tramp ? "PMGR" : "apple,cpu-reset-page");
++		return;
++	}
++	writel_relaxed(ARM_LDR_PC_PC_M4, tramp);
++	writel_relaxed(ARM_WFI, tramp + TRAMP_PARK);
++	writel_relaxed(ARM_B_MINUS_4, tramp + TRAMP_PARK + 4);
++	tramp_target(reset_page + TRAMP_PARK);
++
++	/* Before CPU1 can ever run: its WFI must not be Linux's plain one. */
++	arm_pm_idle = apple_s5l_idle;
++}
++
++static int apple_boot_secondary(unsigned int cpu, struct task_struct *idle)
++{
++	u32 mask = core_mask(cpu);
++
++	if (!tramp || !pmgr_base)
++		return -ENODEV;
++	/* A mask of 1 is CPU0, the one running this. */
++	if (mask == BIT(0))
++		return -EINVAL;
++
++	tramp_target(__pa_symbol(apple_s5l_secondary_startup));
++	writel(mask, pmgr_base + PMGR_CORE_START);
++	writel(mask, pmgr_base + PMGR_CORE_RUN);
++	return 0;
++}
++
++/* On the new CPU, before it takes interrupts: its AIC window made quiet. */
++static void apple_secondary_init(unsigned int cpu)
++{
++	apple_aic1_secondary_init(cpu);
++}
++
++#ifdef CONFIG_HOTPLUG_CPU
++/*
++ * The CPU going down: its L1 was flushed by arch_cpu_idle_dead(), and WFI
++ * powers it off.  A stray interrupt would power it on again, so the
++ * trampoline sends it to the WFI loop rather than anywhere in the kernel.
++ */
++static void apple_cpu_die(unsigned int cpu)
++{
++	tramp_target(reset_page + TRAMP_PARK);
++	for (;;)
++		wfi();
++}
++
++/* On a surviving CPU: power the dead one off, as iOS's EnableCore(off) does. */
++static int apple_cpu_kill(unsigned int cpu)
++{
++	u32 mask = core_mask(cpu);
++
++	if (!pmgr_base || mask == BIT(0))
++		return 0;
++	writel(mask, pmgr_base + PMGR_CORE_STOP);
++	return 1;
++}
++#endif
++
++static const struct smp_operations apple_s5l_smp_ops __initconst = {
++	.smp_prepare_cpus	= apple_smp_prepare_cpus,
++	.smp_boot_secondary	= apple_boot_secondary,
++	.smp_secondary_init	= apple_secondary_init,
++#ifdef CONFIG_HOTPLUG_CPU
++	.cpu_die		= apple_cpu_die,
++	.cpu_kill		= apple_cpu_kill,
++#endif
++};
++CPU_METHOD_OF_DECLARE(apple_pmgr_core, "apple,pmgr-core", &apple_s5l_smp_ops);
+diff --git a/arch/arm/mach-apple/pmccntr.c b/arch/arm/mach-apple/pmccntr.c
+new file mode 100644
+index 000000000..dc1e34945
+--- /dev/null
++++ b/arch/arm/mach-apple/pmccntr.c
+@@ -0,0 +1,117 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Cortex-A9 PMCCNTR clocksource for Apple S5L894x (A5).
++ *
++ * A9 global/private timers never tick in Recovery (PERIPHCLK dead; CTRL
++ * writes do not stick). XNU does not program them either. The cycle
++ * counter does advance — use it as clocksource + sched_clock + delay.
++ *
++ * Rate is a fixed 1 GHz guess (A5 class). Wall time may be skewed until
++ * calibrated; udelay/timekeeping still need a free-running counter.
++ */
++
++#include <linux/clocksource.h>
++#include <linux/init.h>
++#include <linux/kernel.h>
++#include <linux/sched_clock.h>
++
++#include <asm/delay.h>
++
++/* Fallback only.  apple_s5l_pmccntr_init() is handed the rate measured against
++ * the watchdog's 24 MHz counter; this constant is what gets used if that
++ * calibration could not run.  It was the hardcoded guess that made wall-clock
++ * time wrong on this platform for the whole bring-up. */
++#define PMCCNTR_RATE_FALLBACK	1000000000UL
++
++static unsigned long apple_pmccntr_rate = PMCCNTR_RATE_FALLBACK;
++
++static u64 notrace apple_pmccntr_read(void)
++{
++	u32 cyc;
++
++	asm volatile("mrc p15, 0, %0, c9, c13, 0" : "=r"(cyc));
++	return cyc;
++}
++
++static u64 apple_pmccntr_cs_read(struct clocksource *cs)
++{
++	return apple_pmccntr_read();
++}
++
++static struct clocksource apple_pmccntr_cs = {
++	.name	= "pmccntr",
++	/* Below the 24 MHz watchdog counter (350) on purpose: this counts CPU
++	 * cycles and stops dead in WFI, so it is only a fallback for the case
++	 * where the watchdog node is missing. */
++	.rating	= 250,
++	.read	= apple_pmccntr_cs_read,
++	.mask	= CLOCKSOURCE_MASK(32),
++	.flags	= CLOCK_SOURCE_IS_CONTINUOUS,
++};
++
++static unsigned long apple_pmccntr_read_long(void)
++{
++	return (unsigned long)apple_pmccntr_read();
++}
++
++static struct delay_timer apple_pmccntr_delay = {
++	.read_current_timer = apple_pmccntr_read_long,
++	.freq = PMCCNTR_RATE_FALLBACK,
++};
++
++static void __init apple_pmccntr_enable(void)
++{
++	u32 v;
++
++	/* PMUSERENR: allow user + privileged access to PMU */
++	v = 1u | (1u << 2);
++	asm volatile("mcr p15, 0, %0, c9, c14, 0" :: "r"(v));
++
++	/* PMCNTENCLR: clear enable bits before programming */
++	v = 0x80000000u;
++	asm volatile("mcr p15, 0, %0, c9, c12, 2" :: "r"(v));
++
++	/* PMCR: E | P | C then leave E set */
++	v = (1u << 0) | (1u << 1) | (1u << 2);
++	asm volatile("mcr p15, 0, %0, c9, c12, 0" :: "r"(v));
++
++	/* PMCNTENSET: enable cycle counter (bit 31) */
++	v = 0x80000000u;
++	asm volatile("mcr p15, 0, %0, c9, c12, 1" :: "r"(v));
++
++	v = 1u;
++	asm volatile("mcr p15, 0, %0, c9, c12, 0" :: "r"(v));
++
++	isb();
++}
++
++/* Split in two so the caller can enable the counter, measure the real CPU
++ * frequency against the watchdog's 24 MHz reference, and only then register
++ * everything with a rate that is not a guess. */
++void __init apple_s5l_pmccntr_enable_counter(void)
++{
++	apple_pmccntr_enable();
++}
++
++void __init apple_s5l_pmccntr_init(unsigned long rate)
++{
++	if (rate)
++		apple_pmccntr_rate = rate;
++	apple_pmccntr_delay.freq = apple_pmccntr_rate;
++
++	pr_info("pmccntr: clocksource at %lu Hz (%s)\n", apple_pmccntr_rate,
++		rate ? "measured against the 24 MHz watchdog counter" : "fallback guess");
++
++	/* A per-core counter, only running on CPU0, and frozen in WFI: with a
++	 * second core it is neither a clocksource nor a delay timer.  The
++	 * watchdog's 24 MHz counter is both (apple_wdt_clkevt.c). */
++	if (IS_ENABLED(CONFIG_SMP))
++		return;
++
++	/* sched_clock is registered by the watchdog clocksource instead.
++	 * sched_clock_register() keeps whichever rate is HIGHER, so registering
++	 * PMCCNTR's 1 GHz here would permanently shut out the 24 MHz counter --
++	 * and PMCCNTR freezes in idle, which is exactly what we are fixing. */
++	clocksource_register_hz(&apple_pmccntr_cs, apple_pmccntr_rate);
++	register_current_timer_delay(&apple_pmccntr_delay);
++}

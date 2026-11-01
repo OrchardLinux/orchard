@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rzxvx <rrzxznewid@gmail.com>
+Date: Sat, 3 Oct 2026 03:21:53 +0300
+Subject: [PATCH] Bluetooth: Support the iPad mini 1 Bluetooth
+
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at c20b85e:
+  patches/tree/0001-cascadia.patch
+
+Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (1 commit).
+
+[Orchard: imported for the armv7-a5 platform; see kernel/sources.toml]
+---
+ drivers/bluetooth/btbcm.c |  8 +++++++-
+ net/bluetooth/hci_event.c | 10 +++++++++-
+ 2 files changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/bluetooth/btbcm.c b/drivers/bluetooth/btbcm.c
+index eef004679..060ddcbb9 100644
+--- a/drivers/bluetooth/btbcm.c
++++ b/drivers/bluetooth/btbcm.c
+@@ -31,6 +31,7 @@
+ #define BDADDR_BCM4334B0 (&(bdaddr_t) {{0x00, 0x00, 0x00, 0xb0, 0x34, 0x43}})
+ #define BDADDR_BCM4345C5 (&(bdaddr_t) {{0xac, 0x1f, 0x00, 0xc5, 0x45, 0x43}})
+ #define BDADDR_BCM43341B (&(bdaddr_t) {{0xac, 0x1f, 0x00, 0x1b, 0x34, 0x43}})
++#define BDADDR_BCM4334B1_APPLE (&(bdaddr_t) {{0xac, 0x1f, 0x34, 0x43, 0x34, 0x43}})
+ 
+ #define BCM_FW_NAME_LEN			64
+ #define BCM_FW_NAME_COUNT_MAX		4
+@@ -120,6 +121,10 @@ int btbcm_check_bdaddr(struct hci_dev *hdev)
+ 	 *
+ 	 * The address AA:AA:AA:AA:AA:AA indicates a BCM43430A1 controller
+ 	 * with no configured address.
++	 *
++	 * The address 43:34:43:34:1F:AC indicates a BCM4334 running Apple's
++	 * patchram (iPad mini, iOS's BlueTool), which leaves the address to
++	 * the host.
+ 	 */
+ 	if (!bacmp(&bda->bdaddr, BDADDR_BCM20702A0) ||
+ 	    !bacmp(&bda->bdaddr, BDADDR_BCM20702A1) ||
+@@ -130,7 +135,8 @@ int btbcm_check_bdaddr(struct hci_dev *hdev)
+ 	    !bacmp(&bda->bdaddr, BDADDR_BCM4345C5) ||
+ 	    !bacmp(&bda->bdaddr, BDADDR_BCM43430A0) ||
+ 	    !bacmp(&bda->bdaddr, BDADDR_BCM43430A1) ||
+-	    !bacmp(&bda->bdaddr, BDADDR_BCM43341B)) {
++	    !bacmp(&bda->bdaddr, BDADDR_BCM43341B) ||
++	    !bacmp(&bda->bdaddr, BDADDR_BCM4334B1_APPLE)) {
+ 		/* Try falling back to BDADDR EFI variable */
+ 		if (btbcm_set_bdaddr_from_efi(hdev) != 0) {
+ 			bt_dev_info(hdev, "BCM: Using default device address (%pMR)",
+diff --git a/net/bluetooth/hci_event.c b/net/bluetooth/hci_event.c
+index 0bbad90dd..34eeb6dd6 100644
+--- a/net/bluetooth/hci_event.c
++++ b/net/bluetooth/hci_event.c
+@@ -6224,7 +6224,15 @@ static void hci_le_adv_report_evt(struct hci_dev *hdev, void *data,
+ 
+ 		if (info->length <= max_adv_len(hdev)) {
+ 			rssi = info->data[info->length];
+-			process_adv_report(hdev, info->type, &info->bdaddr,
++			/* The legacy types are 0..4.  Apple's patchram for the
++			 * iPad mini's BCM4334 (iOS's BlueTool) sets bits 4 and
++			 * 5 on top of them -- 0x20 for an ADV_IND, 0x24 for its
++			 * SCAN_RSP, 0x13 for an ADV_NONCONN_IND -- and a type
++			 * this function does not know drops the report: an LE
++			 * keyboard in pairing mode was never found.  Only
++			 * reserved bits are cleared; 5..7 are still refused.
++			 */
++			process_adv_report(hdev, info->type & 0x07, &info->bdaddr,
+ 					   info->bdaddr_type, NULL, 0,
+ 					   HCI_ADV_PHY_1M, 0, rssi,
+ 					   info->data, info->length, false,

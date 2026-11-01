@@ -1,0 +1,4873 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rzxvx <rrzxznewid@gmail.com>
+Date: Sat, 24 Oct 2026 04:27:56 +0300
+Subject: [PATCH] drm: Add the apple-sgx driver for the A5 PowerVR SGX543
+
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at c20b85e:
+  patches/files/drivers/gpu/drm/apple-sgx/Kconfig
+  patches/files/drivers/gpu/drm/apple-sgx/Makefile
+  patches/files/drivers/gpu/drm/apple-sgx/apple_sgx.h
+  patches/files/drivers/gpu/drm/apple-sgx/apple_sgx_drm.c
+  patches/files/drivers/gpu/drm/apple-sgx/apple_sgx_hw.c
+  patches/files/drivers/gpu/drm/apple-sgx/apple_sgx_kms.c
+  patches/files/include/uapi/drm/apple_sgx_drm.h
+  patches/tree/0001-cascadia.patch
+
+Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (23 commits);
+  Claude <noreply@anthropic.com> (5a7c341, 196c058, e086f6f)
+
+[Orchard: imported for the armv7-a5 platform; see kernel/sources.toml]
+---
+ drivers/gpu/drm/Kconfig                   |    2 +
+ drivers/gpu/drm/Makefile                  |    1 +
+ drivers/gpu/drm/apple-sgx/Kconfig         |   22 +
+ drivers/gpu/drm/apple-sgx/Makefile        |    3 +
+ drivers/gpu/drm/apple-sgx/apple_sgx.h     |  246 ++
+ drivers/gpu/drm/apple-sgx/apple_sgx_drm.c | 1207 ++++++++++
+ drivers/gpu/drm/apple-sgx/apple_sgx_hw.c  | 2474 +++++++++++++++++++++
+ drivers/gpu/drm/apple-sgx/apple_sgx_kms.c |  564 +++++
+ include/uapi/drm/apple_sgx_drm.h          |  252 +++
+ 9 files changed, 4771 insertions(+)
+ create mode 100644 drivers/gpu/drm/apple-sgx/Kconfig
+ create mode 100644 drivers/gpu/drm/apple-sgx/Makefile
+ create mode 100644 drivers/gpu/drm/apple-sgx/apple_sgx.h
+ create mode 100644 drivers/gpu/drm/apple-sgx/apple_sgx_drm.c
+ create mode 100644 drivers/gpu/drm/apple-sgx/apple_sgx_hw.c
+ create mode 100644 drivers/gpu/drm/apple-sgx/apple_sgx_kms.c
+ create mode 100644 include/uapi/drm/apple_sgx_drm.h
+
+diff --git a/drivers/gpu/drm/Kconfig b/drivers/gpu/drm/Kconfig
+index 1cb5a4f19..a54282595 100644
+--- a/drivers/gpu/drm/Kconfig
++++ b/drivers/gpu/drm/Kconfig
+@@ -449,6 +449,8 @@ source "drivers/gpu/drm/vboxvideo/Kconfig"
+ 
+ source "drivers/gpu/drm/lima/Kconfig"
+ 
++source "drivers/gpu/drm/apple-sgx/Kconfig"
++
+ source "drivers/gpu/drm/panfrost/Kconfig"
+ 
+ source "drivers/gpu/drm/panthor/Kconfig"
+diff --git a/drivers/gpu/drm/Makefile b/drivers/gpu/drm/Makefile
+index 784229d45..2f13b67fe 100644
+--- a/drivers/gpu/drm/Makefile
++++ b/drivers/gpu/drm/Makefile
+@@ -207,6 +207,7 @@ obj-$(CONFIG_DRM_TVE200) += tve200/
+ obj-$(CONFIG_DRM_XEN) += xen/
+ obj-$(CONFIG_DRM_VBOXVIDEO) += vboxvideo/
+ obj-$(CONFIG_DRM_LIMA)  += lima/
++obj-$(CONFIG_DRM_APPLE_SGX) += apple-sgx/
+ obj-$(CONFIG_DRM_PANFROST) += panfrost/
+ obj-$(CONFIG_DRM_PANTHOR) += panthor/
+ obj-$(CONFIG_DRM_ASPEED_GFX) += aspeed/
+diff --git a/drivers/gpu/drm/apple-sgx/Kconfig b/drivers/gpu/drm/apple-sgx/Kconfig
+new file mode 100644
+index 000000000..63dfca6cc
+--- /dev/null
++++ b/drivers/gpu/drm/apple-sgx/Kconfig
+@@ -0,0 +1,22 @@
++# SPDX-License-Identifier: GPL-2.0-only
++config DRM_APPLE_SGX
++	tristate "Apple S5L8940X PowerVR SGX543MP2"
++	depends on DRM
++	depends on ARCH_APPLE_S5L || COMPILE_TEST
++	depends on COMMON_CLK && OF
++	select DRM_GEM_SHMEM_HELPER
++	select DRM_KMS_HELPER
++	select DRM_SCHED
++	help
++	  The GPU of the Apple A5 (S5L8940X/8942X), a PowerVR SGX543MP2.
++	  Switches it on with the initialisation iOS runs, starts iOS's GPU
++	  microkernel (from /lib/firmware/apple/sgx543.fw, which the user
++	  takes out of their own IPSW), and offers a render node for Mesa
++	  and sgx2d: GEM buffers in the GPU's address space and renders
++	  queued to the microkernel; KMS on the boot framebuffer, which the
++	  2D engine copies frames into.  Also fbcon's fills and copies on
++	  the 2D engine, and research tools in debugfs (apple-sgx/).
++
++	  The render node's interface is experimental and will change.
++
++	  If unsure, say N.
+diff --git a/drivers/gpu/drm/apple-sgx/Makefile b/drivers/gpu/drm/apple-sgx/Makefile
+new file mode 100644
+index 000000000..8206a2483
+--- /dev/null
++++ b/drivers/gpu/drm/apple-sgx/Makefile
+@@ -0,0 +1,3 @@
++# SPDX-License-Identifier: GPL-2.0-only
++apple-sgx-y := apple_sgx_hw.o apple_sgx_drm.o apple_sgx_kms.o
++obj-$(CONFIG_DRM_APPLE_SGX) += apple-sgx.o
+diff --git a/drivers/gpu/drm/apple-sgx/apple_sgx.h b/drivers/gpu/drm/apple-sgx/apple_sgx.h
+new file mode 100644
+index 000000000..f4b01d6b6
+--- /dev/null
++++ b/drivers/gpu/drm/apple-sgx/apple_sgx.h
+@@ -0,0 +1,246 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Apple S5L8940X (A5) PowerVR SGX543MP2 -- what the hardware side
++ * (apple_sgx_hw.c: power, MMU, microkernel, queues, debugfs) and the render
++ * node (apple_sgx_drm.c) share.
++ */
++#ifndef __APPLE_SGX_H__
++#define __APPLE_SGX_H__
++
++#include <linux/atomic.h>
++#include <linux/mutex.h>
++#include <linux/sizes.h>
++#include <linux/spinlock.h>
++#include <linux/types.h>
++#include <linux/workqueue.h>
++
++struct apple_sgx_drm;
++struct apple_sgx_kms;
++struct clk_bulk_data;
++struct dentry;
++struct device;
++struct drm_device;
++struct drm_file;
++struct drm_gem_object;
++struct page;
++struct resource;
++
++/* The register window: six 16 KiB banks -- bank 0 broadcast (write only:
++ * a read hangs the bus), bank 1 the master, bank 2 + n core n. */
++#define SGX_BANK_SIZE			0x4000
++#define SGX_BCAST			0x0000
++#define SGX_MASTER			(1 * SGX_BANK_SIZE)
++#define SGX_CORE(n)			((2 + (n)) * SGX_BANK_SIZE)
++#define SGX_MAX_CORES			4
++
++/* ---- the GPU's MMU (sgxmmu.h; iOS's PTE writer is 0x80bf4dc4) ---------- */
++
++#define SGX_PAGE_SIZE			0x1000
++#define SGX_PD_ENTRIES			1024
++#define SGX_PDE_VALID			BIT(0)
++#define SGX_PTE_VALID			BIT(0)
++#define SGX_PTE_READONLY		BIT(2)
++#define SGX_PTE_CACHECONSISTENT		BIT(3)
++#define SGX_PTE_EDMPROTECT		BIT(4)
++
++/*
++ * The GPU's address space, one for everything:
++ *
++ *   0x00001000            the 2D engine's code page (USE code base 10 = 0)
++ *   0x80000000-0x807fffff the microkernel's buffers and the kernel's queues.
++ *                         The microkernel carries no address of its own
++ *                         (every one is patched in or handed over in a
++ *                         register), so the layout is ours; 0x80000000 is
++ *                         where iOS's "GART" starts.  Everything stays within
++ *                         8 MiB of the code, because some addresses are
++ *                         given as offsets from it in 20-bit fields.
++ *   0x80800000-0xefffffff render node buffers (apple_sgx_drm.h), and what
++ *                         debugfs "map" puts there
++ *     0x90000000-+16 MiB  the framebuffer, for the 2D engine and renders
++ *     0x9a000000-+8 MiB   the USSE code zone; USE_CODE_BASE_3 and _5 point
++ *                         at its start.  8 MiB is all a DOUTU or a PHAS can
++ *                         reach: they name a program by its index from the
++ *                         base, 20 bits of 8-byte instructions.  (It was 16
++ *                         MiB, handed out top down, and Mesa's first program
++ *                         landed out of reach: every render hung.)
++ *     0x89000000-+8.3 MiB the kernel's parameter buffer, shared by all
++ *     0x8a000000-0x977fffff  the TA's heap (APPLE_SGX_BO_TA_HEAP): render
++ *                         target data, within 256 MiB of the TA's base
++ *     0xa8000000-         where the kernel picks addresses, top down,
++ *                         up to the tiled window
++ *     0xe0000000-+256 MiB the BIF's tiled window 1 (stride 4096): only at
++ *                         an address asked for
++ *   0xf0000000-           the BIF's tiled window 2 (stride 8192), unused
++ *
++ * The tiled windows are iOS's (BIF_TILE1/2, apple_sgx_hw.c): what the GPU
++ * writes through them lands in 256-byte x 16-line tiles, which the CPU,
++ * reading the buffer as linear, sees scrambled.  (Until 2026-10-04 the
++ * kernel picked addresses from 0xf0000000 down: Mesa's first render
++ * targets landed in window 1 and every non-uniform draw came back
++ * scrambled; uniform clears hid it.)
++ *
++ * PDS data pointers carry bit 31 implied, so everything a PDS program reads
++ * has to be at 0x80000000 or above.
++ */
++#define SGX_VA_BASE			0x80000000u
++#define SGX_FB_VA			0x90000000u
++#define SGX_FB_WINDOW			SZ_16M
++#define SGX_USER_VA_START		0x80800000u
++#define SGX_USER_VA_END			0xf0000000u
++#define SGX_CODE_BASE			0x9a000000u
++#define SGX_CODE_VA_END			(SGX_CODE_BASE + SZ_8M)
++#define SGX_AUTO_VA_START		0xa8000000u
++/* The TA's base (its requests' page numbers count from here), the kernel's
++ * parameter buffer, and where TA-heap buffers go: within 256 MiB of the
++ * base, clear of the windows of the template frame's pack (0x87b00000 to
++ * 0x88851000, sgx2d's).  A parameter buffer at 0x8cc00000-0x8ef00000 hangs
++ * renders or makes them come out wrong, every time or now and then, and
++ * nowhere else in the heap -- not understood (docs/research/p105-mesa.md,
++ * M17); this one is where it works, near iOS's (0x88000000). */
++#define SGX_TA_BASE			0x87800000u
++#define SGX_PB_VA			0x89000000u
++#define SGX_TA_HEAP_START		0x8a000000u
++#define SGX_TA_HEAP_END			0x97800000u
++#define SGX_TILED_VA_START		0xe0000000u
++
++/* The GPU's core clock in kHz: PLL@0x18 (513 MHz) / 2, as measured -- the
++ * microkernel's timer ticked 2500 times a second when told 102600 kHz, and
++ * the USSEs run 2.0 G instructions a second, 8 a clock.  (GFX-CLK, 513 / 5,
++ * is not the core's clock: docs/research/p105-gpu.md, "The GPU's clock,
++ * measured".) */
++#define SGX_CLOCK_KHZ			256500
++
++/* The DDK's SGXMKIF_CC_* (sgx_mkif_km.h): what a kernel CCB command asks
++ * the microkernel to invalidate before it runs. */
++#define SGX_CC_INVAL_BIF_PT		BIT(0)
++#define SGX_CC_INVAL_BIF_PD		BIT(1)
++#define SGX_CC_INVAL_BIF_SL		BIT(2)
++#define SGX_CC_INVAL_DATA		BIT(3)
++
++/* Where in the scratch buffer the render node's completions land (words
++ * 0 and 1 are debugfs's and the 2D engine's). */
++#define SGX_SCRATCH_RENDER		0x40
++
++enum sgx_buf_id {
++	B_CODE,		/* 0x6d4 */
++	B_PDS_6D8, B_PDS_6E0, B_PDS_6E8, B_PDS_6F0, B_PDS_6F8,
++	B_CODE2,	/* 0x700 */
++	B_PDS_704,
++	B_TAB_784, B_TAB_78C,
++	B_740, B_HOST, B_750, B_758, B_KICKER, B_768,
++	B_TAB_774, B_IDX_77C,
++	B_794, B_798, B_79C, B_7A0,
++	B_TQ_CTX, B_TQ_CCB, B_TQ_CTL,	/* one transfer queue (IMGSGXTQChannel) */
++	B_R_CTX, B_R_CCB, B_R_CTL,	/* one render queue (TA + 3D) */
++	B_SCRATCH,			/* where test commands write */
++	B_BLT_BLOCK, B_BLT_PARAM,	/* the 2D engine's PDS block and parameter page */
++	B_NUM
++};
++
++struct sgx_buf {
++	u32 *cpu;
++	dma_addr_t dma;
++	u32 va;
++	size_t size;
++	struct page **pages;	/* set: allocated page by page (map_extra) */
++	dma_addr_t *page_dma;
++	struct device *dev;
++};
++
++#define SGX_MAX_EXTRA			32
++
++struct apple_sgx {
++	struct device *dev;
++	void __iomem *regs;
++	resource_size_t size;
++	struct clk_bulk_data *clks;
++	int num_clks;
++	unsigned int ncores;
++	u32 core_id, core_rev;
++	bool brn_31195;
++	struct dentry *debugfs;
++	struct mutex lock;
++
++	/* the MMU */
++	struct mutex mmu_lock;		/* the page tables */
++	u32 *pd;
++	dma_addr_t pd_dma;
++	u32 *pt[SGX_PD_ENTRIES];
++	dma_addr_t pt_dma[SGX_PD_ENTRIES];
++	u32 va_next;
++	atomic_t mmu_dirty;		/* PTEs changed since the last kick */
++
++	struct sgx_buf buf[B_NUM];
++	bool bufs_ready;
++
++	/* buffers mapped at a chosen GPU address (replaying iOS's layout) */
++	struct sgx_buf extra[SGX_MAX_EXTRA];
++	int nextra;
++	int boot_result;	/* 0 never tried, 1 acknowledged, -errno */
++	unsigned int boots;
++
++	/* the interrupt */
++	int irq;
++	bool irq_on;
++	unsigned int irq_count, irq_unhandled, irq_run;
++	u32 irq_events[SGX_MAX_CORES];	/* every event bit seen, per core */
++	u32 irq_host_flags;		/* host control's interrupt flags, last */
++
++	/* the 2D engine (blits and fills through the transfer queue) */
++	bool quiet;			/* no log line per microkernel command */
++	spinlock_t ccb_lock;		/* the kernel CCB: fbcon may draw from atomic context */
++	spinlock_t blt_lock;		/* one 2D job at a time; also guards boot_result */
++	bool blt_ready, blt_broken, fb_hooked;
++	struct work_struct boot_work;
++	phys_addr_t fb_pa;
++	u64 *blt_code;			/* CPU side of the code page at GPU 0x1000 */
++	u32 blt_seq, r_seq;
++	u32 blt_pending;		/* the job queued and not seen done; 0: none (blt_lock) */
++	unsigned long blt_since;	/* when it was queued, jiffies */
++	u32 fb_w, fb_h, fb_stride;	/* the framebuffer: pixels, pixels, pixels */
++
++	/* the render node, and its screen */
++	struct apple_sgx_drm *drm;
++	struct apple_sgx_kms *kms;
++};
++
++/* apple_sgx_hw.c */
++int apple_sgx_mmu_map(struct apple_sgx *sgx, u32 va, dma_addr_t pa, size_t size,
++		      u32 flags);
++void apple_sgx_mmu_unmap(struct apple_sgx *sgx, u32 va, size_t size);
++bool apple_sgx_up(struct apple_sgx *sgx);
++int apple_sgx_restart(struct apple_sgx *sgx);
++int apple_sgx_render_queue(struct apple_sgx *sgx, const u32 *cmd, u32 len, u32 pb,
++			   u32 *details, u32 done_va, u32 seq, u32 cache_control, u32 *at);
++bool apple_sgx_render_waiting(struct apple_sgx *sgx, u32 at, const u32 *details);
++int apple_sgx_render_rekick(struct apple_sgx *sgx);
++void apple_sgx_report(struct apple_sgx *sgx, const char *why);
++int apple_sgx_fb_find(struct apple_sgx *sgx, struct resource *res);
++/* the screen's overlay's part of a copy onto the screen (apple_sgx_kms.c) */
++struct apple_sgx_over {
++	u32 va, stride;		/* its rectangle's first pixel; pixels a line */
++	u32 w, h;		/* its size, as the source has it */
++	u32 x, y, dw, dh;	/* where it lands in the copy's box, turned */
++};
++int apple_sgx_fb_show(struct apple_sgx *sgx, u32 va, u32 stride, u32 w, u32 h, u32 x, u32 y,
++		      unsigned int rot, const struct apple_sgx_over *over);
++/* until the 2D engine has no job running -- fb_show's copies are queued,
++ * not waited for (sleeps); -EIO: the engine is out of service */
++int apple_sgx_blt_sync(struct apple_sgx *sgx);
++
++/* apple_sgx_drm.c */
++int apple_sgx_drm_init(struct apple_sgx *sgx);
++void apple_sgx_drm_fini(struct apple_sgx *sgx);
++bool apple_sgx_drm_busy(struct apple_sgx *sgx);
++int apple_sgx_drm_reserve(struct apple_sgx *sgx, int slot, u32 va, u32 size);
++void apple_sgx_drm_unreserve(struct apple_sgx *sgx, int slot);
++u32 apple_sgx_bo_va(struct drm_gem_object *obj);
++
++/* apple_sgx_kms.c */
++struct drm_apple_sgx_overlay;
++int apple_sgx_kms_init(struct drm_device *drm, struct apple_sgx *sgx);
++int apple_sgx_kms_overlay(struct apple_sgx *sgx, struct drm_file *file,
++			  struct drm_apple_sgx_overlay *args);
++void apple_sgx_kms_overlay_close(struct apple_sgx *sgx, struct drm_file *file);
++
++#endif
+diff --git a/drivers/gpu/drm/apple-sgx/apple_sgx_drm.c b/drivers/gpu/drm/apple-sgx/apple_sgx_drm.c
+new file mode 100644
+index 000000000..06ba495d2
+--- /dev/null
++++ b/drivers/gpu/drm/apple-sgx/apple_sgx_drm.c
+@@ -0,0 +1,1207 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Apple S5L8940X (A5) PowerVR SGX543MP2 -- the render node.
++ *
++ * What Mesa (and sgx2d) talk to the GPU through: GEM buffers mapped into
++ * the GPU's address space, and renders queued to the microkernel with
++ * syncobjs for synchronisation.  The interface is include/uapi/drm/
++ * apple_sgx_drm.h; docs/research/p105-mesa.md is the plan it belongs to.
++ *
++ * The device's primary node is also the screen (apple_sgx_kms.c): KMS on
++ * the boot framebuffer, which any of these buffers can be shown in.
++ *
++ * Buffers are shmem objects, write-combined on the CPU side, pinned and
++ * mapped page by page into the one page directory the hardware side keeps
++ * (apple_sgx_hw.c), at an address the caller chose or one picked here.
++ * Addresses the kernel picks get a guard page after them: the VDM reads
++ * ahead, and a read past a buffer should fault rather than land in the
++ * next one.
++ *
++ * Renders go through a DRM scheduler with room for one job: the TA command
++ * is copied into the render queue and TA sent, and the job is done when
++ * both of these have happened, in this order:
++ *
++ *   - the microkernel has written the command's completion value (it does
++ *     when the TA is done, into the scratch buffer at SGX_SCRATCH_RENDER);
++ *   - it has cleared the render details' word at +0x24, which it sets to
++ *     the 3D register block's address when the TA starts and clears when
++ *     the 3D pass ends (found for sgx2d's frame fence, p105-gpu.md M6).
++ *
++ * The SGX's interrupt has never been seen to fire, so both are polled, by
++ * an hrtimer that runs only while a render is on the GPU.  A render that
++ * does not finish in render_timeout_ms restarts the microkernel.
++ *
++ * Two things the microkernel does that the render node works around, both
++ * found with Mesa's template-frame clears (docs/research/p105-mesa.md, M12):
++ *
++ *   - it keeps a parameter buffer's state between renders (the DPM's), so
++ *     a new buffer at the same address -- every new client of the template
++ *     frame loads one -- has it hand out pages that are not there: a fault
++ *     at page 0 above TA_REQ_BASE, a lockup.  A render whose parameter
++ *     buffer is another buffer object than the last one's starts the
++ *     microkernel again first (pb_restart);
++ *   - now and then it takes the TA command and leaves the render in the
++ *     queue, unread and unstarted; the poller sends TA again after
++ *     rekick_ms.
++ *
++ * Addresses picked here for buffers of 64 KiB or more are 64 KiB aligned.
++ * That came from a fault at 0xefcf0000 for a render target at 0xefcff000,
++ * read then as the address losing its low 16 bits; it was the BIF's tiled
++ * window (apple_sgx.h), which moves accesses around within 64 KiB, and the
++ * kernel now picks addresses below it.  The alignment stays: it costs
++ * nothing.
++ */
++
++#include <linux/dma-fence.h>
++#include <linux/dma-resv.h>
++#include <linux/hrtimer.h>
++#include <linux/iosys-map.h>
++#include <linux/module.h>
++#include <linux/scatterlist.h>
++#include <linux/slab.h>
++#include <linux/uaccess.h>
++
++#include <drm/apple_sgx_drm.h>
++#include <drm/drm_device.h>
++#include <drm/drm_drv.h>
++#include <drm/drm_file.h>
++#include <drm/drm_gem.h>
++#include <drm/drm_gem_shmem_helper.h>
++#include <drm/drm_ioctl.h>
++#include <drm/drm_managed.h>
++#include <drm/drm_mm.h>
++#include <drm/drm_print.h>
++#include <drm/drm_syncobj.h>
++#include <drm/drm_utils.h>
++#include <drm/gpu_scheduler.h>
++
++#include "apple_sgx.h"
++
++static unsigned int render_timeout_ms = 2000;
++module_param(render_timeout_ms, uint, 0444);
++MODULE_PARM_DESC(render_timeout_ms, "a render not done after this restarts the microkernel");
++
++static unsigned int poll_us = 200;
++module_param(poll_us, uint, 0644);
++MODULE_PARM_DESC(poll_us, "how often a running render is checked on, in microseconds");
++
++static unsigned int rekick_ms = 20;
++module_param(rekick_ms, uint, 0644);
++MODULE_PARM_DESC(rekick_ms, "TA again for a render left unread this long (0: never)");
++
++static bool pb_restart = true;
++module_param(pb_restart, bool, 0644);
++MODULE_PARM_DESC(pb_restart, "start the microkernel again for a new parameter buffer");
++
++#define SGX_MAX_REKICKS			5
++
++/* The render details are read up to here (+0xa4 is written). */
++#define SGX_DETAILS_SIZE		0xa8
++#define SGX_MAX_BOS			4096
++#define SGX_MAX_IN_SYNCS		256
++#define SGX_MAX_BO_SIZE			SZ_256M
++
++struct apple_sgx_job;
++
++struct apple_sgx_drm {
++	struct drm_device drm;
++	struct apple_sgx *sgx;
++
++	/* the GPU addresses buffers may take; what debugfs maps there too */
++	struct mutex va_lock;
++	struct drm_mm va;
++	struct drm_mm_node fb_window;
++	struct drm_mm_node extra[SGX_MAX_EXTRA];
++
++	atomic_t clients;
++
++	struct drm_gpu_scheduler sched;
++	struct mutex sched_lock;	/* arm and push in one order */
++	spinlock_t fence_lock;
++	u64 fence_context;
++	u64 fence_seqno;		/* run_job is serialised by the scheduler */
++	u32 render_seq;			/* the completion value of the last render */
++
++	spinlock_t job_lock;		/* active, against the poller */
++	struct apple_sgx_job *active;	/* the render on the GPU */
++	struct hrtimer poll;
++	struct work_struct rekick;
++
++	/* the parameter buffer the microkernel last worked with: its buffer
++	 * object's serial, and the microkernel start that saw it */
++	atomic64_t bo_serial;
++	u64 pb_serial;
++	unsigned int pb_boots;
++
++	/* the kernel's parameter buffer (UAPI 3), made at the first submit
++	 * that asks for it; its image written again for every microkernel
++	 * start that uses it */
++	struct mutex kpb_lock;
++	struct apple_sgx_bo *kpb;
++	struct iosys_map kpb_map;
++	unsigned int kpb_boots;
++
++	atomic_t submitted, done, timed_out;
++};
++
++struct apple_sgx_bo {
++	struct drm_gem_shmem_object base;
++	struct drm_mm_node node;	/* its GPU address, and a guard page */
++	u32 flags;			/* APPLE_SGX_BO_* */
++	u32 mapped;			/* bytes the PTEs cover */
++	u64 serial;			/* one per buffer object ever made */
++};
++
++struct apple_sgx_file {
++	struct drm_sched_entity entity;
++};
++
++struct apple_sgx_job {
++	struct drm_sched_job base;
++	struct apple_sgx_drm *sdrm;
++
++	u32 *cmd;			/* the TA command */
++	u32 cmd_len;
++	u32 pb_va, cache_control;
++	u64 pb_serial;			/* the parameter buffer's object */
++	bool kernel_pb;			/* it is the kernel's */
++
++	struct drm_gem_object *details_obj;
++	struct iosys_map details_map;
++	u32 *details;			/* the render details, in details_obj */
++
++	struct drm_gem_object **bos;	/* everything the render touches */
++	u32 bo_count;
++
++	struct dma_fence *done_fence;	/* the scheduler's: out_sync, the buffers */
++	struct dma_fence *hw_fence;	/* ours, while on the GPU (job_lock) */
++	u32 seq;
++	bool ta_done;
++	u32 ccb_at;			/* where in the render queue it went */
++	ktime_t kicked;			/* when TA was last sent for it */
++	unsigned int rekicks;
++};
++
++static struct apple_sgx_drm *to_sgx_drm(struct drm_device *drm)
++{
++	return container_of(drm, struct apple_sgx_drm, drm);
++}
++
++static struct apple_sgx_bo *to_sgx_bo(struct drm_gem_object *obj)
++{
++	return container_of(to_drm_gem_shmem_obj(obj), struct apple_sgx_bo, base);
++}
++
++static struct apple_sgx_job *to_sgx_job(struct drm_sched_job *job)
++{
++	return container_of(job, struct apple_sgx_job, base);
++}
++
++/* ---- buffers --------------------------------------------------------------- */
++
++static void sgx_gem_free(struct drm_gem_object *obj)
++{
++	struct apple_sgx_drm *sdrm = to_sgx_drm(obj->dev);
++	struct apple_sgx_bo *bo = to_sgx_bo(obj);
++
++	if (drm_mm_node_allocated(&bo->node)) {
++		apple_sgx_mmu_unmap(sdrm->sgx, bo->node.start, bo->mapped);
++		mutex_lock(&sdrm->va_lock);
++		drm_mm_remove_node(&bo->node);
++		mutex_unlock(&sdrm->va_lock);
++	}
++	drm_gem_shmem_free(&bo->base);
++}
++
++static const struct drm_gem_object_funcs sgx_gem_funcs = {
++	.free = sgx_gem_free,
++	.print_info = drm_gem_shmem_object_print_info,
++	.pin = drm_gem_shmem_object_pin,
++	.unpin = drm_gem_shmem_object_unpin,
++	.get_sg_table = drm_gem_shmem_object_get_sg_table,
++	.vmap = drm_gem_shmem_object_vmap,
++	.vunmap = drm_gem_shmem_object_vunmap,
++	.mmap = drm_gem_shmem_object_mmap,
++	.vm_ops = &drm_gem_shmem_vm_ops,
++};
++
++static struct drm_gem_object *sgx_gem_create_object(struct drm_device *drm, size_t size)
++{
++	struct apple_sgx_bo *bo = kzalloc(sizeof(*bo), GFP_KERNEL);
++
++	if (!bo)
++		return ERR_PTR(-ENOMEM);
++	bo->base.base.funcs = &sgx_gem_funcs;
++	/* the CPU never caches what the GPU reads: no flushes anywhere */
++	bo->base.map_wc = true;
++	return &bo->base.base;
++}
++
++/* Pin the pages, find the buffer a GPU address, and write its PTEs. */
++static int sgx_bo_map(struct apple_sgx_drm *sdrm, struct apple_sgx_bo *bo, u32 va)
++{
++	size_t size = bo->base.base.size;
++	struct scatterlist *sg;
++	struct sg_table *sgt;
++	unsigned int i;
++	u32 pte, at;
++	int ret;
++
++	sgt = drm_gem_shmem_get_pages_sgt(&bo->base);
++	if (IS_ERR(sgt))
++		return PTR_ERR(sgt);
++
++	mutex_lock(&sdrm->va_lock);
++	if (bo->flags & APPLE_SGX_BO_FIXED_VA) {
++		bo->node.start = va;
++		bo->node.size = size;
++		ret = drm_mm_reserve_node(&sdrm->va, &bo->node);
++		if (ret == -ENOSPC)
++			ret = -EEXIST;
++	} else if (bo->flags & APPLE_SGX_BO_TA_HEAP) {
++		ret = drm_mm_insert_node_in_range(&sdrm->va, &bo->node,
++						  size + SGX_PAGE_SIZE, SGX_PAGE_SIZE, 0,
++						  SGX_TA_HEAP_START, SGX_TA_HEAP_END,
++						  DRM_MM_INSERT_LOW);
++	} else if (bo->flags & APPLE_SGX_BO_USSE_CODE) {
++		ret = drm_mm_insert_node_in_range(&sdrm->va, &bo->node,
++						  size + SGX_PAGE_SIZE, SGX_PAGE_SIZE, 0,
++						  SGX_CODE_BASE, SGX_CODE_VA_END,
++						  DRM_MM_INSERT_HIGH);
++	} else {
++		/* below the tiled windows; 64 KiB aligned from 64 KiB up */
++		ret = drm_mm_insert_node_in_range(&sdrm->va, &bo->node,
++						  size + SGX_PAGE_SIZE,
++						  size >= SZ_64K ? SZ_64K : SGX_PAGE_SIZE, 0,
++						  SGX_AUTO_VA_START, SGX_TILED_VA_START,
++						  DRM_MM_INSERT_HIGH);
++	}
++	mutex_unlock(&sdrm->va_lock);
++	if (ret)
++		return ret;
++
++	pte = (bo->flags & APPLE_SGX_BO_GPU_READONLY ? SGX_PTE_READONLY : 0) |
++	      (bo->flags & APPLE_SGX_BO_NOT_CACHE_CONSISTENT ? 0 : SGX_PTE_CACHECONSISTENT);
++	at = bo->node.start;
++	for_each_sgtable_dma_sg(sgt, sg, i) {
++		ret = apple_sgx_mmu_map(sdrm->sgx, at, sg_dma_address(sg), sg_dma_len(sg), pte);
++		if (ret)
++			break;
++		at += sg_dma_len(sg);
++	}
++	bo->mapped = at - bo->node.start;
++	if (!ret && bo->mapped != size)
++		ret = -EIO;
++	if (ret) {
++		apple_sgx_mmu_unmap(sdrm->sgx, bo->node.start, size);
++		mutex_lock(&sdrm->va_lock);
++		drm_mm_remove_node(&bo->node);
++		mutex_unlock(&sdrm->va_lock);
++	}
++	return ret;
++}
++
++/* A buffer object, mapped, and a handle to it; *va in: where (with
++ * APPLE_SGX_BO_FIXED_VA), out: where it went. */
++static int sgx_bo_new(struct drm_device *drm, struct drm_file *file, u64 size, u32 flags,
++		      u32 *va, u32 *handle)
++{
++	struct apple_sgx_drm *sdrm = to_sgx_drm(drm);
++	struct drm_gem_shmem_object *shmem;
++	struct apple_sgx_bo *bo;
++	int ret;
++
++	if ((flags & ~APPLE_SGX_BO_FLAGS) || !size || size > SGX_MAX_BO_SIZE)
++		return -EINVAL;
++	size = ALIGN(size, PAGE_SIZE);
++	if ((flags & APPLE_SGX_BO_FIXED_VA) &&
++	    ((*va & (SGX_PAGE_SIZE - 1)) || *va < SGX_USER_VA_START ||
++	     size > SGX_USER_VA_END - *va))
++		return -EINVAL;
++
++	shmem = drm_gem_shmem_create(drm, size);
++	if (IS_ERR(shmem))
++		return PTR_ERR(shmem);
++	bo = to_sgx_bo(&shmem->base);
++	bo->flags = flags;
++	bo->serial = atomic64_inc_return(&sdrm->bo_serial);
++	ret = sgx_bo_map(sdrm, bo, *va);
++	if (!ret)
++		ret = drm_gem_handle_create(file, &shmem->base, handle);
++	if (!ret)
++		*va = bo->node.start;
++	/* the handle holds it now, or it goes */
++	drm_gem_object_put(&shmem->base);
++	return ret;
++}
++
++static int sgx_ioctl_gem_create(struct drm_device *drm, void *data, struct drm_file *file)
++{
++	struct drm_apple_sgx_gem_create *args = data;
++
++	if (args->pad)
++		return -EINVAL;
++	return sgx_bo_new(drm, file, args->size, args->flags, &args->va, &args->handle);
++}
++
++/* Dumb buffers, for the screen (apple_sgx_kms.c): pitches of 64 bytes */
++static int sgx_dumb_create(struct drm_file *file, struct drm_device *drm,
++			   struct drm_mode_create_dumb *args)
++{
++	u32 va = 0;
++
++	if (!args->width || !args->height || !args->bpp || args->width > 4096 ||
++	    args->height > 4096)
++		return -EINVAL;
++	args->pitch = ALIGN(DIV_ROUND_UP(args->width * args->bpp, 8), 64);
++	args->size = ALIGN((u64)args->pitch * args->height, PAGE_SIZE);
++	return sgx_bo_new(drm, file, args->size, 0, &va, &args->handle);
++}
++
++/* where the GPU sees a buffer object */
++u32 apple_sgx_bo_va(struct drm_gem_object *obj)
++{
++	return to_sgx_bo(obj)->node.start;
++}
++
++static int sgx_ioctl_gem_info(struct drm_device *drm, void *data, struct drm_file *file)
++{
++	struct drm_apple_sgx_gem_info *args = data;
++	struct drm_gem_object *obj;
++	struct apple_sgx_bo *bo;
++
++	if (args->pad)
++		return -EINVAL;
++	obj = drm_gem_object_lookup(file, args->handle);
++	if (!obj)
++		return -ENOENT;
++	if (obj->funcs != &sgx_gem_funcs) {
++		drm_gem_object_put(obj);
++		return -EINVAL;
++	}
++	bo = to_sgx_bo(obj);
++	args->flags = bo->flags;
++	args->va = bo->node.start;
++	args->size = obj->size;
++	drm_gem_object_put(obj);
++	return 0;
++}
++
++static int sgx_ioctl_gem_mmap_offset(struct drm_device *drm, void *data,
++				     struct drm_file *file)
++{
++	struct drm_apple_sgx_gem_mmap_offset *args = data;
++	struct drm_gem_object *obj;
++	int ret;
++
++	if (args->flags)
++		return -EINVAL;
++	obj = drm_gem_object_lookup(file, args->handle);
++	if (!obj)
++		return -ENOENT;
++	ret = drm_gem_create_mmap_offset(obj);
++	if (!ret)
++		args->offset = drm_vma_node_offset_addr(&obj->vma_node);
++	drm_gem_object_put(obj);
++	return ret;
++}
++
++static int sgx_ioctl_gem_wait(struct drm_device *drm, void *data, struct drm_file *file)
++{
++	struct drm_apple_sgx_gem_wait *args = data;
++	unsigned long timeout = drm_timeout_abs_to_jiffies(args->timeout_ns);
++	struct drm_gem_object *obj;
++	long ret;
++
++	if (args->pad)
++		return -EINVAL;
++	obj = drm_gem_object_lookup(file, args->handle);
++	if (!obj)
++		return -ENOENT;
++	ret = dma_resv_wait_timeout(obj->resv, DMA_RESV_USAGE_READ, true, timeout);
++	if (!ret)
++		ret = timeout ? -ETIMEDOUT : -EBUSY;
++	else if (ret > 0)
++		ret = 0;
++	drm_gem_object_put(obj);
++	return ret;
++}
++
++/* ---- parameters ------------------------------------------------------------ */
++
++static int sgx_ioctl_get_param(struct drm_device *drm, void *data, struct drm_file *file)
++{
++	struct apple_sgx_drm *sdrm = to_sgx_drm(drm);
++	struct drm_apple_sgx_get_param *args = data;
++	struct apple_sgx *sgx = sdrm->sgx;
++
++	if (args->pad)
++		return -EINVAL;
++	switch (args->param) {
++	case APPLE_SGX_PARAM_UAPI_VERSION:
++		args->value = 3;	/* (not for OVERLAY: apple_sgx_drm.h) */
++		break;
++	case APPLE_SGX_PARAM_CORE_ID:
++		args->value = sgx->core_id;
++		break;
++	case APPLE_SGX_PARAM_CORE_REVISION:
++		args->value = sgx->core_rev;
++		break;
++	case APPLE_SGX_PARAM_NUM_CORES:
++		args->value = sgx->ncores;
++		break;
++	case APPLE_SGX_PARAM_CLOCK_KHZ:
++		args->value = SGX_CLOCK_KHZ;
++		break;
++	case APPLE_SGX_PARAM_UKERNEL_UP:
++		args->value = apple_sgx_up(sgx);
++		break;
++	case APPLE_SGX_PARAM_VA_START:
++		args->value = SGX_USER_VA_START;
++		break;
++	case APPLE_SGX_PARAM_VA_END:
++		args->value = SGX_USER_VA_END;
++		break;
++	case APPLE_SGX_PARAM_CODE_BASE:
++	case APPLE_SGX_PARAM_CODE_VA_START:
++		args->value = SGX_CODE_BASE;
++		break;
++	case APPLE_SGX_PARAM_CODE_VA_END:
++		args->value = SGX_CODE_VA_END;
++		break;
++	case APPLE_SGX_PARAM_FB_VA:
++		args->value = READ_ONCE(sgx->fb_w) ? SGX_FB_VA : 0;
++		break;
++	case APPLE_SGX_PARAM_FB_WIDTH:
++		args->value = READ_ONCE(sgx->fb_w);
++		break;
++	case APPLE_SGX_PARAM_FB_HEIGHT:
++		args->value = READ_ONCE(sgx->fb_w) ? sgx->fb_h : 0;
++		break;
++	case APPLE_SGX_PARAM_FB_STRIDE:
++		args->value = READ_ONCE(sgx->fb_w) ? sgx->fb_stride * 4 : 0;
++		break;
++	case APPLE_SGX_PARAM_RENDERS_SUBMITTED:
++		args->value = atomic_read(&sdrm->submitted);
++		break;
++	case APPLE_SGX_PARAM_RENDERS_DONE:
++		args->value = atomic_read(&sdrm->done);
++		break;
++	case APPLE_SGX_PARAM_RENDERS_TIMED_OUT:
++		args->value = atomic_read(&sdrm->timed_out);
++		break;
++	case APPLE_SGX_PARAM_UKERNEL_BOOTS:
++		args->value = READ_ONCE(sgx->boots);
++		break;
++	case APPLE_SGX_PARAM_PB_VA:
++		args->value = SGX_PB_VA;
++		break;
++	case APPLE_SGX_PARAM_TA_HEAP_START:
++		args->value = SGX_TA_HEAP_START;
++		break;
++	case APPLE_SGX_PARAM_TA_HEAP_END:
++		args->value = SGX_TA_HEAP_END;
++		break;
++	default:
++		return -EINVAL;
++	}
++	return 0;
++}
++
++/* ---- the kernel's parameter buffer ----------------------------------------- */
++
++/*
++ * One for every client (UAPI 3): the microkernel keeps a parameter buffer's
++ * state between renders, so clients with buffers of their own at the same
++ * address cost it a restart each time they take turns (pb_restart).  Laid
++ * out as the kext does (0x80bfd51c, 0x80bfd9a0, 0x80bfdaa8;
++ * tools/sgx/rgen.py's pb_image()): a descriptor, a page table at +0x10000,
++ * then two blocks -- a header page and data pages each -- whose page
++ * numbers count from the TA's base.
++ */
++#define SGX_PB_PT			0x10000
++#define SGX_PB_SIZE			(0x50000 + 0x800000 + 0x1000)
++
++static const struct { u32 off, size; } sgx_pb_blocks[] = {
++	{ 0x20000, 0x22000 }, { 0x50000, 0x800000 },
++};
++
++static u32 sgx_pb_page(u32 va)
++{
++	return (va - SGX_TA_BASE) >> 12;
++}
++
++static void sgx_pb_image(u8 *img)
++{
++	const unsigned int n = ARRAY_SIZE(sgx_pb_blocks);
++	u32 *d = (u32 *)img, total = 0, last, end;
++	unsigned int i;
++
++	memset(img, 0, SGX_PB_SIZE);
++	for (i = 0; i < n; i++) {
++		u32 va = SGX_PB_VA + sgx_pb_blocks[i].off, size = sgx_pb_blocks[i].size;
++		u32 *h = (u32 *)(img + sgx_pb_blocks[i].off);
++
++		h[0] = size >> 12;
++		h[1] = (sgx_pb_page(va) + 1) | sgx_pb_page(va + size) << 16;
++		h[2] = SGX_PB_VA;
++		h[3] = i + 1 < n ? SGX_PB_VA + sgx_pb_blocks[i + 1].off : 0;
++		total += size >> 12;
++	}
++	last = sgx_pb_blocks[n - 1].size >> 12;
++	end = sgx_pb_page(SGX_PB_VA + sgx_pb_blocks[n - 1].off + sgx_pb_blocks[n - 1].size +
++			  0x1000);
++	d[0] = 3;
++	d[1] = total;
++	d[2] = (end - 1) << 16 | (sgx_pb_page(SGX_PB_VA + sgx_pb_blocks[0].off) + 1);
++	d[3] = (end - 2) << 16;
++	d[4] = SGX_PB_VA + SGX_PB_PT;
++	d[10] = total + 0x10;
++	d[11] = last;
++	d[12] = total;
++	d[13] = last > 0x100 ? last - 0x100 : 0;
++	d[14] = SGX_PB_VA + sgx_pb_blocks[0].off;
++}
++
++/* the kernel's parameter buffer, made and mapped the first time */
++static struct apple_sgx_bo *sgx_kpb_get(struct apple_sgx_drm *sdrm)
++{
++	struct drm_gem_shmem_object *shmem;
++	struct apple_sgx_bo *bo;
++	int ret;
++
++	mutex_lock(&sdrm->kpb_lock);
++	if (sdrm->kpb)
++		goto out;
++	shmem = drm_gem_shmem_create(&sdrm->drm, SGX_PB_SIZE);
++	if (IS_ERR(shmem))
++		goto out;
++	bo = to_sgx_bo(&shmem->base);
++	bo->flags = APPLE_SGX_BO_FIXED_VA;
++	bo->serial = atomic64_inc_return(&sdrm->bo_serial);
++	ret = sgx_bo_map(sdrm, bo, SGX_PB_VA);
++	if (!ret)
++		ret = drm_gem_vmap_unlocked(&shmem->base, &sdrm->kpb_map);
++	if (ret) {
++		drm_err(&sdrm->drm, "no parameter buffer at 0x%08x: %d\n", SGX_PB_VA, ret);
++		drm_gem_object_put(&shmem->base);
++		goto out;
++	}
++	sdrm->kpb_boots = UINT_MAX;
++	sdrm->kpb = bo;
++	drm_info(&sdrm->drm, "the kernel's parameter buffer: 0x%08x, %u KiB\n", SGX_PB_VA,
++		 SGX_PB_SIZE >> 10);
++out:
++	mutex_unlock(&sdrm->kpb_lock);
++	return sdrm->kpb;
++}
++
++/* ---- renders --------------------------------------------------------------- */
++
++static const char *sgx_fence_driver_name(struct dma_fence *fence)
++{
++	return "apple_sgx";
++}
++
++static const char *sgx_fence_timeline_name(struct dma_fence *fence)
++{
++	return "render";
++}
++
++static const struct dma_fence_ops sgx_fence_ops = {
++	.get_driver_name = sgx_fence_driver_name,
++	.get_timeline_name = sgx_fence_timeline_name,
++};
++
++static void sgx_job_release(struct apple_sgx_job *job)
++{
++	unsigned int i;
++
++	if (job->details)
++		drm_gem_vunmap_unlocked(job->details_obj, &job->details_map);
++	if (job->details_obj)
++		drm_gem_object_put(job->details_obj);
++	for (i = 0; i < job->bo_count; i++)
++		if (job->bos[i])
++			drm_gem_object_put(job->bos[i]);
++	kvfree(job->bos);
++	kfree(job->cmd);
++	if (job->done_fence)
++		dma_fence_put(job->done_fence);
++	if (job->hw_fence)
++		dma_fence_put(job->hw_fence);
++	kfree(job);
++}
++
++/* Done is the TA's completion value, then the 3D pass's clear of the render
++ * details' +0x24 (see the top of this file). */
++static enum hrtimer_restart sgx_poll(struct hrtimer *timer)
++{
++	struct apple_sgx_drm *sdrm = container_of(timer, struct apple_sgx_drm, poll);
++	u32 *done = sdrm->sgx->buf[B_SCRATCH].cpu + SGX_SCRATCH_RENDER / 4;
++	struct dma_fence *fence = NULL;
++	struct apple_sgx_job *job;
++	unsigned long flags;
++
++	spin_lock_irqsave(&sdrm->job_lock, flags);
++	job = sdrm->active;
++	if (job) {
++		if (!job->ta_done && READ_ONCE(*done) == job->seq)
++			job->ta_done = true;
++		if (job->ta_done && !READ_ONCE(job->details[0x24 / 4])) {
++			fence = job->hw_fence;
++			job->hw_fence = NULL;
++			sdrm->active = NULL;
++		} else if (!job->ta_done && rekick_ms && job->rekicks < SGX_MAX_REKICKS &&
++			   ktime_ms_delta(ktime_get(), job->kicked) >= rekick_ms &&
++			   apple_sgx_render_waiting(sdrm->sgx, job->ccb_at, job->details)) {
++			job->kicked = ktime_get();
++			job->rekicks++;
++			schedule_work(&sdrm->rekick);
++		}
++	}
++	spin_unlock_irqrestore(&sdrm->job_lock, flags);
++
++	if (fence) {
++		atomic_inc(&sdrm->done);
++		dma_fence_signal(fence);
++		dma_fence_put(fence);
++		return HRTIMER_NORESTART;
++	}
++	if (!job)
++		return HRTIMER_NORESTART;
++	hrtimer_forward_now(timer, ns_to_ktime((u64)poll_us * NSEC_PER_USEC));
++	return HRTIMER_RESTART;
++}
++
++/* TA again for a render the microkernel left in its queue (the poller
++ * decides; sending takes the microkernel's lock, so not from the timer) */
++static void sgx_rekick_work(struct work_struct *work)
++{
++	struct apple_sgx_drm *sdrm = container_of(work, struct apple_sgx_drm, rekick);
++	struct apple_sgx *sgx = sdrm->sgx;
++	struct apple_sgx_job *job;
++	unsigned long flags;
++	bool waiting = false;
++	u32 seq = 0;
++
++	mutex_lock(&sgx->lock);
++	spin_lock_irqsave(&sdrm->job_lock, flags);
++	job = sdrm->active;
++	if (job && !job->ta_done) {
++		seq = job->seq;
++		waiting = apple_sgx_render_waiting(sgx, job->ccb_at, job->details);
++	}
++	spin_unlock_irqrestore(&sdrm->job_lock, flags);
++	if (waiting) {
++		drm_info(&sdrm->drm, "render %u left unread in the queue: TA sent again\n", seq);
++		apple_sgx_render_rekick(sgx);
++	}
++	mutex_unlock(&sgx->lock);
++}
++
++static struct dma_fence *sgx_job_run(struct drm_sched_job *sched_job)
++{
++	struct apple_sgx_job *job = to_sgx_job(sched_job);
++	struct apple_sgx_drm *sdrm = job->sdrm;
++	struct apple_sgx *sgx = sdrm->sgx;
++	struct dma_fence *fence;
++	unsigned long flags;
++	int ret;
++
++	/* a dependency failed, or the job was cancelled */
++	if (unlikely(job->base.s_fence->finished.error))
++		return NULL;
++
++	fence = kzalloc(sizeof(*fence), GFP_KERNEL);
++	if (!fence)
++		return ERR_PTR(-ENOMEM);
++	dma_fence_init(fence, &sgx_fence_ops, &sdrm->fence_lock, sdrm->fence_context,
++		       ++sdrm->fence_seqno);
++
++	/* another parameter buffer than the one the running microkernel last
++	 * used: start it again, or it goes on from the old one's state */
++	if (pb_restart && sdrm->pb_serial && sdrm->pb_serial != job->pb_serial &&
++	    sdrm->pb_boots == READ_ONCE(sgx->boots)) {
++		drm_info(&sdrm->drm, "render with a new parameter buffer at 0x%08x: "
++			 "the microkernel starts again\n", job->pb_va);
++		apple_sgx_restart(sgx);
++	}
++
++	mutex_lock(&sgx->lock);
++	if (!apple_sgx_up(sgx)) {
++		ret = -ENODEV;
++	} else {
++		u32 *done = sgx->buf[B_SCRATCH].cpu + SGX_SCRATCH_RENDER / 4;
++
++		/* the kernel's parameter buffer as new, for a microkernel that
++		 * has not used it yet */
++		if (job->kernel_pb && sdrm->kpb_boots != READ_ONCE(sgx->boots)) {
++			sgx_pb_image(sdrm->kpb_map.vaddr);
++			wmb();
++			sdrm->kpb_boots = READ_ONCE(sgx->boots);
++		}
++		job->seq = ++sdrm->render_seq ? sdrm->render_seq : ++sdrm->render_seq;
++		job->ta_done = false;
++		WRITE_ONCE(*done, 0);
++		ret = apple_sgx_render_queue(sgx, job->cmd, job->cmd_len, job->pb_va,
++					     job->details,
++					     sgx->buf[B_SCRATCH].va + SGX_SCRATCH_RENDER,
++					     job->seq, job->cache_control, &job->ccb_at);
++	}
++	if (!ret) {
++		sdrm->pb_serial = job->pb_serial;
++		sdrm->pb_boots = sgx->boots;
++		spin_lock_irqsave(&sdrm->job_lock, flags);
++		job->kicked = ktime_get();
++		job->hw_fence = dma_fence_get(fence);
++		sdrm->active = job;
++		spin_unlock_irqrestore(&sdrm->job_lock, flags);
++		hrtimer_start(&sdrm->poll, ns_to_ktime((u64)poll_us * NSEC_PER_USEC),
++			      HRTIMER_MODE_REL_SOFT);
++	}
++	mutex_unlock(&sgx->lock);
++
++	if (ret) {
++		drm_dbg(&sdrm->drm, "render not queued: %d\n", ret);
++		dma_fence_set_error(fence, ret);
++		dma_fence_signal(fence);
++	}
++	return fence;
++}
++
++/* A render that never ended: the microkernel is started again (every queue
++ * empty, every mapping kept), and the render fails with ETIMEDOUT. */
++static enum drm_gpu_sched_stat sgx_job_timedout(struct drm_sched_job *sched_job)
++{
++	struct apple_sgx_job *job = to_sgx_job(sched_job);
++	struct apple_sgx_drm *sdrm = job->sdrm;
++	struct dma_fence *parent = job->base.s_fence->parent;
++	struct dma_fence *hw = NULL;
++	unsigned long flags;
++	int ret;
++
++	if (!parent || dma_fence_is_signaled(parent))
++		return DRM_GPU_SCHED_STAT_NOMINAL;
++
++	drm_sched_stop(&sdrm->sched, sched_job);
++	hrtimer_cancel(&sdrm->poll);
++	spin_lock_irqsave(&sdrm->job_lock, flags);
++	if (sdrm->active == job) {
++		hw = job->hw_fence;
++		job->hw_fence = NULL;
++		sdrm->active = NULL;
++	}
++	spin_unlock_irqrestore(&sdrm->job_lock, flags);
++
++	drm_err(&sdrm->drm, "render %u not done after %u ms (TA %s)\n", job->seq,
++		render_timeout_ms, job->ta_done ? "done" : "not done");
++	apple_sgx_report(sdrm->sgx, "render timed out");
++	drm_sched_increase_karma(sched_job);
++	atomic_inc(&sdrm->timed_out);
++	ret = apple_sgx_restart(sdrm->sgx);
++	if (ret)
++		drm_err(&sdrm->drm, "microkernel did not come back: %d\n", ret);
++
++	if (hw) {
++		dma_fence_set_error(hw, -ETIMEDOUT);
++		dma_fence_signal(hw);
++		dma_fence_put(hw);
++	}
++	drm_sched_start(&sdrm->sched);
++	return DRM_GPU_SCHED_STAT_NOMINAL;
++}
++
++static void sgx_job_free(struct drm_sched_job *sched_job)
++{
++	struct apple_sgx_job *job = to_sgx_job(sched_job);
++
++	drm_sched_job_cleanup(sched_job);
++	sgx_job_release(job);
++}
++
++static const struct drm_sched_backend_ops sgx_sched_ops = {
++	.run_job = sgx_job_run,
++	.timedout_job = sgx_job_timedout,
++	.free_job = sgx_job_free,
++};
++
++static int sgx_job_in_syncs(struct apple_sgx_job *job, struct drm_file *file,
++			    struct drm_apple_sgx_submit *args)
++{
++	u32 *handles;
++	unsigned int i;
++	int ret = 0;
++
++	if (!args->in_sync_count)
++		return 0;
++	handles = kvmalloc_array(args->in_sync_count, sizeof(*handles), GFP_KERNEL);
++	if (!handles)
++		return -ENOMEM;
++	if (copy_from_user(handles, u64_to_user_ptr(args->in_syncs),
++			   args->in_sync_count * sizeof(*handles)))
++		ret = -EFAULT;
++	for (i = 0; !ret && i < args->in_sync_count; i++)
++		ret = drm_sched_job_add_syncobj_dependency(&job->base, file, handles[i], 0);
++	kvfree(handles);
++	return ret;
++}
++
++/* Into the scheduler, behind every render that touches one of its buffers;
++ * its fence goes on all of them (as a write: the uAPI does not say which
++ * are only read). */
++static int sgx_job_push(struct apple_sgx_job *job)
++{
++	struct apple_sgx_drm *sdrm = job->sdrm;
++	struct ww_acquire_ctx ctx;
++	unsigned int i;
++	int ret;
++
++	ret = drm_gem_lock_reservations(job->bos, job->bo_count, &ctx);
++	if (ret)
++		return ret;
++
++	mutex_lock(&sdrm->sched_lock);
++	drm_sched_job_arm(&job->base);
++	job->done_fence = dma_fence_get(&job->base.s_fence->finished);
++	for (i = 0; i < job->bo_count; i++) {
++		ret = dma_resv_reserve_fences(job->bos[i]->resv, 1);
++		if (ret)
++			break;
++		ret = drm_sched_job_add_implicit_dependencies(&job->base, job->bos[i], true);
++		if (ret)
++			break;
++	}
++	if (ret) {
++		mutex_unlock(&sdrm->sched_lock);
++		goto unlock;
++	}
++	atomic_inc(&sdrm->submitted);
++	drm_sched_entity_push_job(&job->base);
++	mutex_unlock(&sdrm->sched_lock);
++
++	for (i = 0; i < job->bo_count; i++)
++		dma_resv_add_fence(job->bos[i]->resv, job->done_fence, DMA_RESV_USAGE_WRITE);
++unlock:
++	drm_gem_unlock_reservations(job->bos, job->bo_count, &ctx);
++	return ret;
++}
++
++static int sgx_ioctl_submit(struct drm_device *drm, void *data, struct drm_file *file)
++{
++	struct apple_sgx_drm *sdrm = to_sgx_drm(drm);
++	struct apple_sgx_file *fpriv = file->driver_priv;
++	struct drm_apple_sgx_submit *args = data;
++	struct drm_syncobj *sync_out = NULL;
++	struct drm_gem_object *det;
++	struct apple_sgx_job *job;
++	bool listed = false;
++	unsigned int i;
++	int ret;
++
++	if (args->flags || args->pad ||
++	    args->cmd_size < APPLE_SGX_TA_CMD_MIN || args->cmd_size > APPLE_SGX_TA_CMD_MAX ||
++	    (args->details_offset & 3) || !args->bo_handle_count ||
++	    args->bo_handle_count > SGX_MAX_BOS || args->in_sync_count > SGX_MAX_IN_SYNCS)
++		return -EINVAL;
++	if (!apple_sgx_up(sdrm->sgx))
++		return -ENODEV;
++
++	if (args->out_sync) {
++		sync_out = drm_syncobj_find(file, args->out_sync);
++		if (!sync_out)
++			return -ENOENT;
++	}
++
++	job = kzalloc(sizeof(*job), GFP_KERNEL);
++	if (!job) {
++		ret = -ENOMEM;
++		goto out_sync;
++	}
++	job->sdrm = sdrm;
++	job->pb_va = args->pb_va;
++	job->cache_control = args->cache_control;
++
++	job->cmd = memdup_user(u64_to_user_ptr(args->cmd), args->cmd_size);
++	if (IS_ERR(job->cmd)) {
++		ret = PTR_ERR(job->cmd);
++		job->cmd = NULL;
++		goto out_job;
++	}
++	job->cmd_len = job->cmd[0];
++	if (job->cmd_len < APPLE_SGX_TA_CMD_MIN || job->cmd_len > args->cmd_size ||
++	    (job->cmd_len & 7)) {
++		ret = -EINVAL;
++		goto out_job;
++	}
++
++	/* on a bad handle the ones found before it are held: release puts
++	 * every entry that is set */
++	ret = drm_gem_objects_lookup(file, u64_to_user_ptr(args->bo_handles),
++				     args->bo_handle_count, &job->bos);
++	if (job->bos)
++		job->bo_count = args->bo_handle_count;
++	if (ret)
++		goto out_job;
++
++	/* the parameter buffer: the kernel's, or in one of the listed
++	 * buffers, whose serial tells a new one at the same address
++	 * (pb_restart) */
++	if (!args->pb_va) {
++		struct apple_sgx_bo *kpb = sgx_kpb_get(sdrm);
++
++		if (!kpb) {
++			ret = -ENOMEM;
++			goto out_job;
++		}
++		job->pb_va = SGX_PB_VA;
++		job->pb_serial = kpb->serial;
++		job->kernel_pb = true;
++	}
++	for (i = 0; i < job->bo_count && !job->pb_serial; i++) {
++		struct apple_sgx_bo *bo = to_sgx_bo(job->bos[i]);
++
++		if (drm_mm_node_allocated(&bo->node) && args->pb_va >= bo->node.start &&
++		    args->pb_va - bo->node.start < job->bos[i]->size)
++			job->pb_serial = bo->serial;
++	}
++	if (!job->pb_serial) {
++		ret = -EINVAL;
++		goto out_job;
++	}
++
++	/* the render details: in one of the listed buffers, and mapped for the
++	 * poller */
++	det = drm_gem_object_lookup(file, args->details_handle);
++	if (!det) {
++		ret = -ENOENT;
++		goto out_job;
++	}
++	job->details_obj = det;
++	for (i = 0; i < job->bo_count; i++)
++		listed |= job->bos[i] == det;
++	if (!listed || det->size < SGX_DETAILS_SIZE ||
++	    args->details_offset > det->size - SGX_DETAILS_SIZE) {
++		ret = -EINVAL;
++		goto out_job;
++	}
++	ret = drm_gem_vmap_unlocked(det, &job->details_map);
++	if (ret)
++		goto out_job;
++	job->details = job->details_map.vaddr + args->details_offset;
++
++	ret = drm_sched_job_init(&job->base, &fpriv->entity, 1, NULL);
++	if (ret)
++		goto out_job;
++	ret = sgx_job_in_syncs(job, file, args);
++	if (!ret)
++		ret = sgx_job_push(job);
++	if (ret) {
++		drm_sched_job_cleanup(&job->base);
++		goto out_job;
++	}
++	if (sync_out)
++		drm_syncobj_replace_fence(sync_out, job->done_fence);
++	goto out_sync;		/* the scheduler owns the job now */
++
++out_job:
++	sgx_job_release(job);
++out_sync:
++	if (sync_out)
++		drm_syncobj_put(sync_out);
++	return ret;
++}
++
++/* ---- the device ------------------------------------------------------------ */
++
++static int sgx_open(struct drm_device *drm, struct drm_file *file)
++{
++	struct apple_sgx_drm *sdrm = to_sgx_drm(drm);
++	struct drm_gpu_scheduler *sched = &sdrm->sched;
++	struct apple_sgx *sgx = sdrm->sgx;
++	struct apple_sgx_file *fpriv;
++	int ret;
++
++	/* with autoboot off, the first client starts the microkernel */
++	flush_work(&sgx->boot_work);
++	if (!apple_sgx_up(sgx) && !READ_ONCE(sgx->boot_result))
++		apple_sgx_restart(sgx);
++
++	fpriv = kzalloc(sizeof(*fpriv), GFP_KERNEL);
++	if (!fpriv)
++		return -ENOMEM;
++	ret = drm_sched_entity_init(&fpriv->entity, DRM_SCHED_PRIORITY_NORMAL, &sched, 1, NULL);
++	if (ret) {
++		kfree(fpriv);
++		return ret;
++	}
++	file->driver_priv = fpriv;
++	atomic_inc(&sdrm->clients);
++	return 0;
++}
++
++/* the screen's overlay (apple_sgx_kms.c) */
++static int sgx_ioctl_overlay(struct drm_device *drm, void *data, struct drm_file *file)
++{
++	return apple_sgx_kms_overlay(to_sgx_drm(drm)->sgx, file, data);
++}
++
++static void sgx_postclose(struct drm_device *drm, struct drm_file *file)
++{
++	struct apple_sgx_drm *sdrm = to_sgx_drm(drm);
++	struct apple_sgx_file *fpriv = file->driver_priv;
++
++	apple_sgx_kms_overlay_close(sdrm->sgx, file);
++	drm_sched_entity_destroy(&fpriv->entity);
++	kfree(fpriv);
++	atomic_dec(&sdrm->clients);
++}
++
++static const struct drm_ioctl_desc sgx_ioctls[] = {
++	DRM_IOCTL_DEF_DRV(APPLE_SGX_GET_PARAM, sgx_ioctl_get_param, DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(APPLE_SGX_GEM_CREATE, sgx_ioctl_gem_create, DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(APPLE_SGX_GEM_MMAP_OFFSET, sgx_ioctl_gem_mmap_offset, DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(APPLE_SGX_GEM_WAIT, sgx_ioctl_gem_wait, DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(APPLE_SGX_SUBMIT, sgx_ioctl_submit, DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(APPLE_SGX_GEM_INFO, sgx_ioctl_gem_info, DRM_RENDER_ALLOW),
++	DRM_IOCTL_DEF_DRV(APPLE_SGX_OVERLAY, sgx_ioctl_overlay, DRM_RENDER_ALLOW | DRM_ROOT_ONLY),
++};
++
++DEFINE_DRM_GEM_FOPS(sgx_drm_fops);
++
++static const struct drm_driver sgx_drm_driver = {
++	.driver_features = DRIVER_GEM | DRIVER_RENDER | DRIVER_SYNCOBJ | DRIVER_MODESET |
++			   DRIVER_ATOMIC,
++	.open = sgx_open,
++	.postclose = sgx_postclose,
++	.ioctls = sgx_ioctls,
++	.num_ioctls = ARRAY_SIZE(sgx_ioctls),
++	.fops = &sgx_drm_fops,
++	.gem_create_object = sgx_gem_create_object,
++	.dumb_create = sgx_dumb_create,
++	.name = "apple_sgx",
++	.desc = "Apple S5L8940X PowerVR SGX543MP2",
++	.date = "20261003",
++	.major = 0,
++	.minor = 1,
++};
++
++bool apple_sgx_drm_busy(struct apple_sgx *sgx)
++{
++	return sgx->drm && atomic_read(&sgx->drm->clients) > 0;
++}
++
++/* debugfs "map": memory mapped at a chosen address, which no buffer of the
++ * render node may then take (and the other way round).  Slot is its index
++ * in sgx->extra; anything outside the render node's range is not its
++ * business. */
++int apple_sgx_drm_reserve(struct apple_sgx *sgx, int slot, u32 va, u32 size)
++{
++	struct apple_sgx_drm *sdrm = sgx->drm;
++	u64 end = (u64)va + size;
++	struct drm_mm_node *n;
++	int ret;
++
++	if (!sdrm || end <= SGX_USER_VA_START || va >= SGX_USER_VA_END)
++		return 0;
++	if (slot < 0 || slot >= SGX_MAX_EXTRA || va < SGX_USER_VA_START ||
++	    end > SGX_USER_VA_END)
++		return -EINVAL;
++	n = &sdrm->extra[slot];
++	memset(n, 0, sizeof(*n));
++	n->start = va;
++	n->size = size;
++	mutex_lock(&sdrm->va_lock);
++	ret = drm_mm_reserve_node(&sdrm->va, n);
++	mutex_unlock(&sdrm->va_lock);
++	return ret == -ENOSPC ? -EEXIST : ret;
++}
++
++void apple_sgx_drm_unreserve(struct apple_sgx *sgx, int slot)
++{
++	struct apple_sgx_drm *sdrm = sgx->drm;
++
++	if (!sdrm || slot < 0 || slot >= SGX_MAX_EXTRA)
++		return;
++	mutex_lock(&sdrm->va_lock);
++	if (drm_mm_node_allocated(&sdrm->extra[slot]))
++		drm_mm_remove_node(&sdrm->extra[slot]);
++	mutex_unlock(&sdrm->va_lock);
++}
++
++static void sgx_drm_release(struct drm_device *drm, void *data)
++{
++	struct apple_sgx_drm *sdrm = data;
++	struct drm_mm_node *n, *next;
++
++	drm_mm_for_each_node_safe(n, next, &sdrm->va)
++		drm_mm_remove_node(n);
++	drm_mm_takedown(&sdrm->va);
++}
++
++int apple_sgx_drm_init(struct apple_sgx *sgx)
++{
++	struct apple_sgx_drm *sdrm;
++	int ret;
++
++	sdrm = devm_drm_dev_alloc(sgx->dev, &sgx_drm_driver, struct apple_sgx_drm, drm);
++	if (IS_ERR(sdrm))
++		return PTR_ERR(sdrm);
++	sdrm->sgx = sgx;
++	mutex_init(&sdrm->va_lock);
++	mutex_init(&sdrm->sched_lock);
++	mutex_init(&sdrm->kpb_lock);
++	spin_lock_init(&sdrm->fence_lock);
++	spin_lock_init(&sdrm->job_lock);
++	sdrm->fence_context = dma_fence_context_alloc(1);
++	hrtimer_init(&sdrm->poll, CLOCK_MONOTONIC, HRTIMER_MODE_REL_SOFT);
++	sdrm->poll.function = sgx_poll;
++	INIT_WORK(&sdrm->rekick, sgx_rekick_work);
++
++	drm_mm_init(&sdrm->va, SGX_USER_VA_START, SGX_USER_VA_END - SGX_USER_VA_START);
++	ret = drmm_add_action_or_reset(&sdrm->drm, sgx_drm_release, sdrm);
++	if (ret)
++		return ret;
++	/* the framebuffer's window, whatever the framebuffer turns out to be */
++	sdrm->fb_window.start = SGX_FB_VA;
++	sdrm->fb_window.size = SGX_FB_WINDOW;
++	ret = drm_mm_reserve_node(&sdrm->va, &sdrm->fb_window);
++	if (ret)
++		return ret;
++
++	/* the screen, if there is a framebuffer to show things in */
++	ret = apple_sgx_kms_init(&sdrm->drm, sgx);
++	if (ret == -ENODEV)
++		sdrm->drm.driver_features &= ~(DRIVER_MODESET | DRIVER_ATOMIC);
++	else if (ret)
++		return ret;
++
++	ret = drm_sched_init(&sdrm->sched, &sgx_sched_ops, NULL, DRM_SCHED_PRIORITY_COUNT,
++			     1, 0, msecs_to_jiffies(render_timeout_ms), NULL, NULL,
++			     "apple-sgx-render", sgx->dev);
++	if (ret)
++		return ret;
++
++	sgx->drm = sdrm;
++	ret = drm_dev_register(&sdrm->drm, 0);
++	if (ret) {
++		sgx->drm = NULL;
++		drm_sched_fini(&sdrm->sched);
++		return ret;
++	}
++	drm_info(&sdrm->drm, "render node: buffers at GPU 0x%08x-0x%08x, code base 0x%08x\n",
++		 SGX_USER_VA_START, SGX_USER_VA_END, SGX_CODE_BASE);
++	return 0;
++}
++
++void apple_sgx_drm_fini(struct apple_sgx *sgx)
++{
++	struct apple_sgx_drm *sdrm = sgx->drm;
++
++	if (!sdrm)
++		return;
++	drm_dev_unplug(&sdrm->drm);
++	drm_sched_fini(&sdrm->sched);
++	hrtimer_cancel(&sdrm->poll);
++	cancel_work_sync(&sdrm->rekick);
++}
+diff --git a/drivers/gpu/drm/apple-sgx/apple_sgx_hw.c b/drivers/gpu/drm/apple-sgx/apple_sgx_hw.c
+new file mode 100644
+index 000000000..05591c672
+--- /dev/null
++++ b/drivers/gpu/drm/apple-sgx/apple_sgx_hw.c
+@@ -0,0 +1,2474 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Apple S5L8940X (A5) PowerVR SGX543MP2 -- the hardware side: power-on,
++ * register access, the GPU's MMU, the microkernel, its queues, the 2D
++ * engine and the debugfs tools.  The render node (apple_sgx_drm.c) sits on
++ * top of it.
++ *
++ * At probe this switches the SGX on, runs the initialisation iOS runs,
++ * checks that the master and every core answer, registers the render node,
++ * and starts the microkernel (autoboot): page tables and buffers, iOS's
++ * microkernel loaded the way iOS does it, kicked, and waited for.  From then
++ * on it takes commands through the kernel CCB, the DDK's command queue:
++ * power and perf counters (debugfs apple-sgx/cmd), transfers -- the 2D
++ * engine, which can also draw fbcon's fills and copies -- and renders, the
++ * TA and 3D pass, from debugfs ("rkick") or from the render node.
++ *
++ * Power is two PMGR power states, GFX_SYS (0x3f101024) then GFX
++ * (0x3f101028), taken as clocks from the gate driver in the order the DT
++ * lists them.  Nothing else: the GFX clocks already run off PLL@0x18 (the
++ * core at 256.5 MHz, measured: SGX_CLOCK_KHZ), and HPERF-NRT is not needed.
++ *
++ * The register window is six 16 KiB banks (the DDK's sgx_mkif_km.h, and iOS
++ * addresses the cores the same way):
++ *
++ *   bank 0       broadcast.  Written to reach every core at once; it has no
++ *                read path, and a read HANGS THE BUS.
++ *   bank 1       the master.
++ *   bank 2 + n   core n.  Reads hang until MASTER_CLKGATECTL gives the core
++ *                a clock.
++ *
++ * Every access goes through sgx_read()/sgx_write(), which refuse bank 0
++ * reads and any core bank this SGX does not have, so neither mistake can be
++ * made by accident.  Each freeze during bring-up was one or the other.
++ *
++ * Everything here is iOS 8.4.1's IMGSGX543.kext, class SGXDriver543:
++ * initSGX (kernelcache 0x80bf3918) with its clock helpers (0x80bf3700,
++ * 0x80bf3754), the microkernel loader and setup (0x80bf9754, 0x80bfa080) and
++ * the state it fills in (0x80bfa884).  Buffers are named after the offset in
++ * SGXDriver543 that iOS keeps them at, so each line can be checked against
++ * the disassembly.  Register names come from TI's MIT/GPLv2 DDK (sgxmpdefs.h,
++ * sgx544defs.h, sgxmmu.h) and, where the DDK has none, from iOS's register
++ * dump (0x80bf9230).  docs/research/p105-gpu.md is the notebook,
++ * docs/research/p105-mesa.md the plan this is a part of.
++ *
++ * The microkernel is Apple's and Imagination's.  It is not in this tree: the
++ * build takes it out of the user's own IPSW (scripts/extract-sgx-firmware.py)
++ * into /lib/firmware/apple/sgx543.fw, and the offsets below are for that
++ * exact 12H321 build, which the script checks by hash.
++ */
++
++#include <linux/bits.h>
++#include <linux/clk.h>
++#include <linux/debugfs.h>
++#include <linux/console.h>
++#include <linux/delay.h>
++#include <linux/dma-mapping.h>
++#include <linux/fb.h>
++#include <linux/firmware.h>
++#include <linux/interrupt.h>
++#include <linux/io.h>
++#include <linux/iopoll.h>
++#include <linux/kernel.h>
++#include <linux/ktime.h>
++#include <linux/math64.h>
++#include <linux/mod_devicetable.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/of.h>
++#include <linux/of_address.h>
++#include <linux/platform_device.h>
++#include <linux/seq_file.h>
++#include <linux/sizes.h>
++#include <linux/slab.h>
++#include <linux/spinlock.h>
++#include <linux/string.h>
++#include <linux/uaccess.h>
++#include <linux/vmalloc.h>
++#include <linux/vt_kern.h>
++#include <linux/workqueue.h>
++
++#include "apple_sgx.h"
++
++/* Per-core registers, at SGX_CORE(n) or, for writes, SGX_BCAST. */
++#define SGX_CLKGATECTL			0x000
++#define SGX_CLKGATECTL2			0x004
++#define SGX_CLKGATESTATUS		0x008
++#define SGX_POWER			0x01c
++#define SGX_CORE_ID			0x020
++#define SGX_CORE_REVISION		0x024
++#define SGX_SOFT_RESET			0x080
++#define SGX_EVENT_HOST_ENABLE2		0x110
++#define SGX_EVENT_HOST_CLEAR2		0x114
++#define SGX_EVENT_STATUS2		0x118
++#define SGX_EVENT_STATUS		0x12c
++#define SGX_EVENT_HOST_ENABLE		0x130
++#define SGX_EVENT_HOST_CLEAR		0x134
++#define SGX_REG_13C			0x13c
++#define SGX_REG_140			0x140
++#define SGX_REG_310			0x310	/* iOS writes 1; not in the DDK */
++#define SGX_USE_CODE_BASE(i)		(0xa0c + 4 * (i))
++#define SGX_EVENT_PDS_EXEC		0xa68	/* names guessed: exec, data, info */
++#define SGX_EVENT_PDS_DATA		0xa6c
++#define SGX_EVENT_PDS_INFO		0xa70
++#define SGX_EVENT_KICKER		0xac4
++#define SGX_EVENT_KICK			0xac8
++#define SGX_EVENT_TIMER			0xacc
++#define SGX_BOOT_ENTRY			0xba0	/* entry into the boot program / 8 */
++#define SGX_BIF_CTRL			0xc00
++#define SGX_BIF_INT_STAT		0xc04
++#define SGX_BIF_FAULT			0xc08
++#define SGX_BIF_TILE1			0xc10
++#define SGX_BIF_TILE2			0xc14
++#define SGX_BIF_CTRL_INVAL		0xc34
++#define SGX_BIF_DIR_LIST_BASE(i)	((i) ? 0xc34 + 4 * (i) : 0xc84)
++#define SGX_BIF_BANK_SET		0xc74
++#define SGX_BIF_BANK0			0xc78
++#define SGX_BIF_BANK1			0xc7c
++#define SGX_BIF_MEM_REQ_STAT		0xca8
++#define SGX_BIF_MMU_CTRL		0xcd0
++
++/* Master registers, offsets into the whole window. */
++#define SGX_MASTER_CORE			0x4000	/* enabled cores - 1 */
++#define SGX_MASTER_CLKGATECTL		0x4004	/* 2 bits per core */
++#define SGX_MASTER_CLKGATESTATUS	0x4008
++#define SGX_MASTER_CORE_ID		0x4010
++#define SGX_MASTER_CORE_REVISION	0x4014
++#define SGX_MASTER_CLKGATECTL2		0x4020
++#define SGX_MASTER_CLKGATESTATUS2	0x4024
++#define SGX_MASTER_SOFT_RESET		0x4080
++#define SGX_MASTER_EVENT_STATUS2	0x4118
++#define SGX_MASTER_EVENT_STATUS		0x412c
++#define SGX_MASTER_REG_4144		0x4144
++#define SGX_MASTER_REG_414C		0x414c
++#define SGX_MASTER_REG_4808		0x4808
++#define SGX_MASTER_REG_4A58		0x4a58
++#define SGX_MASTER_BIF_CTRL		0x4c00
++#define SGX_MASTER_BIF_INT_STAT		0x4c04
++#define SGX_MASTER_BIF_FAULT		0x4c08
++#define SGX_MASTER_BIF_MEM_REQ_STAT	0x4ca8
++#define SGX_MASTER_BIF_MMU_CTRL		0x4cd0
++#define SGX_MASTER_SLC_CTRL		0x4d00
++#define SGX_MASTER_SLC_CTRL_BYPASS	0x4d04
++
++#define SGX_CORE_ID_ID(v)		((v) >> 16)
++#define SGX_CORE_ID_CORES(v)		(((v) >> 8) & 0xf)
++#define SGX_ID_543			0x0119
++
++/* MASTER_SOFT_RESET: IPF, DPM, VDM, SLC, PTLA (0x4f0), BIF (0x100), and one
++ * bit per core. */
++#define SGX_MASTER_RESET_ALL		0x5f0
++
++/* iOS's values.  The bypass word is BYP_CC (0x4000000) plus, on parts with
++ * erratum 31195, the USE0-3 and TA requestors (0x1e40) -- the DDK's
++ * FIX_HW_BRN_31195. */
++#define SGX_SLC_CTRL_VAL		0x0044c000
++#define SGX_SLC_BYPASS_VAL		0x04000000
++#define SGX_SLC_BYPASS_BRN_31195	0x00001e40
++
++/* ---- the GPU's MMU (sgxmmu.h; iOS's PTE writer is 0x80bf4dc4) ---------- */
++
++/* The page flags iOS gives each buffer.  Its allocator (0x80bf9658) takes
++ * explicit flags, or else by heap: heap 1 -> cache-consistent and
++ * EDM-protected, heap 0 -> read-only; the PTE writer (0x80bf4dc4) turns them
++ * into these bits.  CACHECONSISTENT is not optional: without it the
++ * microkernel keeps the kernel CCB's write offset in its data cache from
++ * the first read on and never sees a command. */
++#define PTE_RO				SGX_PTE_READONLY
++#define PTE_SHARED			(SGX_PTE_CACHECONSISTENT | SGX_PTE_EDMPROTECT)
++#define PTE_CC				SGX_PTE_CACHECONSISTENT
++
++/* ---- the firmware file (scripts/extract-sgx-firmware.py) --------------- */
++
++#define SGX_FW_NAME			"apple/sgx543.fw"
++#define SGX_FW_DATA_SIZE		0x16094		/* kext __DATA,__data */
++#define SGX_FW_CONST_SIZE		0x730		/* kext __TEXT,__const */
++
++struct sgx_fw_header {
++	char magic[8];			/* "SGX543FW" */
++	__le32 version;			/* 1 */
++	__le32 data_off, data_size;
++	__le32 const_off, const_size;
++	__le32 data_va, const_va;
++	char build[16];			/* "12H321" */
++};
++
++/* In __data: the microkernel, its boot program, and tables. */
++#define UK_CODE_OFF			0x00060
++#define UK_CODE_SIZE			0x11f88
++#define UK_CODE2_OFF			0x11fe8		/* more USSE code */
++#define UK_CODE2_SIZE			0x3b58
++#define UK_BOOT_OFF			0x15b40
++#define UK_BOOT_SIZE			0x248
++#define UK_TAB_BASE			0x15d90
++
++/* The code buffer: the boot program at 0, the microkernel at 0x1000 (iOS's
++ * this+0x6d0), and the entry points into the boot program for core 0 and for
++ * the others (0x80bfa068, 0x80bfa06c). */
++#define UK_START			0x1000
++#define UK_ENTRY_CORE0			0x40
++#define UK_ENTRY_OTHERS			0x240
++
++/* ---- commands: the DDK's kernel CCB (sgx_mkif_km.h), as iOS uses it ---- */
++
++/* The 0x750 buffer is the kernel CCB, 256 SGXMKIF_COMMANDs; the 0x758
++ * buffer is PVRSRV_SGX_CCB_CTL, the write offset and the read offset the
++ * microkernel advances as it takes each command.  iOS's
++ * SGXScheduleCCBCommand (0x80bfb104) fills the slot at the write offset,
++ * bumps the offset and the kicker count, and kicks core 0. */
++#define SGX_CCB_SIZE			256
++
++struct sgx_ccb_cmd {
++	u32 service;		/* the handler: USE code address / 8 */
++	u32 cache_control;	/* SGXMKIF_CC_INVAL_* */
++	u32 data[6];
++};
++
++/* The handlers iOS hands the microkernel (this+0x72c..0x73c, computed at
++ * 0x80bfa448), as offsets into the microkernel.  Which is which follows
++ * from where iOS sends them: TA and TRANSFER from the submit of the
++ * render and the transfer queue (slot 38 of the vtables at 0x80c02798 and
++ * 0x80c02898), POWER from deinitSGX (0x80bf4048) exactly as the DDK's
++ * SGXPrePowerState does it, HWPERF with the perf-counter selectors it
++ * copies into the host control block (0x80bfb1f0), and 0x738 for each
++ * context after a hardware recovery (0x80bf3f42), with cache control 6. */
++enum sgx_cmd_type {
++	SGX_CMD_TA,
++	SGX_CMD_POWER,
++	SGX_CMD_TRANSFER,
++	SGX_CMD_RECOVER,
++	SGX_CMD_HWPERF,
++	SGX_CMD_NUM
++};
++
++static const struct {
++	u32 off;
++	const char *name;
++} uk_handlers[SGX_CMD_NUM] = {
++	[SGX_CMD_TA]		= { 0x1fa8, "TA" },
++	[SGX_CMD_POWER]		= { 0x1bf0, "POWER" },
++	[SGX_CMD_TRANSFER]	= { 0x1e80, "TRANSFER" },
++	[SGX_CMD_RECOVER]	= { 0x21d0, "RECOVER" },
++	[SGX_CMD_HWPERF]	= { 0x21d8, "HWPERF" },
++};
++
++/* POWER's Data[1], and what the microkernel sets in the power status when
++ * it is done. */
++#define SGX_POWERCMD_POWEROFF		1
++#define SGX_POWERCMD_IDLE		2
++#define SGX_POWERCMD_RESUME		3
++#define SGX_POWMAN_IDLE_COMPLETE	BIT(2)
++#define SGX_POWMAN_POWEROFF_COMPLETE	BIT(3)
++#define SGX_POWMAN_NO_WORK		BIT(5)
++
++/* The host control block (0x748 buffer) is the DDK's SGXMKIF_HOST_CTL as
++ * built with SUPPORT_HW_RECOVERY, without FIX_HW_BRN_28889: iOS reads and
++ * writes these words at exactly these offsets.  Word indices. */
++#define HOST_INIT_STATUS		0	/* bit 0: the microkernel is up */
++#define HOST_POWER_STATUS		1	/* SGX_POWMAN_* */
++#define HOST_CLEANUP_STATUS		2
++#define HOST_UK_LOCKUPS			3
++#define HOST_HWR_SAMPLE_RATE		5
++#define HOST_UK_TIMER_CLOCK		6
++#define HOST_APM_SAMPLE_RATE		7
++#define HOST_INTERRUPT_FLAGS		8
++#define HOST_INTERRUPT_CLEAR		9
++#define HOST_TIME_WRAPS			12
++#define HOST_HOST_CLOCK			13
++#define HOST_ASSERT_FAIL		14
++
++enum { SRC_ZERO, SRC_DATA, SRC_CONST };
++
++static const struct sgx_buf_desc {
++	const char *name;
++	u32 size, align;
++	u8 src;
++	u8 pte;			/* PTE_RO, PTE_SHARED or 0 */
++	u32 off;		/* into __data or __const */
++} sgx_buf_descs[B_NUM] = {
++	/* 0x80bf9754, the loader */
++	[B_CODE]	= { "code 6d4",	UK_START + UK_CODE_SIZE, 0x1000, SRC_ZERO, PTE_RO },
++	[B_PDS_6D8]	= { "pds 6d8",	0x18,	0x1000, SRC_CONST, PTE_SHARED, 0x084 },
++	[B_PDS_6E0]	= { "pds 6e0",	0x38,	0x1000, SRC_CONST, PTE_SHARED, 0x09c },
++	[B_PDS_6E8]	= { "pds 6e8",	0x18,	0x1000, SRC_CONST, PTE_SHARED, 0x0d4 },
++	[B_PDS_6F0]	= { "pds 6f0",	0x350,	0x1000, SRC_CONST, PTE_SHARED, 0x0ec },
++	[B_PDS_6F8]	= { "pds 6f8",	0x9c,	0x1000, SRC_CONST, PTE_SHARED, 0x43c },
++	[B_CODE2]	= { "code 700",	UK_CODE2_SIZE, 0x1000, SRC_DATA, PTE_RO, UK_CODE2_OFF },
++	[B_PDS_704]	= { "pds 704",	0x258,	0x1000, SRC_CONST, PTE_SHARED, 0x4d8 },
++	[B_TAB_784]	= { "tab 784",	0xf0,	0x1000, SRC_DATA, PTE_RO, UK_TAB_BASE + 0x28 },
++	[B_TAB_78C]	= { "tab 78c",	0x140,	0x1000, SRC_DATA, PTE_RO, UK_TAB_BASE + 0x118 },
++	/* 0x80bfa080, the setup */
++	[B_740]		= { "ctl 740",	0x1a4,	0x1000, SRC_ZERO, PTE_SHARED },
++	[B_HOST]	= { "host 748",	0xec,	0x1000, SRC_ZERO, PTE_SHARED },
++	[B_750]		= { "750",	0x2000,	0x1000, SRC_ZERO, PTE_SHARED },
++	[B_758]		= { "758",	8,	0x1000, SRC_ZERO, PTE_SHARED },
++	[B_KICKER]	= { "kicker 760", 0x1000, 0x1000, SRC_ZERO, PTE_SHARED },
++	[B_768]		= { "768",	0x1500c, 0x1000, SRC_ZERO, PTE_SHARED },
++	[B_TAB_774]	= { "tab 774",	0x28,	0x1000, SRC_DATA, PTE_RO, UK_TAB_BASE },
++	[B_IDX_77C]	= { "idx 77c",	0x60,	0x1000, SRC_ZERO, PTE_RO },
++	[B_794]		= { "794",	0x14000, 0x100000, SRC_ZERO },
++	[B_798]		= { "798",	0x1000,	0x1000, SRC_ZERO },
++	[B_79C]		= { "79c",	0x8000,	0x1000, SRC_ZERO },
++	[B_7A0]		= { "7a0",	0x28000, 0x1000, SRC_ZERO },
++	/* IMGSGXTQChannel (allocations at 0x80bfcf06-0x80bfcfa0, heap 1) */
++	[B_TQ_CTX]	= { "tq ctx",	0x24,	0x1000, SRC_ZERO, PTE_SHARED },
++	[B_TQ_CCB]	= { "tq ccb",	0x10000, 0x1000, SRC_ZERO, PTE_SHARED },
++	[B_TQ_CTL]	= { "tq ctl",	8,	0x1000, SRC_ZERO, PTE_SHARED },
++	/* the render queue (0x80bfc860: a 0x40-byte context, 64 KiB CCB) */
++	[B_R_CTX]	= { "r ctx",	0x40,	0x1000, SRC_ZERO, PTE_SHARED },
++	[B_R_CCB]	= { "r ccb",	0x10000, 0x1000, SRC_ZERO, PTE_SHARED },
++	[B_R_CTL]	= { "r ctl",	8,	0x1000, SRC_ZERO, PTE_SHARED },
++	[B_SCRATCH]	= { "scratch",	0x1000,	0x1000, SRC_ZERO, PTE_SHARED },
++	[B_BLT_BLOCK]	= { "blt pds",	0x1000,	0x1000, SRC_ZERO, PTE_CC },
++	[B_BLT_PARAM]	= { "blt param", 0x8000, SZ_1M, SRC_ZERO, PTE_CC },
++};
++
++/* A clock-gating mode, as iOS writes it into every 2-bit field: 1 keeps the
++ * clock on, 2 lets the hardware gate it.  iOS uses 2 when auto clock gating
++ * is enabled; bring-up wants 1. */
++static unsigned int clock_mode = 1;
++module_param(clock_mode, uint, 0444);
++MODULE_PARM_DESC(clock_mode, "SGX clock gating: 1 = always on (default), 2 = automatic");
++
++/* The interrupt is taken only when asked for, from the next microkernel
++ * boot on: what raises it and how it clears is still being learnt. */
++static bool use_irq;
++module_param_named(irq, use_irq, bool, 0644);
++MODULE_PARM_DESC(irq, "take the SGX interrupt (AIC 49) from the next microkernel boot");
++
++/* Start the microkernel at probe and put fbcon's copies and fills on the
++ * GPU (the 2D engine); off leaves both to debugfs. */
++static bool autoboot = true;
++module_param(autoboot, bool, 0444);
++MODULE_PARM_DESC(autoboot, "start the microkernel at boot and accelerate fbcon (default on)");
++
++/* fbcon's fills and copies on the GPU.  Off by default: a scroll is a copy of
++ * the whole screen per line (~1 ms), no faster than fbcon redrawing the text
++ * with the CPU (0.2-1.3 ms a line, measured); debugfs "fbcon" turns it on. */
++static bool fbcon_gpu;
++module_param(fbcon_gpu, bool, 0644);
++MODULE_PARM_DESC(fbcon_gpu, "accelerate fbcon with the 2D engine at microkernel start (default off)");
++
++/* A copy up the screen over itself (a scroll) in one job: measured exact
++ * (the GPU reads each region before rows below are written); off cuts it
++ * into bands like the other directions. */
++static bool fast_scroll = true;
++module_param(fast_scroll, bool, 0644);
++MODULE_PARM_DESC(fast_scroll, "scroll up in one GPU job (default on)");
++
++/* What a kick asks the microkernel to invalidate when page tables changed
++ * since the last one, the DDK's way: the cache-control word of the kernel
++ * CCB command.  The DDK's mmu.c asks for the page table and directory
++ * caches and, on multi-core parts (SGX_FEATURE_MP), the system level cache
++ * with them, which holds PDEs and PTEs there.  Before the first kick the
++ * boot has done it. */
++static unsigned int mmu_inval_cc = SGX_CC_INVAL_BIF_PT | SGX_CC_INVAL_BIF_PD |
++				   SGX_CC_INVAL_BIF_SL;
++module_param(mmu_inval_cc, uint, 0644);
++MODULE_PARM_DESC(mmu_inval_cc, "SGXMKIF_CC_* sent with a render after the page tables changed (default 7)");
++
++/* Unhandled interrupts in a row before the line is switched off. */
++#define SGX_IRQ_STORM			16
++
++static int sgx_blt_init(struct apple_sgx *sgx);
++
++/* The only way to a register.  A read of bank 0 or of a core bank this SGX
++ * does not have would hang the bus, so it is refused -- with a warning,
++ * since it can only be a bug. */
++static bool sgx_readable(struct apple_sgx *sgx, u32 off)
++{
++	if (off >= SGX_MASTER && off < SGX_CORE(0))
++		return true;
++	return off >= SGX_CORE(0) && off < SGX_CORE(sgx->ncores);
++}
++
++static u32 sgx_read(struct apple_sgx *sgx, u32 off)
++{
++	if (WARN_ONCE(!sgx_readable(sgx, off),
++		      "apple-sgx: refused read at +0x%05x\n", off))
++		return ~0u;
++	return readl(sgx->regs + off);
++}
++
++static void sgx_write(struct apple_sgx *sgx, u32 off, u32 val)
++{
++	/* Bank 0 is write-only, which is what it is for. */
++	if (WARN_ONCE(off >= SGX_CORE(sgx->ncores),
++		      "apple-sgx: refused write at +0x%05x\n", off))
++		return;
++	writel(val, sgx->regs + off);
++}
++
++/* The same mode in every 2-bit field listed by shift. */
++static u32 sgx_modes(unsigned int m, const u8 *shifts, int n)
++{
++	u32 v = 0;
++
++	while (n--)
++		v |= m << shifts[n];
++	return v;
++}
++
++static void sgx_init(struct apple_sgx *sgx)
++{
++	/* CLKGATECTL: ISP, ISP2, TSP, TE, MTE, DPM, VDM, PDS, IDXFIFO, TA,
++	 * BIF_CORE.  CLKGATECTL2: PBE, TCU_L2, UCACHEL2, USE0, ITR0, TEX0,
++	 * USE1, ITR1, TEX1, DCU_L2, DCU1_L0L1, DCU0_L0L1 (sgx544defs.h). */
++	static const u8 ctl[] = { 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20 };
++	static const u8 ctl2[] = { 0, 2, 4, 6, 8, 10, 14, 16, 18, 22, 24, 26 };
++	static const u8 master2[] = { 2, 4, 6, 8 };
++	unsigned int m = clock_mode, i;
++	u32 cores = 0, bypass = SGX_SLC_BYPASS_VAL;
++
++	for (i = 0; i < sgx->ncores; i++)
++		cores |= m << (2 * i);
++	if (sgx->brn_31195)
++		bypass |= SGX_SLC_BYPASS_BRN_31195;
++
++	/* Which cores exist, and the master's and each core's clocks.  The
++	 * cores have no clock until MASTER_CLKGATECTL gives them one. */
++	sgx_write(sgx, SGX_MASTER_CORE, sgx->ncores - 1);
++	sgx_write(sgx, SGX_MASTER_CLKGATECTL2,
++		  sgx_modes(m, master2, ARRAY_SIZE(master2)) | 1);
++	sgx_write(sgx, SGX_MASTER_CLKGATECTL, cores);
++
++	/* Reset, with the system-level cache set up while it is held. */
++	sgx_write(sgx, SGX_MASTER_SOFT_RESET,
++		  SGX_MASTER_RESET_ALL | GENMASK(sgx->ncores - 1, 0));
++	sgx_write(sgx, SGX_MASTER_SLC_CTRL, SGX_SLC_CTRL_VAL);
++	sgx_write(sgx, SGX_MASTER_SLC_CTRL_BYPASS, bypass);
++	sgx_write(sgx, SGX_MASTER_SOFT_RESET, 0);
++	/* The DDK waits 100 SGX clocks here: 1 us at ~100 MHz. */
++	udelay(10);
++
++	/* Every core's module clocks, through the broadcast bank.  Bit 28
++	 * (SYSTEM_CLKG) goes with mode 1 only, as iOS has it. */
++	sgx_write(sgx, SGX_BCAST + SGX_CLKGATECTL,
++		  sgx_modes(m, ctl, ARRAY_SIZE(ctl)) |
++		  (m == 1 ? BIT(28) : 0));
++	sgx_write(sgx, SGX_BCAST + SGX_CLKGATECTL2,
++		  sgx_modes(m, ctl2, ARRAY_SIZE(ctl2)));
++	sgx_write(sgx, SGX_BCAST + SGX_REG_310, 1);
++}
++
++/* ---- the MMU ------------------------------------------------------------ */
++
++/* Page tables are allocated as needed and kept.  A change to a live mapping
++ * only reaches the GPU once its MMU caches are invalidated: before the
++ * microkernel boots that is the boot, afterwards the next kick asks the
++ * microkernel for it (mmu_dirty, SGX_CC_INVAL_BIF_*). */
++int apple_sgx_mmu_map(struct apple_sgx *sgx, u32 va, dma_addr_t pa, size_t size,
++		      u32 flags)
++{
++	size_t done;
++	int ret = 0;
++
++	mutex_lock(&sgx->mmu_lock);
++	for (done = 0; done < size; done += SGX_PAGE_SIZE) {
++		u32 v = va + done, pde = v >> 22, pte = (v >> 12) & 0x3ff;
++
++		if (!sgx->pt[pde]) {
++			sgx->pt[pde] = dmam_alloc_coherent(sgx->dev, SGX_PAGE_SIZE,
++							   &sgx->pt_dma[pde], GFP_KERNEL);
++			if (!sgx->pt[pde]) {
++				ret = -ENOMEM;
++				break;
++			}
++			sgx->pd[pde] = lower_32_bits(sgx->pt_dma[pde]) | SGX_PDE_VALID;
++		}
++		sgx->pt[pde][pte] = lower_32_bits(pa + done) | flags | SGX_PTE_VALID;
++	}
++	atomic_set(&sgx->mmu_dirty, 1);
++	mutex_unlock(&sgx->mmu_lock);
++	return ret;
++}
++
++void apple_sgx_mmu_unmap(struct apple_sgx *sgx, u32 va, size_t size)
++{
++	size_t done;
++
++	mutex_lock(&sgx->mmu_lock);
++	for (done = 0; done < size; done += SGX_PAGE_SIZE) {
++		u32 v = va + done, pde = v >> 22, pte = (v >> 12) & 0x3ff;
++
++		if (sgx->pt[pde])
++			sgx->pt[pde][pte] = 0;
++	}
++	atomic_set(&sgx->mmu_dirty, 1);
++	mutex_unlock(&sgx->mmu_lock);
++}
++
++static int sgx_buf_alloc(struct apple_sgx *sgx, enum sgx_buf_id id)
++{
++	const struct sgx_buf_desc *d = &sgx_buf_descs[id];
++	struct sgx_buf *b = &sgx->buf[id];
++	int ret;
++
++	b->size = ALIGN(d->size, SGX_PAGE_SIZE);
++	b->cpu = dmam_alloc_coherent(sgx->dev, b->size, &b->dma, GFP_KERNEL);
++	if (!b->cpu)
++		return -ENOMEM;
++	b->va = ALIGN(sgx->va_next, d->align);
++	sgx->va_next = b->va + b->size;
++	ret = apple_sgx_mmu_map(sgx, b->va, b->dma, b->size, d->pte);
++	if (ret)
++		return ret;
++	dev_dbg(sgx->dev, "%-10s va 0x%08x pa %pad size 0x%zx\n",
++		d->name, b->va, &b->dma, b->size);
++	return 0;
++}
++
++static int sgx_bufs_alloc(struct apple_sgx *sgx)
++{
++	int i, ret;
++
++	if (sgx->bufs_ready)
++		return 0;
++	sgx->va_next = SGX_VA_BASE;
++	for (i = 0; i < B_NUM; i++) {
++		ret = sgx_buf_alloc(sgx, i);
++		if (ret)
++			return ret;
++	}
++	if (sgx->va_next - SGX_VA_BASE > SZ_8M)
++		return -E2BIG;
++	sgx->bufs_ready = true;
++	return 0;
++}
++
++/* ---- the microkernel -------------------------------------------------- */
++
++/* A LIMM's 32-bit immediate lives in three fields: bits 20:0 of the low
++ * word, and imm[31:26] / imm[25:21] at bits 17:12 / 8:4 of the high word
++ * (iOS: 0x80bfa4e0 and on). */
++static void uk_set_limm(u32 *insn, u32 imm)
++{
++	insn[0] = (insn[0] & ~GENMASK(20, 0)) | (imm & GENMASK(20, 0));
++	insn[1] = (insn[1] & 0xfffc0e0f) | ((imm >> 14) & 0x3f000) |
++		  ((imm >> 17) & 0x1f0);
++}
++
++/* A USE code address as the PDS programs take it: relative to the code
++ * buffer, in 8-byte units, shifted (0x80bfaa82). */
++static u32 uk_use(struct apple_sgx *sgx, u32 va)
++{
++	return ((va - sgx->buf[B_CODE].va) << 1) & 0xfffff0;
++}
++
++static u32 uk_at(struct apple_sgx *sgx, u32 off)
++{
++	return sgx->buf[B_CODE].va + UK_START + off;
++}
++
++static void sgx_uk_fill(struct apple_sgx *sgx, const u8 *data, const u8 *cnst)
++{
++	struct sgx_buf *b = sgx->buf;
++	u32 *code = b[B_CODE].cpu, *uk = code + UK_START / 4;
++	u32 *pds, *t, i;
++	static const struct { u32 off; u32 imm; } consts[] = {
++		{ 0x0000, 0x01001000 }, { 0x0058, 0x00800900 }, { 0x00f0, 7 },
++		{ 0x7f98, 0x02800900 }, { 0x86c8, 0x02800900 },
++	};
++
++	/* Contents, as the loader and setup leave them. */
++	for (i = 0; i < B_NUM; i++) {
++		const struct sgx_buf_desc *d = &sgx_buf_descs[i];
++
++		memset(b[i].cpu, 0, b[i].size);
++		if (d->src == SRC_DATA)
++			memcpy(b[i].cpu, data + d->off, d->size);
++		else if (d->src == SRC_CONST)
++			memcpy(b[i].cpu, cnst + d->off, d->size);
++	}
++	memcpy(code, data + UK_BOOT_OFF, UK_BOOT_SIZE);
++	memcpy(uk, data + UK_CODE_OFF, UK_CODE_SIZE);
++	for (i = 0; i < 24; i++)
++		b[B_IDX_77C].cpu[i] = i;
++
++	/* The microkernel's LIMMs that carry addresses and constants
++	 * (0x80bfa4e0-0x80bfa72c, 0x80bfac20-0x80bfad1c, 0x80bfae48-). */
++	for (i = 0; i < ARRAY_SIZE(consts); i++)
++		uk_set_limm(uk + consts[i].off / 4, consts[i].imm);
++	uk_set_limm(uk + 0x010 / 4, b[B_PDS_6E0].va >> 4);
++	uk_set_limm(uk + 0x018 / 4, b[B_740].va);
++	uk_set_limm(uk + 0x060 / 4, b[B_PDS_6E8].va >> 4);
++	uk_set_limm(uk + 0x0e0 / 4, b[B_PDS_6F0].va & ~0xfu);
++	uk_set_limm(uk + 0x2b0 / 4, b[B_7A0].va);
++	uk_set_limm(uk + 0x340 / 4, b[B_79C].va);
++	uk_set_limm(uk + 0x390 / 4, b[B_794].va);
++	uk_set_limm(uk + 0x3b0 / 4, b[B_798].va);
++	uk_set_limm(uk + 0x588 / 4, b[B_TAB_774].va);
++	uk_set_limm(uk + 0x7fb0 / 4, b[B_PDS_6F8].va >> 4);
++	uk_set_limm(uk + 0x86e0 / 4, b[B_PDS_6F8].va >> 4);
++
++	/* The boot program: where core 0 continues in the microkernel, and
++	 * where the others go into the second code buffer. */
++	code[0x70 / 4] |= ((UK_START + 0x9d40) >> 3) & 0xfffff;
++	code[0x240 / 4] |= ((b[B_CODE2].va + 0x70 - b[B_CODE].va) >> 3) & 0xfffff;
++
++	/* The PDS programs, pointed at microkernel entry points (0x80bfaa6a-). */
++	pds = b[B_PDS_6D8].cpu;
++	pds[0] = uk_use(sgx, uk_at(sgx, 0));
++	pds[1] = 1;
++	pds[2] = 0;
++	pds = b[B_PDS_6E0].cpu;
++	pds[0] = b[B_740].va;
++	pds[1] = 0x3f;
++	pds[2] = 0;
++	pds[4] = uk_use(sgx, uk_at(sgx, 0x90));
++	pds[5] = 1;
++	pds = b[B_PDS_6E8].cpu;
++	pds[0] = uk_use(sgx, uk_at(sgx, 0xc0));
++	pds[1] = 1;
++	pds[2] = 0;
++	pds = b[B_PDS_6F0].cpu;
++	pds[0] = 0;
++	pds[1] = 0x100;
++	pds[2] = uk_use(sgx, uk_at(sgx, 0x10d20));
++	pds[3] = uk_use(sgx, uk_at(sgx, 0xd0d0));
++	pds[4] = 0x200;
++	pds[6] = uk_use(sgx, uk_at(sgx, 0x4340));
++	pds[7] = uk_use(sgx, uk_at(sgx, 0xac50));
++	pds[8] = 1;
++	pds[9] = 0;
++	pds[10] = uk_use(sgx, uk_at(sgx, 0x1470));
++	pds = b[B_PDS_6F8].cpu;
++	pds[0] = 0;
++	pds[1] = 0x200;
++	pds[2] = 0;
++	pds[3] = 0x8000f;
++	pds[4] = uk_use(sgx, uk_at(sgx, 0xd3f0));
++	pds[5] = 1;
++	pds[6] = 0x240100;
++	pds[7] = 0x420000;
++	pds[8] = uk_use(sgx, uk_at(sgx, 0x4510));
++	pds[9] = 1;
++	pds[12] = uk_use(sgx, uk_at(sgx, 0x11190));
++	pds[13] = 1;
++	pds[16] = uk_use(sgx, uk_at(sgx, 0xad20));
++	pds[17] = 1;
++	pds = b[B_PDS_704].cpu;
++	pds[0] = 0;
++	pds[1] = 0x100;
++	pds[2] = 0;
++	pds[4] = b[B_740].va;
++	pds[5] = 0x200;
++	pds[8] = uk_use(sgx, b[B_CODE2].va + 0x30) | 0x8000000;
++	pds[9] = 1;
++
++	/* The blob's tables, linked up (0x80bfadde-0x80bfae20). */
++	t = b[B_TAB_774].cpu;
++	t[0] |= b[B_TAB_784].va >> 4;
++	t[5] |= (b[B_TAB_784].va + 0x50) >> 4;
++	t[7] |= (b[B_TAB_784].va + 0xa0) >> 4;
++	t[3] |= b[B_IDX_77C].va;
++	t = b[B_TAB_784].cpu;
++	t[0x20 / 4] = 0x1000001;
++	t[0x70 / 4] = 0x1000101;
++	t[0xc0 / 4] = 0x1000231;
++
++	/* The block the microkernel finds through the LIMM at +0x18: the other
++	 * buffers and the page directory (0x80bfa898-).  The timing and duty
++	 * cycle parameters iOS puts at +0xb0..+0xd8 come from ADT properties;
++	 * they stay zero here, but for the 0.8 iOS always writes. */
++	t = b[B_740].cpu;
++	t[0] = b[B_740].va;
++	t[1] = b[B_HOST].va;
++	t[2] = b[B_758].va;
++	t[0x14 / 4] = 2;
++	/* iOS's defaults when the ADT has no sgx-duty-* / sgx-*-scale /
++	 * sgx-ticks-per-timer properties, which this one has not
++	 * (SGXDriver543::start 0x80bf1e32-, copied here at 0x80bfa908-). */
++	t[0xb0 / 4] = 0x3aba40d9;	/* this+0x84c */
++	t[0xb4 / 4] = 0x44af0000;	/* this+0x850, 1400.0 */
++	t[0xb8 / 4] = 0x3f628c7a;	/* this+0x854 */
++	t[0xbc / 4] = 0x42451141;	/* this+0x844 */
++	t[0xc0 / 4] = 0x41c2f9f9;	/* this+0x840 */
++	t[0xc4 / 4] = 0x428c79f8;	/* this+0x83c */
++	t[0xc8 / 4] = 0x3a3b3ee7;	/* 1 / 1400.0 */
++	t[0xcc / 4] = 0x3f4ccccd;
++	t[0xd0 / 4] = 0x3f7f9724;	/* this+0x858 */
++	t[0xd4 / 4] = 0x3ad1b717;	/* this+0x85c */
++	t[0xe0 / 4] = 0x10;
++	t[0xf4 / 4] = b[B_750].va;
++	t[0xf8 / 4] = lower_32_bits(sgx->pd_dma);
++	t[0x154 / 4] = b[B_768].va;
++
++	/* The transfer queue's hardware context (0x80bfd074): valid, the
++	 * channel's number (this+0x34, set by the base class; 0 here), the
++	 * page directory, its CCB and the CCB's control words. */
++	t = b[B_TQ_CTX].cpu;
++	t[0] = 1;
++	t[1] = 0;
++	t[2] = lower_32_bits(sgx->pd_dma);
++	t[3] = b[B_TQ_CCB].va;
++	t[4] = b[B_TQ_CTL].va;
++
++	/* The render queue's context: the same, plus word 6 = the parameter
++	 * buffer descriptor ("rkick" sets it). */
++	t = b[B_R_CTX].cpu;
++	t[0] = 1;
++	t[1] = 0;
++	t[2] = lower_32_bits(sgx->pd_dma);
++	t[3] = b[B_R_CCB].va;
++	t[4] = b[B_R_CTL].va;
++
++	/* Host control parameters (0x80bfa96c-0x80bfaa12).  The microkernel's
++	 * timer period is "hclk" / 1000 -- ticks per millisecond -- and the
++	 * lockup check runs every 16 periods; active power management and duty
++	 * management stay off (sample rate 0, enable byte 0). */
++	t = b[B_HOST].cpu;
++	t[HOST_HWR_SAMPLE_RATE] = 0x10;
++	t[HOST_UK_TIMER_CLOCK] = SGX_CLOCK_KHZ;
++	t[0x98 / 4] = 0x44af2000;	/* this+0x848, 1401.0 */
++	t[0x9c / 4] = 0x44af2000;
++
++	/* Everything above is in write-combined memory; it has to be out
++	 * before the GPU is told to look. */
++	wmb();
++}
++
++static void sgx_uk_regs(struct apple_sgx *sgx)
++{
++	struct sgx_buf *b = sgx->buf;
++	unsigned int n;
++	int i;
++
++	/* The BIF: one page directory for every requestor, then the MMU on
++	 * (initSGX 0x80bf3ac6-0x80bf3b7a). */
++	sgx_write(sgx, SGX_BCAST + SGX_BIF_CTRL, 0);
++	udelay(10);
++	sgx_write(sgx, SGX_BCAST + SGX_BIF_BANK0, 0x77077);
++	sgx_write(sgx, SGX_BCAST + SGX_BIF_BANK1, 0);
++	sgx_write(sgx, SGX_BCAST + SGX_BIF_BANK_SET, 0);
++	for (i = 0; i < 8; i++)
++		sgx_write(sgx, SGX_BCAST + SGX_BIF_DIR_LIST_BASE(i),
++			  lower_32_bits(sgx->pd_dma));
++	/* Tiled windows, as the DDK lays the register out (sgx543defs.h):
++	 * first MiB in 11:0, last in 23:12, configuration in 27:24.  0xb is
++	 * stride 4096 -- measured on 2026-10-04: within each 64 KiB, address
++	 * bits 11:8 and 15:12 trade places, 256-byte x 16-line tiles -- and
++	 * 0xc presumably 8192.  The render node keeps its buffers out of
++	 * them (apple_sgx.h). */
++	sgx_write(sgx, SGX_BCAST + SGX_BIF_TILE1, 0xbeffe00);	/* 0xe0000000-0xefffffff */
++	sgx_write(sgx, SGX_BCAST + SGX_BIF_TILE2, 0xcffff00);	/* 0xf0000000-0xffffffff */
++	sgx_write(sgx, SGX_BCAST + SGX_BIF_CTRL_INVAL, 8);
++	sgx_write(sgx, SGX_MASTER_BIF_MMU_CTRL, 2);
++	for (n = 0; n < sgx->ncores; n++)
++		sgx_write(sgx, SGX_CORE(n) + SGX_BIF_MMU_CTRL, 2);
++	sgx_write(sgx, SGX_MASTER_BIF_CTRL, 0);
++	udelay(10);
++
++	/* The rest, in iOS's order (0x80bf3b7e-0x80bf3c6a); names unknown
++	 * for most. */
++	sgx_write(sgx, SGX_BCAST + 0xa58, 0);
++	sgx_write(sgx, SGX_BCAST + SGX_EVENT_TIMER, 0);
++	sgx_write(sgx, SGX_BCAST + SGX_POWER, 0);
++	sgx_write(sgx, SGX_BCAST + 0xa7c, 0);
++	sgx_write(sgx, SGX_BCAST + 0xa80, 0);
++	sgx_write(sgx, SGX_BCAST + 0xa00, 0x7c000);
++	sgx_write(sgx, SGX_BCAST + 0xabc, 0x4c);
++	sgx_write(sgx, SGX_BCAST + 0xaa0, 0x7fffffff);
++	sgx_write(sgx, SGX_BCAST + 0x818, 0);
++	sgx_write(sgx, SGX_BCAST + 0x804, 0x5e0);
++	sgx_write(sgx, SGX_BCAST + 0x814, 0xffff);
++	sgx_write(sgx, SGX_BCAST + 0xa74, 0x0da08200);
++	sgx_write(sgx, SGX_BCAST + 0xb30, 0x100);
++	sgx_write(sgx, SGX_MASTER_REG_4808, 4);
++	sgx_write(sgx, SGX_MASTER_REG_4144, 1000);
++	sgx_write(sgx, SGX_MASTER_REG_414C, 0);
++	for (n = 0; n < sgx->ncores; n++) {
++		sgx_write(sgx, SGX_CORE(n) + SGX_BOOT_ENTRY,
++			  (n ? UK_ENTRY_OTHERS : UK_ENTRY_CORE0) >> 3);
++		sgx_write(sgx, SGX_CORE(n) + SGX_BOOT_ENTRY + 0x14, 0);
++	}
++
++	/* Events, code bases, the event PDS programs (0x80bf3d98-0x80bf3eac). */
++	sgx_write(sgx, SGX_BCAST + SGX_EVENT_HOST_CLEAR, ~0u);
++	sgx_write(sgx, SGX_BCAST + SGX_EVENT_HOST_CLEAR2, ~0u);
++	sgx_write(sgx, SGX_BCAST + SGX_REG_140, ~0u);
++	sgx_write(sgx, SGX_BCAST + SGX_EVENT_HOST_ENABLE, 0x4000);
++	sgx_write(sgx, SGX_BCAST + SGX_EVENT_HOST_ENABLE2, 0);
++	sgx_write(sgx, SGX_BCAST + SGX_REG_13C, 0);
++	for (i = 2; i <= 14; i++)
++		sgx_write(sgx, SGX_BCAST + SGX_USE_CODE_BASE(i), 0);
++	sgx_write(sgx, SGX_BCAST + SGX_USE_CODE_BASE(0),
++		  0x0c000000 | (b[B_CODE].va >> 6));
++	sgx_write(sgx, SGX_BCAST + SGX_EVENT_PDS_EXEC, b[B_PDS_704].va & ~0xfu);
++	sgx_write(sgx, SGX_BCAST + SGX_EVENT_PDS_DATA, 3);
++	sgx_write(sgx, SGX_BCAST + SGX_EVENT_PDS_INFO, 0x12001);
++	sgx_write(sgx, SGX_CORE(0) + SGX_EVENT_PDS_EXEC, b[B_PDS_6D8].va & ~0xfu);
++	sgx_write(sgx, SGX_CORE(0) + SGX_EVENT_PDS_DATA, 1);
++	sgx_write(sgx, SGX_CORE(0) + SGX_EVENT_PDS_INFO, 0x12001);
++	sgx_write(sgx, SGX_BCAST + SGX_USE_CODE_BASE(1), b[B_TAB_78C].va >> 6);
++	sgx_write(sgx, SGX_BCAST + SGX_EVENT_KICKER, b[B_KICKER].va);
++	sgx_write(sgx, SGX_BCAST + 0x630, 2);
++	sgx_write(sgx, SGX_CORE(0) + 0xa58, 0x2200c000);
++	sgx_write(sgx, SGX_MASTER_REG_4A58, 0x0804300f);
++}
++
++static int sgx_boot_ukernel(struct apple_sgx *sgx)
++{
++	const struct firmware *fw;
++	const struct sgx_fw_header *h;
++	u32 *host, val;
++	unsigned int n;
++	int ret;
++
++	ret = request_firmware(&fw, SGX_FW_NAME, sgx->dev);
++	if (ret) {
++		dev_err(sgx->dev, "no %s (./cascadia firmware): %d\n",
++			SGX_FW_NAME, ret);
++		return ret;
++	}
++	h = (const void *)fw->data;
++	if (fw->size < sizeof(*h) || memcmp(h->magic, "SGX543FW", 8) ||
++	    le32_to_cpu(h->version) != 1 ||
++	    le32_to_cpu(h->data_size) != SGX_FW_DATA_SIZE ||
++	    le32_to_cpu(h->const_size) != SGX_FW_CONST_SIZE ||
++	    le32_to_cpu(h->data_off) + SGX_FW_DATA_SIZE > fw->size ||
++	    le32_to_cpu(h->const_off) + SGX_FW_CONST_SIZE > fw->size ||
++	    strncmp(h->build, "12H321", sizeof(h->build))) {
++		dev_err(sgx->dev, "%s is not the 12H321 microkernel\n", SGX_FW_NAME);
++		ret = -EINVAL;
++		goto out;
++	}
++
++	ret = sgx_bufs_alloc(sgx);
++	if (ret) {
++		dev_err(sgx->dev, "GPU buffers: %d\n", ret);
++		goto out;
++	}
++	ret = sgx_blt_init(sgx);
++	if (ret) {
++		dev_err(sgx->dev, "2D engine: %d\n", ret);
++		goto out;
++	}
++
++	/* Quiet while the GPU is reset under it; back on once it is up. */
++	if (sgx->irq_on) {
++		disable_irq(sgx->irq);
++		sgx->irq_on = false;
++	}
++
++	/* From a clean GPU: clocks and master reset again, then load. */
++	sgx_init(sgx);
++	sgx_uk_fill(sgx, fw->data + le32_to_cpu(h->data_off),
++		    fw->data + le32_to_cpu(h->const_off));
++	/* sgx_uk_regs() invalidates the MMU's caches (BIF_CTRL_INVAL): what
++	 * was mapped until now needs nothing more from the first kick */
++	atomic_set(&sgx->mmu_dirty, 0);
++	sgx_uk_regs(sgx);
++
++	/* The buffers sit at GPU addresses from 0x80000000, which is also where
++	 * this machine's RAM is: a requestor left in MMU bypass (the reset value
++	 * of MASTER_BIF_CTRL has VDM, IPF and DPM in bypass, bits 17-19) would
++	 * write straight into the kernel.  So nothing is kicked unless the MMU
++	 * is on for everyone. */
++	for (n = 0; n <= sgx->ncores; n++) {
++		u32 off = n ? SGX_CORE(n - 1) + SGX_BIF_CTRL : SGX_MASTER_BIF_CTRL;
++
++		val = sgx_read(sgx, off);
++		if (val & GENMASK(31, 16)) {
++			dev_err(sgx->dev, "MMU bypass still on (+0x%05x = 0x%08x), not starting\n",
++				off, val);
++			ret = -EIO;
++			goto out;
++		}
++	}
++	dev_info(sgx->dev, "starting the microkernel: code at GPU 0x%08x, page directory %pad\n",
++		 sgx->buf[B_CODE].va, &sgx->pd_dma);
++
++	/* The handshake: host-control word 0 cleared, the kick count bumped,
++	 * core 0 kicked; the microkernel sets bit 0 when it is up
++	 * (0x80bf3eae-0x80bf3f08). */
++	host = sgx->buf[B_HOST].cpu;
++	WRITE_ONCE(host[0], 0);
++	WRITE_ONCE(sgx->buf[B_KICKER].cpu[0], 1);
++	wmb();
++	sgx_write(sgx, SGX_CORE(0) + SGX_EVENT_KICK, 1);
++
++	ret = read_poll_timeout(READ_ONCE, val, val & 1, 100, 500000, false,
++				host[0]);
++	if (ret) {
++		dev_err(sgx->dev, "microkernel did not answer: host[0] 0x%08x, "
++			"core0 EVENT_STATUS 0x%08x BIF_INT_STAT 0x%08x BIF_FAULT 0x%08x, "
++			"master BIF_INT_STAT 0x%08x BIF_FAULT 0x%08x\n",
++			READ_ONCE(host[0]),
++			sgx_read(sgx, SGX_CORE(0) + SGX_EVENT_STATUS),
++			sgx_read(sgx, SGX_CORE(0) + SGX_BIF_INT_STAT),
++			sgx_read(sgx, SGX_CORE(0) + SGX_BIF_FAULT),
++			sgx_read(sgx, SGX_MASTER_BIF_INT_STAT),
++			sgx_read(sgx, SGX_MASTER_BIF_FAULT));
++		ret = -ETIMEDOUT;
++	} else {
++		dev_info(sgx->dev, "microkernel is up: host[0] 0x%08x\n",
++			 READ_ONCE(host[0]));
++		/* The code base the render node's programs are relative to:
++		 * the two iOS's GL driver uses (its are 0, code at 0x1000).
++		 * Set once the microkernel runs, as sgx2d's packs did. */
++		sgx_write(sgx, SGX_BCAST + SGX_USE_CODE_BASE(3), SGX_CODE_BASE >> 6);
++		sgx_write(sgx, SGX_BCAST + SGX_USE_CODE_BASE(5), SGX_CODE_BASE >> 6);
++		if (use_irq && sgx->irq > 0) {
++			sgx->irq_run = 0;
++			sgx->irq_on = true;
++			enable_irq(sgx->irq);
++			dev_info(sgx->dev, "interrupt %d on\n", sgx->irq);
++		}
++	}
++out:
++	release_firmware(fw);
++	return ret;
++}
++
++/* The microkernel signals the host with SW_EVENT (EVENT_HOST_ENABLE is
++ * 0x4000, as initSGX sets it).  iOS's handler (0x80bf2168) reads
++ * EVENT_STATUS in the broadcast bank and clears through EVENT_HOST_CLEAR
++ * with MASTER_INTERRUPT (bit 31) added, as the DDK's SGX_ISRHandler does.
++ * Bank 0 reads hung the bus during bring-up (before the cores had clocks),
++ * so this reads each core's own bank instead and clears it there.  If the
++ * source is somewhere else, the line would never drop: after
++ * SGX_IRQ_STORM unhandled interrupts in a row it is switched off. */
++static irqreturn_t sgx_irq_handler(int irq, void *data)
++{
++	struct apple_sgx *sgx = data;
++	bool handled = false, cleared = true;
++	unsigned int n;
++
++	for (n = 0; n < sgx->ncores; n++) {
++		u32 base = SGX_CORE(n), st;
++
++		st = sgx_read(sgx, base + SGX_EVENT_STATUS) &
++		     sgx_read(sgx, base + SGX_EVENT_HOST_ENABLE);
++		if (!st)
++			continue;
++		sgx_write(sgx, base + SGX_EVENT_HOST_CLEAR, st | BIT(31));
++		sgx->irq_events[n] |= st;
++		handled = true;
++		if (sgx_read(sgx, base + SGX_EVENT_STATUS) & st)
++			cleared = false;
++	}
++	if (!handled)
++		sgx->irq_unhandled++;
++	/* No event found, or one that does not clear: either way the line
++	 * would stay up forever. */
++	if (!handled || !cleared) {
++		if (++sgx->irq_run >= SGX_IRQ_STORM) {
++			disable_irq_nosync(irq);
++			sgx->irq_on = false;
++			dev_err(sgx->dev, "interrupt: %u in a row %s, switched off\n",
++				sgx->irq_run, handled ? "with an event that does not clear" :
++				"with no core event");
++		}
++		if (!handled)
++			return IRQ_NONE;
++	} else {
++		sgx->irq_run = 0;
++	}
++	sgx->irq_count++;
++	if (sgx->bufs_ready)
++		sgx->irq_host_flags =
++			READ_ONCE(sgx->buf[B_HOST].cpu[HOST_INTERRUPT_FLAGS]);
++	return IRQ_HANDLED;
++}
++
++/* One command through the kernel CCB, the way 0x80bfb104 does it, then wait
++ * for the microkernel to take it (its read offset reaches ours). */
++static int sgx_send_cmd(struct apple_sgx *sgx, enum sgx_cmd_type type,
++			u32 cache_control, u32 data0, u32 data1)
++{
++	u32 *ctl = sgx->buf[B_758].cpu, *kicker = sgx->buf[B_KICKER].cpu;
++	struct sgx_ccb_cmd *cmd;
++	u32 wo, ro, val;
++	ktime_t start;
++	int ret;
++
++	unsigned long flags;
++
++	if (sgx->boot_result != 1)
++		return -ENODEV;
++	spin_lock_irqsave(&sgx->ccb_lock, flags);
++	wo = READ_ONCE(ctl[0]);
++	ro = READ_ONCE(ctl[1]);
++	if (wo >= SGX_CCB_SIZE || ro >= SGX_CCB_SIZE) {
++		spin_unlock_irqrestore(&sgx->ccb_lock, flags);
++		dev_err(sgx->dev, "CCB offsets out of range: write %u read %u\n",
++			wo, ro);
++		return -EIO;
++	}
++	if (((wo + 1) & (SGX_CCB_SIZE - 1)) == ro) {
++		spin_unlock_irqrestore(&sgx->ccb_lock, flags);
++		return -EBUSY;
++	}
++
++	cmd = (struct sgx_ccb_cmd *)sgx->buf[B_750].cpu + wo;
++	memset(cmd, 0, sizeof(*cmd));
++	cmd->service = (UK_START + uk_handlers[type].off) >> 3;
++	cmd->cache_control = cache_control;
++	cmd->data[0] = data0;
++	cmd->data[1] = data1;
++	wmb();
++
++	wo = (wo + 1) & (SGX_CCB_SIZE - 1);
++	WRITE_ONCE(ctl[0], wo);
++	WRITE_ONCE(kicker[0], (READ_ONCE(kicker[0]) + 1) & 0xff);
++	wmb();
++	start = ktime_get();
++	sgx_write(sgx, SGX_CORE(0) + SGX_EVENT_KICK, 1);
++
++	/* taken in tens of microseconds; never sleeps (fbcon) */
++	ret = read_poll_timeout_atomic(READ_ONCE, val, val == wo, 1, 500000, false,
++				       ctl[1]);
++	spin_unlock_irqrestore(&sgx->ccb_lock, flags);
++	if (!sgx->quiet || ret)
++	dev_info(sgx->dev,
++		 "command %s (cc 0x%x, data 0x%x 0x%x): %s after %lld us, CCB write %u read %u, "
++		 "core0 EVENT_STATUS 0x%08x\n",
++		 uk_handlers[type].name, cache_control, data0, data1,
++		 ret ? "NOT TAKEN" : "taken",
++		 ktime_us_delta(ktime_get(), start), wo, READ_ONCE(ctl[1]),
++		 sgx_read(sgx, SGX_CORE(0) + SGX_EVENT_STATUS));
++	return ret;
++}
++
++/* POWER, and for power-off and idle the answer in the power status
++ * (deinitSGX 0x80bf4048, the DDK's SGXPrePowerState).  After a power-off
++ * the microkernel has stopped; only a new boot starts it again. */
++static int sgx_power_cmd(struct apple_sgx *sgx, u32 powercmd)
++{
++	u32 *host = sgx->buf[B_HOST].cpu, done = 0, val;
++	int ret;
++
++	if (powercmd == SGX_POWERCMD_POWEROFF)
++		done = SGX_POWMAN_POWEROFF_COMPLETE;
++	else if (powercmd == SGX_POWERCMD_IDLE)
++		done = SGX_POWMAN_IDLE_COMPLETE;
++	else if (powercmd != SGX_POWERCMD_RESUME)
++		return -EINVAL;
++
++	ret = sgx_send_cmd(sgx, SGX_CMD_POWER, 0, 0, powercmd);
++	if (ret || !done)
++		return ret;
++	ret = read_poll_timeout(READ_ONCE, val, val & done, 10, 500000, false,
++				host[HOST_POWER_STATUS]);
++	dev_info(sgx->dev, "power status 0x%08x: %s\n", val,
++		 ret ? "no answer" : powercmd == SGX_POWERCMD_POWEROFF ?
++		 "powered off" : "idle");
++	if (ret)
++		return ret;
++	/* iOS keeps NO_WORK and clears the status for the next request. */
++	WRITE_ONCE(host[HOST_POWER_STATUS], 0);
++	wmb();
++	if (powercmd == SGX_POWERCMD_POWEROFF)
++		sgx->boot_result = 0;
++	return 0;
++}
++
++/* A transfer command, as IMGSGXTQChannel builds it (0x80bfd19c): 0x140
++ * bytes in the channel's CCB, whose write offset counts bytes.  From the
++ * GL payload (type 2, 0x7c bytes) come the register words at +0x00..+0x43
++ * and +0x78..+0x9f; the kernel adds +0xa0 the size, +0xa4 a word the payload
++ * must leave 0 (validateTransferCommand, 0x80bf6508) -- by elimination the
++ * DDK's SGXMKIF_TQFLAGS_* --, +0xa8 from the command descriptor, and:
++ *
++ *   +0xac/+0xb0   {address, value}: written by the microkernel when the
++ *                 command is done
++ *   +0xb4         number of dependencies, then from +0xb8 {address, value}
++ *                 pairs: the command waits until (s32)(*address - value) >= 0
++ *   +0x108        0x1800000
++ *
++ * (Both measured: a dependency that is not met stalls the queue until the
++ * word changes AND the microkernel is kicked again; it does not poll.)
++ * Then TRANSFER goes through the kernel CCB with Data[1] = the hardware
++ * context, whose word 0 the microkernel clears when the queue is empty.
++ *
++ * "tq FLAGS VAL" sends one with no register words and no dependencies, its
++ * completion written to the scratch buffer, and waits for VAL there.  With
++ * FLAGS = 0x20 (DUMMYTRANSFER in the DDK: "uKernel only updates syncobjects
++ * / status values") that is all the microkernel does. */
++#define SGX_TQ_CMD_SIZE			0x140
++#define SGX_TQ_CCB_SIZE			0x10000
++
++/* A TA command: 0x120 bytes for this SGX (rgen.py's CMD_SIZE); the render
++ * node takes up to SGX_R_CMD_MAX (apple_sgx_drm.h's APPLE_SGX_TA_CMD_*). */
++#define SGX_R_CMD_MIN			0x11c
++#define SGX_R_CMD_MAX			0x200
++
++static int sgx_tq_cmd(struct apple_sgx *sgx, u32 flags, u32 val)
++{
++	u32 *ctl = sgx->buf[B_TQ_CTL].cpu, *scratch = sgx->buf[B_SCRATCH].cpu;
++	u32 sva = sgx->buf[B_SCRATCH].va, *ctx = sgx->buf[B_TQ_CTX].cpu;
++	u32 wo, *cmd, got;
++	int ret;
++
++	if (sgx->boot_result != 1)
++		return -ENODEV;
++	wo = READ_ONCE(ctl[0]);
++	if (wo + SGX_TQ_CMD_SIZE > SGX_TQ_CCB_SIZE)
++		return -ENOSPC;		/* no wrap-around; boot again */
++
++	cmd = sgx->buf[B_TQ_CCB].cpu + wo / 4;
++	memset(cmd, 0, SGX_TQ_CMD_SIZE);
++	cmd[0xa0 / 4] = SGX_TQ_CMD_SIZE;
++	cmd[0xa4 / 4] = flags;
++	cmd[0xac / 4] = sva;
++	cmd[0xb0 / 4] = val;
++	cmd[0x108 / 4] = 0x01800000;
++	WRITE_ONCE(scratch[0], 0);
++	wmb();
++	WRITE_ONCE(ctl[0], wo + SGX_TQ_CMD_SIZE);
++	WRITE_ONCE(ctx[0], 1);
++	wmb();
++
++	ret = sgx_send_cmd(sgx, SGX_CMD_TRANSFER, 0, 0, sgx->buf[B_TQ_CTX].va);
++	if (ret)
++		return ret;
++	ret = read_poll_timeout(READ_ONCE, got, got == val, 10, 500000, false,
++				scratch[0]);
++	dev_info(sgx->dev,
++		 "transfer (flags 0x%x): scratch 0x%08x 0x%08x (%s), tq write 0x%x read 0x%x ctx 0x%x, "
++		 "BIF_FAULT core0 0x%08x master 0x%08x, host lockups %u assert 0x%08x\n",
++		 flags, READ_ONCE(scratch[0]), READ_ONCE(scratch[1]),
++		 ret ? "NOT WRITTEN" : "written", READ_ONCE(ctl[0]), READ_ONCE(ctl[1]),
++		 READ_ONCE(ctx[0]),
++		 sgx_read(sgx, SGX_CORE(0) + SGX_BIF_FAULT),
++		 sgx_read(sgx, SGX_MASTER_BIF_FAULT),
++		 READ_ONCE(sgx->buf[B_HOST].cpu[HOST_UK_LOCKUPS]),
++		 READ_ONCE(sgx->buf[B_HOST].cpu[HOST_ASSERT_FAIL]));
++	return ret;
++}
++
++/* ---- replay tools: memory at chosen GPU addresses ------------------------ */
++
++static void sgx_extra_free(void *data)
++{
++	struct sgx_buf *b = data;
++	unsigned int i, n = b->size >> PAGE_SHIFT;
++
++	if (b->cpu)
++		vunmap(b->cpu);
++	for (i = 0; i < n && b->pages[i]; i++) {
++		if (b->page_dma[i])
++			dma_unmap_page(b->dev, b->page_dma[i], PAGE_SIZE, DMA_BIDIRECTIONAL);
++		__free_page(b->pages[i]);
++	}
++	kvfree(b->pages);
++	kvfree(b->page_dma);
++}
++
++/* "map VA SIZE": fresh zeroed memory at GPU address VA, cache-consistent
++ * like the shared buffers but without EDMPROTECT: on an EDM-protected page
++ * only the microkernel may write, and the pixel back end's write of a
++ * render target faults (BIF_INT_STAT 0x000b0020).  Mappings stay until
++ * reboot; the next microkernel boot invalidates the MMU's caches, so map
++ * first and boot after.
++ *
++ * The memory comes page by page: the GPU's MMU maps every page on its own,
++ * so nothing here needs to be contiguous (the CMA pool is only 64 MiB, and
++ * textures and the parameter buffer want more).  The CPU sees the pages
++ * through one write-combining mapping, as it does dma_alloc_coherent
++ * memory; the pages are cleaned out of the cache when they are mapped for
++ * the device and never touched cached again. */
++static int sgx_map_extra(struct apple_sgx *sgx, u32 va, u32 size)
++{
++	struct sgx_buf *b;
++	unsigned int i, n;
++	int i2, ret;
++
++	if (!sgx->bufs_ready)
++		return -ENODEV;
++	size = ALIGN(size, SGX_PAGE_SIZE);
++	if ((va & (SGX_PAGE_SIZE - 1)) || !size || va + size < va ||
++	    (va < sgx->va_next && va + size > SGX_VA_BASE))
++		return -EINVAL;
++	for (i2 = 0; i2 < sgx->nextra; i2++)
++		if (va < sgx->extra[i2].va + sgx->extra[i2].size &&
++		    va + size > sgx->extra[i2].va)
++			return -EEXIST;
++	if (sgx->nextra == ARRAY_SIZE(sgx->extra))
++		return -ENOSPC;
++	/* the render node's buffers live in the same address space */
++	ret = apple_sgx_drm_reserve(sgx, sgx->nextra, va, size);
++	if (ret)
++		return ret;
++	b = &sgx->extra[sgx->nextra];
++	memset(b, 0, sizeof(*b));
++	b->size = size;
++	b->dev = sgx->dev;
++	n = size >> PAGE_SHIFT;
++	b->pages = kvcalloc(n, sizeof(*b->pages), GFP_KERNEL);
++	b->page_dma = kvcalloc(n, sizeof(*b->page_dma), GFP_KERNEL);
++	if (!b->pages || !b->page_dma) {
++		kvfree(b->pages);
++		kvfree(b->page_dma);
++		apple_sgx_drm_unreserve(sgx, sgx->nextra);
++		return -ENOMEM;
++	}
++	ret = devm_add_action_or_reset(sgx->dev, sgx_extra_free, b);
++	if (ret) {
++		apple_sgx_drm_unreserve(sgx, sgx->nextra);
++		return ret;
++	}
++	for (i = 0; i < n; i++) {
++		dma_addr_t dma;
++
++		ret = -ENOMEM;
++		b->pages[i] = alloc_page(GFP_KERNEL | __GFP_ZERO);
++		if (!b->pages[i])
++			goto fail;
++		dma = dma_map_page(sgx->dev, b->pages[i], 0, PAGE_SIZE, DMA_BIDIRECTIONAL);
++		if (dma_mapping_error(sgx->dev, dma))
++			goto fail;
++		b->page_dma[i] = dma;
++		ret = apple_sgx_mmu_map(sgx, va + i * PAGE_SIZE, dma, PAGE_SIZE,
++				  SGX_PTE_CACHECONSISTENT);
++		if (ret)
++			goto fail;
++	}
++	ret = -ENOMEM;
++	b->cpu = vmap(b->pages, n, VM_MAP, pgprot_writecombine(PAGE_KERNEL));
++	if (!b->cpu)
++		goto fail;
++	b->va = va;
++	b->dma = b->page_dma[0];
++	sgx->nextra++;
++	dev_info(sgx->dev, "mapped GPU 0x%08x-0x%08x (%u pages)\n", va, va + size, n);
++	return 0;
++
++fail:	/* the PTEs written so far point at pages freed here */
++	apple_sgx_mmu_unmap(sgx, va, size);
++	devm_release_action(sgx->dev, sgx_extra_free, b);
++	apple_sgx_drm_unreserve(sgx, sgx->nextra);
++	return ret;
++}
++
++/* The CPU side of GPU address va, and how many bytes follow it there. */
++static u8 *sgx_va_cpu(struct apple_sgx *sgx, u32 va, size_t *avail)
++{
++	int i;
++
++	for (i = 0; sgx->bufs_ready && i < B_NUM + sgx->nextra; i++) {
++		struct sgx_buf *b = i < B_NUM ? &sgx->buf[i] : &sgx->extra[i - B_NUM];
++
++		if (va >= b->va && va - b->va < b->size) {
++			*avail = b->size - (va - b->va);
++			return (u8 *)b->cpu + (va - b->va);
++		}
++	}
++	return NULL;
++}
++
++/* apple-sgx/mem: the file offset is the GPU address. */
++static ssize_t sgx_mem_rw(struct file *file, char __user *ubuf, const char __user *wbuf,
++			  size_t len, loff_t *ppos)
++{
++	struct apple_sgx *sgx = file->private_data;
++	size_t done = 0, avail, n;
++	u8 *p;
++
++	if (*ppos < 0 || *ppos > U32_MAX)
++		return -EINVAL;
++	mutex_lock(&sgx->lock);
++	while (done < len) {
++		p = sgx_va_cpu(sgx, *ppos + done, &avail);
++		if (!p)
++			break;
++		n = min(len - done, avail);
++		if (ubuf ? copy_to_user(ubuf + done, p, n) :
++			   copy_from_user(p, wbuf + done, n)) {
++			mutex_unlock(&sgx->lock);
++			return -EFAULT;
++		}
++		done += n;
++	}
++	wmb();
++	mutex_unlock(&sgx->lock);
++	if (!done && len)
++		return -EFAULT;		/* nothing mapped there */
++	*ppos += done;
++	return done;
++}
++
++static ssize_t sgx_mem_read(struct file *file, char __user *ubuf, size_t len, loff_t *ppos)
++{
++	return sgx_mem_rw(file, ubuf, NULL, len, ppos);
++}
++
++static ssize_t sgx_mem_write(struct file *file, const char __user *ubuf, size_t len,
++			     loff_t *ppos)
++{
++	return sgx_mem_rw(file, NULL, ubuf, len, ppos);
++}
++
++static const struct file_operations sgx_mem_fops = {
++	.owner = THIS_MODULE,
++	.open = simple_open,
++	.read = sgx_mem_read,
++	.write = sgx_mem_write,
++	.llseek = default_llseek,
++};
++
++/* "tqkick": the 0x140-byte command at the transfer CCB's write offset has
++ * been put there through apple-sgx/mem; queue it and send TRANSFER.  Waits
++ * for scratch word 0 to change (point the completion write there). */
++static int sgx_tq_kick(struct apple_sgx *sgx)
++{
++	u32 *ctl = sgx->buf[B_TQ_CTL].cpu, *ctx = sgx->buf[B_TQ_CTX].cpu;
++	u32 *scratch = sgx->buf[B_SCRATCH].cpu, wo, got;
++	unsigned int n;
++	int ret;
++
++	if (sgx->boot_result != 1)
++		return -ENODEV;
++	wo = READ_ONCE(ctl[0]);
++	if (wo + SGX_TQ_CMD_SIZE > SGX_TQ_CCB_SIZE)
++		return -ENOSPC;
++	WRITE_ONCE(scratch[0], 0);
++	wmb();
++	WRITE_ONCE(ctl[0], wo + SGX_TQ_CMD_SIZE);
++	WRITE_ONCE(ctx[0], 1);
++	wmb();
++	ret = sgx_send_cmd(sgx, SGX_CMD_TRANSFER, 0, 0, sgx->buf[B_TQ_CTX].va);
++	if (ret)
++		return ret;
++	ret = read_poll_timeout(READ_ONCE, got, got, 10, 500000, false, scratch[0]);
++	dev_info(sgx->dev, "tqkick at 0x%x: scratch 0x%08x (%s), tq read 0x%x ctx 0x%x; "
++		 "master BIF_INT_STAT 0x%08x BIF_FAULT 0x%08x\n",
++		 wo, READ_ONCE(scratch[0]), ret ? "not done" : "done",
++		 READ_ONCE(ctl[1]), READ_ONCE(ctx[0]),
++		 sgx_read(sgx, SGX_MASTER_BIF_INT_STAT), sgx_read(sgx, SGX_MASTER_BIF_FAULT));
++	for (n = 0; n < sgx->ncores; n++)
++		dev_info(sgx->dev, "  core%u EVENT_STATUS 0x%08x BIF_INT_STAT 0x%08x BIF_FAULT 0x%08x\n",
++			 n, sgx_read(sgx, SGX_CORE(n) + SGX_EVENT_STATUS),
++			 sgx_read(sgx, SGX_CORE(n) + SGX_BIF_INT_STAT),
++			 sgx_read(sgx, SGX_CORE(n) + SGX_BIF_FAULT));
++	return ret;
++}
++
++/* One render into the render queue: the TA command (LEN bytes, word 0 its
++ * size) copied into the render CCB, the parameter buffer descriptor PB
++ * into the render context (word 6), the context into the render target's
++ * "render details" (DETAILS, +0x20 and +0xa4, as 0x80bf7d2a does), the
++ * command's completion (+0x64 flag, +0x68 address, +0x6c value) pointed
++ * at DONE_VA/SEQ -- written when the TA is done -- and TA sent through the
++ * kernel CCB with Data1 = the context.  sgx->lock held.
++ *
++ * The CCB wraps the way iOS's does: offsets are 16-bit, and a command after
++ * which a command as large as any (SGX_R_CMD_MAX) would not fit is
++ * stretched to the end, so the next one starts at 0. */
++int apple_sgx_render_queue(struct apple_sgx *sgx, const u32 *src, u32 len, u32 pb,
++			   u32 *details, u32 done_va, u32 seq, u32 cache_control, u32 *at)
++{
++	u32 *ctl = sgx->buf[B_R_CTL].cpu, *ctx = sgx->buf[B_R_CTX].cpu;
++	u32 cva = sgx->buf[B_R_CTX].va, *cmd, wo, size;
++	int ret;
++
++	if (sgx->boot_result != 1)
++		return -ENODEV;
++	if (len < SGX_R_CMD_MIN || len > SGX_R_CMD_MAX || (len & 7))
++		return -EINVAL;
++	wo = READ_ONCE(ctl[0]);
++	if (wo + len > SGX_TQ_CCB_SIZE)
++		return -EIO;		/* the last command did not wrap */
++	size = len;
++	if (SGX_TQ_CCB_SIZE - wo - len < SGX_R_CMD_MAX)
++		size = SGX_TQ_CCB_SIZE - wo;
++	if (((READ_ONCE(ctl[1]) + 0xffff - wo) & 0xffff) <= size)
++		return -EBUSY;
++
++	if (at)
++		*at = wo;
++	cmd = sgx->buf[B_R_CCB].cpu + wo / 4;
++	memcpy(cmd, src, len);
++	memset(cmd + len / 4, 0, size - len);
++	cmd[0] = size;
++	cmd[0x64 / 4] |= 1;
++	cmd[0x68 / 4] = done_va;
++	cmd[0x6c / 4] = seq;
++	details[0x20 / 4] = cva;
++	details[0xa4 / 4] = cva;
++	ctx[6] = pb;
++	wmb();
++	WRITE_ONCE(ctl[0], (wo + size) & (SGX_TQ_CCB_SIZE - 1));
++	WRITE_ONCE(ctx[0], 1);
++	wmb();
++	if (atomic_xchg(&sgx->mmu_dirty, 0))
++		cache_control |= mmu_inval_cc;
++	sgx->quiet = true;
++	ret = sgx_send_cmd(sgx, SGX_CMD_TA, cache_control, 0, cva);
++	sgx->quiet = false;
++	return ret;
++}
++
++/* Whether the render queued at AT is still where it was put: the
++ * microkernel has not read it (its read offset is AT) and has not started
++ * it (the render details' +0x24, set when the TA starts, is 0). */
++bool apple_sgx_render_waiting(struct apple_sgx *sgx, u32 at, const u32 *details)
++{
++	return READ_ONCE(sgx->buf[B_R_CTL].cpu[1]) == at && !READ_ONCE(details[0x24 / 4]);
++}
++
++/* TA again for the render queue.  Now and then the microkernel takes the
++ * TA command from the kernel CCB and leaves the render it names in the
++ * queue -- seen on the first render after a start, about one in three --
++ * and nothing makes it look again; iOS too kicks pending work again
++ * (0x80bfafe8, after a power-up).  The context is marked as having work,
++ * as for the first kick. */
++int apple_sgx_render_rekick(struct apple_sgx *sgx)
++{
++	u32 *ctx = sgx->buf[B_R_CTX].cpu;
++	int ret;
++
++	if (sgx->boot_result != 1)
++		return -ENODEV;
++	WRITE_ONCE(ctx[0], 1);
++	wmb();
++	sgx->quiet = true;
++	ret = sgx_send_cmd(sgx, SGX_CMD_TA, 0, 0, sgx->buf[B_R_CTX].va);
++	sgx->quiet = false;
++	return ret;
++}
++
++/* What the GPU was doing, for a render that did not finish. */
++void apple_sgx_report(struct apple_sgx *sgx, const char *why)
++{
++	unsigned int n;
++
++	if (!sgx->bufs_ready)
++		return;
++	dev_err(sgx->dev, "%s: r CCB write 0x%x read 0x%x, ctx0 0x%x, lockups %u, "
++		"master BIF_INT_STAT 0x%08x BIF_FAULT 0x%08x\n", why,
++		READ_ONCE(sgx->buf[B_R_CTL].cpu[0]), READ_ONCE(sgx->buf[B_R_CTL].cpu[1]),
++		READ_ONCE(sgx->buf[B_R_CTX].cpu[0]),
++		READ_ONCE(sgx->buf[B_HOST].cpu[HOST_UK_LOCKUPS]),
++		sgx_read(sgx, SGX_MASTER_BIF_INT_STAT), sgx_read(sgx, SGX_MASTER_BIF_FAULT));
++	for (n = 0; n < sgx->ncores; n++)
++		dev_err(sgx->dev, "  core%u EVENT_STATUS 0x%08x STATUS2 0x%08x BIF_INT_STAT 0x%08x "
++			"BIF_FAULT 0x%08x\n", n,
++			sgx_read(sgx, SGX_CORE(n) + SGX_EVENT_STATUS),
++			sgx_read(sgx, SGX_CORE(n) + SGX_EVENT_STATUS2),
++			sgx_read(sgx, SGX_CORE(n) + SGX_BIF_INT_STAT),
++			sgx_read(sgx, SGX_CORE(n) + SGX_BIF_FAULT));
++}
++
++/* "rkick PB DET CMD [CC]": one render (TA, then 3D) from memory put in place
++ * through apple-sgx/mem.  PB = the parameter buffer descriptor (context word
++ * 6), DET = the render target's "render details" (its two entries get the
++ * context's address at +0x20 and +0xa4, as 0x80bf7d2a does), CMD = a TA
++ * command (word 0 = its size) to copy into the render CCB.  Its completion
++ * (+0x68/+0x6c, written when the TA is done) goes to scratch word 0 and is
++ * waited for.  Quiet unless something fails. */
++static int sgx_r_kick(struct apple_sgx *sgx, u32 pb, u32 det, u32 cmdva, u32 cc)
++{
++	u32 *scratch = sgx->buf[B_SCRATCH].cpu, *src, *d, got, seq;
++	size_t avail;
++	int ret;
++
++	if (sgx->boot_result != 1)
++		return -ENODEV;
++	src = (u32 *)sgx_va_cpu(sgx, cmdva, &avail);
++	if (!src || avail < SGX_R_CMD_MIN || src[0] > avail)
++		return -EFAULT;
++	d = (u32 *)sgx_va_cpu(sgx, det, &avail);
++	if (!d || avail < 0xa8 || !sgx_va_cpu(sgx, pb, &avail))
++		return -EFAULT;
++	seq = ++sgx->r_seq ? sgx->r_seq : ++sgx->r_seq;
++	WRITE_ONCE(scratch[0], 0);
++	ret = apple_sgx_render_queue(sgx, src, src[0], pb, d, sgx->buf[B_SCRATCH].va,
++				     seq, cc, NULL);
++	if (ret)
++		return ret;
++	ret = read_poll_timeout(READ_ONCE, got, got == seq, 10, 500000, false, scratch[0]);
++	if (ret)
++		apple_sgx_report(sgx, "render not done");
++	return ret;
++}
++
++/* ---- the 2D engine: blits and fills through the transfer queue ---------- */
++
++/*
++ * A transfer is the GPU's blit: the 3D pipe draws one quad whose texture is
++ * the source, and the pixel back end writes the result.  Everything it needs
++ * is built here; tools/sgx/tqgen.py is the same in Python and
++ * docs/research/p105-gpu.md how each word was found.
++ *
++ *   code    GPU 0x1000    five tiny USSE programs; USE code base 10 is 0
++ *   block   B_BLT_BLOCK   the end-of-tile PDS program, and per object a PDS
++ *                         program with its data: pixel program + texture
++ *   param   B_BLT_PARAM   at BIF_3D_REQ_BASE (1 MiB aligned): the background
++ *                         object, the quad (and the overlay's), one region
++ *                         header for the box
++ *   command               0x140 bytes in the transfer CCB
++ *
++ * Surfaces are linear BGRA8888.  One job at a time: each is waited for.
++ */
++#define SGX_BLT_CODE_VA		0x00001000u
++#define SGX_BLT_PROG_COPY	0x1400u		/* o0 = the sampled texel */
++#define SGX_BLT_PROG_FILL	0x1500u		/* o0 = a constant */
++#define SGX_BLT_PROG_BLEND	0x1600u		/* o0 = the texel over o0, by its alpha */
++#define SGX_BLT_PROG_EOT0	0x1c00u
++#define SGX_BLT_PROG_EOT1	0x1c40u
++#define SGX_BLT_PROG_EMIT	0x1d40u		/* loads the six PBE words, emits */
++#define SGX_BLT_BG_OFF		0x6000u		/* in the parameter page */
++#define SGX_BLT_QUAD_OFF	0x6100u
++#define SGX_BLT_QUAD2_OFF	0x6180u		/* the overlay's quad */
++#define SGX_BLT_RGN_OFF		0x6200u
++#define USSE_PHAS		0xfa44070000000000ull
++
++/* The end-of-tile PDS program and its constants, and the per-object one
++ * (DOUTU the pixel program, DOUTT the texture state), from the GL driver. */
++static const u32 blt_pds_main[] = {
++	0x9380000c, 0xcf800630, 0xcf800870, 0xf7700070, 0xcf086070, 0xc7606030,
++	0xcf800a70, 0xf7700070, 0xcf0a6070, 0xc7606030, 0x07600b05, 0xaf000000,
++	0x94800014, 0xcf0c8270, 0x8700c100, 0xcf800c70, 0xc70e6070, 0x100010e0,
++	0x07018185, 0xaf000000, 0x07041185, 0xaf000000,
++};
++static const u32 blt_pds_const[] = {
++	0xffff0000, 0x000000ff, 0x0000ff00, 0x000000ff, 0x0000ff00,
++	0x00000100, 0x00020000, 0xfffeffff, 0x00000000, 0x00030000,
++};
++static const u32 blt_pds_tex[] = { 0x07000185, 0x07000c02, 0x07041004, 0xaf000000 };
++
++/* LIMM: bank 0 temporaries, 1 outputs, 2 primary attributes */
++static u64 usse_limm(unsigned int bank, unsigned int reg, u32 imm, bool end)
++{
++	u64 w = 0xfca0000000000000ull | (u64)(bank & 3) << 32 | (u64)(reg & 0x7f) << 21;
++
++	w |= (u64)((imm >> 26) & 0x3f) << 44 | (u64)((imm >> 21) & 0x1f) << 36;
++	w |= imm & 0x1fffff;
++	return end ? w | 1ull << 50 : w;
++}
++
++static u32 blt_doutu(u32 va)	{ return (va / 8) << 4 | 0xa; }
++static u32 blt_pds_ptr(u32 va, u32 flag) { return flag << 28 | (va - SGX_VA_BASE) >> 4; }
++/* vertex coordinates: 16-bit fixed point, 4 fraction bits, 1024-px guard band */
++static u32 blt_xy(u32 x, u32 y) { return (0x4000 + x * 16) << 16 | (0x4000 + y * 16); }
++
++struct sgx_surf {		/* a rectangle of a linear BGRA8888 surface */
++	u32 va;			/* its first pixel */
++	u32 w, h, stride;	/* pixels */
++};
++
++/* the overlay's quad's ISP word: every transfer's, 0x01d80000, and bit 25,
++ * blending, as sgx2d's translucent quads have it.  Without it the ISP keeps
++ * only the front object at each pixel (it is a deferred renderer): the
++ * overlay was shaded and the copy under it dropped. */
++static unsigned int overlay_isp = 0x03d80000;
++module_param(overlay_isp, uint, 0644);
++MODULE_PARM_DESC(overlay_isp, "ISP word of the screen overlay's quad (0x03d80000)");
++
++/* what a job with the overlay asks the microkernel to invalidate first
++ * (SGX_CC_*).  Its buffer is written by the CPU between jobs; none was
++ * needed so far -- the blends read back exact, presses showed at once */
++static unsigned int overlay_cc;
++module_param(overlay_cc, uint, 0644);
++MODULE_PARM_DESC(overlay_cc, "cache control with each overlay job (8: data caches)");
++
++/* A quad over the w x h box at x, y, its PDS program at pds; its vertices'
++ * order is the texture's corners' (top-left, bottom-left, bottom-right,
++ * top-right): a quarter turn anticlockwise puts the source's top-left at
++ * the box's bottom-left, and so on round. */
++static void blt_quad(u32 *q, u32 pds, u32 x, u32 y, u32 w, u32 h, unsigned int rot,
++		     u32 isp)
++{
++	const u32 corner[4] = { blt_xy(x, y), blt_xy(x, y + h), blt_xy(x + w, y + h),
++				blt_xy(x + w, y) };
++	int i;
++
++	q[0] = blt_pds_ptr(pds, 0);
++	q[1] = 0x0801e000;
++	q[2] = blt_pds_ptr(pds + 0x20, 1);
++	q[6] = q[7] = q[8] = q[9] = 0x3f800000;
++	q[11] = isp;
++	q[12] = 0x4e504a30;
++	q[13] = 2;
++	for (i = 0; i < 4; i++) {
++		q[15 + 2 * i] = corner[(i + rot) % 4];
++		q[16 + 2 * i] = 0x3f800000;
++	}
++}
++
++/* texture state for a linear BGRA source (from iOS sampling an IOSurface) */
++static void blt_tex(u32 *t, const struct sgx_surf *s)
++{
++	t[0] = (s->stride / 4 - 2) << 16 | 0x0e90;
++	t[1] = 0xcc000000 | (s->w - 1) << 12 | (s->h - 1);
++	t[2] = s->va;
++	t[3] = 0x10000000;
++}
++
++static void blt_put_prog(struct apple_sgx *sgx, u32 va, const u64 *p, int n)
++{
++	memcpy(sgx->blt_code + (va - SGX_BLT_CODE_VA) / 8, p, n * sizeof(*p));
++}
++
++/* The framebuffer simplefb drives, from the device tree. */
++int apple_sgx_fb_find(struct apple_sgx *sgx, struct resource *res)
++{
++	struct device_node *np, *mem;
++	int ret;
++
++	np = of_find_compatible_node(NULL, NULL, "simple-framebuffer");
++	if (!np)
++		return -ENODEV;
++	mem = of_parse_phandle(np, "memory-region", 0);
++	ret = of_address_to_resource(mem ? mem : np, 0, res);
++	of_node_put(mem);
++	if (!ret && (of_property_read_u32(np, "width", &sgx->fb_w) ||
++		     of_property_read_u32(np, "height", &sgx->fb_h) ||
++		     of_property_read_u32(np, "stride", &sgx->fb_stride)))
++		ret = -EINVAL;
++	of_node_put(np);
++	sgx->fb_stride /= 4;
++	return ret;
++}
++
++/* Once the buffers exist and before the microkernel starts (the MMU caches
++ * are clean from its boot): the code page, the fixed programs, and the
++ * framebuffer at GPU 0x90000000. */
++static int sgx_blt_init(struct apple_sgx *sgx)
++{
++	u64 eot0[] = { USSE_PHAS, 0xf834800000000000ull };
++	u64 eot1[] = { USSE_PHAS, usse_limm(0, 0, 0, false), usse_limm(0, 1, 0, false),
++		       0xfb26000081200000ull, 0, 0, 0, 0,
++		       USSE_PHAS, usse_limm(2, 1, 0, false), usse_limm(2, 2, 1, false),
++		       usse_limm(2, 4, 2, false), usse_limm(2, 8, 3, true) };
++	u64 copy[] = { USSE_PHAS, 0x50850009a0000000ull };
++	/* SOP2, as sgx2d's pixel_blend: o0 = pa0 * a + o0 * (1 - a), a the
++	 * texel's alpha (tools/sgx/programs.py) -- o0 being what the quad under
++	 * it drew */
++	u64 blend[] = { USSE_PHAS, 0x809482dd90000000ull };
++	struct resource fb;
++	size_t avail;
++	int ret;
++
++	if (sgx->blt_ready)
++		return 0;
++	ret = sgx_map_extra(sgx, SGX_BLT_CODE_VA, SGX_PAGE_SIZE);
++	if (ret && ret != -EEXIST)
++		return ret;
++	sgx->blt_code = (u64 *)sgx_va_cpu(sgx, SGX_BLT_CODE_VA, &avail);
++	if (!sgx->blt_code || avail < SGX_PAGE_SIZE)
++		return -ENOMEM;
++	memset(sgx->blt_code, 0, SGX_PAGE_SIZE);
++	blt_put_prog(sgx, SGX_BLT_PROG_COPY, copy, ARRAY_SIZE(copy));
++	blt_put_prog(sgx, SGX_BLT_PROG_BLEND, blend, ARRAY_SIZE(blend));
++	blt_put_prog(sgx, SGX_BLT_PROG_EOT0, eot0, ARRAY_SIZE(eot0));
++	blt_put_prog(sgx, SGX_BLT_PROG_EOT1, eot1, ARRAY_SIZE(eot1));
++
++	ret = apple_sgx_fb_find(sgx, &fb);
++	if (ret)
++		dev_warn(sgx->dev, "no framebuffer for the 2D engine: %d\n", ret);
++	else
++		ret = apple_sgx_mmu_map(sgx, SGX_FB_VA, fb.start, resource_size(&fb), 0);
++	sgx->fb_pa = fb.start;
++	if (ret)
++		sgx->fb_w = 0;
++	else
++		dev_info(sgx->dev, "2D engine: framebuffer %ux%u, %u px lines, at GPU 0x%08x\n",
++			 sgx->fb_w, sgx->fb_h, sgx->fb_stride, SGX_FB_VA);
++	sgx->blt_ready = true;
++	return 0;
++}
++
++/* One job: src (or a fill colour, ABGR as the pixel program writes it)
++ * onto dst, scaled -- turned rot quarter turns anticlockwise (DRM's sense);
++ * over: the overlay blended over that, by its alpha, at its place in the
++ * box, in the same job.  Builds the pieces and queues the command: *seq
++ * is the job's, written to the scratch word when it is done (sgx_blt_run
++ * waits).  Under blt_lock, with no job of the engine's still running.
++ *
++ * (The overlay is not blended over what the screen already has: the
++ * background object, the one thing that reads dst, does not read it pixel
++ * for pixel -- its triangle takes the texture's corners as the quad does,
++ * a squeezed, sheared copy.  A copy or a fill covers it whole, so it never
++ * showed.) */
++static int __sgx_blt_submit(struct apple_sgx *sgx, const struct sgx_surf *src, u32 fill,
++			    const struct sgx_surf *dst, unsigned int rot,
++			    const struct apple_sgx_over *over, u32 *seqp)
++{
++	u32 *blk = sgx->buf[B_BLT_BLOCK].cpu, *par = sgx->buf[B_BLT_PARAM].cpu;
++	u32 bva = sgx->buf[B_BLT_BLOCK].va, pva = sgx->buf[B_BLT_PARAM].va;
++	u32 *ctl = sgx->buf[B_TQ_CTL].cpu, *ctx = sgx->buf[B_TQ_CTX].cpu;
++	u32 *scratch = sgx->buf[B_SCRATCH].cpu, *bg, *q, *r, *c, wo, seq, size;
++	u64 emit[11], fillp[2];
++	int i, ret;
++
++	if (sgx->boot_result != 1 || !sgx->blt_ready)
++		return -ENODEV;
++	if (!dst->w || !dst->h || dst->w > 2048 || dst->h > 2048)
++		return -EINVAL;
++
++	/* the pixel back end: linear BGRA, stride, size */
++	emit[0] = USSE_PHAS;
++	emit[1] = 0x488b0281a00c0000ull;
++	emit[2] = 0xe9a30084a0000000ull;
++	emit[3] = 0xf920000000000000ull;
++	emit[4] = usse_limm(0, 0, 0x00110000, false);
++	emit[5] = usse_limm(0, 1, dst->va, false);
++	emit[6] = usse_limm(0, 2, dst->stride / 2 - 1, false);
++	emit[7] = usse_limm(0, 3, 0, false);
++	emit[8] = usse_limm(0, 4, 0, false);
++	emit[9] = usse_limm(0, 5, (dst->h - 1) << 12 | (dst->w - 1), false);
++	emit[10] = 0xfb24000003200082ull;
++	blt_put_prog(sgx, SGX_BLT_PROG_EMIT, emit, ARRAY_SIZE(emit));
++	if (!src) {
++		fillp[0] = USSE_PHAS;
++		fillp[1] = usse_limm(1, 0, fill, true);
++		blt_put_prog(sgx, SGX_BLT_PROG_FILL, fillp, ARRAY_SIZE(fillp));
++	}
++
++	/* the PDS block */
++	memset(blk, 0, 0x220);
++	blk[0x00 / 4] = blt_doutu(SGX_BLT_PROG_EOT1);
++	blk[0x08 / 4] = blt_doutu(SGX_BLT_PROG_EMIT);
++	blk[0x10 / 4] = blt_doutu(SGX_BLT_PROG_EOT0);
++	memcpy(&blk[0x1c / 4], blt_pds_const, sizeof(blt_pds_const));
++	memcpy(&blk[0x50 / 4], blt_pds_main, sizeof(blt_pds_main));
++	/* 0: the background (reads dst), 1: the quad, 2: the overlay */
++	for (i = 0; i < (over ? 3 : 2); i++) {
++		u32 *o = &blk[(0x100 + 0x60 * i) / 4];
++		struct sgx_surf ov;
++
++		o[0] = 0xaf000000;
++		o[8] = blt_doutu(i == 0 ? SGX_BLT_PROG_COPY : i == 2 ? SGX_BLT_PROG_BLEND :
++				 !src ? SGX_BLT_PROG_FILL : SGX_BLT_PROG_COPY);
++		o[9] = 0xa;
++		o[11] = 0xf800;
++		if (i == 2) {
++			ov = (struct sgx_surf){ .va = over->va, .w = over->w, .h = over->h,
++						.stride = over->stride };
++			blt_tex(&o[12], &ov);
++		} else {
++			blt_tex(&o[12], i && src ? src : dst);
++		}
++		memcpy(&o[16], blt_pds_tex, sizeof(blt_pds_tex));
++	}
++
++	/* the parameter page: background triangle over the box, the quad (or
++	 * two), one region header */
++	bg = &par[SGX_BLT_BG_OFF / 4];
++	q = &par[SGX_BLT_QUAD_OFF / 4];
++	r = &par[SGX_BLT_RGN_OFF / 4];
++	memset(bg, 0, 0x220);
++	bg[0] = blt_pds_ptr(bva + 0x100, 0);
++	bg[1] = 0x0801e000;
++	bg[2] = blt_pds_ptr(bva + 0x120, 1);
++	bg[5] = bg[8] = bg[12] = bg[14] = bg[16] = 0x3f800000;
++	bg[9] = 2;
++	bg[11] = blt_xy(0, 0);
++	bg[13] = blt_xy(0, 2 * dst->h);
++	bg[15] = blt_xy(2 * dst->w, 0);
++	blt_quad(q, bva + 0x160, 0, 0, dst->w, dst->h, rot, 0x01d80000);
++	r[0] = 0x80000000;		/* last region */
++	r[1] = 0x46400f03;		/* both triangles of the quad */
++	r[2] = 0x0c000000 | SGX_BLT_QUAD_OFF >> 2 | 0xb;
++	if (over) {			/* and the overlay's */
++		blt_quad(&par[SGX_BLT_QUAD2_OFF / 4], bva + 0x1c0, over->x, over->y, over->dw,
++			 over->dh, rot, overlay_isp);
++		r[3] = 0x46400f03;
++		r[4] = 0x0c000000 | SGX_BLT_QUAD2_OFF >> 2 | 0xb;
++		r[5] = 0xc0000000;	/* end of the stream */
++	} else {
++		r[3] = 0xc0000000;
++	}
++
++	/* the command, as iOS places it (0x80bfd364): 16-bit offsets, and the
++	 * last command before the end is stretched to reach it, so the next
++	 * one starts at 0 */
++	wo = READ_ONCE(ctl[0]);
++	size = SGX_TQ_CMD_SIZE;
++	if (SGX_TQ_CCB_SIZE - SGX_TQ_CMD_SIZE - wo < SGX_TQ_CMD_SIZE)
++		size = SGX_TQ_CCB_SIZE - wo;
++	if (((READ_ONCE(ctl[1]) + 0xffff - wo) & 0xffff) <= size)
++		return -EBUSY;
++	seq = ++sgx->blt_seq ? sgx->blt_seq : ++sgx->blt_seq;
++	c = sgx->buf[B_TQ_CCB].cpu + wo / 4;
++	memset(c, 0, size);
++	c[0x00 / 4] = 0x02000000 | SGX_BLT_BG_OFF >> 4;	/* background object */
++	c[0x04 / 4] = 0x300;
++	c[0x08 / 4] = 0x3f800000;
++	c[0x0c / 4] = 2;
++	c[0x10 / 4] = SGX_BLT_RGN_OFF;			/* ISP_RGN_BASE */
++	c[0x14 / 4] = 0x100;
++	c[0x18 / 4] = pva;				/* BIF_3D_REQ_BASE */
++	c[0x20 / 4] = 0x88;
++	c[0x24 / 4] = bva;				/* end-of-tile PDS */
++	c[0x28 / 4] = 5;
++	c[0x2c / 4] = 0x4000;
++	c[0x34 / 4] = ((dst->w - 1) / 32) << 16 | (dst->h - 1) / 32;	/* region box */
++	c[0x38 / 4] = 0x80;
++	c[0xa0 / 4] = size;
++	c[0xac / 4] = sgx->buf[B_SCRATCH].va;		/* completion */
++	c[0xb0 / 4] = seq;
++	c[0x108 / 4] = 0x01800000;
++	WRITE_ONCE(scratch[0], 0);
++	wmb();
++	WRITE_ONCE(ctl[0], (wo + size) & (SGX_TQ_CCB_SIZE - 1));
++	WRITE_ONCE(ctx[0], 1);
++	wmb();
++	sgx->quiet = true;
++	ret = sgx_send_cmd(sgx, SGX_CMD_TRANSFER, over ? overlay_cc : 0, 0,
++			   sgx->buf[B_TQ_CTX].va);
++	sgx->quiet = false;
++	if (ret)
++		return ret;
++	sgx->blt_pending = seq;
++	sgx->blt_since = jiffies;
++	*seqp = seq;
++	return 0;
++}
++
++/* How long a job may take: the microkernel runs it after the 3D render it
++ * is busy with, and a render may take render_timeout_ms (2 s) before the
++ * render node restarts it all.  fbcon, which cannot sleep, gives up after
++ * 200 ms and draws on the CPU. */
++static unsigned int blt_timeout_ms = 3000;
++module_param(blt_timeout_ms, uint, 0644);
++MODULE_PARM_DESC(blt_timeout_ms, "a 2D job (a copy onto the screen) not done after this puts the engine out of service until it is done");
++
++/* The job queued last, if it is done now -- even one that ran out of time:
++ * the engine is back then; one past its time takes the engine out of
++ * service until it is done after all, or the microkernel is started again.
++ * Under blt_lock. */
++static void sgx_blt_reap(struct apple_sgx *sgx)
++{
++	u32 *scratch = sgx->buf[B_SCRATCH].cpu;
++
++	if (!sgx->blt_pending)
++		return;
++	if (READ_ONCE(scratch[0]) == sgx->blt_pending) {
++		if (sgx->blt_broken)
++			dev_info(sgx->dev, "2D job %u done after all: the engine is back\n",
++				 sgx->blt_pending);
++		sgx->blt_pending = 0;
++		sgx->blt_broken = false;
++	} else if (!sgx->blt_broken &&
++		   time_after(jiffies, sgx->blt_since + msecs_to_jiffies(blt_timeout_ms))) {
++		sgx->blt_broken = true;
++		dev_err(sgx->dev, "2D job %u not done after %u ms: completion 0x%08x, tq read "
++			"0x%x, BIF_FAULT core0 0x%08x master 0x%08x, lockups %u\n",
++			sgx->blt_pending, blt_timeout_ms, READ_ONCE(scratch[0]),
++			READ_ONCE(sgx->buf[B_TQ_CTL].cpu[1]),
++			sgx_read(sgx, SGX_CORE(0) + SGX_BIF_FAULT),
++			sgx_read(sgx, SGX_MASTER_BIF_FAULT),
++			READ_ONCE(sgx->buf[B_HOST].cpu[HOST_UK_LOCKUPS]));
++	}
++}
++
++/* Until the engine has no job running, sleeping: 0, or -EIO when it is out
++ * of service.  What a caller does before memory a job may read goes (the
++ * render node's screen: a framebuffer or the overlay let go). */
++int apple_sgx_blt_sync(struct apple_sgx *sgx)
++{
++	unsigned long flags;
++	int ret;
++
++	for (;;) {
++		spin_lock_irqsave(&sgx->blt_lock, flags);
++		sgx_blt_reap(sgx);
++		ret = sgx->blt_broken ? -EIO : sgx->blt_pending ? -EAGAIN : 0;
++		spin_unlock_irqrestore(&sgx->blt_lock, flags);
++		if (ret != -EAGAIN)
++			return ret;
++		usleep_range(100, 300);
++	}
++}
++
++/* One job at a time, from any context, the job before waited for -- by a
++ * caller that may sleep, sleeping, interrupts on.  It used to spin with them
++ * off for as long as the job took, 200 ms at most: a copy queued behind a
++ * long render of dEQP's took longer, and that put the engine out of service
++ * for good, the screen frozen.  BLT_ASYNC (the render node's copies onto
++ * the screen) returns once the job is queued: the X server goes on drawing
++ * while the GPU copies.  BLT_SYNC waits for it, sleeping (debugfs);
++ * BLT_ATOMIC (fbcon) spins for it, 200 ms at most, and does not wait for
++ * another's: -EBUSY, and fbcon draws on the CPU. */
++enum sgx_blt_wait { BLT_ATOMIC, BLT_SYNC, BLT_ASYNC };
++
++static int sgx_blt_run(struct apple_sgx *sgx, const struct sgx_surf *src, u32 fill,
++		       const struct sgx_surf *dst, unsigned int rot,
++		       const struct apple_sgx_over *over, enum sgx_blt_wait wait)
++{
++	u32 *scratch = sgx->buf[B_SCRATCH].cpu;
++	unsigned long flags;
++	u32 seq = 0, got;
++	bool raced;
++	int ret;
++
++	do {
++		if (wait != BLT_ATOMIC) {
++			ret = apple_sgx_blt_sync(sgx);
++			if (ret)
++				return ret;
++		}
++		spin_lock_irqsave(&sgx->blt_lock, flags);
++		sgx_blt_reap(sgx);
++		raced = !sgx->blt_broken && sgx->blt_pending;
++		ret = sgx->blt_broken ? -EIO : raced ? -EBUSY :
++		      __sgx_blt_submit(sgx, src, fill, dst, rot, over, &seq);
++		spin_unlock_irqrestore(&sgx->blt_lock, flags);
++		/* (another's job got in between: wait for it too) */
++	} while (raced && wait != BLT_ATOMIC);
++	if (ret || wait == BLT_ASYNC)
++		return ret;
++	if (wait == BLT_SYNC)
++		return apple_sgx_blt_sync(sgx);
++	ret = read_poll_timeout_atomic(READ_ONCE, got, got == seq, 1, 200000, false, scratch[0]);
++	spin_lock_irqsave(&sgx->blt_lock, flags);
++	sgx_blt_reap(sgx);
++	if (ret && sgx->blt_pending == seq && !sgx->blt_broken) {
++		sgx->blt_broken = true;
++		dev_err(sgx->dev, "2D job %u (fbcon's) not done after 200 ms: completion 0x%08x\n",
++			seq, got);
++	}
++	spin_unlock_irqrestore(&sgx->blt_lock, flags);
++	return ret;
++}
++
++static bool sgx_fb_rect_ok(struct apple_sgx *sgx, u32 x, u32 y, u32 w, u32 h)
++{
++	return sgx->fb_w && w && h && x < sgx->fb_w && y < sgx->fb_h &&
++	       w <= sgx->fb_w - x && h <= sgx->fb_h - y;
++}
++
++static void sgx_fb_surf(struct apple_sgx *sgx, struct sgx_surf *s, u32 x, u32 y,
++			u32 w, u32 h)
++{
++	s->va = SGX_FB_VA + (y * sgx->fb_stride + x) * 4;
++	s->w = w;
++	s->h = h;
++	s->stride = sgx->fb_stride;
++}
++
++/* "fill X Y W H ARGB" on the framebuffer */
++static int sgx_fb_fill(struct apple_sgx *sgx, u32 x, u32 y, u32 w, u32 h, u32 argb,
++		       enum sgx_blt_wait wait)
++{
++	struct sgx_surf d;
++
++	if (!sgx_fb_rect_ok(sgx, x, y, w, h))
++		return -EINVAL;
++	sgx_fb_surf(sgx, &d, x, y, w, h);
++	/* the pixel program's output is ABGR */
++	return sgx_blt_run(sgx, NULL, (argb & 0xff00ff00) | (argb & 0xff) << 16 |
++			   (argb >> 16 & 0xff), &d, 0, NULL, wait);
++}
++
++/* "copy SX SY DX DY W H" within the framebuffer */
++static int sgx_fb_copy(struct apple_sgx *sgx, u32 sx, u32 sy, u32 dx, u32 dy, u32 w, u32 h,
++		       enum sgx_blt_wait wait)
++{
++	struct sgx_surf s, d;
++
++	if (!sgx_fb_rect_ok(sgx, sx, sy, w, h) || !sgx_fb_rect_ok(sgx, dx, dy, w, h))
++		return -EINVAL;
++	sgx_fb_surf(sgx, &s, sx, sy, w, h);
++	sgx_fb_surf(sgx, &d, dx, dy, w, h);
++	return sgx_blt_run(sgx, &s, 0, &d, 0, NULL, wait);
++}
++
++/* The render node's screen (apple_sgx_kms.c): a w x h rectangle of a
++ * linear BGRA surface -- va its first pixel, stride in pixels -- onto the
++ * screen at x, y, turned rot quarter turns anticlockwise (h x w on the
++ * screen for an odd number).  Queued, once the copy before is done: the
++ * surface must stay until apple_sgx_blt_sync() says so. */
++int apple_sgx_fb_show(struct apple_sgx *sgx, u32 va, u32 stride, u32 w, u32 h, u32 x, u32 y,
++		      unsigned int rot, const struct apple_sgx_over *over)
++{
++	struct sgx_surf s = { .va = va, .w = w, .h = h, .stride = stride }, d;
++
++	if (rot & 1)
++		swap(w, h);
++	if (!sgx_fb_rect_ok(sgx, x, y, w, h))
++		return -EINVAL;
++	if (over && (!over->dw || !over->dh || over->x + over->dw > w || over->y + over->dh > h))
++		return -EINVAL;
++	sgx_fb_surf(sgx, &d, x, y, w, h);
++	return sgx_blt_run(sgx, &s, 0, &d, rot & 3, over, BLT_ASYNC);
++}
++
++/* fbcon moves rectangles over themselves.  Up the screen is one job (see
++ * fast_scroll); otherwise the move goes in bands no taller -- or wider --
++ * than the distance, in the order that never reads a written band. */
++static int sgx_fb_copy_safe(struct apple_sgx *sgx, u32 sx, u32 sy, u32 dx, u32 dy,
++			    u32 w, u32 h)
++{
++	bool overlap = sx < dx + w && dx < sx + w && sy < dy + h && dy < sy + h;
++	u32 d, i, n;
++	int ret = 0;
++
++	if (!overlap || (fast_scroll && dx == sx && dy < sy))
++		return sgx_fb_copy(sgx, sx, sy, dx, dy, w, h, BLT_ATOMIC);
++	if (dy != sy) {
++		d = dy > sy ? dy - sy : sy - dy;
++		n = DIV_ROUND_UP(h, d);
++		for (i = 0; i < n && !ret; i++) {
++			u32 k = dy > sy ? n - 1 - i : i;	/* down: last band first */
++			u32 y = k * d, bh = min(d, h - y);
++
++			ret = sgx_fb_copy(sgx, sx, sy + y, dx, dy + y, w, bh, BLT_ATOMIC);
++		}
++		return ret;
++	}
++	d = dx > sx ? dx - sx : sx - dx;
++	n = DIV_ROUND_UP(w, d);
++	for (i = 0; i < n && !ret; i++) {
++		u32 k = dx > sx ? n - 1 - i : i;		/* right: last band first */
++		u32 x = k * d, bw = min(d, w - x);
++
++		ret = sgx_fb_copy(sgx, sx + x, sy, dx + x, dy, bw, h, BLT_ATOMIC);
++	}
++	return ret;
++}
++
++/* fbcon on the GPU: simplefb's operations, with fills and copies replaced;
++ * whatever the engine cannot do goes back to simplefb's (CPU) versions. */
++extern struct fb_info *registered_fb[FB_MAX];	/* fbmem.c; both built in */
++static struct apple_sgx *sgx_fbcon;
++static struct fb_ops sgx_fbcon_ops;
++static const struct fb_ops *sgx_fbcon_cpu;
++
++static void sgx_fbcon_fillrect(struct fb_info *info, const struct fb_fillrect *r)
++{
++	u32 c = r->color;
++
++	if (info->fix.visual == FB_VISUAL_TRUECOLOR || info->fix.visual == FB_VISUAL_DIRECTCOLOR)
++		c = ((u32 *)info->pseudo_palette)[r->color];
++	if (r->rop != ROP_COPY ||
++	    sgx_fb_fill(sgx_fbcon, r->dx, r->dy, r->width, r->height, c, BLT_ATOMIC))
++		sgx_fbcon_cpu->fb_fillrect(info, r);
++}
++
++static void sgx_fbcon_copyarea(struct fb_info *info, const struct fb_copyarea *a)
++{
++	/* glyphs the CPU drew must be in memory before the GPU reads them */
++	wmb();
++	if (sgx_fb_copy_safe(sgx_fbcon, a->sx, a->sy, a->dx, a->dy, a->width, a->height))
++		sgx_fbcon_cpu->fb_copyarea(info, a);
++}
++
++static void sgx_fbcon_hook(struct apple_sgx *sgx)
++{
++	struct fb_info *info = registered_fb[0];
++
++	if (sgx->fb_hooked || !sgx->fb_w || !info || info->fix.smem_start != sgx->fb_pa)
++		return;
++	sgx_fbcon_cpu = info->fbops;
++	sgx_fbcon_ops = *info->fbops;
++	sgx_fbcon_ops.fb_fillrect = sgx_fbcon_fillrect;
++	sgx_fbcon_ops.fb_copyarea = sgx_fbcon_copyarea;
++	sgx_fbcon = sgx;
++	console_lock();
++	info->fbops = &sgx_fbcon_ops;
++	info->flags |= FBINFO_HWACCEL_COPYAREA | FBINFO_HWACCEL_FILLRECT;
++	/* fbcon picks its scroll mode on a switch: copies instead of redraws */
++	if (vc_cons[fg_console].d)
++		redraw_screen(vc_cons[fg_console].d, 0);
++	console_unlock();
++	sgx->fb_hooked = true;
++	dev_info(sgx->dev, "fbcon: fills and copies on the GPU\n");
++}
++
++/* "bench N": N fills of 64x64 in the top-left corner, timed */
++static int sgx_fb_bench(struct apple_sgx *sgx, u32 n)
++{
++	ktime_t t0 = ktime_get();
++	s64 us;
++	u32 i;
++	int ret = 0;
++
++	for (i = 0; i < n && !ret; i++)
++		ret = sgx_fb_fill(sgx, 0, 0, 64, 64, 0xff000000 | (i * 0x0a1f3d), BLT_SYNC);
++	us = ktime_us_delta(ktime_get(), t0);
++	dev_info(sgx->dev, "bench: %u of %u fills done in %lld us (%lld us each)%s\n",
++		 ret ? i - 1 : i, n, us, i ? div_s64(us, i) : 0, ret ? ", stopped on an error" : "");
++	return ret;
++}
++
++/* ---- debugfs -------------------------------------------------------------- */
++
++static const struct {
++	u32 off;
++	const char *name;
++} sgx_master_regs[] = {
++	{ SGX_MASTER_CORE,		"MASTER_CORE" },
++	{ SGX_MASTER_CLKGATECTL,	"MASTER_CLKGATECTL" },
++	{ SGX_MASTER_CLKGATESTATUS,	"MASTER_CLKGATESTATUS" },
++	{ SGX_MASTER_CORE_ID,		"MASTER_CORE_ID" },
++	{ SGX_MASTER_CORE_REVISION,	"MASTER_CORE_REVISION" },
++	{ SGX_MASTER_CLKGATECTL2,	"MASTER_CLKGATECTL2" },
++	{ SGX_MASTER_CLKGATESTATUS2,	"MASTER_CLKGATESTATUS2" },
++	{ SGX_MASTER_SOFT_RESET,	"MASTER_SOFT_RESET" },
++	{ SGX_MASTER_EVENT_STATUS,	"MASTER_EVENT_STATUS" },
++	{ SGX_MASTER_EVENT_STATUS2,	"MASTER_EVENT_STATUS2" },
++	{ SGX_MASTER_BIF_CTRL,		"MASTER_BIF_CTRL" },
++	{ SGX_MASTER_BIF_INT_STAT,	"MASTER_BIF_INT_STAT" },
++	{ SGX_MASTER_BIF_FAULT,		"MASTER_BIF_FAULT" },
++	{ SGX_MASTER_BIF_MEM_REQ_STAT,	"MASTER_BIF_MEM_REQ_STAT" },
++	{ SGX_MASTER_SLC_CTRL,		"MASTER_SLC_CTRL" },
++	{ SGX_MASTER_SLC_CTRL_BYPASS,	"MASTER_SLC_CTRL_BYPASS" },
++}, sgx_core_regs[] = {
++	{ SGX_CLKGATECTL,		"CLKGATECTL" },
++	{ SGX_CLKGATECTL2,		"CLKGATECTL2" },
++	{ SGX_CLKGATESTATUS,		"CLKGATESTATUS" },
++	{ SGX_CORE_ID,			"CORE_ID" },
++	{ SGX_CORE_REVISION,		"CORE_REVISION" },
++	{ SGX_SOFT_RESET,		"SOFT_RESET" },
++	{ SGX_EVENT_STATUS,		"EVENT_STATUS" },
++	{ SGX_EVENT_STATUS2,		"EVENT_STATUS2" },
++	{ SGX_BIF_CTRL,			"BIF_CTRL" },
++	{ SGX_BIF_INT_STAT,		"BIF_INT_STAT" },
++	{ SGX_BIF_FAULT,		"BIF_FAULT" },
++	{ SGX_BIF_MEM_REQ_STAT,		"BIF_MEM_REQ_STAT" },
++};
++
++static int sgx_regs_show(struct seq_file *s, void *unused)
++{
++	struct apple_sgx *sgx = s->private;
++	unsigned int i, n;
++
++	mutex_lock(&sgx->lock);
++	for (i = 0; i < ARRAY_SIZE(sgx_master_regs); i++)
++		seq_printf(s, "+0x%05x  %-24s 0x%08x\n", sgx_master_regs[i].off,
++			   sgx_master_regs[i].name,
++			   sgx_read(sgx, sgx_master_regs[i].off));
++	for (n = 0; n < sgx->ncores; n++)
++		for (i = 0; i < ARRAY_SIZE(sgx_core_regs); i++) {
++			u32 off = SGX_CORE(n) + sgx_core_regs[i].off;
++
++			seq_printf(s, "+0x%05x  core%u %-18s 0x%08x\n", off, n,
++				   sgx_core_regs[i].name, sgx_read(sgx, off));
++		}
++	if (sgx->bufs_ready) {
++		static const struct { u8 w; const char *name; } hw[] = {
++			{ HOST_INIT_STATUS, "init status" },
++			{ HOST_POWER_STATUS, "power status" },
++			{ HOST_CLEANUP_STATUS, "cleanup status" },
++			{ HOST_UK_LOCKUPS, "ukernel lockups" },
++			{ HOST_UK_TIMER_CLOCK, "ukernel timer clock" },
++			{ HOST_INTERRUPT_FLAGS, "interrupt flags" },
++			{ HOST_INTERRUPT_CLEAR, "interrupt clear" },
++			{ HOST_TIME_WRAPS, "time wraps" },
++			{ HOST_ASSERT_FAIL, "assert fail" },
++		};
++		u32 *host = sgx->buf[B_HOST].cpu, *ctl = sgx->buf[B_758].cpu;
++
++		seq_printf(s, "page directory pa %pad\n", &sgx->pd_dma);
++		for (i = 0; i < ARRAY_SIZE(hw); i++)
++			seq_printf(s, "host +0x%02x %-20s 0x%08x\n", hw[i].w * 4,
++				   hw[i].name, READ_ONCE(host[hw[i].w]));
++		seq_printf(s, "CCB write %u read %u, kicker %u\n",
++			   READ_ONCE(ctl[0]), READ_ONCE(ctl[1]),
++			   READ_ONCE(sgx->buf[B_KICKER].cpu[0]));
++		seq_printf(s, "tq CCB write 0x%x read 0x%x; scratch 0x%08x 0x%08x\n",
++			   READ_ONCE(sgx->buf[B_TQ_CTL].cpu[0]),
++			   READ_ONCE(sgx->buf[B_TQ_CTL].cpu[1]),
++			   READ_ONCE(sgx->buf[B_SCRATCH].cpu[0]),
++			   READ_ONCE(sgx->buf[B_SCRATCH].cpu[1]));
++		seq_printf(s, "r CCB write 0x%x read 0x%x; r ctx 0x%08x word0 0x%x; renders %u\n",
++			   READ_ONCE(sgx->buf[B_R_CTL].cpu[0]),
++			   READ_ONCE(sgx->buf[B_R_CTL].cpu[1]),
++			   sgx->buf[B_R_CTX].va, READ_ONCE(sgx->buf[B_R_CTX].cpu[0]),
++			   sgx->r_seq);
++		for (i = 0; i < B_NUM; i++)
++			seq_printf(s, "buffer %-10s va 0x%08x pa %pad size 0x%zx\n",
++				   sgx_buf_descs[i].name, sgx->buf[i].va,
++				   &sgx->buf[i].dma, sgx->buf[i].size);
++		for (i = 0; i < sgx->nextra; i++)
++			seq_printf(s, "mapped            va 0x%08x pa %pad size 0x%zx\n",
++				   sgx->extra[i].va, &sgx->extra[i].dma, sgx->extra[i].size);
++	}
++	seq_printf(s, "interrupt %d: %s, %u handled, %u unhandled; events core0 0x%08x core1 0x%08x; host interrupt flags 0x%08x\n",
++		   sgx->irq, sgx->irq_on ? "on" : "off", sgx->irq_count,
++		   sgx->irq_unhandled, sgx->irq_events[0], sgx->irq_events[1],
++		   sgx->irq_host_flags);
++	seq_printf(s, "microkernel: %s (%d)\n",
++		   sgx->boot_result == 1 ? "up" :
++		   sgx->boot_result ? "failed" : "not started", sgx->boot_result);
++	mutex_unlock(&sgx->lock);
++	return 0;
++}
++DEFINE_SHOW_ATTRIBUTE(sgx_regs);
++
++/* Any write starts the microkernel, from a reset GPU each time. */
++/* Start (or restart) the microkernel; sgx->lock held.  The 2D engine is out
++ * of service meanwhile -- fbcon draws with the CPU. */
++static int sgx_boot(struct apple_sgx *sgx)
++{
++	unsigned long flags;
++	int ret;
++
++	spin_lock_irqsave(&sgx->blt_lock, flags);
++	sgx->boot_result = 0;
++	spin_unlock_irqrestore(&sgx->blt_lock, flags);
++	ret = sgx_boot_ukernel(sgx);
++	spin_lock_irqsave(&sgx->blt_lock, flags);
++	sgx->boot_result = ret ? ret : 1;
++	sgx->boots++;
++	sgx->blt_broken = false;
++	sgx->blt_pending = 0;
++	spin_unlock_irqrestore(&sgx->blt_lock, flags);
++	if (!ret && fbcon_gpu)
++		sgx_fbcon_hook(sgx);
++	return ret;
++}
++
++static void sgx_boot_work(struct work_struct *work)
++{
++	struct apple_sgx *sgx = container_of(work, struct apple_sgx, boot_work);
++	int ret;
++
++	mutex_lock(&sgx->lock);
++	ret = sgx_boot(sgx);
++	mutex_unlock(&sgx->lock);
++	if (ret)
++		dev_err(sgx->dev, "microkernel did not start: %d\n", ret);
++}
++
++bool apple_sgx_up(struct apple_sgx *sgx)
++{
++	return READ_ONCE(sgx->boot_result) == 1;
++}
++
++/* A new start of the microkernel, from a reset GPU: every queue empty, every
++ * mapping kept.  For the render node, after a render that never ended. */
++int apple_sgx_restart(struct apple_sgx *sgx)
++{
++	int ret;
++
++	mutex_lock(&sgx->lock);
++	ret = sgx_boot(sgx);
++	mutex_unlock(&sgx->lock);
++	return ret;
++}
++
++/* A boot from debugfs would pull the queues out from under the render
++ * node's clients. */
++static ssize_t sgx_boot_write(struct file *file, const char __user *ubuf,
++			      size_t len, loff_t *ppos)
++{
++	struct apple_sgx *sgx = file->private_data;
++	int ret;
++
++	mutex_lock(&sgx->lock);
++	ret = apple_sgx_drm_busy(sgx) ? -EBUSY : sgx_boot(sgx);
++	mutex_unlock(&sgx->lock);
++	return ret ? ret : len;
++}
++
++static const struct file_operations sgx_boot_fops = {
++	.owner = THIS_MODULE,
++	.open = simple_open,
++	.write = sgx_boot_write,
++	.llseek = noop_llseek,
++};
++
++/* Commands that need nothing but the microkernel itself (those that touch
++ * the queues or the address map are refused while the render node is open):
++ *   "hwperf N"   SETHWPERFSTATUS with status N (0 = counters off)
++ *   "power N"    POWER: 1 power off, 2 idle, 3 resume (after idle)
++ *   "tq F [V]"   a transfer with flags F and no work but two writes of V
++ *   "map VA SZ"  memory at GPU address VA (see apple-sgx/mem)
++ *   "tqkick"     send the transfer command placed at the transfer CCB
++ *   "rkick PB DET CMD [CC]"  one render (see sgx_r_kick)
++ * and the 2D engine, on the framebuffer:
++ *   "fill X Y W H ARGB", "copy SX SY DX DY W H", "bench N" (N timed fills),
++ *   "fbcon" (put fbcon's fills and copies on the GPU from now on) */
++static ssize_t sgx_cmd_write(struct file *file, const char __user *ubuf,
++			     size_t len, loff_t *ppos)
++{
++	struct apple_sgx *sgx = file->private_data;
++	char buf[96], word[8];
++	u32 arg = 0, arg2 = 0x1234, a[4] = { 0 };
++	int ret;
++
++	if (len >= sizeof(buf))
++		return -EINVAL;
++	if (copy_from_user(buf, ubuf, len))
++		return -EFAULT;
++	buf[len] = 0;
++	if (sscanf(buf, "%7s %i %i %i %i %i %i", word, &arg, &arg2,
++		   &a[0], &a[1], &a[2], &a[3]) < 1)
++		return -EINVAL;
++
++	mutex_lock(&sgx->lock);
++	if (apple_sgx_drm_busy(sgx) &&
++	    (!strcmp(word, "power") || !strcmp(word, "tq") || !strcmp(word, "tqkick") ||
++	     !strcmp(word, "rkick") || !strcmp(word, "map")))
++		ret = -EBUSY;	/* the render node has clients */
++	else if (!strcmp(word, "hwperf"))
++		ret = sgx_send_cmd(sgx, SGX_CMD_HWPERF, 0, arg, 0);
++	else if (!strcmp(word, "power"))
++		ret = sgx_power_cmd(sgx, arg);
++	else if ((!strcmp(word, "tq") || !strcmp(word, "tqkick")) && sgx->fb_hooked)
++		ret = -EBUSY;	/* the transfer queue belongs to fbcon now */
++	else if (!strcmp(word, "tq"))
++		ret = sgx_tq_cmd(sgx, arg, arg2);
++	else if (!strcmp(word, "map"))
++		ret = sgx_map_extra(sgx, arg, arg2);
++	else if (!strcmp(word, "tqkick"))
++		ret = sgx_tq_kick(sgx);
++	else if (!strcmp(word, "rkick"))
++		ret = sgx_r_kick(sgx, arg, arg2, a[0], a[1]);
++	else if (!strcmp(word, "fill"))
++		ret = sgx_fb_fill(sgx, arg, arg2, a[0], a[1], a[2], BLT_SYNC);
++	else if (!strcmp(word, "copy"))
++		ret = sgx_fb_copy(sgx, arg, arg2, a[0], a[1], a[2], a[3], BLT_SYNC);
++	else if (!strcmp(word, "bench"))
++		ret = sgx_fb_bench(sgx, arg);
++	else if (!strcmp(word, "fbcon")) {
++		ret = sgx->boot_result == 1 ? 0 : -ENODEV;
++		if (!ret)
++			sgx_fbcon_hook(sgx);
++	}
++	else
++		ret = -EINVAL;
++	mutex_unlock(&sgx->lock);
++	return ret ? ret : len;
++}
++
++static const struct file_operations sgx_cmd_fops = {
++	.owner = THIS_MODULE,
++	.open = simple_open,
++	.write = sgx_cmd_write,
++	.llseek = noop_llseek,
++};
++
++/* ---- the device ----------------------------------------------------------- */
++
++static void sgx_power_off(void *data)
++{
++	struct apple_sgx *sgx = data;
++
++	clk_bulk_disable_unprepare(sgx->num_clks, sgx->clks);
++}
++
++static int apple_sgx_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct apple_sgx *sgx;
++	struct resource *res;
++	u32 id, rev, cid, crev;
++	unsigned int n, cores;
++	int ret;
++
++	if (clock_mode != 1 && clock_mode != 2)
++		return dev_err_probe(dev, -EINVAL, "clock_mode must be 1 or 2\n");
++
++	sgx = devm_kzalloc(dev, sizeof(*sgx), GFP_KERNEL);
++	if (!sgx)
++		return -ENOMEM;
++	sgx->dev = dev;
++	mutex_init(&sgx->lock);
++	mutex_init(&sgx->mmu_lock);
++	spin_lock_init(&sgx->ccb_lock);
++	spin_lock_init(&sgx->blt_lock);
++	INIT_WORK(&sgx->boot_work, sgx_boot_work);
++	sgx->brn_31195 = of_property_read_bool(dev->of_node, "apple,brn-31195");
++
++	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
++	if (ret)
++		return ret;
++	/* one page directory for everything, from the start: the render node
++	 * maps buffers before the microkernel's first boot too */
++	sgx->pd = dmam_alloc_coherent(dev, SGX_PAGE_SIZE, &sgx->pd_dma, GFP_KERNEL);
++	if (!sgx->pd)
++		return -ENOMEM;
++
++	sgx->regs = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
++	if (IS_ERR(sgx->regs))
++		return PTR_ERR(sgx->regs);
++	sgx->size = resource_size(res);
++	if (sgx->size < SGX_CORE(1))
++		return dev_err_probe(dev, -EINVAL, "register window too small\n");
++
++	/* GFX_SYS, then GFX: clk_bulk enables in DT order. */
++	sgx->num_clks = devm_clk_bulk_get_all(dev, &sgx->clks);
++	if (sgx->num_clks < 0)
++		return dev_err_probe(dev, sgx->num_clks, "no power-state clocks\n");
++	ret = clk_bulk_prepare_enable(sgx->num_clks, sgx->clks);
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot power the GPU on\n");
++	ret = devm_add_action_or_reset(dev, sgx_power_off, sgx);
++	if (ret)
++		return ret;
++
++	/* The master answers as soon as it has power.  ncores is still 0, so
++	 * only master reads get through. */
++	id = sgx_read(sgx, SGX_MASTER_CORE_ID);
++	rev = sgx_read(sgx, SGX_MASTER_CORE_REVISION);
++	cores = SGX_CORE_ID_CORES(id);
++	if (SGX_CORE_ID_ID(id) != SGX_ID_543)
++		return dev_err_probe(dev, -ENODEV,
++				     "CORE_ID 0x%08x is not an SGX543 -- powered?\n", id);
++	if (!cores || cores > SGX_MAX_CORES || SGX_CORE(cores) > sgx->size)
++		return dev_err_probe(dev, -ENODEV,
++				     "CORE_ID 0x%08x says %u cores\n", id, cores);
++	sgx->ncores = cores;
++	sgx->core_id = id;
++	sgx->core_rev = rev;
++
++	sgx_init(sgx);
++
++	/* Now the cores have clocks and can be read.  Each reports the same
++	 * ID and revision as the master, or something is wrong. */
++	for (n = 0; n < sgx->ncores; n++) {
++		cid = sgx_read(sgx, SGX_CORE(n) + SGX_CORE_ID);
++		crev = sgx_read(sgx, SGX_CORE(n) + SGX_CORE_REVISION);
++		if (cid != id || crev != rev)
++			return dev_err_probe(dev, -EIO,
++				"core %u: CORE_ID 0x%08x rev 0x%08x, master 0x%08x 0x%08x\n",
++				n, cid, crev, id, rev);
++	}
++
++	/* Requested now, switched on only by a microkernel boot with irq=1. */
++	sgx->irq = platform_get_irq_optional(pdev, 0);
++	if (sgx->irq > 0) {
++		ret = devm_request_irq(dev, sgx->irq, sgx_irq_handler,
++				       IRQF_NO_AUTOEN, dev_name(dev), sgx);
++		if (ret)
++			return dev_err_probe(dev, ret, "interrupt %d\n", sgx->irq);
++	}
++
++	dev_info(dev, "SGX543MP%u rev %u.%u.%u, %u core(s) up, clocks %s\n",
++		 sgx->ncores, (rev >> 16) & 0xff, (rev >> 8) & 0xff, rev & 0xff,
++		 sgx->ncores, clock_mode == 1 ? "on" : "auto");
++
++	sgx->debugfs = debugfs_create_dir("apple-sgx", NULL);
++	debugfs_create_file("regs", 0400, sgx->debugfs, sgx, &sgx_regs_fops);
++	debugfs_create_file("boot", 0200, sgx->debugfs, sgx, &sgx_boot_fops);
++	debugfs_create_file("cmd", 0200, sgx->debugfs, sgx, &sgx_cmd_fops);
++	debugfs_create_file("mem", 0600, sgx->debugfs, sgx, &sgx_mem_fops);
++	platform_set_drvdata(pdev, sgx);
++
++	ret = apple_sgx_drm_init(sgx);
++	if (ret) {
++		debugfs_remove_recursive(sgx->debugfs);
++		return dev_err_probe(dev, ret, "render node\n");
++	}
++	if (autoboot)
++		schedule_work(&sgx->boot_work);
++	return 0;
++}
++
++static void apple_sgx_remove(struct platform_device *pdev)
++{
++	struct apple_sgx *sgx = platform_get_drvdata(pdev);
++
++	cancel_work_sync(&sgx->boot_work);
++	apple_sgx_drm_fini(sgx);
++	debugfs_remove_recursive(sgx->debugfs);
++}
++
++static const struct of_device_id apple_sgx_of_match[] = {
++	{ .compatible = "apple,s5l8940x-sgx" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, apple_sgx_of_match);
++
++static struct platform_driver apple_sgx_driver = {
++	.probe = apple_sgx_probe,
++	.remove = apple_sgx_remove,
++	.driver = {
++		.name = "apple-sgx",
++		.of_match_table = apple_sgx_of_match,
++		/* the render node's buffers outlive an unbind */
++		.suppress_bind_attrs = true,
++	},
++};
++module_platform_driver(apple_sgx_driver);
++
++MODULE_DESCRIPTION("Apple S5L8940X PowerVR SGX543MP2: microkernel, queues, render node");
++MODULE_FIRMWARE(SGX_FW_NAME);
++MODULE_LICENSE("GPL");
+diff --git a/drivers/gpu/drm/apple-sgx/apple_sgx_kms.c b/drivers/gpu/drm/apple-sgx/apple_sgx_kms.c
+new file mode 100644
+index 000000000..8d1eff4fe
+--- /dev/null
++++ b/drivers/gpu/drm/apple-sgx/apple_sgx_kms.c
+@@ -0,0 +1,564 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Apple S5L8940X (A5) PowerVR SGX543MP2 -- the screen, through KMS.
++ *
++ * The display pipe is iBoot's: it scans out a framebuffer at a fixed
++ * physical address (the device tree's simple-framebuffer, which simplefb
++ * keeps for fbcon), and nothing here programs it.  What is here is KMS on
++ * that memory, so that GBM, EGL and compositors have a screen: one plane,
++ * CRTC, encoder and connector, the framebuffer's one mode.  A KMS
++ * framebuffer is any of the render node's buffers (Mesa's through GBM, or
++ * a dumb buffer), and showing it is a copy onto the screen by the 2D
++ * engine -- the damaged rectangles, or the whole plane on a flip -- once
++ * the renders writing it are done (the plane's implicit fences), turned
++ * as the plane's rotation says (M41: the copy's quad turned).
++ *
++ * There is no vblank interrupt.  A flip is done when its copy is: its
++ * event goes then (sgx_kms_commit_tail).  A timer at the mode's refresh
++ * stands for the interrupt, so that there is a vblank count: X's Present
++ * has no MSC without one, and GL programs under X go unpaced.  fbcon still
++ * draws into the same memory when it has something to show.
++ * docs/research/p105-mesa.md, M16, M38.
++ *
++ * Over the plane, the overlay (the render node's OVERLAY ioctl): a buffer
++ * whose listed rectangles are blended over the plane in each copy that
++ * reaches them, the same 2D job -- an on-screen control over whatever runs,
++ * with no compositor (tools/screenpad).
++ */
++
++#include <linux/hrtimer.h>
++#include <linux/log2.h>
++#include <linux/of.h>
++
++#include <drm/drm_atomic.h>
++#include <drm/drm_atomic_helper.h>
++#include <drm/drm_blend.h>
++#include <drm/drm_connector.h>
++#include <drm/drm_damage_helper.h>
++#include <drm/drm_drv.h>
++#include <drm/drm_file.h>
++#include <drm/drm_fourcc.h>
++#include <drm/drm_framebuffer.h>
++#include <drm/drm_gem.h>
++#include <drm/drm_gem_framebuffer_helper.h>
++#include <drm/drm_managed.h>
++#include <drm/drm_modes.h>
++#include <drm/drm_probe_helper.h>
++#include <drm/drm_rect.h>
++#include <drm/drm_print.h>
++#include <drm/drm_simple_kms_helper.h>
++#include <drm/drm_vblank.h>
++#include <drm/apple_sgx_drm.h>
++
++#include "apple_sgx.h"
++
++/* the iPad mini's panel: 163 pixels an inch */
++#define SGX_KMS_UM_PER_PX	156
++/* the 2D engine is given surfaces that start on 64 bytes: framebuffers'
++ * pitches and offsets are multiples of it, and copies start and end on
++ * 16 pixels (damage is widened) */
++#define SGX_KMS_ALIGN_PX	16
++#define SGX_KMS_ALIGN		64
++#define SGX_KMS_MAX_SIZE	4096
++
++struct apple_sgx_kms {
++	struct apple_sgx *sgx;
++	struct drm_simple_display_pipe pipe;
++	struct drm_connector connector;
++	struct drm_display_mode mode;
++	struct hrtimer vblank_timer;
++	ktime_t vblank_period;
++
++	/* the overlay: its buffer, owner and rectangles (the plane's source
++	 * coordinates less its origin, out to 16 pixels); the lock keeps them
++	 * still through the copies of one commit */
++	struct mutex ov_lock;
++	struct drm_file *ov_owner;
++	struct drm_gem_object *ov_obj;
++	u32 ov_pitch, ov_w, ov_h;
++	unsigned int ov_n;
++	struct drm_rect ov_rects[APPLE_SGX_OVERLAY_MAX_RECTS];
++};
++
++static const u32 sgx_kms_formats[] = { DRM_FORMAT_XRGB8888, DRM_FORMAT_ARGB8888 };
++
++static int sgx_kms_get_modes(struct drm_connector *connector)
++{
++	struct apple_sgx_kms *kms = container_of(connector, struct apple_sgx_kms, connector);
++
++	return drm_connector_helper_get_modes_fixed(connector, &kms->mode);
++}
++
++static const struct drm_connector_helper_funcs sgx_kms_connector_helper = {
++	.get_modes = sgx_kms_get_modes,
++};
++
++static const struct drm_connector_funcs sgx_kms_connector_funcs = {
++	.reset = drm_atomic_helper_connector_reset,
++	.fill_modes = drm_helper_probe_single_connector_modes,
++	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
++	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
++};
++
++static enum drm_mode_status sgx_kms_mode_valid(struct drm_simple_display_pipe *pipe,
++					       const struct drm_display_mode *mode)
++{
++	struct apple_sgx_kms *kms = container_of(pipe, struct apple_sgx_kms, pipe);
++
++	if (mode->hdisplay != kms->mode.hdisplay || mode->vdisplay != kms->mode.vdisplay)
++		return MODE_ONE_SIZE;
++	return MODE_OK;
++}
++
++static int sgx_kms_check(struct drm_simple_display_pipe *pipe,
++			 struct drm_plane_state *plane_state, struct drm_crtc_state *crtc_state)
++{
++	/* a pan across has to keep the copies' alignment -- down too, turned
++	 * a quarter (the screen's x is then the framebuffer's y) */
++	if (plane_state->fb && ((plane_state->src.x1 >> 16) % SGX_KMS_ALIGN_PX ||
++				(drm_rotation_90_or_270(plane_state->rotation) &&
++				 (plane_state->src.y1 >> 16) % SGX_KMS_ALIGN_PX)))
++		return -EINVAL;
++	return 0;
++}
++
++/* The overlay's part of r (framebuffer coordinates, as copied): the box of
++ * its rectangles that meet r, where it lands in r's copy turned.  0: none.
++ * Under ov_lock. */
++static bool sgx_kms_over(struct apple_sgx_kms *kms, const struct drm_plane_state *state,
++			 const struct drm_rect *r, struct apple_sgx_over *over)
++{
++	u32 sx = state->src.x1 >> 16, sy = state->src.y1 >> 16;
++	u32 sw = drm_rect_width(&state->src) >> 16, sh = drm_rect_height(&state->src) >> 16;
++	struct drm_rect box = { 0 }, o;
++	unsigned int i;
++
++	if (!kms->ov_obj || kms->ov_w != sw || kms->ov_h != sh)
++		return false;
++	for (i = 0; i < kms->ov_n; i++) {
++		o = kms->ov_rects[i];
++		drm_rect_translate(&o, sx, sy);
++		if (!drm_rect_intersect(&o, r))
++			continue;
++		if (!drm_rect_visible(&box)) {
++			box = o;
++		} else {
++			box.x1 = min(box.x1, o.x1);
++			box.y1 = min(box.y1, o.y1);
++			box.x2 = max(box.x2, o.x2);
++			box.y2 = max(box.y2, o.y2);
++		}
++	}
++	if (!drm_rect_visible(&box))
++		return false;
++	over->va = apple_sgx_bo_va(kms->ov_obj) + (box.y1 - sy) * kms->ov_pitch + (box.x1 - sx) * 4;
++	over->stride = kms->ov_pitch / 4;
++	over->w = drm_rect_width(&box);
++	over->h = drm_rect_height(&box);
++	drm_rect_translate(&box, -r->x1, -r->y1);
++	drm_rect_rotate(&box, drm_rect_width(r), drm_rect_height(r),
++			state->rotation & DRM_MODE_ROTATE_MASK);
++	over->x = box.x1;
++	over->y = box.y1;
++	over->dw = drm_rect_width(&box);
++	over->dh = drm_rect_height(&box);
++	return true;
++}
++
++/* One damaged rectangle (framebuffer coordinates) onto the screen, turned
++ * as the plane is (M41: the 2D engine's quad turned -- the copy costs the
++ * same), the overlay blended over it in the same job.  Its edges go out to
++ * 16 pixels in the framebuffer's x, and in its y too when that is the
++ * screen's x.  Under ov_lock. */
++static void sgx_kms_show(struct apple_sgx_kms *kms, const struct drm_plane_state *state,
++			 const struct drm_rect *clip)
++{
++	struct drm_framebuffer *fb = state->fb;
++	unsigned int rot = ilog2(state->rotation & DRM_MODE_ROTATE_MASK);
++	u32 sx = state->src.x1 >> 16, sy = state->src.y1 >> 16;
++	u32 sw = drm_rect_width(&state->src) >> 16, sh = drm_rect_height(&state->src) >> 16;
++	struct drm_rect src = DRM_RECT_INIT(sx, sy, sw, sh), r = *clip, on;
++	struct apple_sgx_over over;
++	u32 va;
++	int ret;
++
++	r.x1 = round_down(r.x1, SGX_KMS_ALIGN_PX);
++	r.x2 = round_up(r.x2, SGX_KMS_ALIGN_PX);
++	if (rot & 1) {
++		r.y1 = round_down(r.y1, SGX_KMS_ALIGN_PX);
++		r.y2 = round_up(r.y2, SGX_KMS_ALIGN_PX);
++	}
++	if (!drm_rect_intersect(&r, &src))
++		return;
++	/* where it lands: the plane's source turned onto the screen */
++	on = r;
++	drm_rect_translate(&on, -sx, -sy);
++	drm_rect_rotate(&on, sw, sh, state->rotation & DRM_MODE_ROTATE_MASK);
++	va = apple_sgx_bo_va(fb->obj[0]) + fb->offsets[0] + r.y1 * fb->pitches[0] + r.x1 * 4;
++	ret = apple_sgx_fb_show(kms->sgx, va, fb->pitches[0] / 4, drm_rect_width(&r),
++				drm_rect_height(&r), on.x1, on.y1, rot,
++				sgx_kms_over(kms, state, &r, &over) ? &over : NULL);
++	if (ret)
++		drm_err_ratelimited(fb->dev, "the 2D engine's copy to the screen: %d\n", ret);
++}
++
++/* The plane's damage onto the screen, before the commit's event goes. */
++static void sgx_kms_update(struct drm_simple_display_pipe *pipe,
++			   struct drm_plane_state *old_state)
++{
++	struct apple_sgx_kms *kms = container_of(pipe, struct apple_sgx_kms, pipe);
++	struct drm_plane_state *state = pipe->plane.state;
++	struct drm_atomic_helper_damage_iter iter;
++	struct drm_rect clip;
++
++	if (!state->fb || !state->visible || !pipe->crtc.state->active)
++		return;
++	mutex_lock(&kms->ov_lock);
++	drm_atomic_helper_damage_iter_init(&iter, old_state, state);
++	drm_atomic_for_each_plane_damage(&iter, &clip)
++		sgx_kms_show(kms, state, &clip);
++	mutex_unlock(&kms->ov_lock);
++}
++
++static void sgx_kms_enable(struct drm_simple_display_pipe *pipe,
++			   struct drm_crtc_state *crtc_state, struct drm_plane_state *plane_state)
++{
++	/* what is shown comes with the plane's update */
++	drm_crtc_vblank_on(&pipe->crtc);
++}
++
++static void sgx_kms_disable(struct drm_simple_display_pipe *pipe)
++{
++	drm_crtc_vblank_off(&pipe->crtc);
++}
++
++/* The vblank that is not there, at the mode's refresh while anyone waits
++ * for one.  Disabled (the count's users gone) it stops: a disable that
++ * missed the timer running leaves it to stop itself. */
++static enum hrtimer_restart sgx_kms_vblank(struct hrtimer *timer)
++{
++	struct apple_sgx_kms *kms = container_of(timer, struct apple_sgx_kms, vblank_timer);
++
++	if (!drm_crtc_handle_vblank(&kms->pipe.crtc))
++		return HRTIMER_NORESTART;
++	hrtimer_forward_now(timer, kms->vblank_period);
++	return HRTIMER_RESTART;
++}
++
++static int sgx_kms_enable_vblank(struct drm_simple_display_pipe *pipe)
++{
++	struct apple_sgx_kms *kms = container_of(pipe, struct apple_sgx_kms, pipe);
++
++	hrtimer_start(&kms->vblank_timer, kms->vblank_period, HRTIMER_MODE_REL);
++	return 0;
++}
++
++static void sgx_kms_disable_vblank(struct drm_simple_display_pipe *pipe)
++{
++	struct apple_sgx_kms *kms = container_of(pipe, struct apple_sgx_kms, pipe);
++
++	/* (under the vblank locks the timer's handler takes: not waited for) */
++	hrtimer_try_to_cancel(&kms->vblank_timer);
++}
++
++static const struct drm_simple_display_pipe_funcs sgx_kms_pipe_funcs = {
++	.mode_valid = sgx_kms_mode_valid,
++	.check = sgx_kms_check,
++	.enable = sgx_kms_enable,
++	.disable = sgx_kms_disable,
++	.update = sgx_kms_update,
++	.enable_vblank = sgx_kms_enable_vblank,
++	.disable_vblank = sgx_kms_disable_vblank,
++};
++
++/* drm_atomic_helper_commit_tail() but for the vblank: the planes' copies
++ * are queued when commit_planes returns, so a commit's event goes then,
++ * with the vblank count it is (not at the next vblank) -- the program
++ * draws its next frame into the other buffer meanwhile; the next copy
++ * waits for this one.  An old framebuffer goes once no copy reads it. */
++static void sgx_kms_commit_tail(struct drm_atomic_state *state)
++{
++	struct drm_device *drm = state->dev;
++	struct drm_plane_state *old_ps, *new_ps;
++	struct drm_crtc_state *crtc_state;
++	struct drm_plane *plane;
++	struct drm_crtc *crtc;
++	int i;
++
++	drm_atomic_helper_commit_modeset_disables(drm, state);
++	drm_atomic_helper_commit_planes(drm, state, 0);
++	drm_atomic_helper_commit_modeset_enables(drm, state);
++	for_each_new_crtc_in_state(state, crtc, crtc_state, i) {
++		unsigned long flags;
++
++		spin_lock_irqsave(&drm->event_lock, flags);
++		if (crtc_state->event) {
++			drm_crtc_send_vblank_event(crtc, crtc_state->event);
++			crtc_state->event = NULL;
++		}
++		spin_unlock_irqrestore(&drm->event_lock, flags);
++	}
++	drm_atomic_helper_commit_hw_done(state);
++	for_each_oldnew_plane_in_state(state, plane, old_ps, new_ps, i) {
++		struct apple_sgx_kms *kms = container_of(plane, struct apple_sgx_kms, pipe.plane);
++
++		if (old_ps->fb && old_ps->fb != new_ps->fb)
++			apple_sgx_blt_sync(kms->sgx);
++	}
++	drm_atomic_helper_cleanup_planes(drm, state);
++}
++
++static const struct drm_mode_config_helper_funcs sgx_kms_mode_config_helpers = {
++	.atomic_commit_tail = sgx_kms_commit_tail,
++};
++
++/* Framebuffers the 2D engine can read: the render node's own buffers (no
++ * imports from other devices), 64-byte pitches and offsets. */
++static struct drm_framebuffer *sgx_kms_fb_create(struct drm_device *drm, struct drm_file *file,
++						 const struct drm_mode_fb_cmd2 *cmd)
++{
++	if (cmd->pitches[0] % SGX_KMS_ALIGN || cmd->offsets[0] % SGX_KMS_ALIGN)
++		return ERR_PTR(-EINVAL);
++	return drm_gem_fb_create_with_dirty(drm, file, cmd);
++}
++
++static const struct drm_mode_config_funcs sgx_kms_mode_config_funcs = {
++	.fb_create = sgx_kms_fb_create,
++	.atomic_check = drm_atomic_helper_check,
++	.atomic_commit = drm_atomic_helper_commit,
++};
++
++static void sgx_kms_overlay_drop(struct apple_sgx_kms *kms);
++
++static void sgx_kms_fini(struct drm_device *drm, void *data)
++{
++	struct apple_sgx_kms *kms = data;
++
++	kms->sgx->kms = NULL;
++	sgx_kms_overlay_drop(kms);
++
++	hrtimer_cancel(&kms->vblank_timer);
++}
++
++/* ---- the overlay ---------------------------------------------------------- */
++
++/* The screen under rects (overlay coordinates) shown again: the plane's
++ * copy, the overlay's blend.  Under the modeset locks and ov_lock. */
++static void sgx_kms_overlay_redraw(struct apple_sgx_kms *kms, const struct drm_rect *rects,
++				   unsigned int n)
++{
++	struct drm_plane_state *state = kms->pipe.plane.state;
++	struct drm_rect r;
++	unsigned int i;
++
++	if (!state || !state->fb || !state->visible || !kms->pipe.crtc.state->active)
++		return;
++	for (i = 0; i < n; i++) {
++		r = rects[i];
++		drm_rect_translate(&r, state->src.x1 >> 16, state->src.y1 >> 16);
++		sgx_kms_show(kms, state, &r);
++	}
++}
++
++static void sgx_kms_overlay_drop(struct apple_sgx_kms *kms)
++{
++	/* (a copy queued may still be reading it) */
++	if (kms->ov_obj) {
++		apple_sgx_blt_sync(kms->sgx);
++		drm_gem_object_put(kms->ov_obj);
++	}
++	kms->ov_obj = NULL;
++	kms->ov_owner = NULL;
++	kms->ov_n = 0;
++}
++
++/* DRM_IOCTL_APPLE_SGX_OVERLAY (apple_sgx_drm.c): set, change or take away
++ * the overlay, or (QUERY) say what the plane is now. */
++int apple_sgx_kms_overlay(struct apple_sgx *sgx, struct drm_file *file,
++			  struct drm_apple_sgx_overlay *args)
++{
++	struct apple_sgx_kms *kms = sgx->kms;
++	struct drm_rect rects[APPLE_SGX_OVERLAY_MAX_RECTS], old[APPLE_SGX_OVERLAY_MAX_RECTS];
++	struct drm_modeset_acquire_ctx ctx;
++	struct drm_gem_object *obj = NULL;
++	struct drm_plane_state *state;
++	struct drm_device *drm;
++	unsigned int i, j, n = 0, nold;
++	int ret;
++
++	if (!kms)
++		return -ENODEV;
++	drm = kms->pipe.plane.dev;
++	if (args->flags & ~APPLE_SGX_OVERLAY_QUERY || args->nrects > APPLE_SGX_OVERLAY_MAX_RECTS)
++		return -EINVAL;
++	if (!(args->flags & APPLE_SGX_OVERLAY_QUERY) && args->handle) {
++		if (!args->width || !args->height || args->pitch % SGX_KMS_ALIGN ||
++		    args->pitch < args->width * 4)
++			return -EINVAL;
++		obj = drm_gem_object_lookup(file, args->handle);
++		if (!obj)
++			return -ENOENT;
++		if (obj->size < (size_t)args->pitch * args->height) {
++			drm_gem_object_put(obj);
++			return -EINVAL;
++		}
++		/* each rectangle out to 16 pixels, within the buffer */
++		for (i = 0; i < args->nrects; i++) {
++			const struct drm_apple_sgx_overlay_rect *a = &args->rects[i];
++			struct drm_rect r = DRM_RECT_INIT(a->x, a->y, a->w, a->h);
++			struct drm_rect all = DRM_RECT_INIT(0, 0, args->width, args->height);
++
++			r.x1 = round_down(r.x1, SGX_KMS_ALIGN_PX);
++			r.y1 = round_down(r.y1, SGX_KMS_ALIGN_PX);
++			r.x2 = round_up(r.x2, SGX_KMS_ALIGN_PX);
++			r.y2 = round_up(r.y2, SGX_KMS_ALIGN_PX);
++			if (drm_rect_intersect(&r, &all))
++				rects[n++] = r;
++		}
++	}
++
++	DRM_MODESET_LOCK_ALL_BEGIN(drm, ctx, 0, ret);
++	mutex_lock(&kms->ov_lock);
++	if (!(args->flags & APPLE_SGX_OVERLAY_QUERY)) {
++		if (kms->ov_owner && kms->ov_owner != file) {
++			ret = -EBUSY;
++		} else {
++			/* (an old rectangle inside a new one is redrawn with it) */
++			for (i = nold = 0; i < kms->ov_n; i++) {
++				for (j = 0; j < n; j++) {
++					struct drm_rect in = kms->ov_rects[i];
++
++					if (obj && drm_rect_intersect(&in, &rects[j]) &&
++					    drm_rect_equals(&in, &kms->ov_rects[i]))
++						break;
++				}
++				if (!obj || j == n)
++					old[nold++] = kms->ov_rects[i];
++			}
++			sgx_kms_overlay_drop(kms);
++			if (obj) {
++				kms->ov_obj = obj;
++				obj = NULL;
++				kms->ov_owner = file;
++				kms->ov_pitch = args->pitch;
++				kms->ov_w = args->width;
++				kms->ov_h = args->height;
++				kms->ov_n = n;
++				memcpy(kms->ov_rects, rects, sizeof(rects[0]) * n);
++			}
++			/* what was under the old rectangles, then the new ones */
++			sgx_kms_overlay_redraw(kms, old, nold);
++			sgx_kms_overlay_redraw(kms, kms->ov_rects, kms->ov_n);
++		}
++	}
++	state = kms->pipe.plane.state;
++	if (state && state->fb && state->visible) {
++		args->out_width = drm_rect_width(&state->src) >> 16;
++		args->out_height = drm_rect_height(&state->src) >> 16;
++		args->out_rotation = state->rotation;
++	} else {
++		args->out_width = args->out_height = 0;
++		args->out_rotation = DRM_MODE_ROTATE_0;
++	}
++	mutex_unlock(&kms->ov_lock);
++	DRM_MODESET_LOCK_ALL_END(drm, ctx, ret);
++	if (obj)
++		drm_gem_object_put(obj);
++	return ret;
++}
++
++/* The file that set the overlay closed: it goes, and the screen under it
++ * is shown again. */
++void apple_sgx_kms_overlay_close(struct apple_sgx *sgx, struct drm_file *file)
++{
++	struct apple_sgx_kms *kms = sgx->kms;
++	struct drm_apple_sgx_overlay args = { 0 };
++
++	if (kms && READ_ONCE(kms->ov_owner) == file)
++		apple_sgx_kms_overlay(sgx, file, &args);
++}
++
++/* Before the device is registered.  -ENODEV: no framebuffer, no screen. */
++int apple_sgx_kms_init(struct drm_device *drm, struct apple_sgx *sgx)
++{
++	struct apple_sgx_kms *kms;
++	struct drm_display_mode *m;
++	struct resource fb;
++	int ret;
++
++	ret = apple_sgx_fb_find(sgx, &fb);
++	if (ret)
++		return -ENODEV;
++	kms = drmm_kzalloc(drm, sizeof(*kms), GFP_KERNEL);
++	if (!kms)
++		return -ENOMEM;
++	kms->sgx = sgx;
++	ret = drmm_mutex_init(drm, &kms->ov_lock);
++	if (ret)
++		return ret;
++
++	/* the one mode: the framebuffer's size, a 60 Hz refresh with token
++	 * blanking (nothing is programmed from it) */
++	m = &kms->mode;
++	m->hdisplay = sgx->fb_w;
++	m->hsync_start = sgx->fb_w + 8;
++	m->hsync_end = sgx->fb_w + 16;
++	m->htotal = sgx->fb_w + 32;
++	m->vdisplay = sgx->fb_h;
++	m->vsync_start = sgx->fb_h + 2;
++	m->vsync_end = sgx->fb_h + 4;
++	m->vtotal = sgx->fb_h + 8;
++	m->clock = DIV_ROUND_UP(m->htotal * m->vtotal * 60, 1000);
++	m->width_mm = sgx->fb_w * SGX_KMS_UM_PER_PX / 1000;
++	m->height_mm = sgx->fb_h * SGX_KMS_UM_PER_PX / 1000;
++	m->type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED;
++	drm_mode_set_name(m);
++
++	ret = drmm_mode_config_init(drm);
++	if (ret)
++		return ret;
++	/* (the screen on its side, M41: 1024 x 768 buffers too) */
++	drm->mode_config.min_width = min(sgx->fb_w, sgx->fb_h);
++	drm->mode_config.min_height = min(sgx->fb_w, sgx->fb_h);
++	drm->mode_config.max_width = SGX_KMS_MAX_SIZE;
++	drm->mode_config.max_height = SGX_KMS_MAX_SIZE;
++	drm->mode_config.preferred_depth = 24;
++	drm->mode_config.funcs = &sgx_kms_mode_config_funcs;
++	drm->mode_config.helper_private = &sgx_kms_mode_config_helpers;
++
++	ret = drmm_connector_init(drm, &kms->connector, &sgx_kms_connector_funcs,
++				  DRM_MODE_CONNECTOR_Unknown, NULL);
++	if (ret)
++		return ret;
++	drm_connector_helper_add(&kms->connector, &sgx_kms_connector_helper);
++	kms->connector.display_info.width_mm = m->width_mm;
++	kms->connector.display_info.height_mm = m->height_mm;
++
++	ret = drm_simple_display_pipe_init(drm, &kms->pipe, &sgx_kms_pipe_funcs, sgx_kms_formats,
++					   ARRAY_SIZE(sgx_kms_formats), NULL, &kms->connector);
++	if (ret)
++		return ret;
++	drm_plane_enable_fb_damage_clips(&kms->pipe.plane);
++	/* (M41) the screen turned: the copies are */
++	ret = drm_plane_create_rotation_property(&kms->pipe.plane, DRM_MODE_ROTATE_0,
++						 DRM_MODE_ROTATE_0 | DRM_MODE_ROTATE_90 |
++						 DRM_MODE_ROTATE_180 | DRM_MODE_ROTATE_270);
++	if (ret)
++		return ret;
++
++	/* the vblank's timer: a frame of the mode (clock in kHz) */
++	kms->vblank_period = ns_to_ktime(div_u64((u64)m->htotal * m->vtotal * 1000000, m->clock));
++	hrtimer_init(&kms->vblank_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
++	kms->vblank_timer.function = sgx_kms_vblank;
++	ret = drmm_add_action_or_reset(drm, sgx_kms_fini, kms);
++	if (ret)
++		return ret;
++	ret = drm_vblank_init(drm, 1);
++	if (ret)
++		return ret;
++	drm_mode_config_reset(drm);
++	sgx->kms = kms;
++	drm_info(drm, "screen: %ux%u at %pa, through the 2D engine\n", sgx->fb_w, sgx->fb_h,
++		 &fb.start);
++	return 0;
++}
+diff --git a/include/uapi/drm/apple_sgx_drm.h b/include/uapi/drm/apple_sgx_drm.h
+new file mode 100644
+index 000000000..490e6cffe
+--- /dev/null
++++ b/include/uapi/drm/apple_sgx_drm.h
+@@ -0,0 +1,252 @@
++/* SPDX-License-Identifier: MIT */
++/*
++ * Apple S5L8940X (A5) PowerVR SGX543MP2: the render node's interface.
++ *
++ * EXPERIMENTAL.  This is the first interface Mesa and sgx2d talk to the GPU
++ * through (docs/research/p105-mesa.md, M9); it will change while the Mesa
++ * driver is written, and nothing outside this repository should depend on
++ * it yet.  APPLE_SGX_PARAM_UAPI_VERSION says which revision a kernel has.
++ *
++ * The model, kept as small as the hardware allows:
++ *
++ *  - One GPU address space, shared by every client (the microkernel's own
++ *    buffers are in it too, at 0x80000000).  Buffers are GEM objects mapped
++ *    into it for their whole life; the kernel picks the address (64 KiB
++ *    aligned for buffers of 64 KiB or more: a render target needs it), or
++ *    the caller asks for one (APPLE_SGX_BO_FIXED_VA).  The GPU's own pointer
++ *    encodings decide where things may go -- PDS data pointers only reach
++ *    0x80000000 and up, and USSE code is addressed relative to a code base
++ *    register -- so the usable range and the code zone are parameters.
++ *
++ *  - USE_CODE_BASE_3 and USE_CODE_BASE_5 (the ones iOS's GL driver uses)
++ *    point at APPLE_SGX_PARAM_CODE_BASE.  A DOUTU word for code at GPU
++ *    address A is ((A - CODE_BASE) / 8) << 4 | 3, the index in 20 bits:
++ *    code has to be within 8 MiB of the base.  Buffers created with
++ *    APPLE_SGX_BO_USSE_CODE land there (kernels before 2026-10-04 gave
++ *    CODE_VA_END as base + 16 MiB and used the top of it: out of reach).
++ *
++ *  - A render (the TA, then the 3D pass) is submitted as the TA command iOS
++ *    puts in a render context's CCB, built by the caller as for debugfs's
++ *    "rkick" (docs/research/p105-gpu.md, M4): the kernel copies it into the
++ *    render queue, points its completion at its own memory, writes the
++ *    render context into the render details (+0x20, +0xa4), sets the
++ *    parameter buffer descriptor, and kicks.  The job is done when the
++ *    microkernel clears the render details' word at +0x24 after the 3D pass.
++ *    Renders run one at a time, in submission order across all clients.
++ *
++ *  - Synchronisation is syncobjs: a submit waits for in_syncs and signals
++ *    out_sync when its 3D pass is over.  Every buffer the render touches
++ *    must be listed in bo_handles; they stay alive and mapped until then.
++ */
++#ifndef _APPLE_SGX_DRM_H_
++#define _APPLE_SGX_DRM_H_
++
++#include "drm.h"
++
++#if defined(__cplusplus)
++extern "C" {
++#endif
++
++#define DRM_APPLE_SGX_GET_PARAM			0x00
++#define DRM_APPLE_SGX_GEM_CREATE		0x01
++#define DRM_APPLE_SGX_GEM_MMAP_OFFSET		0x02
++#define DRM_APPLE_SGX_GEM_WAIT			0x03
++#define DRM_APPLE_SGX_SUBMIT			0x04
++#define DRM_APPLE_SGX_GEM_INFO			0x05
++#define DRM_APPLE_SGX_OVERLAY			0x06
++
++#define DRM_IOCTL_APPLE_SGX_GET_PARAM \
++	DRM_IOWR(DRM_COMMAND_BASE + DRM_APPLE_SGX_GET_PARAM, struct drm_apple_sgx_get_param)
++#define DRM_IOCTL_APPLE_SGX_GEM_CREATE \
++	DRM_IOWR(DRM_COMMAND_BASE + DRM_APPLE_SGX_GEM_CREATE, struct drm_apple_sgx_gem_create)
++#define DRM_IOCTL_APPLE_SGX_GEM_MMAP_OFFSET \
++	DRM_IOWR(DRM_COMMAND_BASE + DRM_APPLE_SGX_GEM_MMAP_OFFSET, struct drm_apple_sgx_gem_mmap_offset)
++#define DRM_IOCTL_APPLE_SGX_GEM_WAIT \
++	DRM_IOW(DRM_COMMAND_BASE + DRM_APPLE_SGX_GEM_WAIT, struct drm_apple_sgx_gem_wait)
++#define DRM_IOCTL_APPLE_SGX_SUBMIT \
++	DRM_IOW(DRM_COMMAND_BASE + DRM_APPLE_SGX_SUBMIT, struct drm_apple_sgx_submit)
++#define DRM_IOCTL_APPLE_SGX_GEM_INFO \
++	DRM_IOWR(DRM_COMMAND_BASE + DRM_APPLE_SGX_GEM_INFO, struct drm_apple_sgx_gem_info)
++#define DRM_IOCTL_APPLE_SGX_OVERLAY \
++	DRM_IOWR(DRM_COMMAND_BASE + DRM_APPLE_SGX_OVERLAY, struct drm_apple_sgx_overlay)
++
++/* ---- GET_PARAM ---------------------------------------------------------- */
++
++enum drm_apple_sgx_param {
++	APPLE_SGX_PARAM_UAPI_VERSION = 0,	/* 3 (2: no kernel PB, 1: no GEM_INFO) */
++	APPLE_SGX_PARAM_CORE_ID = 1,		/* MASTER_CORE_ID: 0x01194201 */
++	APPLE_SGX_PARAM_CORE_REVISION = 2,	/* 0x00010202 = 1.2.2 */
++	APPLE_SGX_PARAM_NUM_CORES = 3,		/* 2 */
++	APPLE_SGX_PARAM_CLOCK_KHZ = 4,		/* the GPU clock */
++	APPLE_SGX_PARAM_UKERNEL_UP = 5,		/* 1 while the microkernel runs */
++
++	/* GPU addresses: [VA_START, VA_END) is where buffers may be mapped,
++	 * [CODE_VA_START, CODE_VA_END) the code zone, CODE_BASE what
++	 * USE_CODE_BASE_3 and _5 hold (see above). */
++	APPLE_SGX_PARAM_VA_START = 6,
++	APPLE_SGX_PARAM_VA_END = 7,
++	APPLE_SGX_PARAM_CODE_BASE = 8,
++	APPLE_SGX_PARAM_CODE_VA_START = 9,
++	APPLE_SGX_PARAM_CODE_VA_END = 10,
++
++	/* The framebuffer (simplefb's memory), mapped by the kernel for the 2D
++	 * engine; a render can write straight into it.  0 if there is none.
++	 * Linear a8r8g8b8; stride in bytes. */
++	APPLE_SGX_PARAM_FB_VA = 11,
++	APPLE_SGX_PARAM_FB_WIDTH = 12,
++	APPLE_SGX_PARAM_FB_HEIGHT = 13,
++	APPLE_SGX_PARAM_FB_STRIDE = 14,
++
++	/* Renders submitted, completed, and timed out since the module loaded;
++	 * microkernel (re)starts. */
++	APPLE_SGX_PARAM_RENDERS_SUBMITTED = 15,
++	APPLE_SGX_PARAM_RENDERS_DONE = 16,
++	APPLE_SGX_PARAM_RENDERS_TIMED_OUT = 17,
++	APPLE_SGX_PARAM_UKERNEL_BOOTS = 18,
++
++	/* UAPI 3: the kernel's parameter buffer (a submit with pb_va 0 uses
++	 * it), and where APPLE_SGX_BO_TA_HEAP buffers go -- above the TA's
++	 * base, 0x87800000, within the 256 MiB the TA's addresses reach. */
++	APPLE_SGX_PARAM_PB_VA = 19,
++	APPLE_SGX_PARAM_TA_HEAP_START = 20,
++	APPLE_SGX_PARAM_TA_HEAP_END = 21,
++};
++
++struct drm_apple_sgx_get_param {
++	__u32 param;		/* in: enum drm_apple_sgx_param */
++	__u32 pad;		/* in: 0 */
++	__u64 value;		/* out */
++};
++
++/* ---- GEM_CREATE --------------------------------------------------------- */
++
++/* Map at drm_apple_sgx_gem_create.va instead of an address the kernel
++ * picks.  Fails with EEXIST if anything is mapped there already. */
++#define APPLE_SGX_BO_FIXED_VA			(1 << 0)
++/* USSE code: in the code zone, where a DOUTU can reach it. */
++#define APPLE_SGX_BO_USSE_CODE			(1 << 1)
++/* The GPU may only read it (PTE READONLY). */
++#define APPLE_SGX_BO_GPU_READONLY		(1 << 2)
++/* Without the PTE's CACHECONSISTENT bit, which every other buffer has (the
++ * microkernel only sees CPU writes to cache-consistent pages; the
++ * framebuffer is mapped without it). */
++#define APPLE_SGX_BO_NOT_CACHE_CONSISTENT	(1 << 3)
++/* In the TA's heap (UAPI 3): render target data, whose state buffer the 3D
++ * register block names by its offset from the TA's base. */
++#define APPLE_SGX_BO_TA_HEAP			(1 << 4)
++
++#define APPLE_SGX_BO_FLAGS			0x1f
++
++struct drm_apple_sgx_gem_create {
++	__u64 size;		/* in: bytes, rounded up to 4 KiB */
++	__u32 flags;		/* in: APPLE_SGX_BO_* */
++	__u32 handle;		/* out */
++	__u32 va;		/* in with APPLE_SGX_BO_FIXED_VA, out: the GPU address */
++	__u32 pad;		/* in: 0 */
++};
++
++/* ---- GEM_MMAP_OFFSET: the offset to mmap() the buffer at (write-combined) */
++
++struct drm_apple_sgx_gem_mmap_offset {
++	__u32 handle;		/* in */
++	__u32 flags;		/* in: 0 */
++	__u64 offset;		/* out */
++};
++
++/* ---- GEM_WAIT: until no render that lists the buffer is running -------- */
++
++struct drm_apple_sgx_gem_wait {
++	__u32 handle;		/* in */
++	__u32 pad;		/* in: 0 */
++	__s64 timeout_ns;	/* in: absolute, CLOCK_MONOTONIC; 0 just polls */
++};
++
++/* ---- SUBMIT: one render, the TA and then the 3D pass -------------------- */
++
++#define APPLE_SGX_TA_CMD_MIN			0x11c
++#define APPLE_SGX_TA_CMD_MAX			0x200
++
++struct drm_apple_sgx_submit {
++	/* in: user pointer to the TA command, as iOS's render submit builds
++	 * it (0x80bfca20): word 0 its size in bytes, a multiple of 8 between
++	 * APPLE_SGX_TA_CMD_MIN and _MAX; the kernel rewrites words 0, 0x64,
++	 * 0x68 and 0x6c. */
++	__u64 cmd;
++	__u32 cmd_size;		/* in: bytes copied from cmd; >= word 0 */
++	__u32 flags;		/* in: 0 */
++
++	__u32 pb_va;		/* in: the parameter buffer's descriptor; 0: the
++				 * kernel's, shared by every client (UAPI 3) */
++	__u32 details_handle;	/* in: the buffer holding the render details */
++	__u32 details_offset;	/* in: where in it, 4-byte aligned */
++	__u32 cache_control;	/* in: SGXMKIF_CC_* to add to the kick, normally 0 */
++
++	__u64 bo_handles;	/* in: user pointer to __u32 handles */
++	__u32 bo_handle_count;
++	__u32 in_sync_count;
++	__u64 in_syncs;		/* in: user pointer to __u32 syncobj handles */
++	__u32 out_sync;		/* in: syncobj to signal when it is done, or 0 */
++	__u32 pad;		/* in: 0 */
++};
++
++/* ---- GEM_INFO: what a handle is, for one that came from a dma-buf ------ */
++
++/* Every buffer is the render node's own (dma-bufs of other devices are not
++ * taken), so a dma-buf's handle names a buffer already mapped: this says
++ * where.  UAPI version 2 on. */
++struct drm_apple_sgx_gem_info {
++	__u32 handle;		/* in */
++	__u32 flags;		/* out: the APPLE_SGX_BO_* it was made with */
++	__u32 va;		/* out: its GPU address */
++	__u32 pad;		/* in: 0 */
++	__u64 size;		/* out: bytes */
++};
++
++/* ---- OVERLAY: a picture over the screen, whatever shows it -------------- */
++
++/*
++ * A buffer of the render node blended over the screen -- straight alpha,
++ * colour = overlay * a + screen * (1 - a) -- after every copy of KMS's
++ * plane onto it, and at once when it is set: an on-screen control over a
++ * fullscreen game, with no compositor (tools/screenpad).  Its pixels are
++ * the plane's, turned as the plane is; width x height must be the plane's
++ * size now (out_width x out_height), or it is not shown until it is set
++ * again for the new size.  The rectangles listed (out to 16 pixels on every
++ * side) say where it is: a copy that meets any of them blends the box
++ * round those it meets, so the buffer's pixels outside them must be
++ * transparent.  A change to its pixels shows when it is set again.  handle 0 takes it away, and so does closing the
++ * file that set it; one file at a time has it (-EBUSY for the others).
++ * Shown while a KMS client has a framebuffer on the plane (X, a game on
++ * KMS), not on the text console.  Root only.
++ *
++ * Kernels from 2026-10-23 on.  It changed nothing else, so it did not
++ * change APPLE_SGX_PARAM_UAPI_VERSION: Mesa (sgx_device.c) refuses a
++ * version it does not know and falls back to software -- XFCE on softpipe
++ * -- so a kernel that only adds to the interface keeps the number, and a
++ * program asks for the addition itself (QUERY: -EINVAL where there is
++ * none).
++ */
++#define APPLE_SGX_OVERLAY_QUERY		(1 << 0)	/* only the out fields */
++#define APPLE_SGX_OVERLAY_MAX_RECTS	16
++
++struct drm_apple_sgx_overlay_rect {
++	__u16 x, y, w, h;
++};
++
++struct drm_apple_sgx_overlay {
++	__u32 flags;		/* in: APPLE_SGX_OVERLAY_* */
++	__u32 handle;		/* in: the buffer (BGRA8888, its alpha used), or 0 */
++	__u32 pitch;		/* in: bytes a line, a multiple of 64 */
++	__u16 width, height;	/* in: pixels: the plane's size */
++	__u32 nrects;		/* in: how many rects are used */
++	struct drm_apple_sgx_overlay_rect rects[APPLE_SGX_OVERLAY_MAX_RECTS];
++	__u16 out_width;	/* out: the plane's size now; 0 x 0 with no */
++	__u16 out_height;	/*      framebuffer shown */
++	__u32 out_rotation;	/* out: the plane's DRM_MODE_ROTATE_* */
++};
++
++#if defined(__cplusplus)
++}
++#endif
++
++#endif /* _APPLE_SGX_DRM_H_ */

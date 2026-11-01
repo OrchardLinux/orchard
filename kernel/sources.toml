@@ -41,3 +41,17 @@ license = "GPL-2.0"
 patches = "patches/drivers, patches/devices/s8000"
 status = "integrated"
 notes = "Integrated topic by topic with the granular a9/pcie, a9/periph, a9/touch and a9/audio branches and OrchardLinux/hardware#6; docs/integration/j71t.md maps every original commit. Not yet run on an iPad 5 on this stack."
+
+[[source]]
+name = "cascadia"
+url = "https://github.com/rzxvx/Project-Cascadia.git"
+branch = "main"
+commit = "c20b85ebb951c704d7e3a664c378dde8276e3928"
+base = "torvalds v6.12 (kernel/upstream-v6.12.lock), not [base]"
+contributors = ["rzxvx", "liquidmetal-Hg", "K <k@Ks-MacBook-Pro-4.local>", "Claude <noreply@anthropic.com>"]
+devices = ["p105 (iPad mini 1 Wi-Fi)"]
+platforms = ["armv7-a5"]
+license = "GPL-2.0"
+patches = "patches/import/cascadia"
+status = "imported"
+notes = "Cascadia is a build project, not a kernel tree: v6.12 + patches/files + patches/tree/*.patch + patches/files-sandcastle-port, as its scripts/build-kernel.sh assembles them. tools/kernel-tree/import-cascadia.py rebuilds that tree with git plumbing and splits it into 0001-0020 by subsystem, with author and co-contributors from Cascadia's history per file; applied to v6.12 they reproduce Cascadia's tree 8d7f28c8. 0021 moves dts/p105ap.dts into arch/arm/boot/dts/apple/, 0022 drops an unused driver copy. The seven S5L8940X drivers from files-sandcastle-port are Cascadia ports of Corellium's Project Sandcastle (https://github.com/corellium/linux-sandcastle, sandcastle-5.4, GPL-2.0, Copyright 2020 Corellium LLC). Config: multi_v7_defconfig + Cascadia's config/p105ap.config, without the build-time initramfs and with LOCALVERSION_AUTO off as on the arm64 platforms (a clean release name, no git call in the build container). Built with clang 19 here; Cascadia builds with GCC."

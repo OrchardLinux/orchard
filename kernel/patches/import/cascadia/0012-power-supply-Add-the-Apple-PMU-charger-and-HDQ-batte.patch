@@ -1,0 +1,730 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rzxvx <rrzxznewid@gmail.com>
+Date: Sat, 24 Oct 2026 05:22:43 +0300
+Subject: [PATCH] power: supply: Add the Apple PMU charger and HDQ battery
+
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at c20b85e:
+  patches/files/drivers/power/supply/apple-hdq-battery.c
+  patches/files/drivers/power/supply/apple-pmu-charger.c
+  patches/tree/0001-cascadia.patch
+
+Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (4 commits);
+  liquidmetal-Hg <liquidmetal-Hg@users.noreply.github.com> (0a4002d)
+
+[Orchard: imported for the armv7-a5 platform; see kernel/sources.toml]
+---
+ drivers/power/supply/Kconfig             |  16 +
+ drivers/power/supply/Makefile            |   2 +
+ drivers/power/supply/apple-hdq-battery.c | 273 ++++++++++++++++
+ drivers/power/supply/apple-pmu-charger.c | 382 +++++++++++++++++++++++
+ 4 files changed, 673 insertions(+)
+ create mode 100644 drivers/power/supply/apple-hdq-battery.c
+ create mode 100644 drivers/power/supply/apple-pmu-charger.c
+
+diff --git a/drivers/power/supply/Kconfig b/drivers/power/supply/Kconfig
+index bcfa63fb9..c7d7849c2 100644
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -263,6 +263,22 @@ config MANAGER_SBS
+ 	  This driver can also be built as a module. If so, the module will be
+ 	  called sbs-manager.
+ 
++config BATTERY_APPLE_HDQ
++	tristate "Apple iPad mini 1 battery gauge (bq27540 on HDQ over UART)"
++	depends on ARCH_APPLE_S5L || COMPILE_TEST
++	help
++	  The iPad mini 1's bq27540 gas gauge, read over its one-wire HDQ bus
++	  through UART5 as iOS does it: charge, voltage, current, temperature,
++	  capacities and cycle count, as the "battery" power supply.
++
++config CHARGER_APPLE_PMU
++	tristate "Apple iPad mini 1 USB input current limit (D1946 PMU)"
++	depends on MFD_APPLE_PMU_I2C && POWER_SUPPLY
++	help
++	  Raises the D1946 PMU's USB input current limit (register 0x3d) the
++	  way iBEC does, so the iPad mini 1 charges under Linux.  It writes
++	  nothing until armed through its "armed" module parameter.
++
+ config BATTERY_BQ27XXX
+ 	tristate "BQ27xxx battery driver"
+ 	help
+diff --git a/drivers/power/supply/Makefile b/drivers/power/supply/Makefile
+index 8dcb41545..e3c9ca945 100644
+--- a/drivers/power/supply/Makefile
++++ b/drivers/power/supply/Makefile
+@@ -44,6 +44,8 @@ obj-$(CONFIG_BATTERY_WM97XX)	+= wm97xx_battery.o
+ obj-$(CONFIG_BATTERY_SBS)	+= sbs-battery.o
+ obj-$(CONFIG_CHARGER_SBS)	+= sbs-charger.o
+ obj-$(CONFIG_MANAGER_SBS)	+= sbs-manager.o
++obj-$(CONFIG_BATTERY_APPLE_HDQ)	+= apple-hdq-battery.o
++obj-$(CONFIG_CHARGER_APPLE_PMU)	+= apple-pmu-charger.o
+ obj-$(CONFIG_BATTERY_BQ27XXX)	+= bq27xxx_battery.o
+ obj-$(CONFIG_BATTERY_BQ27XXX_I2C) += bq27xxx_battery_i2c.o
+ obj-$(CONFIG_BATTERY_BQ27XXX_HDQ) += bq27xxx_battery_hdq.o
+diff --git a/drivers/power/supply/apple-hdq-battery.c b/drivers/power/supply/apple-hdq-battery.c
+new file mode 100644
+index 000000000..703cc3ca4
+--- /dev/null
++++ b/drivers/power/supply/apple-hdq-battery.c
+@@ -0,0 +1,273 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * The iPad mini 1's battery gauge: a TI bq27540 on HDQ, its one-wire bus,
++ * driven through UART5 the way iOS (AppleHDQGasGauge) and iBoot do it.
++ *
++ * UART5 is set up by iBoot for exactly this -- 57600 baud, 8 data bits, two
++ * stop bits, pin 196 muxed to it -- and this driver writes the same values
++ * again rather than trusting them.  One UART frame is then 11 bits, 191 us,
++ * one HDQ bit cycle, and a bit is the length of the low pulse: the host
++ * sends 0xFE for a 1 (start bit + one low data bit, ~35 us) and 0xE0 for a 0
++ * (start + five, ~104 us).  The line is shared, so the receiver sees the host's
++ * own 8 bits and then the gauge's 8, each again a low pulse whose length
++ * leaves bit 2 of the received byte set for a 1 and clear for a 0.
++ * A transaction starts with a break (UCON bit 4: one frame low).
++ *
++ * Only reads (command bit 7 clear) are ever sent: register numbers are the
++ * bq27541 family's standard commands, 16 bits as two 8-bit reads.
++ * README ("Battery gauge") has the summary.
++ */
++#include <linux/delay.h>
++#include <linux/io.h>
++#include <linux/jiffies.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/power_supply.h>
++
++#define ULCON		0x00
++#define UCON		0x04
++#define  UCON_SBREAK	BIT(4)
++#define UFCON		0x08
++#define UTRSTAT		0x10
++#define  UTRSTAT_RXRDY	BIT(0)	/* Apple's UFSTAT layout differs from Samsung's */
++#define UTXH		0x20
++#define URXH		0x24
++#define UBRDIV		0x28
++#define UFRACVAL	0x2c
++
++/* iBoot's setup: 8N2, RX/TX polled, FIFO on, 24 MHz / 16 / 26 = 57692 baud */
++#define HDQ_ULCON	0x07
++#define HDQ_UCON	0x405
++#define HDQ_UFCON	0x01
++#define HDQ_UBRDIV	25
++
++/* bq27541-family standard commands */
++#define BQ_TEMP		0x06	/* 0.1 K */
++#define BQ_VOLT		0x08	/* mV */
++#define BQ_FLAGS	0x0a
++#define  BQ_FLAG_DSG	BIT(0)
++#define  BQ_FLAG_FC	BIT(9)
++#define BQ_RM		0x10	/* mAh */
++#define BQ_FCC		0x12	/* mAh */
++#define BQ_AI		0x14	/* mA, signed; negative discharging */
++#define BQ_CYCT		0x2a
++#define BQ_SOC		0x2c	/* % */
++#define BQ_DCAP		0x3c	/* mAh */
++
++struct hdq_battery {
++	struct device *dev;
++	void __iomem *base;
++	struct mutex lock;
++	struct power_supply *psy;
++	unsigned long stamp;		/* jiffies of the last refresh */
++	int soc, volt, ai, temp, rm, fcc, flags, cyct, dcap;
++	bool valid;
++};
++
++static void hdq_drain(struct hdq_battery *b)
++{
++	int i;
++
++	for (i = 0; i < 512 && (readl(b->base + UTRSTAT) & UTRSTAT_RXRDY); i++)
++		readl(b->base + URXH);
++}
++
++/* one 8-bit register; -EIO if the gauge did not answer */
++static int hdq_read8(struct hdq_battery *b, u8 reg)
++{
++	u8 rx[40];
++	unsigned long end;
++	int i, n = 0, v = 0;
++
++	hdq_drain(b);
++	writel(readl(b->base + UCON) | UCON_SBREAK, b->base + UCON);
++	end = jiffies + msecs_to_jiffies(5);
++	while ((readl(b->base + UCON) & UCON_SBREAK) && time_before(jiffies, end))
++		udelay(10);
++	udelay(200);			/* break recovery */
++	hdq_drain(b);
++
++	for (i = 0; i < 8; i++)		/* LSB first; bit 7 clear: read */
++		writel(((reg >> i) & 1) ? 0xFE : 0xE0, b->base + UTXH);
++
++	/* 8 echoed bits (1.5 ms), a turnaround, the gauge's 8 (1.7 ms) */
++	usleep_range(4500, 5000);
++	while (n < ARRAY_SIZE(rx) && (readl(b->base + UTRSTAT) & UTRSTAT_RXRDY))
++		rx[n++] = readl(b->base + URXH) & 0xff;
++	if (n < 16)
++		return -EIO;
++	for (i = 0; i < 8; i++)		/* the last 8 are the gauge's */
++		v |= ((rx[n - 8 + i] & 0x04) ? 1 : 0) << i;
++	return v;
++}
++
++static int hdq_read16(struct hdq_battery *b, u8 reg)
++{
++	int lo, hi, tries;
++
++	for (tries = 0; tries < 3; tries++) {
++		lo = hdq_read8(b, reg);
++		hi = lo < 0 ? lo : hdq_read8(b, reg + 1);
++		if (lo >= 0 && hi >= 0)
++			return lo | hi << 8;
++	}
++	return -EIO;
++}
++
++/* everything at once, at most every 5 s: a 16-bit read is ~10 ms of bus */
++static int hdq_refresh(struct hdq_battery *b)
++{
++	struct { u8 reg; int *dst; } r[] = {
++		{ BQ_SOC, &b->soc }, { BQ_VOLT, &b->volt }, { BQ_AI, &b->ai },
++		{ BQ_TEMP, &b->temp }, { BQ_RM, &b->rm }, { BQ_FCC, &b->fcc },
++		{ BQ_FLAGS, &b->flags }, { BQ_CYCT, &b->cyct }, { BQ_DCAP, &b->dcap },
++	};
++	int i, v;
++
++	if (b->valid && time_before(jiffies, b->stamp + 5 * HZ))
++		return 0;
++	for (i = 0; i < ARRAY_SIZE(r); i++) {
++		v = hdq_read16(b, r[i].reg);
++		if (v < 0) {
++			dev_warn_ratelimited(b->dev, "no answer for %#x\n", r[i].reg);
++			return v;
++		}
++		*r[i].dst = v;
++	}
++	b->ai = (s16)b->ai;
++	b->stamp = jiffies;
++	b->valid = true;
++	return 0;
++}
++
++static int hdq_get_property(struct power_supply *psy, enum power_supply_property psp,
++			    union power_supply_propval *val)
++{
++	struct hdq_battery *b = power_supply_get_drvdata(psy);
++	int ret;
++
++	if (psp == POWER_SUPPLY_PROP_TECHNOLOGY) {
++		val->intval = POWER_SUPPLY_TECHNOLOGY_LIPO;
++		return 0;
++	}
++	mutex_lock(&b->lock);
++	ret = hdq_refresh(b);
++	mutex_unlock(&b->lock);
++	if (psp == POWER_SUPPLY_PROP_PRESENT) {
++		val->intval = ret == 0;
++		return 0;
++	}
++	if (ret)
++		return ret;
++
++	switch (psp) {
++	case POWER_SUPPLY_PROP_STATUS:
++		if (b->flags & BQ_FLAG_FC)
++			val->intval = POWER_SUPPLY_STATUS_FULL;
++		else if (b->ai > 0)
++			val->intval = POWER_SUPPLY_STATUS_CHARGING;
++		else if (b->flags & BQ_FLAG_DSG)
++			val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
++		else
++			val->intval = POWER_SUPPLY_STATUS_NOT_CHARGING;
++		break;
++	case POWER_SUPPLY_PROP_CAPACITY:
++		val->intval = b->soc;
++		break;
++	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
++		val->intval = b->volt * 1000;
++		break;
++	case POWER_SUPPLY_PROP_CURRENT_NOW:
++		val->intval = b->ai * 1000;
++		break;
++	case POWER_SUPPLY_PROP_TEMP:
++		val->intval = b->temp - 2731;
++		break;
++	case POWER_SUPPLY_PROP_CHARGE_NOW:
++		val->intval = b->rm * 1000;
++		break;
++	case POWER_SUPPLY_PROP_CHARGE_FULL:
++		val->intval = b->fcc * 1000;
++		break;
++	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
++		val->intval = b->dcap * 1000;
++		break;
++	case POWER_SUPPLY_PROP_CYCLE_COUNT:
++		val->intval = b->cyct;
++		break;
++	default:
++		return -EINVAL;
++	}
++	return 0;
++}
++
++static const enum power_supply_property hdq_props[] = {
++	POWER_SUPPLY_PROP_STATUS, POWER_SUPPLY_PROP_PRESENT, POWER_SUPPLY_PROP_TECHNOLOGY,
++	POWER_SUPPLY_PROP_CAPACITY, POWER_SUPPLY_PROP_VOLTAGE_NOW, POWER_SUPPLY_PROP_CURRENT_NOW,
++	POWER_SUPPLY_PROP_TEMP, POWER_SUPPLY_PROP_CHARGE_NOW, POWER_SUPPLY_PROP_CHARGE_FULL,
++	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN, POWER_SUPPLY_PROP_CYCLE_COUNT,
++};
++
++static const struct power_supply_desc hdq_desc = {
++	.name = "battery",
++	.type = POWER_SUPPLY_TYPE_BATTERY,
++	.properties = hdq_props,
++	.num_properties = ARRAY_SIZE(hdq_props),
++	.get_property = hdq_get_property,
++};
++
++static int hdq_probe(struct platform_device *pdev)
++{
++	struct power_supply_config cfg = {};
++	struct hdq_battery *b;
++	int soc;
++
++	b = devm_kzalloc(&pdev->dev, sizeof(*b), GFP_KERNEL);
++	if (!b)
++		return -ENOMEM;
++	b->dev = &pdev->dev;
++	mutex_init(&b->lock);
++	b->base = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(b->base))
++		return PTR_ERR(b->base);
++
++	writel(HDQ_ULCON, b->base + ULCON);
++	writel(HDQ_UFCON, b->base + UFCON);
++	writel(HDQ_UBRDIV, b->base + UBRDIV);
++	writel(0, b->base + UFRACVAL);
++	writel(HDQ_UCON, b->base + UCON);
++
++	mutex_lock(&b->lock);
++	soc = hdq_refresh(b) ? -1 : b->soc;
++	mutex_unlock(&b->lock);
++	if (soc < 0)
++		dev_warn(&pdev->dev, "the gauge does not answer yet\n");
++	else
++		dev_info(&pdev->dev, "bq27540: %d%%, %d mV, %d mA, %d/%d mAh, %d cycles\n",
++			 b->soc, b->volt, b->ai, b->rm, b->fcc, b->cyct);
++
++	cfg.drv_data = b;
++	cfg.of_node = pdev->dev.of_node;
++	b->psy = devm_power_supply_register(&pdev->dev, &hdq_desc, &cfg);
++	return PTR_ERR_OR_ZERO(b->psy);
++}
++
++static const struct of_device_id hdq_of_match[] = {
++	{ .compatible = "apple,s5l8940x-hdq-battery" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, hdq_of_match);
++
++static struct platform_driver hdq_driver = {
++	.probe = hdq_probe,
++	.driver = {
++		.name = "apple-hdq-battery",
++		.of_match_table = hdq_of_match,
++	},
++};
++module_platform_driver(hdq_driver);
++
++MODULE_DESCRIPTION("bq27540 gas gauge on HDQ through UART5 (iPad mini 1)");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/power/supply/apple-pmu-charger.c b/drivers/power/supply/apple-pmu-charger.c
+new file mode 100644
+index 000000000..5b34d9da9
+--- /dev/null
++++ b/drivers/power/supply/apple-pmu-charger.c
+@@ -0,0 +1,382 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * The iPad mini 1's USB input current limit: D1946 PMU register 0x3d.
++ *
++ * iBEC hands over with 0x3d at 0x02, about 100 mA, and nothing in Linux used
++ * to raise it, so the iPad drained on any cable -- measured -386 mA on a
++ * host port and -388 mA on a wall charger that charges iOS at +1082 mA.
++ * The charger itself is already on: 0x3f and the temperature bands
++ * 0x4b..0x53 are left as iBoot set them, and so is the input-suspend pair
++ * 0x1b bit 2 / 0x1c bit 7.  This driver only moves the input limit, the
++ * way iBEC's own apply step does it (0x9ff0c540 in the 12H321 iBEC):
++ *
++ *   code = (8 * mA - 600) / 100, then iBEC's correction: below 0x49 as is,
++ *   0x49..0x4a -> 0x48, 0x4b..0x6e -> -2, 0x6f..0x72 -> 0x6e, 0x73 and up
++ *   -> -4; under 100 mA it is 0x02, and nothing goes above 2100 mA.
++ *
++ *   Upwards it ramps, 8 codes every 10 ms.  If 0x3d then reads back 0x02
++ *   the PMU has dropped the limit itself because VBUS sagged; iBEC and
++ *   iOS (AppleD1946PMUPowerSource::handleInterrupt) both treat that as
++ *   "this source cannot give more" and back off 8 codes.  So does this.
++ *
++ * Online is 0x0a bit 6: 0x6b plugged, 0x03 or 0x23 not, the same for a host
++ * port and a charger -- telling those apart takes the D+/D- measurement on
++ * the PMU's ADC that iBEC makes, which is not here.  Until it is, the
++ * target is 1000 mA (Cascadia's choice: iBEC's for a charger it does not
++ * know; a Mac's USB-C port gave it with no sag, +752 mA into the battery
++ * against +253 at 500), and a source that cannot give it sags: the limit
++ * then stays 8 codes under where it sagged until the cable comes out (a
++ * cable out and in again within the 1 s poll looks like a sag: 900 mA until
++ * the next time).  More
++ * has to be asked for by hand: raise max_input_ma, then write
++ * input_current_limit.
++ *
++ * The rules this file keeps:
++ *  - 0x3d is the only register it writes.  pmu_chg_write() refuses any
++ *    other.  It never reads 0x01..0x09: those clear on read.
++ *  - It writes nothing until armed (module parameter, default off); until
++ *    then it logs what it would do.  Disarming puts back the value it found
++ *    at probe.
++ *  - Above 45 C on the battery gauge it drops to 100 mA, and stays there
++ *    until below 40 C.  iBEC's charge table ends at 45 C.
++ */
++#include <linux/delay.h>
++#include <linux/devm-helpers.h>
++#include <linux/jiffies.h>
++#include <linux/minmax.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/power_supply.h>
++#include <linux/regmap.h>
++#include <linux/workqueue.h>
++#include <linux/apple-pmu-i2c.h>
++
++#define PMU_STATUS0		0x0a	/* bit 6: VBUS there */
++#define PMU_STATUS0_VBUS	BIT(6)
++#define PMU_ILIM		0x3d	/* the only register written */
++
++#define ILIM_MIN_CODE		0x02	/* < 100 mA; also the PMU's own sag value */
++#define ILIM_STEP		8	/* codes per ramp step, 100 mA */
++#define ILIM_STEP_MS		10
++#define ILIM_HARD_MAX_MA	2100
++#define ILIM_DEFAULT_MA		1000
++
++#define POLL_MS			1000
++#define HOT_DECI_C		450
++#define COOL_DECI_C		400
++
++static bool armed;
++module_param(armed, bool, 0644);
++MODULE_PARM_DESC(armed, "write 0x3d (default off: log only)");
++
++static int max_input_ma = ILIM_DEFAULT_MA;
++module_param(max_input_ma, int, 0644);
++MODULE_PARM_DESC(max_input_ma, "ceiling for input_current_limit, 100..2100 mA (default 1000)");
++
++struct pmu_chg {
++	struct device *dev;
++	struct regmap *map;
++	struct power_supply *psy;
++	struct delayed_work work;
++	struct mutex lock;		/* everything below */
++	unsigned int req_ma;		/* asked for: default or input_current_limit */
++	u8 probe_code;			/* 0x3d as iBEC left it */
++	u8 last_written;		/* 0 = nothing written while online */
++	u8 ceiling;			/* after a sag, until unplugged; 0xff = none */
++	bool online;
++	bool was_armed;
++	bool hot;
++	u8 logged_code;			/* last "would set" logged, to say it once */
++};
++
++/* iBEC's encoding, 0x9ff0c618..0x9ff0c662 */
++static u8 pmu_chg_ma_to_code(unsigned int ma)
++{
++	unsigned int code;
++
++	ma = min_t(unsigned int, ma, ILIM_HARD_MAX_MA);
++	if (ma < 100)
++		return ILIM_MIN_CODE;
++	code = (8 * ma - 600) / 100;
++	if (code >= 0x73)
++		return code - 4;
++	if (code > 0x6e)
++		return 0x6e;
++	if (code >= 0x4b)
++		return code - 2;
++	if (code > 0x48)
++		return 0x48;
++	return code;
++}
++
++/* The nominal current of a code, for the log only. */
++static unsigned int pmu_chg_code_to_ma(u8 code)
++{
++	return code <= ILIM_MIN_CODE ? 100 : (code * 100 + 600) / 8;
++}
++
++static int pmu_chg_write(struct pmu_chg *c, unsigned int reg, u8 val)
++{
++	int ret;
++
++	if (reg != PMU_ILIM) {
++		dev_err(c->dev, "refusing PMU write 0x%02x = 0x%02x: only 0x%02x is ours\n",
++			reg, val, PMU_ILIM);
++		return -EPERM;
++	}
++	ret = regmap_write(c->map, reg, val);
++	if (!ret)
++		c->last_written = val;
++	return ret;
++}
++
++static int pmu_chg_read(struct pmu_chg *c, unsigned int reg, u8 *val)
++{
++	unsigned int v;
++	int ret = regmap_read(c->map, reg, &v);
++
++	if (!ret)
++		*val = v;
++	return ret;
++}
++
++static void pmu_chg_sagged(struct pmu_chg *c, u8 at)
++{
++	c->ceiling = max_t(int, ILIM_MIN_CODE, at - ILIM_STEP);
++	dev_warn(c->dev, "VBUS sagged at 0x%02x: limiting USB input current to %u mA until unplugged\n",
++		 at, pmu_chg_code_to_ma(c->ceiling));
++}
++
++/* Ramp 0x3d from cur up to target, 8 codes every 10 ms, watching for a sag. */
++static void pmu_chg_ramp(struct pmu_chg *c, u8 cur, u8 target)
++{
++	while (cur < target) {
++		u8 next = min_t(int, cur + ILIM_STEP, target), rb;
++
++		if (pmu_chg_write(c, PMU_ILIM, next))
++			return;
++		msleep(ILIM_STEP_MS);
++		if (pmu_chg_read(c, PMU_ILIM, &rb))
++			return;
++		if (rb == ILIM_MIN_CODE && next > ILIM_MIN_CODE) {
++			pmu_chg_sagged(c, next);
++			if (c->ceiling < next)
++				pmu_chg_write(c, PMU_ILIM, c->ceiling);
++			return;
++		}
++		if (rb != next) {
++			dev_warn(c->dev, "0x3d reads 0x%02x after writing 0x%02x; stopping the ramp\n",
++				 rb, next);
++			return;
++		}
++		cur = rb;
++	}
++}
++
++static bool pmu_chg_battery_hot(struct pmu_chg *c)
++{
++	union power_supply_propval t;
++	struct power_supply *bat = power_supply_get_by_name("battery");
++
++	if (!bat)
++		return c->hot;
++	if (!power_supply_get_property(bat, POWER_SUPPLY_PROP_TEMP, &t)) {
++		if (!c->hot && t.intval > HOT_DECI_C) {
++			c->hot = true;
++			dev_warn(c->dev, "battery at %d.%d C: input limited to 100 mA\n",
++				 t.intval / 10, t.intval % 10);
++		} else if (c->hot && t.intval < COOL_DECI_C) {
++			c->hot = false;
++			dev_info(c->dev, "battery back to %d.%d C\n", t.intval / 10, t.intval % 10);
++		}
++	}
++	power_supply_put(bat);
++	return c->hot;
++}
++
++static u8 pmu_chg_target(struct pmu_chg *c)
++{
++	unsigned int ma = min_t(unsigned int, c->req_ma,
++				clamp(READ_ONCE(max_input_ma), 100, ILIM_HARD_MAX_MA));
++	u8 code = pmu_chg_ma_to_code(ma);
++
++	if (c->ceiling != 0xff)
++		code = min(code, c->ceiling);
++	if (pmu_chg_battery_hot(c))
++		code = ILIM_MIN_CODE;
++	return code;
++}
++
++static void pmu_chg_work(struct work_struct *w)
++{
++	struct pmu_chg *c = container_of(to_delayed_work(w), struct pmu_chg, work);
++	bool is_armed = READ_ONCE(armed), online, changed = false;
++	u8 st, cur, target;
++
++	mutex_lock(&c->lock);
++	if (pmu_chg_read(c, PMU_STATUS0, &st) || pmu_chg_read(c, PMU_ILIM, &cur))
++		goto out;
++	online = st & PMU_STATUS0_VBUS;
++	changed = online != c->online;
++	c->online = online;
++	if (changed) {
++		/* a source's sag is that source's: a new cable starts afresh */
++		c->ceiling = 0xff;
++		if (online)
++			c->last_written = 0;	/* a new session: a low 0x3d now is not a sag */
++	}
++
++	if (c->was_armed && !is_armed) {
++		dev_info(c->dev, "disarmed: 0x3d back to 0x%02x\n", c->probe_code);
++		pmu_chg_write(c, PMU_ILIM, c->probe_code);
++		c->last_written = 0;
++		c->logged_code = 0;
++		c->was_armed = false;
++		goto out;
++	}
++	if (!online)
++		goto out;
++
++	target = pmu_chg_target(c);
++	if (!is_armed) {
++		if (cur != target && target != c->logged_code) {
++			dev_info(c->dev, "disarmed: would set 0x3d 0x%02x -> 0x%02x (%u mA)\n",
++				 cur, target, pmu_chg_code_to_ma(target));
++			c->logged_code = target;
++		}
++		goto out;
++	}
++	c->was_armed = true;
++
++	/* steady state: the PMU dropped what we set, so the source sagged */
++	if (cur == ILIM_MIN_CODE && c->last_written > ILIM_MIN_CODE) {
++		pmu_chg_sagged(c, c->last_written);
++		target = min(target, c->ceiling);
++	}
++	if (cur < target)
++		pmu_chg_ramp(c, cur, target);
++	else if (cur > target)
++		pmu_chg_write(c, PMU_ILIM, target);
++out:
++	mutex_unlock(&c->lock);
++	if (changed)
++		power_supply_changed(c->psy);
++	schedule_delayed_work(&c->work, msecs_to_jiffies(POLL_MS));
++}
++
++static int pmu_chg_get(struct power_supply *psy, enum power_supply_property psp,
++		       union power_supply_propval *val)
++{
++	struct pmu_chg *c = power_supply_get_drvdata(psy);
++
++	switch (psp) {
++	case POWER_SUPPLY_PROP_ONLINE:
++		val->intval = c->online;
++		return 0;
++	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
++		val->intval = c->req_ma * 1000;
++		return 0;
++	default:
++		return -EINVAL;
++	}
++}
++
++static int pmu_chg_set(struct power_supply *psy, enum power_supply_property psp,
++		       const union power_supply_propval *val)
++{
++	struct pmu_chg *c = power_supply_get_drvdata(psy);
++	int ma = val->intval / 1000;
++
++	if (psp != POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT)
++		return -EINVAL;
++	if (ma < 100 || ma > clamp(READ_ONCE(max_input_ma), 100, ILIM_HARD_MAX_MA))
++		return -ERANGE;
++	mutex_lock(&c->lock);
++	c->req_ma = ma;
++	c->logged_code = 0;
++	mutex_unlock(&c->lock);
++	mod_delayed_work(system_wq, &c->work, 0);
++	return 0;
++}
++
++static int pmu_chg_writeable(struct power_supply *psy, enum power_supply_property psp)
++{
++	return psp == POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT;
++}
++
++static enum power_supply_property pmu_chg_props[] = {
++	POWER_SUPPLY_PROP_ONLINE,
++	POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
++};
++
++static char *pmu_chg_supplied_to[] = { "battery" };
++
++static const struct power_supply_desc pmu_chg_desc = {
++	.name = "apple-pmu-usb",
++	.type = POWER_SUPPLY_TYPE_USB,
++	.properties = pmu_chg_props,
++	.num_properties = ARRAY_SIZE(pmu_chg_props),
++	.get_property = pmu_chg_get,
++	.set_property = pmu_chg_set,
++	.property_is_writeable = pmu_chg_writeable,
++};
++
++static int pmu_chg_probe(struct platform_device *pdev)
++{
++	struct apple_pmu_i2c *pmu = dev_get_drvdata(pdev->dev.parent);
++	struct power_supply_config cfg = {};
++	struct pmu_chg *c;
++	u8 st;
++	int ret;
++
++	c = devm_kzalloc(&pdev->dev, sizeof(*c), GFP_KERNEL);
++	if (!c)
++		return -ENOMEM;
++	c->dev = &pdev->dev;
++	c->map = pmu->regmap;
++	c->req_ma = ILIM_DEFAULT_MA;
++	c->ceiling = 0xff;
++	mutex_init(&c->lock);
++
++	if (pmu_chg_read(c, PMU_ILIM, &c->probe_code) || pmu_chg_read(c, PMU_STATUS0, &st))
++		return -EIO;
++	c->online = st & PMU_STATUS0_VBUS;
++
++	cfg.drv_data = c;
++	cfg.of_node = pdev->dev.of_node;
++	cfg.supplied_to = pmu_chg_supplied_to;
++	cfg.num_supplicants = ARRAY_SIZE(pmu_chg_supplied_to);
++	c->psy = devm_power_supply_register(&pdev->dev, &pmu_chg_desc, &cfg);
++	if (IS_ERR(c->psy))
++		return PTR_ERR(c->psy);
++	platform_set_drvdata(pdev, c);
++
++	ret = devm_delayed_work_autocancel(&pdev->dev, &c->work, pmu_chg_work);
++	if (ret)
++		return ret;
++	schedule_delayed_work(&c->work, msecs_to_jiffies(POLL_MS));
++	dev_info(&pdev->dev, "0x3d = 0x%02x (%u mA) at probe, VBUS %s, %s\n",
++		 c->probe_code, pmu_chg_code_to_ma(c->probe_code),
++		 c->online ? "on" : "off", armed ? "armed" : "disarmed (log only)");
++	return 0;
++}
++
++static const struct of_device_id pmu_chg_of_match[] = {
++	{ .compatible = "apple,pmu-d1946-charger" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, pmu_chg_of_match);
++
++static struct platform_driver pmu_chg_driver = {
++	.probe = pmu_chg_probe,
++	.driver = {
++		.name = "apple-pmu-charger",
++		.of_match_table = pmu_chg_of_match,
++	},
++};
++module_platform_driver(pmu_chg_driver);
++
++MODULE_DESCRIPTION("D1946 PMU USB input current limit (iPad mini 1)");
++MODULE_LICENSE("GPL");
