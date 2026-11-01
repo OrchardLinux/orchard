@@ -1,0 +1,4 @@
+# Ordered patch layers for the armv7-a5 platform (A5: 32-bit ARMv7), relative
+# to kernel/, on torvalds v6.12 (kernel/upstream-v6.12.lock). Every *.patch
+# below each directory is applied in path order.
+patches/import/cascadia

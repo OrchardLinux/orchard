@@ -1,0 +1,15 @@
+# Kernel platform: one kernel build shared by every board whose
+# devices/<board>/device.toml names it in [kernel] platform.
+schema = 1
+kind = "hardware.platform"
+name = "armv7-a5"
+description = "A5: 32-bit ARMv7, Project Cascadia's port on Linux 6.12"
+
+[kernel]
+arch = "arm"                            # make ARCH=
+image = "zImage"                        # make target; the payload's kernel file
+dtbs = "arch/arm/boot/dts/apple"        # where make dtbs leaves the boards' DTBs
+upstream = "kernel/upstream-v6.12.lock" # base the series applies to
+series = "kernel/series/armv7-a5"       # ordered patch layers
+config = "kernel/configs/armv7-a5/config"
+defconfig = "orchard_armv7a5_defconfig"   # the same config in OrchardLinux/linux

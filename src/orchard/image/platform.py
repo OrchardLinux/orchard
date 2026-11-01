@@ -44,10 +44,18 @@ def boards(platform, hardware=None):
     return known[platform]
 
 
+ROOT_ARCH = 'arm64'  # distributions build one arm64 root for every platform
+
+
 def platforms(hardware=None):
-    """Every platform with at least one described board, sorted."""
+    """Every platform with at least one described board whose kernel runs the
+    shared arm64 root, sorted. A platform of another architecture (armv7-a5)
+    has no platform layer until a root of its architecture exists."""
+    from ..kernel import descriptor
     from ..ram import boards_by_platform
-    return sorted(boards_by_platform(hardware or ROOT))
+    hardware = hardware or ROOT
+    return sorted(platform for platform, boards in boards_by_platform(hardware).items()
+                  if descriptor(hardware, sorted(boards)[0])['arch'] == ROOT_ARCH)
 
 
 def kernel(platform, *, hardware=None, cache=None):
