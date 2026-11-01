@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Regenerate main of the linux and m1n1 trees from an orchard commit.
+#
+#   tools/kernel-tree/regenerate --linux DIR --m1n1 DIR [ORCHARD_COMMIT]
+#
+# DIR are clones of OrchardLinux/linux and OrchardLinux/m1n1 that contain the
+# upstream bases (v7.3-rc1 / Asahi's c9ef56f7, see kernel/upstream.lock and
+# boot/m1n1/upstream.lock). ORCHARD_COMMIT defaults to HEAD of this checkout.
+# linux main also gets the platform defconfigs, made with `make savedefconfig`
+# in the kernel toolchain container and checked to reproduce kernel/configs.
+# Nothing is pushed.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+orchard=$(cd "$here/../.." && pwd)
+python=${ORCHARD_PYTHON:-python3}
+linux= m1n1= commit=HEAD
+while (($#)); do
+  case $1 in
+    --linux) linux=$2; shift 2;;
+    --m1n1) m1n1=$2; shift 2;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0;;
+    *) commit=$1; shift;;
+  esac
+done
+[[ -n $linux && -n $m1n1 ]] || { echo 'Usage: regenerate --linux DIR --m1n1 DIR [ORCHARD_COMMIT]' >&2; exit 2; }
+commit=$(git -C "$orchard" rev-parse --short "$commit")
+image=localhost/orchard-hardware-kernel-toolchain:bookworm
+
+lock() { git -C "$orchard" show "$commit:$1" | awk -F= '$1=="commit" {print $2}'; }
+set_main() {  # repo new-commit
+  local repo=$1 new=$2 current
+  current=$(git -C "$repo" symbolic-ref -q --short HEAD || true)
+  if [[ $current == main ]]; then
+    [[ -z $(git -C "$repo" status --porcelain) ]] || { echo "$repo: main has local changes; not moved" >&2; exit 1; }
+    git -C "$repo" reset -q --hard "$new"
+  else
+    git -C "$repo" update-ref refs/heads/main "$new"
+  fi
+  echo "$(basename "$repo") main $(git -C "$repo" rev-parse --short main)"
+}
+
+# --- linux: patch layers, then the defconfigs
+"$python" -I "$here/convert.py" --orchard "$orchard" --commit "$commit" --layers kernel \
+  --target "$linux" --base "$(lock kernel/upstream.lock)" --map "$linux/.git/orchard-patch-map"
+converted=$(git -C "$linux" rev-parse refs/orchard/converted)
+podman image exists "$image" || podman build -q -t "$image" -f "$orchard/kernel/Containerfile" "$orchard/kernel"
+out=$(mktemp -d); trap 'rm -rf "$out"' EXIT
+mkdir -p "$out/configs"
+git -C "$orchard" archive "$commit" kernel/configs | tar -x -C "$out/configs" --strip-components=2
+echo 'Making the defconfigs in the toolchain container...'
+git -C "$linux" archive "$converted" | podman run --rm -i --userns keep-id -v "$out:/out" "$image" bash -euc '
+  mkdir /tmp/src && tar -x -C /tmp/src
+  for config in /out/configs/*/config; do
+    platform=$(basename "$(dirname "$config")") name=orchard_${platform//-/}_defconfig
+    mkdir -p "/tmp/b/$platform" "/tmp/r/$platform"
+    cp "$config" "/tmp/b/$platform/.config"
+    make -s -C /tmp/src O="/tmp/b/$platform" LLVM=-19 ARCH=arm64 olddefconfig
+    cmp "/tmp/b/$platform/.config" "$config"
+    make -s -C /tmp/src O="/tmp/b/$platform" LLVM=-19 ARCH=arm64 savedefconfig
+    cp "/tmp/b/$platform/defconfig" "/tmp/src/arch/arm64/configs/$name"
+    make -s -C /tmp/src O="/tmp/r/$platform" LLVM=-19 ARCH=arm64 "$name"
+    cmp "/tmp/r/$platform/.config" "$config"
+    cp "/tmp/b/$platform/defconfig" "/out/$name"
+    echo "$name reproduces kernel/configs/$platform/config"
+  done'
+# The defconfig commit is authored and committed as the last change to kernel/configs.
+field() { git -C "$orchard" log -1 --format="$1" "$commit" -- kernel/configs; }
+changed=$(field %h) an=$(field %an) ae=$(field %ae) cn=$(field %cn) ce=$(field %ce) date=$(field %cD)
+export GIT_INDEX_FILE="$out/index"
+git -C "$linux" read-tree "$converted"
+names=()
+for defconfig in "$out"/orchard_*_defconfig; do
+  name=$(basename "$defconfig"); names+=("$name")
+  blob=$(git -C "$linux" hash-object -w "$defconfig")
+  git -C "$linux" update-index --add --cacheinfo "100644,$blob,arch/arm64/configs/$name"
+done
+tree=$(git -C "$linux" write-tree)
+unset GIT_INDEX_FILE
+export GIT_AUTHOR_NAME=$an GIT_AUTHOR_EMAIL=$ae GIT_AUTHOR_DATE=$date
+export GIT_COMMITTER_NAME=$cn GIT_COMMITTER_EMAIL=$ce GIT_COMMITTER_DATE=$date
+configs=$(git -C "$linux" commit-tree "$tree" -p "$converted" -F - <<EOF
+arm64: configs: Add Orchard platform defconfigs
+
+${names[*]}: \`make savedefconfig\` of orchard's
+kernel/configs/<platform>/config as of orchard $changed. \`make <name>\` with LLVM=-19
+reproduces those configs byte for byte. orchard_apple16k_defconfig covers
+A9 and later (16 KiB pages), orchard_apple4k_defconfig A7, A8 and A8X.
+
+Assisted-by: LLM
+EOF
+)
+git -C "$linux" update-ref refs/topics/configs "$configs"
+merged=$(git -C "$linux" commit-tree "$tree" -p "$converted" -p "$configs" \
+  -m 'Merge configs (1 patch)' -m "From kernel/configs as of orchard $changed.")
+unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_AUTHOR_DATE GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL GIT_COMMITTER_DATE
+set_main "$linux" "$merged"
+
+# --- m1n1
+"$python" -I "$here/convert.py" --orchard "$orchard" --commit "$commit" --layers boot/m1n1 \
+  --target "$m1n1" --base "$(lock boot/m1n1/upstream.lock)" --map "$m1n1/.git/orchard-patch-map"
+set_main "$m1n1" "$(git -C "$m1n1" rev-parse refs/orchard/converted)"
