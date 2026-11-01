@@ -66,32 +66,6 @@ done
 mkdir -p /newroot
 mount ${fstype:+-t "$fstype"} -o "$mode${flags:+,$flags}" "$device" /newroot || stop "could not mount $device"
 [ -x "/newroot$init" ] || [ -L "/newroot$init" ] || stop "the root has no $init"
-# The system's boot splash (docs/boot-contract.md), on the framebuffer m1n1
-# left black, before the system starts; it stays until the system takes over.
-splash() {
-    s=/newroot/usr/share/orchard/splash fb=/sys/class/graphics/fb0
-    say() { echo "orchard initrd: splash: $*" > /dev/kmsg; }
-    [ -f "$s" ] || { say "none in the system"; return 0; }
-    [ -c /dev/fb0 ] && [ -r "$fb/stride" ] || { say "no framebuffer"; return 0; }
-    [ "$(cat "$fb/bits_per_pixel")" = 32 ] && [ "$(head -c 4 "$s")" = OSPL ] || { say "unsupported format"; return 0; }
-    set -- $(od -An -tu4 -j4 -N8 "$s")
-    w=$1 h=$2 size=$(cat "$fb/virtual_size") stride=$(cat "$fb/stride")
-    W=${size%,*} H=${size#*,}
-    [ "$w" -le "$W" ] && [ "$h" -le "$H" ] || { say "${w}x$h does not fit ${W}x$H"; return 0; }
-    # /dev/fb0 is simpledrm's shadow buffer, shown only once something sets a
-    # mode on it; fbcon would, but it stays off the screen. Writing the current
-    # mode to sysfs activates it, then the rows reach the screen.
-    head -1 "$fb/modes" > "$fb/mode" 2>/dev/null || say "could not activate the framebuffer"
-    left=$(((W - w) / 2)) top=$(((H - h) / 2)) row=$((w * 4)) y=0
-    while [ "$y" -lt "$h" ]; do
-        dd if="$s" of=/dev/fb0 bs="$row" count=1 iflag=skip_bytes oflag=seek_bytes conv=notrunc \
-            skip=$((12 + y * row)) seek=$(((top + y) * stride + left * 4)) 2>/dev/null ||
-            { say "write failed at row $y"; return 0; }
-        y=$((y + 1))
-    done
-    say "${w}x$h at $left,$top on ${W}x$H"
-}
-splash
 
 # USB for the host: network (usb0) and a serial console (ttyGS0), named after
 # the system, so `orchard devices` sees it. What runs on them is the system's.

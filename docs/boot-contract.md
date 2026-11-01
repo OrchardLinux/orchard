@@ -85,8 +85,8 @@ options    root=PARTUUID=4d6c…-… rw quiet
 A system's boot splash ships in its root as `/usr/share/orchard/splash`; the
 installer copies it next to the entry's kernel (`/TOKEN/VERSION/splash`).
 When an entry starts, m1n1 paints it centred on black before it loads the
-kernel; it stays until the system clears it. orchard's initrd still paints it
-once more after mounting the root, until that is removed. Entries start quiet (`fbcon=map:9`), as the recovery
+kernel. Nothing paints it again: the picture stays on the screen until the
+system draws over it. Entries start quiet (`fbcon=map:9`), as the recovery
 does, so no console text covers it. A missing or malformed splash only costs
 the picture, never the boot.
 
@@ -172,7 +172,7 @@ problem devicetree is not t8010-j71b.dtb
 - Order is systemd-boot's: entries with a sort-key first, by sort-key, machine-id and newest version (UAPI version comparison), then by id, newest first.
 
 `P_BOOT_START` (0008, 0009), in this order:
-1. Paint the entry's splash (`splash` in the directory of its `linux`, see [Splash](#splash)) centred on black, unless flag bit 0 is set. A missing or broken splash only costs the picture. The initrd still paints it again after mounting the root; that goes once m1n1's painting has run for a while.
+1. Paint the entry's splash (`splash` in the directory of its `linux`, see [Splash](#splash)) centred on black, unless flag bit 0 is set. A missing or broken splash only costs the picture.
 2. Check the entries again and load the bootable entry: linux (an Image at a 2 MiB boundary with room for its `image_size`, or gzip, uncompressed behind the heap), the initrds (concatenated) and the devicetree. The arguments are copied first, then m1n1 lifts any heap limit the host set (`P_HEAPBLOCK_SET_LIMIT`; today's client sets 128 MiB when it connects): an allocation past the limit panics m1n1, and memory above m1n1's heap is m1n1's from here on.
 3. Shut storage down. Only now, so a failure before it leaves storage up for another entry. A second `main_storage_init` in one m1n1 session hangs on A10 (J71b, 2026-11-01: the init answers, the next read never returns and m1n1 stops answering), so a host initialises storage once per session. The NVMe strap release (0006) stays the backend's job.
 4. Set the entry's options as bootargs, start cpufreq, the secondary CPUs and the mitigations (as m1n1's payload boot does), prepare the DT, reply OK, boot.
