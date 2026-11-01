@@ -19,14 +19,20 @@ from . import sources
 from .kernel_sdk import export as export_sdk
 
 
-def pin(hardware):
-    return dict(line.split('=', 1) for line in (Path(hardware) / 'kernel/upstream.lock').read_text().splitlines()
-                if '=' in line)
-
-
 def _series(hardware, *args):
     return subprocess.check_output([sys.executable, str(Path(hardware) / 'kernel/series.py'), *args],
                                    text=True)
+
+
+def descriptor(hardware, device):
+    """The platform descriptor's kernel table (platforms/<platform>.toml): arch,
+    image, dtbs and the repository paths of upstream, series and config."""
+    return json.loads(_series(hardware, '--platform', device))
+
+
+def pin(hardware, device):
+    lock = Path(hardware) / descriptor(hardware, device)['upstream']
+    return dict(line.split('=', 1) for line in lock.read_text().splitlines() if '=' in line)
 
 
 def layout(hardware, device):
@@ -55,7 +61,7 @@ def work_directory(hardware, device):
     """
     platform = layout(hardware, device)[0]
     if shared_tree(hardware):
-        return sources.cache_root() / 'kernel-work' / f"{platform}-{pin(hardware)['commit'][:12]}"
+        return sources.cache_root() / 'kernel-work' / f"{platform}-{pin(hardware, device)['commit'][:12]}"
     return Path(hardware) / 'kernel/.work' / platform
 
 
@@ -104,7 +110,7 @@ def source_tree(hardware, cache, device):
     content-addressed key. Local edits still participate, or block a patch
     transition when they cannot be separated safely.
     """
-    selected = pin(hardware)
+    selected = pin(hardware, device)
     work = work_directory(hardware, device)
     source = work / 'source'
     patches, expected = patch_identity(hardware, device)
@@ -132,7 +138,7 @@ def source_tree(hardware, cache, device):
 
 def prepare_source(hardware, cache, device):
     hardware = Path(hardware)
-    selected = pin(hardware)
+    selected = pin(hardware, device)
     work = work_directory(hardware, device)
     source = work / 'source'
     work.mkdir(parents=True, exist_ok=True)
@@ -206,11 +212,11 @@ def build_base(hardware, cache, device, output):
         command(sys.executable, hardware / 'kernel/stage-modules.py',
                 '--build', compiler_output, '--output', work / 'in-tree')
         output.mkdir(parents=True)
-        for name in ('Image.gz', 'kernel.release'):
+        for name in (descriptor(hardware, device)['image'], 'kernel.release'):
             shutil.copy2(work / 'full' / name, output / name)
         shutil.copytree(work / 'full/dtbs', output / 'dtbs')
         shutil.copytree(work / 'in-tree/lib', output / 'lib')
-        export_sdk(compiler_output, output / 'sdk')
+        export_sdk(compiler_output, output / 'sdk', descriptor(hardware, device)['arch'])
         (output / 'inputs.json').write_text(json.dumps({'source_tree': tree}) + '\n')
     if sources.working_tree(source) != tree:
         raise ValueError('Kernel source changed during build; refusing result')
@@ -220,12 +226,13 @@ def build_device(hardware, cache, device, base, output):
     """Select the device DTB; build any external modules with a PRIVATE cached-SDK copy."""
     from .build import command
     hardware, base, output = map(Path, (hardware, base, output))
-    platform, dtb = layout(hardware, device)
+    platform_name, dtb = layout(hardware, device)
+    described = descriptor(hardware, device)
     source, _ = prepare_source(hardware, cache, device)
     tree = sources.working_tree(source)
     if json.loads((base / 'inputs.json').read_text())['source_tree'] != tree:
         raise ValueError('Cached kernel source identity differs; rebuild the base')
-    if (base / 'sdk/.config').read_bytes() != (hardware / 'kernel/configs' / platform / 'config').read_bytes():
+    if (base / 'sdk/.config').read_bytes() != (hardware / described['config']).read_bytes():
         raise ValueError('Cached kernel configuration differs; rebuild the base')
     release = (base / 'kernel.release').read_text().strip()
     if not release or '/' in release or len(release.split()) != 1:
@@ -252,12 +259,13 @@ def build_device(hardware, cache, device, base, output):
         if (hardware / 'kernel/modules' / device).is_dir():
             command(hardware / 'kernel/build-modules', '--source', source, '--build', sdk,
                     '--modules', hardware / 'kernel/modules' / device,
-                    '--localversion', '-orchard-' + platform, '--output', work / 'external')
+                    '--localversion', '-orchard-' + platform_name, '--arch', described['arch'],
+                    '--output', work / 'external')
             external = ['--external', work / 'external']
         command(sys.executable, hardware / 'kernel/stage-modules.py', '--build', sdk,
                 *external, '--output', work / 'staged')
         output.mkdir(parents=True)
-        for name in ('Image.gz', 'kernel.release'):
+        for name in (described['image'], 'kernel.release'):
             shutil.copy2(base / name, output / name)
         shutil.copy2(base / 'dtbs' / (dtb + '.dtb'), output / (device + '.dtb'))
         # Every board of the platform: an installed root serves all of them.

@@ -1,0 +1,15 @@
+# Kernel platform: one kernel build shared by every board whose
+# devices/<board>/device.toml names it in [kernel] platform.
+schema = 1
+kind = "hardware.platform"
+name = "apple-16k"
+description = "A9 and later: 16 KiB pages"
+
+[kernel]
+arch = "arm64"                          # make ARCH=
+image = "Image.gz"                      # make target; the payload's kernel file
+dtbs = "arch/arm64/boot/dts/apple"      # where make dtbs leaves the boards' DTBs
+upstream = "kernel/upstream.lock"       # base the series applies to
+series = "kernel/series/apple-16k"       # ordered patch layers
+config = "kernel/configs/apple-16k/config"
+defconfig = "orchard_apple16k_defconfig"   # the same config in OrchardLinux/linux

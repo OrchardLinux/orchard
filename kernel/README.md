@@ -1,10 +1,13 @@
 # Kernel build
 
-`build` fetches the pinned torvalds revision, applies the platform's ordered
-patch layers (`series/<platform>`) and config, and compiles one kernel, its
-modules and every Apple DTB. A device name resolves to its platform through
+A platform is described in one file, `platforms/<platform>.toml`: its
+architecture, kernel image, DTB directory, upstream lock, patch series and
+config. `build` reads it, fetches the pinned revision, applies the ordered
+patch layers and config, and compiles one kernel, its modules and every DTB of
+the platform. A device name resolves to its platform through
 `devices/<device>/device.toml` `[kernel]` and additionally copies its DTB to
-`DIRECTORY/<device>.dtb`. Git and Podman are required.
+`DIRECTORY/<device>.dtb`. Git and Podman are required. `series.py --platform
+NAME` prints the checked descriptor of a platform or device.
 
 `orchard build` runs it; build with `orchard build --device j71b` (platform
 `apple-16k` plus the j71b DTB) or `orchard build --platform apple-16k`, not
@@ -25,7 +28,7 @@ recorded compiler commands are the same with and without it; `ORCHARD_CCACHE=0`
 builds without it and rebuilds nothing by itself. `make` runs one job per CPU of
 the build environment (the Podman machine's CPUs); `ORCHARD_KERNEL_JOBS=N`
 chooses another number. `--output` must name a new
-directory; it receives `Image.gz`, `<device>.dtb`, `dtbs/`, `kernel.release` and
+directory; it receives the image the descriptor names (`Image.gz` for arm64), `<device>.dtb`, `dtbs/`, `kernel.release` and
 `lib/modules/`.
 
 The kernel has no device-specific NVMe fences. Protecting Apple's data is

@@ -25,7 +25,8 @@ class KernelTree(unittest.TestCase):
     def setUp(self):
         self.cache = self.directory()
         for patcher in (patch.dict(os.environ, ORCHARD_CACHE_DIR=str(self.cache)),
-                        patch.object(kernel, 'layout', return_value=('apple-16k', 't8010-j71b'))):
+                        patch.object(kernel, 'layout', return_value=('apple-16k', 't8010-j71b')),
+                        patch.object(kernel, 'descriptor', return_value={'upstream': 'kernel/upstream.lock'})):
             patcher.start()
             self.addCleanup(patcher.stop)
 

@@ -26,7 +26,7 @@ class KernelSDKTests(unittest.TestCase):
 
     def compiler_output(self):
         output = self.root / 'compiler-output'
-        for directory in kernel_sdk.DIRECTORIES:
+        for directory in kernel_sdk.directories('arm64'):
             (output / directory).mkdir(parents=True, exist_ok=True)
         for name in kernel_sdk.REQUIRED:
             path = output / name

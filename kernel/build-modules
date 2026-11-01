@@ -4,7 +4,7 @@ set -euo pipefail
 python=${ORCHARD_PYTHON:-python3}
 here=$(cd "$(dirname "$0")" && pwd)
 
-source='' build='' modules='' output='' localversion=''
+source='' build='' modules='' output='' localversion='' arch=''
 while (($#)); do
   case "$1" in
     --source) source=$2; shift 2;;
@@ -12,12 +12,13 @@ while (($#)); do
     --modules) modules=$2; shift 2;;
     --output) output=$2; shift 2;;
     --localversion) localversion=$2; shift 2;;
+    --arch) arch=$2; shift 2;;
     *) echo "Unknown argument: $1" >&2; exit 2;;
   esac
 done
 if [[ ! -d "$source" || ! -f "$build/Module.symvers" || ! -d "$modules" ||
-      -z "$output" || -z "$localversion" || -e "$output" ]]; then
-  echo 'Usage: ./kernel/build-modules --source KERNEL_SOURCE --build KERNEL_OUTPUT --modules MODULE_SOURCES --localversion SUFFIX --output DIRECTORY' >&2
+      -z "$output" || -z "$localversion" || -e "$output" || ! "$arch" =~ ^(arm64|arm)$ ]]; then
+  echo 'Usage: ./kernel/build-modules --source KERNEL_SOURCE --build KERNEL_OUTPUT --modules MODULE_SOURCES --localversion SUFFIX --arch ARCH --output DIRECTORY' >&2
   exit 2
 fi
 source=$(cd "$source" && pwd)
@@ -36,10 +37,10 @@ done
 # shellcheck disable=SC2016 # Variables below belong to the recipe shell.
 "$python" "$here/../src/orchard/buildenv.py" run \
   --bind "$source:/src:ro" --bind "$build:/out:rw" --bind "$output:/modules:rw" \
-  --env "LOCALVERSION=$localversion" \
+  --env "LOCALVERSION=$localversion" --env "ARCH=$arch" \
   --image localhost/orchard-hardware-kernel-toolchain:bookworm -- bash -euc '
     for group in "$ORCHARD_MODULES"/*; do
-      make -C "$ORCHARD_SRC" O="$ORCHARD_OUT" -j"$(nproc)" LLVM=-19 ARCH=arm64 \
+      make -C "$ORCHARD_SRC" O="$ORCHARD_OUT" -j"$(nproc)" LLVM=-19 ARCH="$ARCH" \
         LOCALVERSION="$LOCALVERSION" M="$group" modules
     done
   '

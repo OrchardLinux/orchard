@@ -159,8 +159,9 @@ def kernel_base_inputs(hardware, device, cache):
     layers nor documentation next to the config select a new base.
     """
     platform = kernels.layout(hardware, device)[0]
+    described = kernels.descriptor(hardware, device)
     recipes = recipe_entries(hardware, [
-        'kernel/upstream.lock', 'kernel/configs/' + platform + '/config', 'kernel/series/' + platform,
+        'platforms/' + platform + '.toml', described['upstream'], described['config'], described['series'],
         'kernel/series.py', 'kernel/build', 'kernel/Containerfile', 'kernel/install-toolchain',
         'kernel/stage-modules.py', 'src/orchard/buildenv.py',
     ])
@@ -353,9 +354,10 @@ def _check_kernel_recipe(hardware, device):
     if not (hardware / 'kernel/series.py').is_file():
         raise ValueError(f'Hardware checkout has no kernel series: {hardware}; update hardware')
     platform = kernels.layout(hardware, device)[0]
-    for relative in ('kernel/configs/' + platform + '/config', 'kernel/series/' + platform):
-        if not (hardware / relative).is_file():
-            raise ValueError(f'Missing hardware recipe input: {hardware / relative}')
+    if not (hardware / 'platforms' / (platform + '.toml')).is_file():
+        raise ValueError(f'Missing platform descriptor: {hardware}/platforms/{platform}.toml')
+    # series.py --platform refuses a descriptor whose series, config or upstream lock is missing.
+    kernels.descriptor(hardware, device)
 
 
 def _prepare_kernel(hardware, cache, device):

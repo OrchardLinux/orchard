@@ -94,7 +94,10 @@ Write patches as you would for upstream Linux:
 ## Kernel configuration
 
 `kernel/configs/<platform>/config` builds every device on that platform:
-`apple-4k` covers A7, A8 and A8X, `apple-16k` covers A9 and later. For each
+`apple-4k` covers A7, A8 and A8X, `apple-16k` covers A9 and later.
+`platforms/<platform>.toml` names that config together with the platform's
+architecture, image, upstream lock and patch series; a new platform is a new
+descriptor. For each
 change, the commit message says which options change, which device or feature
 needs them, and why. That covers options you turn off too, and options you
 switch from module (`=m`) to built-in (`=y`).

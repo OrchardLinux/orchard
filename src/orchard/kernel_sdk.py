@@ -12,10 +12,11 @@ REQUIRED = ('.config', 'Makefile', 'Module.symvers', 'modules.builtin',
             'modules.builtin.modinfo', 'include/config/kernel.release',
             'include/config/auto.conf', 'include/generated/autoconf.h',
             'include/generated/utsrelease.h', 'scripts/basic/fixdep', 'scripts/mod/modpost')
-DIRECTORIES = ('include', 'scripts', 'arch/arm64/include', 'arch/arm64/boot/dts')
+def directories(arch='arm64'):
+    return ('include', 'scripts', f'arch/{arch}/include', f'arch/{arch}/boot/dts')
 
 
-def export(build, output):
+def export(build, output, arch='arm64'):
     build, output = Path(build), Path(output)
     missing = [name for name in REQUIRED if not (build / name).is_file()]
     if missing:
@@ -23,7 +24,7 @@ def export(build, output):
     if output.exists():
         raise ValueError(f'SDK output already exists: {output}')
     output.mkdir(parents=True)
-    for name in DIRECTORIES:
+    for name in directories(arch):
         shutil.copytree(build / name, output / name)
     for name in ('.config', 'Makefile', 'Module.symvers', 'modules.builtin',
                  'modules.builtin.modinfo', 'modules.order', '.version'):
