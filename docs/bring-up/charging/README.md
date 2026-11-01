@@ -10,6 +10,7 @@ Reference files:
 
 | File | Contents |
 |---|---|
+| [adaptive-charging.md](adaptive-charging.md) | **Start here for a new board:** what adaptive charging means, J71b end to end, and the steps to bring the D2365/Bellatrix boards (iPad 7) to the same standard |
 | [pmic-d2365.md](pmic-d2365.md) | Charger registers, input-limit encoding, ADC, status byte `0x18a`, calibration |
 | [pmu-events.md](pmu-events.md) | Shared event block `0x140`, GPIO38, event attribution, withdrawal timings |
 | [tristar-cbtl1610.md](tristar-cbtl1610.md) | Tristar registers, capability frame, mux selections, vendor dispatch map |
