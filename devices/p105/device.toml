@@ -1,0 +1,53 @@
+# iPad mini 1 Wi-Fi (P105): identity and manual boot prerequisites.
+schema = 1
+kind = "hardware.device"
+
+[device]
+profile = "p105"
+name = "iPad mini 1 (Wi-Fi)"
+apple_products = ["iPad2,5"]
+dt_compatible = ["apple,p105ap"]
+
+[match.dfu]
+chip = 0x8942
+board = 0x0a
+
+[boot]
+methods = ["jailbreak-kdfu"]
+# The CLI consumes an owner-private boot manifest. Public launch assets await release integration.
+
+[kernel]
+platform = "armv7-a5"     # kernel/series/armv7-a5, kernel/configs/armv7-a5
+dtb = "s5l8942x-p105"       # arch/arm/boot/dts/apple/<dtb>.dtb
+
+[firmware]
+recipe = "firmware.json"
+
+[support]
+install = false # NAND is disabled; RAM and NFS root only.
+status = "experimental"
+caveats = [
+  "Kernel: Project Cascadia's A5 port on Linux 6.12 (platform armv7-a5), not the shared v7.3 kernel.",
+  "Not yet run on this stack. On a Cascadia-based build, shaynelegault saw display, touch, the Home button, typing, Wi-Fi association and a Bluetooth mouse working.",
+]
+wifi = true # Association was verified through the native desktop password UI (Cascadia-based build).
+usb_serial = true
+usb_network = true
+
+# States: working, partial, untested, missing, none (features.toml). Untested
+# on this stack; see the caveats for what was seen on a Cascadia-based build.
+[features]
+display = "untested"
+touch = "untested"
+wifi = "untested"
+bluetooth = "untested"
+storage = "missing"
+battery = "untested"
+charging = "untested"
+backlight = "untested"
+buttons = "untested"
+audio = "untested"
+camera = "missing"
+cellular = "none"
+suspend = "missing"
+gpu = "missing"
