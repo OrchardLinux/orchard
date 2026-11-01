@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sun, 1 Nov 2026 18:35:24 +0800
+Subject: [PATCH 3/3] arm64: dts: apple: t8010: Add the SoC performance state
+
+The PMGR register that selects the SoC and memory performance states,
+for apple-pmgr-misc.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8010.dtsi | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t8010.dtsi b/arch/arm64/boot/dts/apple/t8010.dtsi
+index ce2cd94..71523b5 100644
+--- a/arch/arm64/boot/dts/apple/t8010.dtsi
++++ b/arch/arm64/boot/dts/apple/t8010.dtsi
+@@ -550,6 +550,12 @@
+ 			reg = <0x2 0xe000000 0 0x8c000>;
+ 		};
+ 
++		pmgr_misc: power-management@20e068000 {
++			compatible = "apple,t8010-pmgr-misc";
++			reg = <0x2 0x0e068000 0x0 0x4>;
++			reg-names = "soc-ps";
++		};
++
+ 		aic: interrupt-controller@20e100000 {
+ 			compatible = "apple,t8010-aic", "apple,aic";
+ 			reg = <0x2 0x0e100000 0x0 0x100000>;
+-- 
+2.54.0 (Apple Git-157)
+
