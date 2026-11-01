@@ -44,6 +44,15 @@ onto your PR branch, your commits keep your authorship, and the PR is merged
 on GitHub, so it shows as your contribution. If you'd rather we didn't touch
 your branch, say so in the PR and we'll review it with you instead.
 
+**Read the merge comment carefully.** A merge is often partial: we merge
+what fits now and record the rest. The comment on the PR says what was
+changed on your branch, what was left out and why, and which follow-up work
+is open. Nothing is thrown away. Your original commits stay in the history
+through the merge, and code that isn't in the tree yet is tagged
+`contrib/<login>-<topic>`. The device's `devices/<board>/README.md` (or its
+bring-up doc in `docs/bring-up/`) lists that code under "Unmerged code" and
+the follow-ups under "Open work", so you can pick them up from there.
+
 ## Where kernel patches go
 
 Patches are applied in the layer order of `kernel/series/<platform>`; within a
