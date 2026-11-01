@@ -35,6 +35,7 @@ status = "experimental"
 caveats = [
   "Bluetooth needs its module vendor (Murata or USI) chosen per unit; not loaded yet.",
   "Wi-Fi and SmartIO firmware come from iPadOS 17.7, not the 18.x build tested so far; not yet checked on hardware.",
+  "Charging is limited to 500 mA from any source until source identification and unplug withdrawal exist (README.md).",
 ]
 wifi = false # DT board-type is apple,rudderb but Apple's J171 ADT says module-instance "ruddera"; unvalidated.
 usb_serial = false # No Orchard launcher/gadget validated on this board yet.
@@ -48,7 +49,7 @@ wifi = "untested"
 bluetooth = "missing"
 storage = "untested"
 battery = "untested"
-charging = "missing"
+charging = "untested"
 backlight = "untested"
 buttons = "untested"
 audio = "missing"
