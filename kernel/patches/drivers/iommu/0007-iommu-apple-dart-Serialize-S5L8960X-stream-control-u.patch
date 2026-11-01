@@ -13,7 +13,7 @@ iOS-order translation setup already calls write_tcr under dart->lock.
 Return instead of writing when the stream ID is out of range.
 
 Reported-by: Josh Slaughter <josh@clicksandmortarwebsites.com>
-Closes: https://github.com/OrchardLinux/linux/pull/1
+Link: https://github.com/joshgk00/linux/commit/0b1c4b0d7026be4a5e3948669b5fec0583865576
 Signed-off-by: Henrik Klee <henrik@goat-code.com>
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
