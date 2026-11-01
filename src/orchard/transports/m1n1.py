@@ -1,7 +1,9 @@
 """Minimal m1n1 USB proxy client: the operations `orchard launch` needs.
 
 Implements m1n1's UART proxy framing (proxyclient/m1n1/proxy.py upstream)
-for memory transfer, heap, main_storage_* and kboot. Op numbers are fixed in
+for memory transfer, the host heap, storage init and the boot manager ops
+(docs/boot-contract.md). m1n1 reads the boot partition and boots the entry
+itself; the host only lists, chooses and starts. Op numbers are fixed in
 m1n1's src/proxy.h. No m1n1 Python tree or extra dependency is needed.
 """
 import fcntl
@@ -15,28 +17,20 @@ REQ_NOP, REQ_PROXY, REQ_MEMREAD, REQ_MEMWRITE = 0x00AA55FF, 0x01AA55FF, 0x02AA55
 REQ_BOOT, REQ_EVENT = 0x04AA55FF, 0x05AA55FF
 CMD_LEN, REPLY_LEN, EVENT_HDR_LEN = 56, 36, 8
 
-P_MEMCPY8 = 0x203
 P_HEAPBLOCK_ALLOC, P_HEAPBLOCK_SET_LIMIT = 0x600, 0x604
-P_KBOOT_BOOT, P_KBOOT_SET_CHOSEN, P_KBOOT_SET_INITRD, P_KBOOT_PREPARE_DT = 0x700, 0x701, 0x702, 0x703
-P_SMP_START_SECONDARIES = 0x500
-P_GZDEC = 0x401
-P_MAIN_STORAGE_INIT, P_MAIN_STORAGE_SHUTDOWN, P_MAIN_STORAGE_READ = 0xf08, 0xf09, 0xf0a
-P_CPUFREQ_INIT = 0x1300
+P_MAIN_STORAGE_INIT, P_MAIN_STORAGE_SHUTDOWN = 0xf08, 0xf09
 P_BOOT_ENTRIES, P_BOOT_ENTRIES_FREE, P_BOOT_START = 0x1500, 0x1501, 0x1502   # orchard m1n1 0007, 0008; Orchard-local
 BOOT_CONTRACT = 1
+# An m1n1 without the boot manager ops answers them with "bad command".
+NO_BOOT_MANAGER = ('This loader has no boot manager (orchard m1n1 patches 0007-0009); '
+                   'update orchard, or rebuild the loader from this checkout')
 
 M1N1_HEAP = 128 << 20   # room left to m1n1's own heap, as proxyclient does
 HOST_HEAP = 1 << 30
-BLOCK = 4096
-MAX_BLOCKS = 256   # one NVMe command in m1n1's apcie backend (orchard m1n1 patch 0003)
 
 
 class M1n1Error(RuntimeError):
     pass
-
-
-class M1n1Unsupported(M1n1Error):
-    """The loader doesn't know an op: an older m1n1."""
 
 
 def checksum(data):
@@ -166,36 +160,9 @@ class M1n1Proxy:
         if not self.call(P_MAIN_STORAGE_INIT):
             raise M1n1Error('This loader has no storage support for the device '
                             '(m1n1 main_storage_init failed)')
-        self.staging = self.memalign(BLOCK, BLOCK)
 
     def storage_shutdown(self):
         self.call(P_MAIN_STORAGE_SHUTDOWN)
-
-    def read_into(self, lba, addr, count=1):
-        """count blocks from lba to device memory; the count needs orchard m1n1 patch 0003."""
-        if not self.call(P_MAIN_STORAGE_READ, lba, addr, count if count > 1 else 0):
-            raise M1n1Error(f'm1n1 storage read of {count} block(s) at {lba} failed')
-
-    def read_block(self, lba):
-        self.read_into(lba, self.staging)
-        return self.read(self.staging, BLOCK)
-
-    def load_runs(self, runs, addr):
-        """Copy disk byte runs to device memory at addr without crossing USB."""
-        offset = 0
-        for start, length in runs:
-            while length:
-                lba, skip = divmod(start, BLOCK)
-                whole = min(length // BLOCK, MAX_BLOCKS)
-                if skip == 0 and whole and (addr + offset) % BLOCK == 0:
-                    self.read_into(lba, addr + offset, whole)
-                    count = whole * BLOCK
-                else:
-                    count = min(BLOCK - skip, length)
-                    self.read_into(lba, self.staging)
-                    self.call(P_MEMCPY8, addr + offset, self.staging + skip, count)
-                start, length, offset = start + count, length - count, offset + count
-        return offset
 
     def boot_entries(self, devicetree=None):
         """m1n1's own reading of the boot partition: (id, keys, problems) per entry, in BLS order.
@@ -207,7 +174,7 @@ class M1n1Proxy:
         try:
             failed = self.call(P_BOOT_ENTRIES, out, name, signed=True)
         except M1n1Error as error:
-            raise M1n1Unsupported('This loader cannot read boot entries itself (needs orchard m1n1 patch 0007)') from error
+            raise M1n1Error(NO_BOOT_MANAGER) from error
         addr, size = struct.unpack('<QQ', self.read(out, 16))
         if failed or not addr:
             raise M1n1Error('m1n1 could not list the boot entries')
@@ -229,7 +196,7 @@ class M1n1Proxy:
             failed = self.call(P_BOOT_START, name, tree, 0, signed=True)
         except M1n1Error as error:
             if 'status -1' in str(error):
-                raise M1n1Unsupported('This loader cannot start boot entries itself (needs orchard m1n1 patch 0008)') from error
+                raise M1n1Error(NO_BOOT_MANAGER) from error
             raise
         finally:
             self.timeout = saved
@@ -240,35 +207,11 @@ class M1n1Proxy:
             raise M1n1Error('m1n1 could not start the entry: ' + ('; '.join(reasons[-2:]) or 'see its console')
                             + (' (storage: ' + '; '.join(storage[-4:]) + ')' if storage else ''))
 
-    # kboot
     def string(self, text):
         data = text.encode() + b'\0'
         addr = self.memalign(8, len(data))
         self.write(addr, data)
         return addr
-
-    def gzdec(self, src, size, dst, dst_size):
-        result = self.call(P_GZDEC, src, size, dst, dst_size, signed=True)
-        if result < 0:
-            raise M1n1Error('Kernel decompression failed')
-        return result
-
-    def boot_linux(self, kernel, dtb, initrd, initrd_size, bootargs):
-        self.call(P_KBOOT_SET_CHOSEN, self.string('bootargs'), self.string(bootargs))
-        if initrd_size:
-            self.call(P_KBOOT_SET_INITRD, initrd, initrd_size)
-        self.call(P_CPUFREQ_INIT)
-        self.call(P_SMP_START_SECONDARIES)
-        if self.call(P_KBOOT_PREPARE_DT, dtb):
-            raise M1n1Error('m1n1 could not prepare the device tree; console: ' +
-                            self.console[-2000:].decode('utf-8', 'replace'))
-        # On success m1n1 leaves the proxy and starts the kernel; a reply may not follow.
-        self._command(REQ_PROXY, struct.pack('<7Q', P_KBOOT_BOOT, kernel, 0, 0, 0, 0, 0))
-        try:
-            self._reply(REQ_PROXY)
-        except M1n1Error:
-            pass
-
 
 def parse_boot_entries(text):
     """The text of P_BOOT_ENTRIES: [(id, {key: [values]}, [problems])]; an `error` line raises."""

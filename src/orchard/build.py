@@ -502,7 +502,7 @@ def _prepare_m1n1(hardware, components, device):
         # One tree per patch set: a changed series starts a fresh tree instead
         # of resuming one the recipe would refuse. Crates are shared.
         work = recipe_work(components, 'm1n1-' + device, key())
-        # Quiet, as CI builds it: black, no m1n1 logo, until launch paints the system's splash.
+        # Quiet, as CI builds it: black, no m1n1 logo, until m1n1 paints the system's splash.
         argv = [hardware / 'boot/m1n1/build', device, '--output', stage / 'm1n1.bin',
                 '--work-dir', work, '--cargo-dir', components.parent / 'work/.cargo-m1n1',
                 '--extra-patch', hardware / 'boot/quiet/m1n1.patch', '--extra-cflags', '-DQUIET_BOOT']

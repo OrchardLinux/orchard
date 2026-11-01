@@ -2,25 +2,42 @@
 
 The device carries the boot contract (hardware docs/boot-contract.md): an
 XBOOTLDR FAT32 partition with Boot Loader Specification entries. The host
-boots a storage-capable m1n1, which lists the entries; the user chooses and
-m1n1 loads and boots the entry itself. With an older m1n1 that lacks those
-ops, the host reads the partition through main_storage calls instead
-(bootdisk). Nothing is written.
+boots a storage-capable m1n1, which reads and checks the entries itself; the
+user chooses and m1n1 loads and boots the entry. The host never reads the
+disk, and nothing is written.
 
 The host brings only Pongo and that m1n1, which ship with Orchard
 (orchard.hardware.loader) or are built from the hardware source, so any
 host with Orchard can launch any installed system, from any distro.
 """
-from .bootdisk import BootDiskError, Disk, Entry, read_boot
+from dataclasses import dataclass, field
+
 from .devices import choose
 from .progress import Clock, Progress
 from .service import ask, save_report
 from .state import exclusive_operation, private_directory
 from .state import DeviceState
-from .transports.m1n1 import BLOCK, M1n1Error, M1n1Proxy, M1n1Unsupported
+from .transports.m1n1 import M1n1Error, M1n1Proxy
 
-KERNEL_ALIGN = 2 << 20
-KERNEL_SPACE = 512 << 20
+
+@dataclass
+class Entry:
+    """A boot entry as m1n1 lists it: its BLS keys, its root's PARTUUID and why it can't boot."""
+    id: str
+    keys: dict
+    problems: list = field(default_factory=list)
+
+    def get(self, key):
+        values = self.keys.get(key)
+        return values[0] if values else None
+
+    @property
+    def title(self):
+        return self.get('title') or self.id
+
+    @property
+    def root(self):
+        return self.get('root')
 
 
 def describe(number, entry, entries):
@@ -52,34 +69,6 @@ def select(entries, wanted, clock, input_fn):
     return entries[int(answer) - 1]
 
 
-def load(proxy, fat, path, align=BLOCK):
-    runs, size = fat.file(path)
-    addr = proxy.memalign(align, max(size, 1))
-    proxy.load_runs(runs, addr)
-    return addr, size
-
-
-def start(proxy, fat, entry, progress):
-    progress.phase('Starting ' + entry.title)
-    runs, _ = fat.file(entry.get('linux'))
-    kernel = proxy.memalign(KERNEL_ALIGN, KERNEL_SPACE)
-    if fat.disk.read(runs[0][0], 2) == b'\x1f\x8b':
-        image, image_size = load(proxy, fat, entry.get('linux'))
-        proxy.gzdec(image, image_size, kernel, KERNEL_SPACE)
-    else:
-        proxy.load_runs(runs, kernel)
-    dtb, _ = load(proxy, fat, entry.get('devicetree'))
-    initrds = entry.keys.get('initrd', [])
-    initrd_size = sum(fat.file(path)[1] for path in initrds)
-    initrd = proxy.memalign(1 << 16, max(initrd_size, 1))
-    offset = 0
-    for path in initrds:
-        # Concatenated initrds are one cpio stream to Linux, as BLS specifies.
-        offset += proxy.load_runs(fat.file(path)[0], initrd + offset)
-    proxy.storage_shutdown()
-    proxy.boot_linux(kernel, dtb, initrd, initrd_size, entry.get('options'))
-
-
 def loader_files(profile, progress):
     """Pongo and the storage-capable m1n1: shipped with Orchard, else built from the hardware source."""
     from . import hardware
@@ -104,28 +93,21 @@ def launch(*, entry=None, input_fn=input, progress=None):
     path = private_directory(DeviceState(adapter.PROFILE, device['ecid']).root) / 'last-launch.json'
     with M1n1Proxy(port) as proxy:
         proxy.storage_init()
-        fat = None
         try:
-            try:
-                entries = [Entry(i, keys, problems) for i, keys, problems in proxy.boot_entries(adapter.DEVICETREE)]
-            except M1n1Unsupported:
-                _, fat, entries = read_boot(Disk(proxy.read_block, BLOCK), adapter.DEVICETREE)
+            entries = [Entry(i, keys, problems) for i, keys, problems in proxy.boot_entries(adapter.DEVICETREE)]
             if not entries:
                 raise ValueError('No boot entries on this device; install a system first')
             chosen = select(entries, entry, clock, input_fn)
             if chosen.problems:
                 raise ValueError(f'{chosen.title} is not bootable: ' + '; '.join(chosen.problems))
-        except (BootDiskError, ValueError, M1n1Error):
+        except (ValueError, M1n1Error):
             proxy.storage_shutdown()
             raise
         report['entry'] = {'id': chosen.id, 'title': chosen.title, 'version': chosen.get('version'),
                            'root': chosen.root}
-        if fat is None:
-            # m1n1 shuts storage down itself; after a failure the device stays in its proxy.
-            progress.phase('Starting ' + chosen.title)
-            proxy.boot_start(chosen.id, adapter.DEVICETREE)
-        else:
-            start(proxy, fat, chosen, progress)
+        # m1n1 shuts storage down itself; after a failure the device stays in its proxy.
+        progress.phase('Starting ' + chosen.title)
+        proxy.boot_start(chosen.id, adapter.DEVICETREE)
     report.update(started=True, timing=clock.result())
     save_report(path, report)
     progress.phase(f'{chosen.title} is starting.')

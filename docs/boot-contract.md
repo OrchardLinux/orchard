@@ -6,8 +6,9 @@ two standards, applied with as few additions as possible:
 - [Boot Loader Specification](https://uapi-group.org/specifications/specs/boot_loader_specification/) (BLS), Type #1 entries;
 - [Discoverable Partitions Specification](https://uapi-group.org/specifications/specs/discoverable_partitions_specification/) (DPS), for partition types.
 
-Status (2026-10-29): agreed direction, not yet implemented by the CLI or an
-installer. It replaces the old layout (root directory on an "OmarchySystems"
+Status (2026-11-01): implemented. The installer writes it, and `orchard launch`
+boots it through m1n1's boot manager (orchard m1n1 patches 0007-0010, see
+[Host and m1n1](#host-and-m1n1)); hardware-tested on J71b. It replaces the old layout (root directory on an "OmarchySystems"
 ext4 partition, launcher kernel, `switch_root`). Old installs are not migrated.
 
 ## Who does what
@@ -83,9 +84,9 @@ options    root=PARTUUID=4d6c…-… rw quiet
 
 A system's boot splash ships in its root as `/usr/share/orchard/splash`; the
 installer copies it next to the entry's kernel (`/TOKEN/VERSION/splash`).
-When an entry starts, orchard's initrd paints it centred on the framebuffer
-as soon as it has mounted the root, before the system starts; it stays until
-the system clears it. Entries start quiet (`fbcon=map:9`), as the recovery
+When an entry starts, m1n1 paints it centred on black before it loads the
+kernel; it stays until the system clears it. orchard's initrd still paints it
+once more after mounting the root, until that is removed. Entries start quiet (`fbcon=map:9`), as the recovery
 does, so no console text covers it. A missing or malformed splash only costs
 the picture, never the boot.
 
@@ -187,7 +188,7 @@ the same m1n1 code, splash included.
 
 ### Versions
 
-- An op m1n1 doesn't know gets its "bad command" status. Then the host falls back to its own reader (`bootdisk.py`) until that is deleted.
+- An op m1n1 doesn't know gets its "bad command" status. The host then refuses that m1n1 ("no boot manager") and reads nothing itself: it has no disk reader. A host always boots the m1n1 that ships with it or is built from the same checkout, so it meets an older one only from a stale hand-made loader.
 - Changes to the text change the `contract` line, not the op numbers.
 
 ### Guarantees

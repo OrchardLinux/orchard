@@ -1,5 +1,4 @@
 """Launch reads boot entries from the device through m1n1 and boots one; it never writes."""
-import gzip
 import io
 import os
 from pathlib import Path
@@ -10,8 +9,8 @@ from unittest.mock import ANY, Mock, patch
 
 from boot_image import ROOT_ARM64, XBOOTLDR, fat32, gpt_disk
 from orchard import launch
-from orchard.bootdisk import Disk, read_boot
-from orchard.transports.m1n1 import M1n1Error, M1n1Unsupported
+from boot_reader import Disk, read_boot
+from orchard.transports.m1n1 import NO_BOOT_MANAGER, M1n1Error
 from orchard.progress import Progress
 
 ROOT = uuid.UUID('4d6c1a2e-0000-4000-8000-000000000001')
@@ -24,7 +23,7 @@ def entry(title, version, root=ROOT, devicetree='t8010-j71b.dtb'):
             f'devicetree /t/{version}/{devicetree}\noptions root=PARTUUID={root} rw\n')
 
 
-def image(entries, kernel=KERNEL, splash=None):
+def image(entries, kernel=KERNEL):
     files = {}
     for name, text in entries.items():
         files['/loader/entries/' + name] = text.encode()
@@ -33,18 +32,20 @@ def image(entries, kernel=KERNEL, splash=None):
         files[f'/t/{version}/initrd'] = b'initrd-one' * 900
         files[f'/t/{version}/extra'] = b'initrd-two' * 7
         files[f'/t/{version}/t8010-j71b.dtb'] = b'\xd0\x0d\xfe\xed' + b'D' * 500
-        if splash is not None:
-            files[f'/t/{version}/splash'] = splash
     return gpt_disk([(XBOOTLDR, uuid.uuid4(), 'boot', fat32(files)),
                      (ROOT_ARM64, ROOT, 'root', b'\0' * 4096)])
 
 
 class FakeM1n1:
-    """m1n1 proxy over a disk image: storage reads only, device memory as a dict."""
+    """An m1n1 with the boot manager ops (orchard 0007-0009) over a disk image.
 
-    def __init__(self, disk):
-        self.disk, self.memory, self.heap = disk, {}, 0x900000000
-        self.calls, self.booted = [], None
+    The listing is modelled with the test-side reader (tests/boot_reader.py),
+    in m1n1's reply shape: the BLS keys plus `root`. The host never reads storage.
+    """
+
+    def __init__(self, disk, fail=None, boot_manager=True):
+        self.disk, self.fail, self.boot_manager = disk, fail, boot_manager
+        self.calls, self.started = [], None
 
     def __enter__(self):
         return self
@@ -58,51 +59,12 @@ class FakeM1n1:
     def storage_shutdown(self):
         self.calls.append('shutdown')
 
-    def read_block(self, lba):
-        return self.disk[lba * 4096:(lba + 1) * 4096]
-
-    def boot_entries(self, devicetree=None):
-        raise M1n1Unsupported('older m1n1')
-
-    def memalign(self, align, size):
-        addr = (self.heap + align - 1) & ~(align - 1)
-        self.heap = addr + size
-        return addr
-
-    def load_runs(self, runs, addr):
-        data = b''.join(self.disk[start:start + length] for start, length in runs)
-        self.memory[addr] = data
-        return len(data)
-
-    def read(self, addr, size):
-        return self.memory[addr][:size]
-
-    def gzdec(self, src, size, dst, dst_size):
-        self.memory[dst] = gzip.decompress(self.memory[src][:size])
-        return len(self.memory[dst])
-
-    def boot_linux(self, kernel, dtb, initrd, initrd_size, bootargs):
-        self.calls.append('boot')
-        initrd_data = b''.join(data for addr, data in sorted(self.memory.items())
-                               if initrd <= addr < initrd + initrd_size)
-        self.booted = dict(kernel=self.memory[kernel], dtb=self.memory[dtb], initrd=initrd_data,
-                           bootargs=bootargs)
-
-
-class FakeBootManager(FakeM1n1):
-    """An m1n1 with the boot manager ops (orchard 0007, 0008), modelled with the host reader."""
-
-    def __init__(self, disk, fail=None):
-        super().__init__(disk)
-        self.fail, self.started = fail, None
-
-    def read_block(self, lba):
-        raise AssertionError('the host must not read storage')
-
     def boot_entries(self, devicetree=None):
         self.calls.append('entries')
+        if not self.boot_manager:
+            raise M1n1Error(NO_BOOT_MANAGER)
         _, _, entries = read_boot(Disk(lambda lba: self.disk[lba * 4096:(lba + 1) * 4096]), devicetree)
-        return [(e.id, e.keys, e.problems) for e in entries]
+        return [(e.id, {**e.keys, **({'root': [e.root]} if e.root else {})}, e.problems) for e in entries]
 
     def boot_start(self, entry_id, devicetree=None):
         self.calls.append('start')
@@ -130,26 +92,20 @@ class LaunchFlow(unittest.TestCase):
         adapter.start_loader.assert_called_once_with({'mode': mode, 'ecid': 1}, LOADER, ANY, quiet=True)
         return report, proxy
 
-    def test_boots_the_chosen_entry_from_device_storage(self):
+    def test_m1n1_lists_and_starts_the_chosen_entry(self):
         disk = image({'omarchy-2.conf': entry('Omarchy', '6.18.2'), 'omarchy-1.conf': entry('Omarchy', '6.17.9')})
         report, proxy = self.run_launch(disk, answers=('2',))
         self.assertTrue(report['started'])
-        self.assertEqual(report['entry']['version'], '6.17.9')
-        self.assertEqual(proxy.booted['kernel'], KERNEL)
-        self.assertEqual(proxy.booted['initrd'], b'initrd-one' * 900 + b'initrd-two' * 7)
-        self.assertTrue(proxy.booted['dtb'].startswith(b'\xd0\x0d\xfe\xed'))
-        self.assertEqual(proxy.booted['bootargs'], f'root=PARTUUID={ROOT} rw')
-        self.assertEqual(proxy.calls, ['init', 'shutdown', 'boot'])
+        self.assertEqual(report['entry'], {'id': 'omarchy-1', 'title': 'Omarchy', 'version': '6.17.9',
+                                           'root': str(ROOT)})
+        self.assertEqual(proxy.started, ('omarchy-1', 't8010-j71b.dtb'))
+        # m1n1 shuts storage down itself when it starts the entry.
+        self.assertEqual(proxy.calls, ['init', 'entries', 'start'])
 
     def test_default_is_the_first_bootable_entry_in_bls_order(self):
         disk = image({'a.conf': entry('Omarchy', '6.17.9'), 'b.conf': entry('Omarchy', '6.18.2')})
         report, _ = self.run_launch(disk)
         self.assertEqual(report['entry']['version'], '6.18.2')
-
-    def test_gzip_kernels_are_decompressed_on_the_device(self):
-        disk = image({'a.conf': entry('Omarchy', '6.18.2')}, kernel=gzip.compress(KERNEL))
-        _, proxy = self.run_launch(disk)
-        self.assertEqual(proxy.booted['kernel'], KERNEL)
 
     def test_the_only_system_starts_without_a_question(self):
         disk = image({'a.conf': entry('Omarchy', '6.18.2')})
@@ -171,22 +127,22 @@ class LaunchFlow(unittest.TestCase):
         proxy = FakeM1n1(disk)
         with self.assertRaisesRegex(ValueError, 'No boot entries'):
             self.run_launch(disk, proxy=proxy)
-        self.assertEqual(proxy.calls, ['init', 'shutdown'])
-
-    def test_m1n1_lists_and_starts_the_entry_itself(self):
-        disk = image({'omarchy-2.conf': entry('Omarchy', '6.18.2'), 'omarchy-1.conf': entry('Omarchy', '6.17.9')})
-        proxy = FakeBootManager(disk)
-        report, _ = self.run_launch(disk, answers=('2',), proxy=proxy)
-        self.assertTrue(report['started'])
-        self.assertEqual(proxy.started, ('omarchy-1', 't8010-j71b.dtb'))
-        self.assertEqual(proxy.calls, ['init', 'entries', 'start'])
+        self.assertEqual(proxy.calls, ['init', 'entries', 'shutdown'])
 
     def test_m1n1_start_failure_is_reported(self):
         disk = image({'a.conf': entry('Omarchy', '6.18.2')})
-        proxy = FakeBootManager(disk, fail='m1n1 could not start the entry: out of memory')
+        proxy = FakeM1n1(disk, fail='m1n1 could not start the entry: out of memory')
         with self.assertRaisesRegex(M1n1Error, 'out of memory'):
             self.run_launch(disk, answers=(), proxy=proxy)
         self.assertEqual(proxy.calls, ['init', 'entries', 'start'])
+
+    def test_an_m1n1_without_the_boot_manager_is_refused(self):
+        # No host-side fallback: the host never reads the disk itself.
+        disk = image({'a.conf': entry('Omarchy', '6.18.2')})
+        proxy = FakeM1n1(disk, boot_manager=False)
+        with self.assertRaisesRegex(M1n1Error, 'no boot manager'):
+            self.run_launch(disk, proxy=proxy)
+        self.assertEqual(proxy.calls, ['init', 'entries', 'shutdown'])
 
     def test_running_systems_are_not_rebooted(self):
         with self.assertRaisesRegex(ValueError, 'DFU mode'):

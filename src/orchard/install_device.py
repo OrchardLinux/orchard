@@ -478,7 +478,7 @@ def remove_old_entries(boot_root, partuuid):
     return removed
 
 
-# A distribution's boot splash in its root; launch paints it (OSPL: see launch.py).
+# A distribution's boot splash in its root; m1n1 paints it when the entry starts (OSPL: docs/boot-contract.md).
 SPLASH = 'usr/share/orchard/splash'
 
 def entry_token(entry, partuuid):

@@ -1,8 +1,10 @@
-"""Read-only boot contract reader: GPT, the XBOOTLDR FAT32 partition and BLS entries.
+"""Test-side boot contract reader: GPT, the XBOOTLDR FAT32 partition and BLS entries.
 
-Everything goes through a block-read callable, so the same code reads a
-device through m1n1's main_storage calls or a disk image in tests. Nothing
-here writes. See hardware docs/boot-contract.md.
+Not part of orchard: on a device m1n1 reads and checks the entries itself
+(boot/m1n1/patches/orchard/0007, docs/boot-contract.md). The tests use this
+as an independent reading of the contract: to check what the installer
+writes (tests/linux/install_vm.py) and to model m1n1's listing in the launch
+tests. Everything goes through a block-read callable; nothing here writes.
 """
 import re
 import struct

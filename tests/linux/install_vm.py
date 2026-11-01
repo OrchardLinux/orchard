@@ -19,9 +19,9 @@ import uuid
 
 CLI = Path(sys.argv[1])
 BUSYBOX = Path(sys.argv[2])
-sys.path.insert(0, str(CLI / 'src'))
+sys.path[:0] = [str(CLI / 'src'), str(CLI / 'tests')]
 from orchard import install_layout as L          # noqa: E402
-from orchard.bootdisk import Disk, read_boot     # noqa: E402
+from boot_reader import Disk, read_boot        # noqa: E402  (tests/boot_reader.py)
 
 DEVICE = CLI / 'src/orchard/install_device.py'
 APFS = '7c3457ef-0000-11aa-aa11-00306543ecac'

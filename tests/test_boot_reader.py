@@ -2,7 +2,7 @@ import unittest
 import uuid
 
 from boot_image import ROOT_ARM64, XBOOTLDR, fat32, gpt_disk
-from orchard.bootdisk import BootDiskError, Disk, read_boot
+from boot_reader import BootDiskError, Disk, read_boot
 
 ROOT = uuid.UUID('4d6c1a2e-0000-4000-8000-000000000001')
 ENTRY = f"""# Omarchy
