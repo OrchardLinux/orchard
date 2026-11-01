@@ -34,6 +34,11 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: python -c 'import os, tomllib; assert os.environ["TAG"] == "v" + tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]'
+      - name: Check release notes
+        if: github.ref_type == 'tag'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: ci/release-notes "$TAG" >/dev/null
       # orchard runs from its checkout: the hardware data and recipes are files beside src/.
       # jsonschema validates manifests in tests and release CI; the core needs none (tests/test_core.py).
       - run: python -m pip install -e '.[validate]' && python -m pip check
@@ -298,6 +303,14 @@ jobs:
         with:
           name: orchard-release-assets
           path: assets
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          path: source
+          sparse-checkout: |
+            CHANGELOG.md
+            ci/release-notes
+          sparse-checkout-cone-mode: false
       - name: Create draft release
         if: github.ref_type == 'tag'
         env:
@@ -305,5 +318,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
+          { (cd source && ci/release-notes "$TAG")
+            printf '\n---\n\n%s\n' 'Public build assets; physical-device qualification is required before publication. Shared launcher assets are built separately.'
+          } > notes.md
           gh release create "$TAG" assets/* --draft --verify-tag \
-            --title "$TAG" --notes 'Public build assets; physical-device qualification is required before publication. Shared launcher assets are built separately.'
+            --title "$TAG" --notes-file notes.md

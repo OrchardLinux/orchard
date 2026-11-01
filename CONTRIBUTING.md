@@ -30,6 +30,11 @@ it solves:
 A device PR can depend on a tooling PR; say so and link it. Within a PR, split
 commits by logical part. They don't need to be smaller than that.
 
+If users, device owners or contributors would notice the change (a device, a
+hardware feature, install or launch behaviour, a compatibility break), add a
+line under Unreleased in [CHANGELOG.md](CHANGELOG.md). It becomes the release
+notes. If you don't, we add it when the PR lands.
+
 ## How pull requests land
 
 We usually rework a pull request to fit the kernel structure and orchard's

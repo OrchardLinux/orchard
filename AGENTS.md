@@ -40,3 +40,12 @@ other people's builds.
 - Bound every command you run on a device with a timeout (`timeout -k 5 N …`).
 - Coordinate device time with whoever else is testing; one person holds the
   device at a time.
+
+## Changelog
+
+- CHANGELOG.md is curated: one entry per meaningful unit of work (a device, a
+  hardware feature, an install or launch change, a compatibility break), not
+  per commit, refactor or CI change.
+- When you finish such a unit, propose the entry under Unreleased: what
+  changed, described by its effect. Add it only after the user explicitly
+  approves it, and never edit the changelog without that approval.
