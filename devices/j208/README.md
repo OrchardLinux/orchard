@@ -1,16 +1,17 @@
 # iPad Pro 10.5 (Cellular), J208
 
-Hardware identity is in [`device.toml`](device.toml); measured bring-up
-facts are in [`docs/bring-up/j208.md`](../../docs/bring-up/j208.md). This
-file tracks what needs testing, open work, and contributed code that is not
-in the tree yet.
+Measured bring-up facts, including the hardware identity, are in
+[`docs/bring-up/j208.md`](../../docs/bring-up/j208.md). This file tracks what
+needs testing, open work, and contributed code that is not in the tree yet.
+There is no `device.toml` yet: every descriptor needs a firmware recipe, and
+the J208 recipe isn't written (open work 10).
 
 ## Needs testing
 
-Nothing J208-specific is in the kernel series yet. The mainline
-`t8011-j208` device tree (SoC, framebuffer, buttons) is what Orchard would
-build; a RAM boot of `examples/hardware-check` with it would confirm
-display and buttons.
+Nothing J208-specific is in the kernel series yet, and without a descriptor
+Orchard doesn't build for the J208. Once the descriptor exists, a RAM boot of
+`examples/hardware-check` with the mainline `t8011-j208` device tree (SoC,
+framebuffer, buttons) would confirm display and buttons.
 
 ## Open work
 
@@ -38,7 +39,12 @@ From the review of #42. Each needs a test on a J208:
 8. Light sensor: an IIO driver for the I2C3 parts (`0x29`, `0x39`; the
    register map looks TCS34xx-like, check against `tcs3472`).
 9. SmartIO: an `apple,t8011-sio` compatible, without the firmware-size gate.
-10. A firmware recipe from iPadOS 17.7.11 (21H461).
+10. A firmware recipe from iPadOS 17.7.11 (21H461), from the IPSW itself, and
+    then the device descriptor. #42's descriptor is at the tag
+    (`devices/j208/device.toml`); its identity values are in the bring-up
+    doc. When it comes back: touch, Wi-Fi, battery and backlight are
+    `missing` until their drivers are in the tree, and mainline does have
+    `t8011-j208.dts` (SoC, framebuffer, buttons).
 11. Shared SPI word-size setting: the RAM patch changed
     `APPLE_SPI_T8010_DESC_WORD_BITS << word_index` to
     `word_index << APPLE_SPI_T8010_DESC_WORD_BITS` in `spi-apple`. That
@@ -65,6 +71,7 @@ registers directly. Everything is preserved in the contributor's commit
 | `drivers/modules/battery/` | UART5/HDQ overlay, bq27xxx register-table swap |
 | `drivers/modules/als/` | I2C3 enable overlay, identity, config and sample readers |
 | `drivers/modules/pmic/` | D2400 LDO13 and D2401 GPIO1 regulator stubs |
+| `device.toml`, `firmware.json` | descriptor and a recipe placeholder (not schema-valid) |
 | `ram-kernel.config` | the RAM kernel's resolved configuration |
 | `tests/test_j208_drivers.py` (repo root) | checks of the layout above |
 
