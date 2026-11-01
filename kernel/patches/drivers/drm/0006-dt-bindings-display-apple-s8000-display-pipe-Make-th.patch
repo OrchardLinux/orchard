@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sat, 31 Oct 2026 20:45:20 +0000
+Subject: [PATCH] dt-bindings: display: apple,s8000-display-pipe: Make the
+ description a literal block
+
+The description's plain multi-line scalar contains "own: it must", which
+YAML reads as a mapping, so the schema does not load. Make it a literal
+block.
+
+Assisted-by: LLM
+---
+ .../devicetree/bindings/display/apple,s8000-display-pipe.yaml   | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Documentation/devicetree/bindings/display/apple,s8000-display-pipe.yaml b/Documentation/devicetree/bindings/display/apple,s8000-display-pipe.yaml
+index 7626d7f..a74e9fd 100644
+--- a/Documentation/devicetree/bindings/display/apple,s8000-display-pipe.yaml
++++ b/Documentation/devicetree/bindings/display/apple,s8000-display-pipe.yaml
+@@ -9,7 +9,7 @@ title: Apple A9 display pipe (disp0)
+ maintainers:
+   - Berkay Kösebay <brkosebay@users.noreply.github.com>
+ 
+-description:
++description: |
+   The display subsystem of the Apple A9 SoCs (S8000/S8003), called "disp0"
+   with the compatible "adbe0,s8000" in the Apple device tree. It contains
+   the ADP/ADBE display pipe that scans out to the internal eDP panel. The
+-- 
+2.54.0 (Apple Git-157)
+

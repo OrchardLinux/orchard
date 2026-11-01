@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sat, 31 Oct 2026 20:45:57 +0000
+Subject: [PATCH] arm64: dts: apple: t8010: Add the display pipe
+
+Describe the A10's display pipe (disp0) with its ADP window, the display
+DART windows it checks, its six interrupts and three power domains, and
+enable it on the iPad 6 (J71b, J72b), whose 1536x2048 panel the ADBE
+driver adopts from iBoot. The iPad 7's panel is a different size and
+keeps simpledrm.
+
+The registers, interrupts and power domains are those of the iPadOS
+device tree's /arm-io/disp0 node ("disp0,t8010").
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8010-ipad6.dtsi |  4 ++++
+ arch/arm64/boot/dts/apple/t8010.dtsi       | 22 ++++++++++++++++++++++
+ 2 files changed, 26 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi b/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
+index e31b419..b6d6aff 100644
+--- a/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
++++ b/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
+@@ -73,6 +73,10 @@
+ 	power-domains = <&ps_disp0_fe &ps_disp0_be &ps_dp>;
+ };
+ 
++&disp0 {
++	status = "okay";
++};
++
+ &hurricane_opp09 {
+ 	status = "okay";
+ };
+diff --git a/arch/arm64/boot/dts/apple/t8010.dtsi b/arch/arm64/boot/dts/apple/t8010.dtsi
+index 49c6bce..1185013 100644
+--- a/arch/arm64/boot/dts/apple/t8010.dtsi
++++ b/arch/arm64/boot/dts/apple/t8010.dtsi
+@@ -494,6 +494,28 @@
+ 			};
+ 		};
+ 
++		/*
++		 * iBoot leaves the eDP link, the panel and the pipe running; the
++		 * driver adopts that mode. The display DART (dart-disp0) is only
++		 * read, to check that the scanout bypasses translation.
++		 */
++		disp0: display-controller@206200000 {
++			compatible = "apple,t8010-display-pipe", "apple,s8000-display-pipe";
++			reg = <0x2 0x06200000 0x0 0x9000>,
++			      <0x2 0x06304000 0x0 0x4000>,
++			      <0x2 0x06300000 0x0 0x4000>;
++			reg-names = "adp", "dart0", "dart1";
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 154 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 158 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 159 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 160 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 161 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 155 IRQ_TYPE_LEVEL_HIGH>;
++			power-domains = <&ps_disp0_fe>, <&ps_disp0_be>, <&ps_dp>;
++			status = "disabled";
++		};
++
+ 		pmgr: power-management@20e000000 {
+ 			compatible = "apple,t8010-pmgr", "apple,pmgr", "syscon", "simple-mfd";
+ 			#address-cells = <1>;
+-- 
+2.54.0 (Apple Git-157)
+
