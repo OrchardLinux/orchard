@@ -23,9 +23,9 @@ implements.
 The host reads `ipsw` sources. The in-app installer reads `device` sources
 when a recipe lists them, and falls back to the IPSW when an input is
 missing there or its hash differs. Every output must match its pinned hash
-either way. Per-unit data (MAC addresses, Wi-Fi, Bluetooth and touch
-calibration) never goes into firmware files: m1n1 copies it from the ADT
-at boot.
+either way. For the existing PCIe recipes, per-unit data (MAC addresses, Wi-Fi,
+Bluetooth and touch calibration) stays outside their firmware files: m1n1
+copies it from the ADT at boot. The legacy USB exception is described below.
 
 ## How the CLI reads an IPSW
 
@@ -47,6 +47,16 @@ ranges it needs from Apple's server, about 20-40 MB per device
 
 The whole IPSW's sha256 can't be checked this way; its size is checked
 against the recipe, and every pinned input and every output against its hash.
+
+## Legacy BCM43241 USB preparation
+
+`orchard wifi-firmware` converts the owner's original J72 TRX, matching
+board NVRAM and raw six-byte MAC file into a private data-only mixin. It
+runs offline and does not change automatic recipes or boot a device.
+This USB format needs per-unit NVRAM in the downloaded image, so its output
+cannot be pinned by one public hash. See [the command, measured configuration
+and integration limits](bring-up/j72-wifi.md). J72 is not yet registered as
+an Orchard device.
 
 ## Finding firmware during bring-up
 
