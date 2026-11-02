@@ -25,6 +25,12 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
 - iPad Air 2 (J81): native-root boot, desktop and peripheral status recorded.
   (micro23)
 
+### Firmware
+
+- `orchard wifi-firmware` prepares an owner-private BCM43241 B5 USB firmware
+  mixin from the original TRX, board settings and MAC file. This is the first
+  J72 Wi-Fi host component; native J72 boot/HSIC support remains unintegrated.
+
 ### Install & launch
 
 - m1n1 reads and starts boot entries itself and paints the entry's splash at

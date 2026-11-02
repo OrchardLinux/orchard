@@ -21,3 +21,10 @@ framing are informed by Corellium's Project Sandcastle and Paul Praschl's
 Gen2 mtprops and MTFW HBPP item conversions (mtfw.c, makez2fw.c):
 https://github.com/Pauli1Go/HoolockLinux-linux-firmware
 Reference revision: 944541e67b4c603df328c77d30093551de802c17.
+
+BCM43241 USB conversion (src/orchard/apple/brcm_usb.py): GPL-2.0-or-later.
+The strict packer is the working J72 implementation from thisiscamk/ipad-air-j72-linux
+(code/wifi/usb-firmware/j72_pack_wifi_trx.py, ae9fa9d). TRX/NVRAM layout follows
+rzxvx/Project-Cascadia scripts/trx-add-nvram.py at
+c20b85ebb951c704d7e3a664c378dde8276e3928. No Apple firmware, NVRAM,
+calibration, reference MAC or owner data is included.
