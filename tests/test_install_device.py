@@ -60,11 +60,13 @@ class PlatformLayer(unittest.TestCase):
     def test_the_layer_lands_next_to_the_root_image(self):
         path, receipt = self.layer({'usr/lib/modules/6.18-orchard/vmlinuz': b'kernel',
                                     'usr/lib/modules/6.18-orchard/dtb/t8010-j71b.dtb': b'dtb',
-                                    'usr/lib/firmware/regulatory.db': b'regdb'})
-        self.assertEqual(D.install_layer(path, self.root, **receipt), 3)
+                                    'usr/lib/firmware/regulatory.db': b'regdb',
+                                    'usr/share/alsa/ucm2/Orchard/j71b/HiFi.conf': b'ucm'})
+        self.assertEqual(D.install_layer(path, self.root, **receipt), 4)
         self.assertEqual((self.root / 'usr/lib/modules/6.18-orchard/vmlinuz').read_bytes(), b'kernel')
         self.assertEqual((self.root / 'usr/lib/firmware/brcm.bin').read_bytes(), b'distro firmware')
         self.assertEqual(D.kernel_version(self.root), '6.18-orchard')
+        self.assertEqual((self.root / 'usr/share/alsa/ucm2/Orchard/j71b/HiFi.conf').read_bytes(), b'ucm')
 
     def test_a_file_the_root_image_already_has_is_refused(self):
         path, receipt = self.layer({'usr/lib/firmware/brcm.bin': b'other'})
