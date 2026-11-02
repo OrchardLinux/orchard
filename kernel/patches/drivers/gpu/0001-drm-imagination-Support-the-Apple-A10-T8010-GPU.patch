@@ -27,6 +27,9 @@ replaces what is specific to IMG's firmware:
   scene, so a geometry job waits for the previous fragment job's
   retirement and fragment-done event, and a fragment fence signals only
   after that event;
+- recovery: a job that does not retire within 5 s ends with -ETIMEDOUT,
+  with every job in flight; the firmware restarts from the kept image with
+  fresh init data, and only the hung job's context stays faulty;
 - clock: devfreq (simple_ondemand) on the GPU's OPP table, which the
   bootloader fills from the Apple device tree, the OPP level being the
   performance state; apple_perf_state fixes one;
@@ -40,11 +43,11 @@ Assisted-by: LLM
 ---
  drivers/gpu/drm/imagination/Kconfig           |   12 +
  drivers/gpu/drm/imagination/Makefile          |    5 +
- drivers/gpu/drm/imagination/pvr_apple.c       | 1440 +++++++++++++++++
- drivers/gpu/drm/imagination/pvr_apple.h       |  135 ++
- .../gpu/drm/imagination/pvr_apple_layout.c    |  722 +++++++++
+ drivers/gpu/drm/imagination/pvr_apple.c       | 1515 +++++++++++++++++
+ drivers/gpu/drm/imagination/pvr_apple.h       |  137 ++
+ .../gpu/drm/imagination/pvr_apple_layout.c    |  722 ++++++++
  .../gpu/drm/imagination/pvr_apple_layout.h    |   62 +
- drivers/gpu/drm/imagination/pvr_apple_queue.c |  139 ++
+ drivers/gpu/drm/imagination/pvr_apple_queue.c |  142 ++
  drivers/gpu/drm/imagination/pvr_context.c     |   66 +-
  drivers/gpu/drm/imagination/pvr_context.h     |    9 +
  drivers/gpu/drm/imagination/pvr_device.c      |   60 +-
@@ -63,7 +66,7 @@ Assisted-by: LLM
  drivers/gpu/drm/imagination/pvr_stream_defs.h |    2 +
  drivers/gpu/drm/imagination/pvr_vm.c          |  106 +-
  drivers/gpu/drm/imagination/pvr_vm.h          |    2 +
- 25 files changed, 3027 insertions(+), 64 deletions(-)
+ 25 files changed, 3107 insertions(+), 64 deletions(-)
  create mode 100644 drivers/gpu/drm/imagination/pvr_apple.c
  create mode 100644 drivers/gpu/drm/imagination/pvr_apple.h
  create mode 100644 drivers/gpu/drm/imagination/pvr_apple_layout.c
@@ -111,10 +114,10 @@ index a5c5e38..de8d1b1 100644
  
 diff --git a/drivers/gpu/drm/imagination/pvr_apple.c b/drivers/gpu/drm/imagination/pvr_apple.c
 new file mode 100644
-index 0000000..6ba839e
+index 0000000..69e1025
 --- /dev/null
 +++ b/drivers/gpu/drm/imagination/pvr_apple.c
-@@ -0,0 +1,1440 @@
+@@ -0,0 +1,1515 @@
 +// SPDX-License-Identifier: GPL-2.0-only OR MIT
 +/*
 + * Apple A10 (T8010) support: Rogue fixed-function hardware driven by Apple's
@@ -205,6 +208,8 @@ index 0000000..6ba839e
 +	void *win;
 +	dma_addr_t win_dma;
 +	size_t win_next;	/* RTKit buffers are carved after the image */
++	const void *fw_image;	/* the firmware image, for a restart after a reset */
++	size_t fw_size;
 +	void *heap;
 +	dma_addr_t heap_dma;
 +	bool booted;
@@ -570,7 +575,12 @@ index 0000000..6ba839e
 +		return dev_err_probe(dev, -EINVAL, "%s too large\n", name);
 +	}
 +	memcpy(apple->win, fw->data, fw->size);
++	/* The firmware writes into its image while it runs: keep it for a reset */
++	apple->fw_image = devm_kmemdup(dev, fw->data, fw->size, GFP_KERNEL);
++	apple->fw_size = fw->size;
 +	release_firmware(fw);
++	if (!apple->fw_image)
++		return -ENOMEM;
 +
 +	apple->rtk = devm_apple_rtkit_init(dev, apple, NULL, 0, &pvr_apple_rtkit_ops);
 +	if (IS_ERR(apple->rtk))
@@ -1467,21 +1477,26 @@ index 0000000..6ba839e
 +	return err;
 +}
 +
-+int pvr_apple_fw_init(struct pvr_device *pvr_dev)
++/*
++ * Hand the firmware fresh init data: the window and heap layouts with empty
++ * rings, GPU context 0 on the kernel VM. Every stamp starts at 0 again, so
++ * do the sequence numbers. The firmware has just booted.
++ */
++static int pvr_apple_fw_start(struct pvr_apple *apple)
 +{
-+	struct pvr_apple *apple = to_apple(pvr_dev);
++	struct pvr_device *pvr_dev = apple->pvr_dev;
 +	struct device *dev = apple_dev(apple);
 +	u32 init = pvr_apple_layout_init_offset();
 +	u32 ready;
 +	int err;
 +
-+	err = pvr_apple_gpu_pages_init(apple);
-+	if (err)
-+		return err;
-+
 +	memset(apple->win + init, 0, PVR_APPLE_WINDOW_SIZE - init);
 +	memset(apple->heap, 0, PVR_APPLE_HEAP_SIZE);
 +	apple->vm_root = pvr_vm_get_page_table_root_addr(pvr_dev->kernel_vm_ctx);
++	apple->last_seq = 0;
++	apple->ta_seq = 0;
++	apple->frag_seq = 0;
++	apple->frag_events = 0;
 +	pvr_apple_layout_build(apple->win, apple->win_dma, apple->heap, apple->heap_dma,
 +			       apple->vm_root, APPLE_GPU_PDS, APPLE_GPU_USC);
 +	/* Geometry and fragment queues (work rings 0 and 1) */
@@ -1492,20 +1507,83 @@ index 0000000..6ba839e
 +	err = apple_rtkit_send_message(apple->rtk, APPLE_EP_AGX_INIT,
 +				       APPLE_MSG_INIT | (apple->win_dma + init), NULL, false);
 +	if (err)
-+		goto err_pages;
++		return err;
 +	err = read_poll_timeout(heap_read32, ready, ready == 1, 1000, 3000000, false, apple,
 +				HEAP_U_READY);
 +	if (err) {
 +		dev_err(dev, "GFX firmware did not accept init data\n");
-+		goto err_pages;
++		return err;
 +	}
 +	dev_info(dev, "GFX firmware initialized (window %pad, heap %pad)\n", &apple->win_dma,
 +		 &apple->heap_dma);
++	return 0;
++}
++
++int pvr_apple_fw_init(struct pvr_device *pvr_dev)
++{
++	struct pvr_apple *apple = to_apple(pvr_dev);
++	int err;
++
++	err = pvr_apple_gpu_pages_init(apple);
++	if (err)
++		return err;
++	err = pvr_apple_fw_start(apple);
++	if (err) {
++		pvr_apple_gpu_pages_fini(apple);
++		return err;
++	}
 +	pvr_apple_devfreq_start(apple);
 +	return 0;
++}
 +
-+err_pages:
-+	pvr_apple_gpu_pages_fini(apple);
++/**
++ * pvr_apple_reset() - Restart the GFX firmware after a job hung
++ * @pvr_dev: Target device.
++ *
++ * Every job in flight ends with -ETIMEDOUT, the hung one and those queued
++ * behind it on the firmware's rings, so that nothing waits on the GPU
++ * forever. The firmware is shut down, the GPU powered off through state 0,
++ * and both started again from the kept firmware image with fresh init data,
++ * as at probe. The driver's GPU pages stay: userspace VMs map the data page.
++ *
++ * Return: 0 once the GPU runs again, or a negative error; then it stays off.
++ */
++int pvr_apple_reset(struct pvr_device *pvr_dev)
++{
++	struct pvr_apple *apple = to_apple(pvr_dev);
++	struct device *dev = apple_dev(apple);
++	int err;
++
++	mutex_lock(&apple->submit_lock);
++	dev_warn(dev, "resetting the GPU\n");
++	pvr_apple_cancel_fences(apple, -ETIMEDOUT);
++	dma_fence_put(apple->last_frag);
++	apple->last_frag = NULL;
++	dma_fence_put(apple->last_geom);
++	apple->last_geom = NULL;
++	spin_lock_irq(&apple->fence_lock);
++	apple->busy_since = 0;
++	spin_unlock_irq(&apple->fence_lock);
++
++	if (apple->booted) {
++		/* a wedged firmware may not answer either: go on regardless */
++		pvr_apple_request_power_state(apple, 0);
++		apple_rtkit_shutdown(apple->rtk);
++		writel(readl(apple->fender + FENDER_RUN) & ~FENDER_RUN_ENABLE,
++		       apple->fender + FENDER_RUN);
++		apple->booted = false;
++	}
++	/* The window as at probe: the image, zeroes after it, RTKit buffers anew */
++	memset(apple->win, 0, pvr_apple_layout_init_offset());
++	memcpy(apple->win, apple->fw_image, apple->fw_size);
++	apple->win_next = PVR_APPLE_FW_RUNTIME;
++	wmb();
++	err = pvr_apple_power_on(pvr_dev);
++	if (!err)
++		err = pvr_apple_fw_start(apple);
++	mutex_unlock(&apple->submit_lock);
++	if (err)
++		dev_err(dev, "GPU reset failed: %d\n", err);
 +	return err;
 +}
 +
@@ -1557,10 +1635,10 @@ index 0000000..6ba839e
 +}
 diff --git a/drivers/gpu/drm/imagination/pvr_apple.h b/drivers/gpu/drm/imagination/pvr_apple.h
 new file mode 100644
-index 0000000..5a1ee17
+index 0000000..13b1970
 --- /dev/null
 +++ b/drivers/gpu/drm/imagination/pvr_apple.h
-@@ -0,0 +1,135 @@
+@@ -0,0 +1,137 @@
 +/* SPDX-License-Identifier: GPL-2.0-only OR MIT */
 +/* Apple A10 (T8010): Rogue hardware behind Apple's GFX firmware. */
 +
@@ -1648,6 +1726,7 @@ index 0000000..5a1ee17
 +#if IS_ENABLED(CONFIG_DRM_POWERVR_APPLE)
 +int pvr_apple_fw_init(struct pvr_device *pvr_dev);
 +void pvr_apple_fw_fini(struct pvr_device *pvr_dev);
++int pvr_apple_reset(struct pvr_device *pvr_dev);
 +void pvr_apple_device_info_init(struct pvr_device *pvr_dev);
 +struct dma_fence *pvr_apple_submit_compute_job(struct pvr_device *pvr_dev,
 +					       struct pvr_vm_context *vm_ctx, u64 stream,
@@ -1669,6 +1748,7 @@ index 0000000..5a1ee17
 +#else
 +static inline int pvr_apple_fw_init(struct pvr_device *pvr_dev) { return -ENODEV; }
 +static inline void pvr_apple_fw_fini(struct pvr_device *pvr_dev) {}
++static inline int pvr_apple_reset(struct pvr_device *pvr_dev) { return -ENODEV; }
 +static inline void pvr_apple_device_info_init(struct pvr_device *pvr_dev) {}
 +static inline int pvr_apple_vm_init(struct pvr_device *pvr_dev, struct pvr_vm_context *vm_ctx)
 +{
@@ -2494,10 +2574,10 @@ index 0000000..60d2c33
 +#endif /* PVR_APPLE_LAYOUT_H */
 diff --git a/drivers/gpu/drm/imagination/pvr_apple_queue.c b/drivers/gpu/drm/imagination/pvr_apple_queue.c
 new file mode 100644
-index 0000000..ca00799
+index 0000000..f3c81d9
 --- /dev/null
 +++ b/drivers/gpu/drm/imagination/pvr_apple_queue.c
-@@ -0,0 +1,139 @@
+@@ -0,0 +1,142 @@
 +// SPDX-License-Identifier: GPL-2.0-only OR MIT
 +/*
 + * Apple A10 (T8010) job queues.
@@ -2542,13 +2622,16 @@ index 0000000..ca00799
 +	struct pvr_job *job = container_of(sched_job, struct pvr_job, base);
 +
 +	/*
-+	 * There is no firmware-level reset yet: report the hang and mark the
-+	 * context faulty so that no further jobs are accepted on it.
++	 * Report the hang, restart the GPU (every job in flight ends with
++	 * -ETIMEDOUT) and accept no further jobs on the guilty context: its
++	 * owner sees the device lost, every other client goes on.
 +	 */
 +	drm_err(from_pvr_device(job->pvr_dev), "Apple GPU job timed out\n");
 +	pvr_apple_report_hang(job->pvr_dev, sched_job->s_fence->parent);
 +	atomic_set(&job->ctx->faulty, 1);
-+	return DRM_GPU_SCHED_STAT_NO_HANG;
++	if (pvr_apple_reset(job->pvr_dev))
++		return DRM_GPU_SCHED_STAT_ENODEV;
++	return DRM_GPU_SCHED_STAT_RESET;
 +}
 +
 +static void pvr_apple_free_job(struct drm_sched_job *sched_job)
