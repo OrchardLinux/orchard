@@ -418,6 +418,25 @@ class RamTests(unittest.TestCase):
                 self.assertEqual(sorted(dtbs), sorted(build.digest(self.kernel / 'dtbs' / (dtb + '.dtb'))
                                                       for dtb in boards[platform].values()))
 
+    def test_j72_usb_console_packages_standard_transport_without_optional_modules(self):
+        directory = self.base / 'console'
+        shutil.copytree(self.hardware / 'examples/usb-console', directory)
+        for dtb in ram.boards_by_platform(self.hardware)['apple-4k'].values():
+            (self.kernel / 'dtbs' / (dtb + '.dtb')).write_bytes(dtb.encode())
+        with patch.object(build, 'prepare_components', return_value=self.components), \
+                patch('orchard.apple.usb.devices', side_effect=AssertionError('unexpected USB access')), \
+                patch('orchard.firmware.ensure', side_effect=AssertionError('unexpected firmware fetch')):
+            output = ram.build_directory(directory, hardware=self.hardware, device='j72')
+        receipt = ram.verify_ram(output)
+        self.assertEqual(receipt['platform'], 'apple-4k')
+        self.assertIn('j72', receipt['boards'])
+        self.assertFalse(receipt['firmware'])
+        archive = gzip.decompress((output / 'initramfs.cpio.gz').read_bytes())
+        self.assertIn(b'usr/libexec/orchard/usb-session\0', archive)
+        self.assertIn(b'etc/orchard/authorized_keys\0', archive)
+        self.assertIn(b'ssh-ed25519 ', archive)
+        self.assertNotIn(b'test.ko\0', archive)
+
     def test_an_undescribed_board_lists_the_platforms(self):
         (self.base / 'orchard.local.toml').write_text('device = "experimental"\n')
         with self.assertRaisesRegex(ValueError, r'No hardware support describes experimental.*apple-16k: .*j71b'):

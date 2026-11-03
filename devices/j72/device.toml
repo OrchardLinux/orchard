@@ -1,0 +1,54 @@
+# Initial native Orchard path, distinct from the previously measured lab stack.
+schema = 1
+kind = "hardware.device"
+
+[device]
+profile = "j72"
+name = "iPad Air 1 (Cellular)"
+apple_products = ["iPad4,2"]
+dt_compatible = ["apple,j72"]
+
+[match.dfu]
+chip = 0x8960
+board = 0x12
+
+[boot]
+methods = ["checkm8-pongo"]
+bootstrap = "checkra1n-a7"
+
+[kernel]
+platform = "apple-4k"
+dtb = "s5l8960x-j72"
+
+[firmware]
+recipe = "firmware.json"
+
+[support]
+install = false
+status = "experimental"
+caveats = [
+  "Native Orchard build/run path is not yet tested on this device; start with examples/usb-console.",
+  "Pi 4 A7 bootstrap requires a direct USB port and pinned checkra1n 0.1337.3; hub handoff is not qualified.",
+  "The separate lab desktop demonstrated touch and Wi-Fi; these have not yet been ported to this native kernel/device tree.",
+  "No native charging policy is qualified. Return to iOS for charging after a bounded RAM test.",
+  "Internal-storage installation is disabled.",
+]
+wifi = false
+usb_serial = false
+usb_network = false
+
+[features]
+display = "untested"
+touch = "missing"
+wifi = "missing"
+bluetooth = "missing"
+storage = "missing"
+battery = "missing"
+charging = "missing"
+backlight = "missing"
+buttons = "untested"
+audio = "missing"
+camera = "missing"
+cellular = "missing"
+suspend = "missing"
+gpu = "missing"

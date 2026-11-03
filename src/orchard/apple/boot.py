@@ -11,6 +11,7 @@ from orchard.integrity import digest
 from orchard.state import DeviceState, private_directory
 from orchard.transports import pongo
 from . import replug, usb
+from .bootstrap import checkra1n_a7, require_direct_pi
 
 
 def wait_mode(device, mode, *, chip, board, product, seconds=30):
@@ -69,9 +70,11 @@ def run_process_group(argv, *, timeout, **kwargs):
         with subprocess.Popen(argv, start_new_session=True, **kwargs) as process:
             try:
                 returncode = process.wait(timeout=timeout)
-            except BaseException:
-                os.killpg(process.pid, signal.SIGKILL)
-                raise
+            finally:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
     finally:
         if previous is not None:
             signal.signal(signal.SIGTERM, previous)
@@ -79,19 +82,29 @@ def run_process_group(argv, *, timeout, **kwargs):
         raise subprocess.CalledProcessError(returncode, argv)
 
 
-def start_pongo(device, image, log, say, *, chip, board, product, seconds=30, quiet=False):
+def start_pongo(device, image, log, say, *, chip, board, product, seconds=30, quiet=False, bootstrap='palera1n'):
     """Start Pongo once on the selected device in DFU; never retried.
 
     Every boot path goes through here so they share the cable hint, the
     process-group cleanup and the failure message.
     """
     from orchard.host_setup import palera1n
-    executable = palera1n()
-    if not executable:
-        raise ValueError('palera1n is required on the host to boot Pongo')
+    if bootstrap == 'palera1n':
+        executable = palera1n()
+        if not executable:
+            raise ValueError('palera1n is required on the host to boot Pongo')
+        argv = [executable, '-p', '-k', str(image)]
+    elif bootstrap == 'checkra1n-a7':
+        if chip != 0x8960:
+            raise ValueError('checkra1n-a7 requires an A7 CPID 0x8960 descriptor')
+        executable = checkra1n_a7()
+        require_direct_pi(device['location'])
+        argv = [executable, '-E', '-p', '-v', '-n', '-k', str(image)]
+    else:
+        raise ValueError('Unknown Pongo bootstrap: ' + str(bootstrap))
     usb.selected(device['location'], device['ecid'], chip=chip, board=board, mode='dfu')
     # Resolved while the device is present: its sysfs node goes away after checkm8.
-    control = replug.port_control(device['location'])
+    control = replug.port_control(device['location']) if bootstrap == 'palera1n' else None
     if control:
         say('If the Apple logo stays for about 15 seconds, reconnect the cable at the device once.')
     else:
@@ -100,7 +113,7 @@ def start_pongo(device, image, log, say, *, chip, board, product, seconds=30, qu
     if watcher:
         watcher.start()
     try:
-        run_process_group([executable, '-p', '-k', str(image)],
+        run_process_group(argv,
                           stdout=log, stderr=subprocess.STDOUT, timeout=120)
     except (OSError, subprocess.SubprocessError) as error:
         raise RuntimeError('Pongo bootstrap failed or outcome unknown; inspect USB before any retry. '
@@ -114,7 +127,7 @@ def start_pongo(device, image, log, say, *, chip, board, product, seconds=30, qu
     return wait_mode(device, 'pongo', chip=chip, board=board, product=product, seconds=seconds)
 
 
-def pongo_from_dfu(device, image, progress, *, profile, chip, board, product, quiet=False):
+def pongo_from_dfu(device, image, progress, *, profile, chip, board, product, quiet=False, bootstrap='palera1n'):
     """Start Pongo when the device is in DFU, logging palera1n under the device's state.
 
     A device already in Pongo is used as it is.
@@ -122,15 +135,15 @@ def pongo_from_dfu(device, image, progress, *, profile, chip, board, product, qu
     if device['mode'] != 'dfu':
         return
     logs = private_directory(DeviceState(profile, device['ecid']).root / 'logs')
-    with tempfile.NamedTemporaryFile(prefix='palera1n-', suffix='.log', dir=logs, delete=False) as log:
-        start_pongo(device, image, log, progress.phase, chip=chip, board=board, product=product, quiet=quiet)
+    with tempfile.NamedTemporaryFile(prefix=bootstrap+'-', suffix='.log', dir=logs, delete=False) as log:
+        start_pongo(device, image, log, progress.phase, chip=chip, board=board, product=product, quiet=quiet, bootstrap=bootstrap)
 
 
-def boot(device, assets, manifest, progress, *, profile, chip, board, product):
+def boot(device, assets, manifest, progress, *, profile, chip, board, product, bootstrap='palera1n'):
     if device['mode'] == 'linux':
         progress.phase('Using running recovery; no reboot or upload (timing starts at resume)')
         return
-    pongo_from_dfu(device, assets['pongo'], progress, profile=profile, chip=chip, board=board, product=product)
+    pongo_from_dfu(device, assets['pongo'], progress, profile=profile, chip=chip, board=board, product=product, bootstrap=bootstrap)
     usb.selected(device['location'], device['ecid'], chip=chip, board=board)
     progress.reset_transfer()
     pongo.upload(assets['recovery'], device['location'], manifest['assets']['recovery']['sha256'], progress.transfer)
@@ -138,12 +151,12 @@ def boot(device, assets, manifest, progress, *, profile, chip, board, product):
     wait_mode(device, 'linux', chip=chip, board=board, product=product, seconds=120)
 
 
-def start_loader(device, loader, progress, *, profile, chip, board, product, seconds=30, quiet=False):
+def start_loader(device, loader, progress, *, profile, chip, board, product, seconds=30, quiet=False, bootstrap='palera1n'):
     """Boot the bare m1n1 loader ({'pongo', 'm1n1'} files) through Pongo; return its proxy serial port."""
     if device['mode'] not in ('dfu', 'pongo'):
         raise ValueError('Put the device in DFU mode first; a running system is not rebooted')
     pongo_from_dfu(device, loader['pongo'], progress, profile=profile, chip=chip, board=board, product=product,
-                   quiet=quiet)
+                   quiet=quiet, bootstrap=bootstrap)
     before = set(usb.m1n1_ports())
     if not quiet:
         progress.phase('Loading the bootloader')

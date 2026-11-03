@@ -101,6 +101,14 @@
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9._-]*$"
           }
+        },
+        "bootstrap": {
+          "type": "string",
+          "enum": [
+            "palera1n",
+            "checkra1n-a7"
+          ],
+          "description": "Host bootstrap for checkm8-pongo; omitted uses palera1n. A7 experimental boot uses the pinned checkra1n tool."
         }
       },
       "required": [
