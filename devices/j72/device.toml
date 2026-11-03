@@ -27,15 +27,15 @@ recipe = "firmware.json"
 install = false
 status = "experimental"
 caveats = [
-  "Native Orchard build/run path is not yet tested on this device; start with examples/usb-console.",
+  "One native Orchard usb-console boot passes serial, NCM/SSH, exec and SHA-checked RAM transfers; desktop hardware remains unqualified.",
   "Pi 4 A7 bootstrap requires a direct USB port and pinned checkra1n 0.1337.3; hub handoff is not qualified.",
   "The separate lab desktop demonstrated touch and Wi-Fi; these have not yet been ported to this native kernel/device tree.",
   "No native charging policy is qualified. Return to iOS for charging after a bounded RAM test.",
   "Internal-storage installation is disabled.",
 ]
 wifi = false
-usb_serial = false
-usb_network = false
+usb_serial = true
+usb_network = true
 
 [features]
 display = "untested"
