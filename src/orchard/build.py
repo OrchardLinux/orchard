@@ -522,7 +522,11 @@ def _prepare_tools(hardware, components):
 
 def prepare_tools(hardware=None, cache=None, *, device):
     """The directory of static recovery tools for RAM images, built or reused."""
+    from . import published
     hardware, cache = _build_context(hardware, cache, device)
+    tools = published.tools(hardware, cache)
+    if tools is not None:
+        return tools
     with component_lock(cache):
         return _prepare_tools(hardware, cache / 'components-v2')
 

@@ -233,9 +233,10 @@ def _build_directory(directory, *, hardware, cache, kernel, busybox, loader, pon
             raise ValueError(f'Symlinks in rootfs are not supported yet: {path}')
         if path.is_file():
             files[str(path.relative_to(overlay))] = path
+    from .published import TOOLS
     tools = build.prepare_tools(hardware, cache, device=representative)
     for tool in sorted(tools.iterdir()):
-        if tool.name != 'busybox' and tool.is_file():
+        if tool.name in TOOLS and tool.name != 'busybox' and tool.is_file():
             files.setdefault(TOOL_DESTINATIONS.get(tool.name, 'usr/bin') + '/' + tool.name, tool)
     if settings['transport']:
         from . import ram_session
@@ -247,7 +248,8 @@ def _build_directory(directory, *, hardware, cache, kernel, busybox, loader, pon
     if tree is not None:
         print(f'Kernel from the tree {tree}', flush=True)
     components = build.prepare_components(hardware, cache, device=representative, kernel=kernel,
-                                          busybox=busybox, loader=loader, pongo=pongo, kernel_tree=tree)
+                                          busybox=busybox if busybox is not None else tools / 'busybox',
+                                          loader=loader, pongo=pongo, kernel_tree=tree)
     hostname = re.sub(r'[^A-Za-z0-9_-]', '-', directory.name).strip('-_')[:63] or 'orchard-ram'
     assemble_ram(hardware, output, **components, init=init, files=files, modules=settings['modules'],
                  hostname=hostname, platform=platform, boards=boards)

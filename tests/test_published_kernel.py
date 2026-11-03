@@ -151,3 +151,18 @@ class PublishedShared(unittest.TestCase):
         with self.release():
             self.assertIsNone(published.m1n1(ROOT, self.cache))
             self.assertIsNone(published.tools(ROOT, self.cache))
+
+    def test_ram_tools_reuse_the_verified_published_producer_without_local_build(self):
+        from orchard import build
+        with self.release(), mock.patch.object(build, '_prepare_tools', side_effect=AssertionError('local build')), \
+                contextlib.redirect_stdout(io.StringIO()):
+            tools = build.prepare_tools(ROOT, self.cache, device='j71b')
+        for name in published.TOOLS:
+            self.assertEqual((tools / name).read_bytes(), b'tool')
+
+    def test_ram_tools_preserve_explicit_local_build_policy(self):
+        from orchard import build
+        os.environ['ORCHARD_PUBLISHED'] = 'off'
+        with self.release(), mock.patch.object(build, '_prepare_tools', return_value=self.cache/'local') as local:
+            self.assertEqual(build.prepare_tools(ROOT, self.cache, device='j71b'), self.cache/'local')
+        local.assert_called_once_with(ROOT, self.cache/'components-v2')
