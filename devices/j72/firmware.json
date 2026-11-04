@@ -1,0 +1,21 @@
+{
+  "schema": 2,
+  "device": "iPad4,2",
+  "ipsw": {
+    "version": "12.5.7",
+    "build": "16H81",
+    "url": "https://updates.cdn-apple.com/2023FCSWinter/fullrestores/032-14132/A3C10B93-0E34-405D-8A92-92AA354BABF0/iPad_64bit_12.5.7_16H81_Restore.ipsw",
+    "bytes": 2961469678,
+    "sha256": "780aa5b20fa9fb5770c18311663bd098dbbf8e89311675a19b4860303edc0cd9"
+  },
+  "inputs": {
+    "J72.mtprops": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/multitouch/J72.mtprops"
+      },
+      "device": "/usr/share/firmware/multitouch/J72.mtprops",
+      "sha256": "69f27fe207cc5810a748dac3dfe640b1c5a755709f49513b4b5125660784f0fc"
+    }
+  },
+  "outputs": []
+}

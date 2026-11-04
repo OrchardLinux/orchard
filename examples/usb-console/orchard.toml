@@ -1,0 +1,7 @@
+name = "usb-console"
+
+# Serial and key-authenticated SSH without device discovery or driver loading.
+[payload]
+transport = true
+modules = false
+firmware = false

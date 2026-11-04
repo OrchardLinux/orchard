@@ -1,0 +1,23 @@
+#!/bin/busybox sh
+# RAM-only console: no coldplug, storage mounts or optional driver loading.
+set -eu
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+/bin/busybox --install -s /bin
+mount -t proc -o nosuid,nodev,noexec proc /proc
+mount -t sysfs -o nosuid,nodev,noexec sysfs /sys
+mount -t devtmpfs -o nosuid devtmpfs /dev
+mount -t tmpfs -o nosuid,nodev tmpfs /run
+mkdir -p /dev/pts /var/run /tmp
+mount -t devpts devpts /dev/pts
+exec </dev/console >/dev/console 2>&1
+echo /bin/false > /proc/sys/kernel/modprobe
+echo /bin/false > /proc/sys/kernel/hotplug
+
+# Standard Orchard transport: ACM serial, NCM networking and Dropbear.
+sh /usr/libexec/orchard/usb-session || echo 'USB session failed; see above'
+echo "$(cat /etc/hostname): RAM console; no optional drivers loaded or storage mounted."
+echo 'Physical USB root shell is unauthenticated; connect only to a trusted host.'
+while :; do
+    setsid -c sh -i </dev/ttyGS0 >/dev/ttyGS0 2>&1 || true
+    sleep 1
+done

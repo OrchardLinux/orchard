@@ -16,6 +16,7 @@ from orchard.apple.adt_tree import parse
 from orchard.transports import ssh
 from orchard import firmware
 from .adt import validate as validate_adt
+from .bootstrap import name as bootstrap_name
 
 
 # The recovery's USB product; its serial string names the board (BOARD:j71b).
@@ -32,6 +33,7 @@ class Device:
         self.PRODUCT = RECOVERY_PRODUCT if descriptor['match'].get('linux', {}).get('recovery') else None
         self.CHIP = descriptor['match']['dfu']['chip']
         self.BOARD = descriptor['match']['dfu']['board']
+        self.BOOTSTRAP = bootstrap_name(descriptor)
         dtb = descriptor.get('kernel', {}).get('dtb')
         self.DEVICETREE = dtb + '.dtb' if dtb else None
         support = descriptor.get('support', {})
@@ -83,9 +85,9 @@ class Device:
     def boot(self, device: SelectedDevice, assets: BootAssets,
              manifest: BootRequest, progress: Progress) -> None:
         return apple_boot.boot(device, assets, manifest, progress,
-                               profile=self.PROFILE, chip=self.CHIP, board=self.BOARD, product=self.PRODUCT)
+                               profile=self.PROFILE, chip=self.CHIP, board=self.BOARD, product=self.PRODUCT, bootstrap=self.BOOTSTRAP)
 
     def start_loader(self, device: SelectedDevice, loader: Dict[str, Path], progress: Progress,
                      quiet: bool = False) -> str:
         return apple_boot.start_loader(device, loader, progress, profile=self.PROFILE,
-                                       chip=self.CHIP, board=self.BOARD, product=self.PRODUCT, quiet=quiet)
+                                       chip=self.CHIP, board=self.BOARD, product=self.PRODUCT, quiet=quiet, bootstrap=self.BOOTSTRAP)
