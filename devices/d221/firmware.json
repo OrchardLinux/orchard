@@ -38,6 +38,12 @@
         "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/P-herculesk_M-GINS_V-u__m-6.1.txt"
       },
       "sha256": "c3cf7f2260bb73c979d8995a608a47926127fc6e9c6e05bc308924f62a24a8c9"
+    },
+    "D221_Multitouch.im4p": {
+      "ipsw": {
+        "zip": "Firmware/D221_Multitouch.im4p"
+      },
+      "sha256": "5826c1d1ab24b31c41766121096b54ae113656cacd4a02c3f95b8df59f73c789"
     }
   },
   "outputs": [
@@ -88,6 +94,20 @@
         {
           "step": "copy@1",
           "input": "P-herculesk_M-GINS_V-u__m-6.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/d221-touch.bin",
+      "sha256": "7a73116a97899500eaf44ceb2455af32a3abbbc8b58399f862179ee13455f061",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "D221_Multitouch.im4p"
+        },
+        {
+          "step": "hidspi-from-mtfw@1",
+          "profile": "C1R1FC0,2"
         }
       ]
     }

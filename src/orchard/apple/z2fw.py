@@ -435,3 +435,97 @@ def convert_mtfw(mtfw, profile, *, otp_preflight):
     return container(records), {'profile': profile, 'config_valid': valid, 'otp_preflight': bool(otp_preflight and otp),
                                 'loads': loads, 'calibration': providers, 'wait_ms': wait_ms,
                                 'command_sequence': [c for c, p in records]}
+
+
+# iPhone X (hid-transport,k1): the MTFW personality as the op list apple_hidspi_ts replays.
+
+HIDSPI_MAGIC = b'D221OPS1'
+HBPP_ACK_BLOB = 0x4bc1
+HBPP_ACK_WRITE = 0x4ad1
+# DT names of the ADT calibrations m1n1 copies to the touchscreen0 node; others are apple,<ADT name>.
+HIDSPI_CALIBRATION_NAMES = {'multi-touch-calibration': 'apple,z2-cal-blob'}
+
+
+def convert_hidspi_mtfw(mtfw, profile):
+    """MTFW personality of a HIDSPI controller (Config Protocol "HIDSPI") as apple_hidspi_ts's op list.
+
+    The file is "D221OPS1" then little-endian ops:
+      'T' u32 len, label                        (logged by the driver)
+      'S' u16 ack (0: none), u32 len, packet    (an HBPP packet; ack 4bc1 for blobs, 4ad1 for writes)
+      'P' u32 address, mask, value, timeout_ms  (poll a controller register)
+      'R' u32 address                           (read and log a register)
+      'C' u32 address, max, u32 len, DT name    (the unit's calibration, sent as an HBPP blob)
+    Items are replayed in order: ReadModifyWrite as masked writes (SkipCheck: no ack), Binary
+    as blobs, Poll as polls, Property as calibration records; Metadata and Config load nothing.
+    The ReadOnError metadata address is read before and after, for the driver's log. No
+    per-unit bytes enter the file: m1n1 copies each Property from the ADT to the device tree.
+    """
+    items = mtfw.get(profile) if isinstance(mtfw, dict) else None
+    if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
+        raise ValueError('MTFW personality not found: ' + str(profile))
+    configs = [item.get('Config') for item in items if item.get('Type') == 'Config']
+    if len(configs) != 1 or not isinstance(configs[0], dict) or configs[0].get('Protocol') != 'HIDSPI':
+        raise ValueError('Expected one HIDSPI config item')
+    errors = [item for item in items if item.get('Type') == 'Metadata' and item.get('Tag') == 'ReadOnError']
+    out = bytearray(HIDSPI_MAGIC)
+    counts = {}
+
+    def op(code, payload):
+        out.extend(code + payload)
+        counts[code.decode()] = counts.get(code.decode(), 0) + 1
+
+    def label(text):
+        data = text.encode()
+        op(b'T', struct.pack('<I', len(data)) + data)
+
+    def send(packet, ack):
+        op(b'S', struct.pack('<HI', ack, len(packet)) + packet)
+
+    def read(address):
+        op(b'R', struct.pack('<I', uint(address, 'ReadOnError address')))
+
+    if errors:
+        read(errors[0].get('Address'))
+    calibration = []
+    for index, item in enumerate(items):
+        kind = item.get('Type')
+        if kind in ('Metadata', 'Config'):
+            continue
+        address = uint(item.get('Address'), 'HBPP item address')
+        name = item.get('Description') or item.get('Tag') or ''
+        if kind == 'ReadModifyWrite':
+            if 'Value' not in item:
+                raise ValueError('ReadModifyWrite without value')
+            mask = item.get('Mask', 0xffffffff)
+            label(f'{index} write {address:#x} mask {mask:#x} = {item["Value"]:#x} {name}'.rstrip())
+            skip = item.get('SkipCheck', False)
+            if not isinstance(skip, bool):
+                raise ValueError('SkipCheck must be a boolean')
+            send(register_packet(address, mask, item['Value']), 0 if skip else HBPP_ACK_WRITE)
+        elif kind == 'Binary':
+            if item.get('SysConfigKey'):
+                raise ValueError('Binary item with per-unit SysCfg data')
+            payload = item.get('Payload')
+            label(f'{index} load {address:#x} {len(payload or b"")} bytes {name}'.rstrip())
+            send(encode_blob(address, payload), HBPP_ACK_BLOB)
+        elif kind == 'Property':
+            prop = item.get('Property')
+            if not isinstance(prop, str) or not prop:
+                raise ValueError('Property item without a property name')
+            maximum = uint(item.get('MaxSize'), 'calibration size')
+            if not maximum:
+                raise ValueError('Empty calibration range: ' + prop)
+            dt_name = HIDSPI_CALIBRATION_NAMES.get(prop, 'apple,' + prop).encode()
+            label(f'{index} calibration {address:#x} up to {maximum} bytes {dt_name.decode()}')
+            op(b'C', struct.pack('<III', address, maximum, len(dt_name)) + dt_name)
+            calibration.append(dt_name.decode())
+        elif kind == 'Poll':
+            label(f'{index} poll {address:#x} {name}'.rstrip())
+            op(b'P', struct.pack('<IIII', address, uint(item.get('Mask'), 'poll mask'),
+                                 uint(item.get('Value'), 'poll value'),
+                                 uint(item.get('TimeoutMs'), 'poll timeout', 60000)))
+        else:
+            raise ValueError('Unsupported HBPP item type: ' + str(kind))
+    if errors:
+        read(errors[0].get('Address'))
+    return bytes(out), {'profile': profile, 'ops': counts, 'calibration': calibration}

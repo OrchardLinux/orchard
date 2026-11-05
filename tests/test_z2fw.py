@@ -330,5 +330,92 @@ def der(tag, value):
     return bytes([tag, 0x80 | size]) + length.to_bytes(size, 'big') + value
 
 
+def hidspi_ops(data):
+    """Decode apple_hidspi_ts's op list into (code, fields) tuples, labels dropped."""
+    assert data[:8] == z2fw.HIDSPI_MAGIC
+    ops, i = [], 8
+    while i < len(data):
+        code = data[i:i + 1]
+        i += 1
+        if code == b'T':
+            (n,) = struct.unpack_from('<I', data, i)
+            i += 4 + n
+        elif code == b'S':
+            ack, n = struct.unpack_from('<HI', data, i)
+            ops.append(('S', ack, data[i + 6:i + 6 + n]))
+            i += 6 + n
+        elif code == b'P':
+            ops.append(('P',) + struct.unpack_from('<IIII', data, i))
+            i += 16
+        elif code == b'R':
+            ops.append(('R',) + struct.unpack_from('<I', data, i))
+            i += 4
+        elif code == b'C':
+            address, maximum, n = struct.unpack_from('<III', data, i)
+            ops.append(('C', address, maximum, data[i + 12:i + 12 + n].decode()))
+            i += 12 + n
+        else:
+            raise AssertionError(f'bad op {code!r}')
+    return ops
+
+
+def hidspi_fixture(**config):
+    return {'C1R1FC0,2': [
+        {'Type': 'Metadata', 'Tag': 'fifo_geometry', 'BaseAddress': 0x140000, 'BlockSize': 0x8000, 'BlockCount': 4},
+        {'Type': 'Metadata', 'Tag': 'ReadOnError', 'Address': 0x400b0fd4},
+        {'Type': 'Binary', 'Tag': '_bootloader', 'Address': 0x160000, 'Payload': bytes(range(1, 7))},
+        {'Type': 'ReadModifyWrite', 'Address': 0x400b0000, 'Mask': 1, 'Value': 0, 'SkipCheck': False},
+        {'Type': 'ReadModifyWrite', 'Address': 0x400b0000, 'Mask': 1, 'Value': 1, 'SkipCheck': True},
+        {'Type': 'Property', 'Address': 0x15800c, 'MaxSize': 0x86c, 'Property': 'multi-touch-calibration',
+         'SysConfigKey': 'MtCl'},
+        {'Type': 'Poll', 'Address': 0x140000, 'Mask': 4, 'Value': 4, 'TimeoutMs': 1000},
+        {'Type': 'Property', 'Address': 0x164000, 'MaxSize': 0x8ea8, 'Property': 'luna-force-calibration',
+         'SysConfigKey': 'LFCL'},
+        {'Type': 'Config', 'Config': {'Protocol': 'HIDSPI', **config}},
+    ]}
+
+
+class HidspiMtfwConversion(unittest.TestCase):
+    def test_replays_the_items_in_order_with_their_acks(self):
+        output, info = z2fw.convert_hidspi_mtfw(hidspi_fixture(), 'C1R1FC0,2')
+        self.assertEqual(hidspi_ops(output), [
+            ('R', 0x400b0fd4),
+            ('S', 0x4bc1, z2fw.encode_blob(0x160000, bytes(range(1, 7)))),
+            ('S', 0x4ad1, z2fw.register_packet(0x400b0000, 1, 0)),
+            # SkipCheck: the write restarts the controller's core, no ACK follows.
+            ('S', 0, z2fw.register_packet(0x400b0000, 1, 1)),
+            ('C', 0x15800c, 0x86c, 'apple,z2-cal-blob'),
+            ('P', 0x140000, 4, 4, 1000),
+            ('C', 0x164000, 0x8ea8, 'apple,luna-force-calibration'),
+            ('R', 0x400b0fd4),
+        ])
+        self.assertEqual(info['calibration'], ['apple,z2-cal-blob', 'apple,luna-force-calibration'])
+
+    def test_carries_no_per_unit_bytes(self):
+        output, _ = z2fw.convert_hidspi_mtfw(hidspi_fixture(), 'C1R1FC0,2')
+        self.assertNotIn(b'MtCl', output)
+        self.assertNotIn(b'LFCL', output)
+
+    def test_refuses_other_protocols_types_and_per_unit_binaries(self):
+        root = hidspi_fixture()
+        root['C1R1FC0,2'][-1]['Config']['Protocol'] = 'Z2'
+        with self.assertRaises(ValueError):
+            z2fw.convert_hidspi_mtfw(root, 'C1R1FC0,2')
+        with self.assertRaises(ValueError):
+            z2fw.convert_hidspi_mtfw(hidspi_fixture(), 'C1R1FC0,1')
+        root = hidspi_fixture()
+        root['C1R1FC0,2'].insert(2, {'Type': 'Jump', 'Address': 0})
+        with self.assertRaises(ValueError):
+            z2fw.convert_hidspi_mtfw(root, 'C1R1FC0,2')
+        root = hidspi_fixture()
+        root['C1R1FC0,2'][2]['SysConfigKey'] = 'X'
+        with self.assertRaises(ValueError):
+            z2fw.convert_hidspi_mtfw(root, 'C1R1FC0,2')
+        root = hidspi_fixture()
+        root['C1R1FC0,2'][5]['MaxSize'] = 0
+        with self.assertRaises(ValueError):
+            z2fw.convert_hidspi_mtfw(root, 'C1R1FC0,2')
+
+
 if __name__ == '__main__':
     unittest.main()
