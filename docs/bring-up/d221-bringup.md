@@ -104,8 +104,9 @@ sha256. Bluetooth HCD, touch and PMP firmware are still to be extracted.
 
 ## What is untested
 
-Display (full DRM/GPU), touch, Wi-Fi, Bluetooth, mounting the NVMe root,
-battery/charging, backlight, audio, camera and cellular. The A11-specific work
+Full display DRM (the console works through simpledrm; see `d221-display.md`),
+touch, Wi-Fi, Bluetooth, mounting the NVMe root, battery/charging, backlight,
+audio, camera and cellular. The A11-specific work
 still needed before this board is usable beyond a RAM shell:
 
 1. `apple/pmp-t8015.bin` (and any other coprocessor firmware) in the recipe.
