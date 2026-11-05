@@ -99,6 +99,9 @@ def main():
     mixin = commands.add_parser('mixin', help='prepare a data-only private mixin')
     for name in ('firmware-dir', 'output'):
         mixin.add_argument('--' + name, type=Path, required=True)
+    usb_wifi = commands.add_parser('wifi-firmware', help='prepare private BCM43241 B5 USB firmware; offline, no device access')
+    for name in ('firmware', 'nvram', 'mac-file', 'output'):
+        usb_wifi.add_argument('--' + name, type=Path, required=True)
     args = parser.parse_args()
     progress = Progress(verbose=args.verbose)
     try:
@@ -260,6 +263,10 @@ def main():
                 with os.fdopen(os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as stream:
                     stream.write(data)
                 result = {'saved': str(args.output), 'bytes': len(data)}
+            elif args.action == 'wifi-firmware':
+                from orchard.apple.brcm_usb import prepare
+                archive, result = prepare(args.firmware, args.nvram, args.mac_file, args.output)
+                result = {**result, 'path': str(archive)}
             elif args.action == 'mixin':
                 adapter = load()
                 archive, result = adapter.prepare_mixin(args.firmware_dir, args.output)
