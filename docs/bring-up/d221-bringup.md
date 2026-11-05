@@ -107,11 +107,12 @@ be extracted.
 ## What is untested
 
 Display (full DRM/GPU), Wi-Fi, Bluetooth, mounting the NVMe root,
-battery/charging, backlight, audio, camera and cellular. The A11-specific work
+charging, audio, camera and cellular (brightness, buttons and battery:
+[d221-backlight.md](d221-backlight.md)). The A11-specific work
 still needed before this board is usable beyond a RAM shell:
 
 1. `apple/pmp-t8015.bin` (and any other coprocessor firmware) in the recipe.
-2. The `t8015-x`/`d221` device tree nodes for Wi-Fi, Bluetooth and backlight
+2. The `t8015-x`/`d221` device tree nodes for Wi-Fi and Bluetooth
    (upstream describes the SoC alone).
 3. An installer and launcher release, then `resize-apfs` qualification on this
    board.

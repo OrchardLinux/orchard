@@ -154,7 +154,7 @@ Boards Orchard builds for. States: working, untested, missing, none (no such har
 | `j172` | untested | untested | untested | untested | untested | untested | missing | untested | missing | untested | untested | untested | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | missing | missing | missing |
 | `j71b` | working | working | working | working | untested | working | missing | missing | missing | working | working | working | working | working | none | working | working | working | working | working | working | working | working | missing | missing |
 | `j72b` | untested | untested | untested | untested | untested | untested | missing | missing | missing | untested | untested | untested | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | missing | missing | missing |
-| `d221` | working | untested | missing | working | missing | missing | missing | missing | none | working | working | untested | missing | missing | missing | untested | missing | missing | missing | missing | working | untested | missing | missing | missing |
+| `d221` | working | untested | working | working | working | missing | missing | missing | none | working | working | untested | missing | missing | missing | working | missing | missing | missing | missing | working | untested | missing | missing | missing |
 
 ## Drivers
 
@@ -230,3 +230,5 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `j72b` | Bluetooth input devices | missing, but a driver binds |
 | `j72b` | Bluetooth audio | missing, but a driver binds |
 | `d221` | Touchscreen | working, but no driver binds |
+| `d221` | Buttons | working, but no driver binds |
+| `d221` | Backlight | working, but no driver binds |
