@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Eduardo Martins <eduardo@martins.ws>
+Date: Thu, 5 Nov 2026 13:18:09 -0600
+Subject: [PATCH] kboot: Copy the iPhone X 3D Touch calibrations
+
+The iPhone X touch controller (hid-transport,k1) loads, besides its
+multi-touch calibration, ten per-unit "luna" (3D Touch) calibrations
+from the ADT's multi-touch node into its RAM during the firmware load.
+Copy them through the touchscreen0 alias under their ADT names, with the
+same missing/syscfg-reference handling, so the firmware file stays the
+same for every unit.
+
+Assisted-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kboot.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/src/kboot.c b/src/kboot.c
+index ebd6282..27ebe5e 100644
+--- a/src/kboot.c
++++ b/src/kboot.c
+@@ -936,6 +936,17 @@ static int dt_set_touchscreen(void)
+         {"ext-multi-touch-calibration", "apple,z2-ext-cal-blob"},
+         {"pressure-effect-correction", "apple,z2-pressure-cal-blob"},
+         {"prox-calibration", "apple,z2-prox-cal-blob"},
++        /* iPhone X (hid-transport,k1): the 3D Touch calibrations its firmware loads. */
++        {"luna-force-calibration", "apple,luna-force-calibration"},
++        {"luna-pixel-map", "apple,luna-pixel-map"},
++        {"luna-shape-graffix-calibration", "apple,luna-shape-graffix-calibration"},
++        {"luna-shape-speaker-calibration", "apple,luna-shape-speaker-calibration"},
++        {"luna-shape-soc-calibration", "apple,luna-shape-soc-calibration"},
++        {"luna-shape-receiver-calibration", "apple,luna-shape-receiver-calibration"},
++        {"luna-shape-pmic-calibration", "apple,luna-shape-pmic-calibration"},
++        {"luna-shape-flex-noise", "apple,luna-shape-flex-noise"},
++        {"luna-racer-tmon-comp", "apple,luna-racer-tmon-comp"},
++        {"luna-afe-calibration", "apple,luna-afe-calibration"},
+     };
+     const char *path = fdt_get_alias(dt, "touchscreen0");
+     if (path == NULL)
+-- 
+2.56.0
+
