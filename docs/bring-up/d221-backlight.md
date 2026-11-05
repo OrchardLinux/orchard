@@ -28,7 +28,8 @@ write `15 51 xx`.
 
 `apple_dsi_bl` sends the level this way and registers a backlight from 0 to
 2047. Levels below `apple,min-dbv` are raised to it, so 0 is the dimmest, not
-off. On a white screen, stepping through the driver: 139 is well below the boot
+off; blanking the backlight (`bl_power` 4) sends 0, which darkens the panel until
+it is unblanked. On a white screen, stepping through the driver: 139 is well below the boot
 level, 2047 well above, and 400, 740 and 1400 fall in between.
 
 ## Buttons

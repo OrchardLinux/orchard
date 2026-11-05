@@ -154,7 +154,7 @@ Boards Orchard builds for. States: working, untested, missing, none (no such har
 | `j172` | untested | untested | untested | untested | untested | untested | missing | untested | missing | untested | untested | untested | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | missing | missing | missing |
 | `j71b` | working | working | working | working | untested | working | missing | missing | missing | working | working | working | working | working | none | working | working | working | working | working | working | working | working | missing | missing |
 | `j72b` | untested | untested | untested | untested | untested | untested | missing | missing | missing | untested | untested | untested | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | missing | missing | missing |
-| `d221` | working | untested | working | working | working | missing | missing | missing | none | working | working | untested | missing | missing | missing | working | missing | missing | missing | missing | working | untested | missing | missing | missing |
+| `d221` | working | working | working | working | working | missing | missing | missing | none | working | working | untested | missing | missing | missing | working | missing | missing | missing | missing | working | untested | missing | missing | missing |
 
 ## Drivers
 
