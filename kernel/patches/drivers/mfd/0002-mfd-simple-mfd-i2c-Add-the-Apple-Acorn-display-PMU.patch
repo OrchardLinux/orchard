@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Eduardo Martins <eduardo@martins.ws>
+Date: Thu, 5 Nov 2026 13:16:40 -0600
+Subject: [PATCH] mfd: simple-mfd-i2c: Add the Apple Acorn display PMU
+
+Acorn has 8-bit registers like Chestnut; its children use the same
+regmap.
+
+Assisted-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/mfd/simple-mfd-i2c.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/mfd/simple-mfd-i2c.c b/drivers/mfd/simple-mfd-i2c.c
+index 4442ea0e0..277c27507 100644
+--- a/drivers/mfd/simple-mfd-i2c.c
++++ b/drivers/mfd/simple-mfd-i2c.c
+@@ -139,6 +139,7 @@ static const struct simple_mfd_data spacemit_p1 = {
+ };
+ 
+ static const struct of_device_id simple_mfd_i2c_of_match[] = {
++	{ .compatible = "apple,acorn-pmic", .data = &apple_chestnut_pmic },
+ 	{ .compatible = "apple,chestnut-pmic", .data = &apple_chestnut_pmic },
+ 	{ .compatible = "apple,i2c-pmic", .data = &apple_i2c_pmic },
+ 	{ .compatible = "apple,sn2400", .data = &apple_sn2400 },

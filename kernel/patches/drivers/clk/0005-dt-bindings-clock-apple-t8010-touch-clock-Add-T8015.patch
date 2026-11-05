@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Eduardo Martins <eduardo@martins.ws>
+Date: Thu, 5 Nov 2026 13:16:15 -0600
+Subject: [PATCH] dt-bindings: clock: apple,t8010-touch-clock: Add T8015
+
+The A11 PMGR has the touch clock block at offset 0x78000 as well: iBoot
+leaves it at 0x800002ee (disabled, divider 750), and the iPhone X ADT's
+TCLK(8, 100, 24000000) runs it from the 24 MHz reference.
+
+Assisted-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../devicetree/bindings/clock/apple,t8010-touch-clock.yaml | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/clock/apple,t8010-touch-clock.yaml b/Documentation/devicetree/bindings/clock/apple,t8010-touch-clock.yaml
+index a558d5bd6..f49ce6014 100644
+--- a/Documentation/devicetree/bindings/clock/apple,t8010-touch-clock.yaml
++++ b/Documentation/devicetree/bindings/clock/apple,t8010-touch-clock.yaml
+@@ -13,7 +13,8 @@ description:
+   The T7000 and T8010 PMGR contain a gate and integer divider for the
+   reference clock consumed by the touchscreen controller. The S8000 PMGR has
+   the same block at the same offset; the iPad 5 N1 touchscreen runs it at
+-  32768 Hz.
++  32768 Hz. So has the T8015 PMGR, whose iPhone X touchscreen runs it at
++  24 MHz.
+ 
+ properties:
+   compatible:
+@@ -22,7 +23,9 @@ properties:
+           - apple,t7000-touch-clock
+           - apple,t8010-touch-clock
+       - items:
+-          - const: apple,s8000-touch-clock
++          - enum:
++              - apple,s8000-touch-clock
++              - apple,t8015-touch-clock
+           - const: apple,t8010-touch-clock
+ 
+   reg:
