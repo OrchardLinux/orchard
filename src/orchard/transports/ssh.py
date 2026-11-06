@@ -177,5 +177,3 @@ def session(device: DeviceState, select_endpoint, *, expected_boot=None, handoff
             connection = Connection(argv, scope, check, handoff)
             verify_peer(connection)
             yield connection
-
-

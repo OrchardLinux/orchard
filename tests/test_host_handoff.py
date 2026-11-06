@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """A host-bound recovery keeps its attempt identity through serial and SSH."""
 import base64
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
@@ -102,6 +103,7 @@ class HandoffChecks(unittest.TestCase):
         with TemporaryDirectory() as temporary, patch.dict(os.environ, {'ORCHARD_HOME': temporary}), \
              patch.object(ssh.subprocess, 'run', side_effect=keygen), \
              patch.object(ssh, 'SerialPort') as serial, patch.object(ssh, 'wait_authenticated'), \
+             patch.object(ssh, 'one_connection', return_value=nullcontext(['ssh'])), \
              patch.object(ssh, 'Client') as client:
             serial.return_value.__enter__.return_value.run.side_effect = bootstrap
             client.return_value.call.return_value = self.identity
