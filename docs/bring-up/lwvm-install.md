@@ -86,6 +86,11 @@ snapshot again. The two default-off NAND write configuration prerequisites
 must already be present in the approved kernel. A built-in read-only
 provider refuses installation before writes.
 
+On a recovery that holds storage for a manual request, inspect and install
+consume that request and run the bounded read-only storage fence before
+waiting for readiness. A failed or interrupted activation requires inspection
+and leaves a failure marker. A later call never restarts that activation.
+
 The fresh driver's initial read-only flag must also report that its replay
 state and upstream program callback permit writes. The installer checks
 this before clearing a block fence, which preserves the driver's refusal

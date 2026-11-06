@@ -58,6 +58,7 @@ SECRETS = Path('/run/orchard/secrets.json')
 STORAGE_FENCE = Path('/usr/libexec/orchard/storage-fence')
 STORAGE_READY = Path('/run/orchard/storage-ready')
 STORAGE_FAILED = Path('/run/orchard/storage-failed')
+STORAGE_MANUAL = Path('/run/orchard/storage-manual')
 
 PIN_CHECK = r'''#!/bin/sh
 # Lock-screen PIN check for the orchard-pin PAM service (pam_exec expose_authtok).
@@ -188,15 +189,35 @@ def check_quiet(disk, partitions):
 
 # --- inspect -----------------------------------------------------------------
 
+def start_storage():
+    """Consume recovery's manual request once, before waiting for its fence."""
+    if not STORAGE_FENCE.exists():
+        return
+    try:
+        STORAGE_MANUAL.unlink()
+    except FileNotFoundError:
+        return
+    if STORAGE_READY.exists() or STORAGE_FAILED.exists():
+        return
+    try:
+        run(str(STORAGE_FENCE), timeout=60)
+    except BaseException:
+        if not STORAGE_FAILED.exists():
+            STORAGE_FAILED.write_text('Manual storage activation requires inspection\n')
+        raise
+
+
 def wait_for_storage(seconds=60):
     """On the recovery, wait until its storage fence has finished; elsewhere (tests) there is none."""
     if not STORAGE_FENCE.exists():
         return
     deadline = time.monotonic() + seconds
-    while not STORAGE_READY.exists():
+    while True:
         if STORAGE_FAILED.exists():
             raise InstallError('storage-unavailable', 'Storage did not come up: ' +
                                STORAGE_FAILED.read_text(errors='replace').strip())
+        if STORAGE_READY.exists():
+            return
         if time.monotonic() >= deadline:
             raise InstallError('storage-unavailable', f'Storage was not ready after {seconds} s')
         time.sleep(0.5)
@@ -859,6 +880,7 @@ def install(plan, stream):
 def main(argv):
     try:
         if argv[1:] == ['inspect']:
+            start_storage()
             wait_for_storage()
             inspect(discover_disk())
         elif len(argv) == 3 and argv[1] == 'finish':
@@ -869,6 +891,7 @@ def main(argv):
             finish(plan, Path('/'), set(plan['present']), secrets)
             emit('finished', root=plan['root']['partuuid'], boot=plan['boot']['partuuid'])
         elif len(argv) == 3 and argv[1] == 'run':
+            start_storage()
             wait_for_storage()
             install(json.loads(Path(argv[2]).read_text()), sys.stdin.buffer)
         else:
