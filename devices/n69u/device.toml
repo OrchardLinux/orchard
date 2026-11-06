@@ -13,6 +13,11 @@ dt_compatible = ["apple,n69u"]
 chip = 0x8000
 board = 0x02
 
+# Orchard Recovery is built for this platform (USB "Orchard Recovery", serial
+# BOARD:<profile>); it has not run on this board yet.
+[match.linux]
+recovery = true
+
 [boot]
 methods = ["checkm8-pongo"] # palera1n's device list (palera.in); not run with Orchard yet.
 

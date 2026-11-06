@@ -36,6 +36,10 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
   the IPSW and its calibration from the device; each phone gets the firmware
   variant it asks for. Brightness works over the panel's DSI command, and buttons
   and battery are confirmed working. (Eduardo Martins)
+- 32 more iPads and iPhones (A7 to A11) now have a place in Orchard's kernels.
+  Experimental: none has booted with Orchard yet. The iPhone 8, 8 Plus and X
+  (Global) can try installing, because a storage driver binds; that doesn't mean
+  they'll work.
 - iPad mini 4 (J96): RAM-boot bring-up record: desktop, touch, battery and
   native Wi-Fi measured on a local kernel tree. Not a device profile yet. (Tom Ballard)
 - iPad Air (J85): measured RAM-boot status documented. (Christopher M. Smith)

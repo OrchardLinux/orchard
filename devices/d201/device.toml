@@ -13,6 +13,11 @@ dt_compatible = ["apple,d201"]
 chip = 0x8015
 board = 0x0a
 
+# Orchard Recovery is built for this platform (USB "Orchard Recovery", serial
+# BOARD:<profile>); it has not run on this board yet.
+[match.linux]
+recovery = true
+
 [boot]
 methods = ["checkm8-pongo"] # palera1n's device list (palera.in); not run with Orchard yet.
 
@@ -40,7 +45,7 @@ gyroscope = "missing"
 light_sensor = "missing"
 touch_id = "missing"
 storage_read = "untested"
-storage_write = "missing" # A driver binds, but installing waits for a RAM boot on this board.
+storage_write = "untested"
 wifi = "missing"
 bluetooth_input = "missing"
 bluetooth_audio = "missing"
