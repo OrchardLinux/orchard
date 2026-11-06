@@ -1,5 +1,4 @@
-# iPad 3 (Wi-Fi) (J1): identity from public sources
-# (tools/catalog/generate). No Orchard bring-up yet; see docs/device-bring-up.md.
+# iPad 3 (Wi-Fi) (J1): identity, kernel and manual boot prerequisites.
 schema = 1
 kind = "hardware.device"
 
@@ -7,7 +6,54 @@ kind = "hardware.device"
 profile = "j1"
 name = "iPad 3 (Wi-Fi)"
 apple_products = ["iPad3,1"]
+dt_compatible = ["apple,j1ap"]
 
 [match.dfu]
 chip = 0x8945
 board = 0x00
+
+[boot]
+methods = ["jailbreak-kdfu"]
+entries = ["kdfu"]
+# Booted from a jailbroken iOS 9.3.5 with kloader and Cascadia's staging
+# loader (README.md); orchard's launcher does not run this chain yet.
+
+[kernel]
+platform = "apple-armv7"  # kernel/series/apple-armv7, kernel/configs/apple-armv7
+dtb = "s5l8945x-j1"       # arch/arm/boot/dts/apple/<dtb>.dtb
+
+[firmware]
+recipe = "firmware.json"
+
+[support]
+status = "experimental"
+
+# States: working, untested, missing, none (features.toml).
+# "untested" means not yet run on orchard's build; README.md says what ran
+# on Project Cascadia's build of the same tree.
+[features]
+display = "untested"
+screen_off = "missing"
+backlight = "missing"
+touch = "untested"
+buttons = "missing"
+accelerometer = "missing"
+gyroscope = "missing"
+light_sensor = "missing"
+touch_id = "none"
+storage_read = "missing"
+storage_write = "missing"
+wifi = "untested"
+bluetooth_input = "missing"
+bluetooth_audio = "missing"
+cellular = "none"
+battery = "missing"
+charging = "missing"
+charging_control = "missing"
+suspend = "missing"
+resume = "missing"
+usb_serial = "untested"
+usb_network = "untested"
+audio_output = "missing"
+audio_input = "missing"
+camera = "missing"
