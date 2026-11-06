@@ -42,6 +42,20 @@ def executable(architecture='arm', dynamic=False):
     return bytes(data)
 
 
+def initrd_entries(data):
+    stream = io.BytesIO(gzip.decompress(data))
+    entries = {}
+    while True:
+        header = stream.read(110)
+        fields = [int(header[i:i + 8], 16) for i in range(6, 110, 8)]
+        name = stream.read(fields[11])[:-1].decode()
+        stream.read(-(110 + fields[11]) % 4)
+        if name == 'TRAILER!!!':
+            return entries
+        entries[name] = stream.read(fields[6])
+        stream.read(-fields[6] % 4)
+
+
 class Armv7ProducerTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -165,12 +179,15 @@ class Armv7ProducerTests(unittest.TestCase):
         bundle = self.work / 'kernel'
         modules = bundle / 'lib/modules/test-arm'
         modules.mkdir(parents=True)
-        (modules / 'modules.dep').write_text('')
-        (modules / 'modules.order').write_text('')
+        (modules / 'kernel/drivers/mtd').mkdir(parents=True)
+        (modules / 'kernel/drivers/mtd/apple-sftl.ko').write_bytes(b'sftl module')
+        (modules / 'modules.dep').write_text('kernel/drivers/mtd/apple-sftl.ko:\n')
+        (modules / 'modules.order').write_text('kernel/drivers/mtd/apple-sftl.ko\n')
         (bundle / 'kernel.release').write_text('test-arm\n')
         (bundle / 'zImage').write_bytes(kernel())
         (bundle / 'dtbs').mkdir()
         (bundle / 'dtbs/s5l8942x-p105.dtb').write_bytes(b'caller-supplied-dtb')
+        (bundle / 'dtbs/s5l8945x-j1.dtb').write_bytes(b'caller-supplied-j1-dtb')
         busybox = self.work / 'busybox'
         busybox.write_bytes(executable())
         mapper = self.work / 'orchard-lwvm'
@@ -189,22 +206,25 @@ class Armv7ProducerTests(unittest.TestCase):
             self.assertEqual(description['image'], 'zImage')
             self.assertEqual(description['boards'], {'p105': 's5l8942x-p105'})
             self.assertEqual(archive.extractfile('usr/lib/modules/test-arm/vmlinuz').read(), kernel())
-            initrd = archive.extractfile('usr/lib/modules/test-arm/initrd').read()
-            stream = io.BytesIO(gzip.decompress(initrd))
-            entries = {}
-            while True:
-                h = stream.read(110)
-                fields = [int(h[i:i + 8], 16) for i in range(6, 110, 8)]
-                name = stream.read(fields[11])[:-1].decode()
-                stream.read(-(110 + fields[11]) % 4)
-                if name == 'TRAILER!!!': break
-                entries[name] = stream.read(fields[6])
-                stream.read(-fields[6] % 4)
+            entries = initrd_entries(archive.extractfile('usr/lib/modules/test-arm/initrd').read())
             self.assertEqual(entries['bin/orchard-lwvm'], executable())
             self.assertEqual(entries['bin/dropbear'], executable())
             self.assertIn(b'/run/orchard/rescue/dropbear', entries['bin/recovery-start-ssh'])
-            self.assertEqual(entries['etc/orchard/modules'], b'\n')
+            self.assertEqual(entries['etc/orchard/modules'], b'apple-sftl\n')
+            self.assertEqual(entries['lib/modules/test-arm/kernel/drivers/mtd/apple-sftl.ko'], b'sftl module')
+            self.assertIn('bin/orchard-load-storage', entries)
             self.assertNotIn('bin/python3', entries)
+        j1 = self.work / 'j1'
+        j1.mkdir()
+        with mock.patch('orchard.build.prepare_lwvm') as prepare_lwvm:
+            platform.build('apple-armv7', j1, bundle=bundle, busybox=busybox,
+                           root_architecture='arm', device='j1')
+        prepare_lwvm.assert_not_called()
+        with tarfile.open(j1 / 'platform-apple-armv7.tar.gz') as archive:
+            entries = initrd_entries(archive.extractfile('usr/lib/modules/test-arm/initrd').read())
+            self.assertEqual(entries['etc/orchard/modules'], b'\n')
+            self.assertNotIn('lib/modules/test-arm/kernel/drivers/mtd/apple-sftl.ko', entries)
+            self.assertNotIn('bin/orchard-lwvm', entries)
         busybox.write_bytes(executable('arm64'))
         other = self.work / 'wrong'
         other.mkdir()

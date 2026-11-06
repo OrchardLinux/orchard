@@ -59,6 +59,27 @@ reads and 600000 ms from probe cannot sustain an installed desktop session.
 `rw` alone never enables the default-off SFTL writer. Device installation
 remains gated on qualification of the exact kernel, policy and initrd.
 
+The selected P105 initrd loads `apple-sftl` as a module. Its loader validates
+`apple_sftl.write_enable` as `0` or `1`; `apple_sftl.max_page_reads` and
+`apple_sftl.max_io_time_ms` accept canonical decimal integers from 1 through
+4294967295. A write opt-in requires both explicit limits. Repeated, unknown
+or malformed policy parameters stop module loading and leave RAM recovery.
+The limits bound the whole module lifetime, including startup scans.
+
+An operator starts with a read-only entry and substitutes reviewed integers
+for the placeholders before building the boot image:
+
+```
+root=PARTUUID=<Linux-UUID> ro apple_sftl.write_enable=0 apple_sftl.max_page_reads=<approved-read-count> apple_sftl.max_io_time_ms=<approved-milliseconds>
+```
+
+After qualifying the kernel's write capabilities and the operating limits,
+the corresponding writable entry uses `rw` and
+`apple_sftl.write_enable=1` with both explicit limits. This document supplies
+no qualified operating values. The kernel needs `CONFIG_MTD_APPLE_SFTL=m`,
+`CONFIG_MD=y` and `CONFIG_BLK_DEV_DM=y`; the linear target is included in
+device mapper. Config export and physical qualification gate this path.
+
 ## Partitions (GPT)
 
 | Partition | Type GUID | Filesystem | Count |

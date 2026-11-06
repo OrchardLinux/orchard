@@ -108,6 +108,8 @@ def initrd(modules, release, busybox, *, hardware=None, storage_modules=STORAGE_
     entries = {name: (directory, b'') for name in ('bin', 'dev', 'proc', 'sys', 'run', 'root', 'etc', 'etc/orchard', 'newroot',
                                                     'lib', 'lib/modules', 'lib/modules/' + release)}
     entries['init'] = (stat.S_IFREG | 0o755, (hardware / 'boot/initramfs/root/init').read_bytes())
+    entries['bin/orchard-load-storage'] = (stat.S_IFREG | 0o755,
+                                          (hardware / 'boot/initramfs/root/load-storage').read_bytes())
     entries['bin/busybox'] = (stat.S_IFREG | 0o755, Path(busybox).read_bytes())
     entries['etc/orchard/modules'] = (stat.S_IFREG | 0o644, ('\n'.join(loaded) + '\n').encode())
     if lwvm is not None:
@@ -143,11 +145,16 @@ def initrd(modules, release, busybox, *, hardware=None, storage_modules=STORAGE_
         return output.read_bytes()
 
 
-def storage_modules(hardware, platform):
+def storage_modules(hardware, platform, *, device=None):
     """The platform's early-root modules; an empty list denotes built-in storage."""
     if not re.fullmatch(r'[a-z0-9][a-z0-9_-]*', platform):
         raise ValueError('Invalid platform name')
     settings = tomllib.loads((Path(hardware) / 'platforms' / (platform + '.toml')).read_text())
+    selected = settings.get('root', {}).get('devices')
+    if selected is not None:
+        root_format(hardware, platform, device=device)
+        if device not in selected:
+            return ()
     modules = settings.get('root', {}).get('storage_modules', list(STORAGE_MODULES))
     if (not isinstance(modules, list) or
             any(not isinstance(name, str) or not re.fullmatch(r'[a-zA-Z0-9_+-]+', name) for name in modules) or
@@ -188,7 +195,10 @@ def files(bundle, platform, board_dtbs, *, busybox, hardware=None, lwvm=None, re
     release, result = module_files(bundle / 'lib/modules')
     base = f'usr/lib/modules/{release}/'
     result[base + 'vmlinuz'] = ((bundle / described['image']).read_bytes(), 0o644)
-    modules_to_load = storage_modules(hardware, platform)
+    choices = {storage_modules(hardware, platform, device=board) for board in board_dtbs}
+    if len(choices) != 1:
+        raise ValueError('Different early-root module sets require --device')
+    modules_to_load = next(iter(choices))
     result[base + 'initrd'] = (initrd(result, release, busybox, hardware=hardware,
                                      storage_modules=modules_to_load, lwvm=lwvm,
                                      rescue_tools=rescue_tools), 0o644)

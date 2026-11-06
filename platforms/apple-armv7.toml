@@ -17,9 +17,9 @@ branch = "armv7"                   # its branch in OrchardLinux/linux
 loader = "cascadia"                # the payload format that boots this kernel
 
 [root]
-# H2FMI is built in. The installed NAND backend supplies the early root
-# setup; the arm64 platforms' NVMe modules do not apply to this platform.
-storage_modules = []
+# H2FMI is built in. The selected installed-root profile loads its logical
+# backend explicitly; other boards keep their built-in storage path.
+storage_modules = ["apple-sftl"]
 format = "lwvm"
 devices = ["p105"]
 

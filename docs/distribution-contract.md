@@ -55,6 +55,8 @@ profile; a platform with several boards requires explicit board selection.
 root ISA and writes a layer for that board. Its kernel image comes from the
 platform descriptor. Optional `[root] storage_modules` in that descriptor
 names the early-root modules; an empty list requires built-in storage.
+For a platform with `root.devices`, those modules apply only to the selected
+profiles; other boards retain an empty early-root module set.
 
 An LwVM platform sets `[root] format = "lwvm"`. Optional `root.devices`
 restricts that installed-root path to the named device profiles; P105's
@@ -68,7 +70,7 @@ record retain their meaning. Consumers forward this path as `--lwvm FILE`
 to the recovery and platform producers. The platform producer also accepts
 `--rescue-tools DIR` for the matching static Dropbear tools; otherwise it
 resolves those tools through Orchard's cache. LwVM installed roots require
-built-in `CONFIG_BLK_DEV_DM=y` and its linear target alongside the logical
+built-in `CONFIG_MD=y`, `CONFIG_BLK_DEV_DM=y` and its linear target alongside the logical
 storage backend. P105 remains `install = false` until the exact path passes
 physical qualification.
 Every platform record also identifies `root_format` as `gpt` or `lwvm`.
