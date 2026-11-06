@@ -371,6 +371,21 @@ class RootWrites(unittest.TestCase):
             with self.assertRaises(OSError):
                 I.Provider(link)
 
+    def test_provider_size_ioctl_uses_native_arm_pointer_width_with_u64_output(self):
+        info = Mock(st_mode=I.stat.S_IFBLK, st_rdev=I.os.makedev(99, 0))
+        for pointer_bytes, request in ((4, 0x80041272), (8, 0x80081272)):
+            with self.subTest(pointer_bytes=pointer_bytes), \
+                 patch.object(I.os, 'open', return_value=123), \
+                 patch.object(I.os, 'fstat', return_value=info), \
+                 patch.object(I.os, 'close') as close, \
+                 patch.object(I.struct, 'calcsize', return_value=pointer_bytes), \
+                 patch.object(I.fcntl, 'ioctl', return_value=struct.pack('Q', MEDIA)) as ioctl:
+                provider = I.Provider('/dev/fixture')
+                self.assertEqual(provider.size, MEDIA)
+                ioctl.assert_called_once_with(123, request, bytes(8))
+                provider.close()
+                close.assert_called_once_with(123)
+
     def test_reprobed_read_only_backend_stops_before_clearing_fence_or_writing(self):
         identity = {**DEVICE, 'boot_id': 'fixture-boot'}
         plan = {'identity': identity, 'lwvm': self.allocation,

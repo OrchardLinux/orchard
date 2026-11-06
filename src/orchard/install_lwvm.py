@@ -14,7 +14,7 @@ import subprocess
 
 from . import lwvm
 
-BLKGETSIZE64 = 0x80081272
+BLKGETSIZE64_BASE = 0x80001272
 BLKFLSBUF = 0x1261
 BLKROGET = 0x125e
 MAPPER = '/usr/sbin/orchard-lwvm'
@@ -32,7 +32,11 @@ class Provider:
             if not stat.S_ISBLK(info.st_mode):
                 raise lwvm.Error('LwVM provider must be a block device')
             self.device = {'major': os.major(info.st_rdev), 'minor': os.minor(info.st_rdev)}
-            self.size = struct.unpack('Q', fcntl.ioctl(self.fd, BLKGETSIZE64, bytes(8)))[0]
+            # Linux defines this request with sizeof(size_t), while the
+            # returned value is always u64. ARMv7 and arm64 use different
+            # request numbers with the same eight-byte output buffer.
+            request = BLKGETSIZE64_BASE | (struct.calcsize('P') << 16)
+            self.size = struct.unpack('Q', fcntl.ioctl(self.fd, request, bytes(8)))[0]
         except BaseException:
             os.close(self.fd)
             raise
