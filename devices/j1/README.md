@@ -65,7 +65,7 @@ Wi-Fi step is not in its recipe vocabulary. What the board needs:
 | Destination | Made by |
 |---|---|
 | `lib/firmware/J1.mtprops` | a copy of `J1.mtprops` |
-| `lib/firmware/brcm/brcmfmac4330.bin` | Cascadia's `scripts/trx-add-nvram.py` from `mike.trx` and `mike.txt`, with the unit's `macaddr=` |
+| `lib/firmware/brcm/brcmfmac4330.bin` | Cascadia's `devices/a5/scripts/trx-add-nvram.py` from `mike.trx` and `mike.txt`, with the unit's `macaddr=` |
 
 Two things belong to one unit and stay out of public recipes and releases: the
 touch calibration (`MtCl` from syscfg, captured from the unit's iOS) and the
@@ -78,9 +78,24 @@ Wi-Fi MAC address that goes into the nvram.
 - Upstream to Cascadia first, then import here. Open as Cascadia
   [PR #35](https://github.com/rzxvx/Project-Cascadia/pull/35): CPU ids
   `0x900`/`0x901` and both cores, the battery gauge (HDQ, UART5 powered), the
-  backlight node and a portrait boot console. In progress, not published yet:
-  a PHY driver for the second USB complex, so Wi-Fi comes up at boot without
-  the userspace bring-up.
+  backlight node, a portrait boot console, a PHY driver for the second USB
+  complex (Wi-Fi at boot without the userspace bring-up) and Bluetooth.
+  `import-cascadia.py` regenerates only 0001–0020: like the P105's 0021, 0023
+  is refreshed by hand from Cascadia's `devices/a5/dts/j1ap.dts`.
+- Known faults in this tree (only the first is fixed upstream so far):
+  - The CPU nodes are `0xa00`/`0xa01`, the iPad mini's, but the A5X boots with
+    MPIDR `0x900`. Linux finds no node for the boot CPU and falls back to one
+    possible CPU (`maxcpus=1` in the bootargs hides this). PR #35 fixes it.
+  - The static AIC mapping at `0xf0500000` lands below `VMALLOC_START` with
+    the J1's memory size: the `BUG: mapping ... out of vmalloc space` at t=0.
+    ARM maps it anyway, so the boot goes on, but it should move into the IO
+    area.
+  - The PMU node is `apple,pmu-d1946` only. The D1974's registers differ (input
+    limit `0x3e` instead of `0x3d`, WLED `0xd3`/`0xd5`), so a charger or
+    backlight child needs an `apple,pmu-d1974` compatible first.
+  - The bootargs are the boot kit's (`rdinit=/init` for its built-in
+    initramfs, debug log levels, fixed gadget MACs), as the P105's are its
+    kit's. Orchard's launcher will pass its own.
 - Charging: iBEC leaves the D1974's input limit (`0x3e`) at about 100 mA, so
   the battery drains even on a charger. `0x4a` (1000 mA) charges, and today it
   is written from userspace. The tree has no charger node for Cascadia's
