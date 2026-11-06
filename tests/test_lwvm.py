@@ -177,3 +177,14 @@ class LwvmCParser(unittest.TestCase):
                                 capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('original block provider', result.stderr)
+
+    def test_missing_and_repeated_cli_values_fail_without_a_signal(self):
+        for command in ('inspect', 'map', 'unmap'):
+            options = ('--disk', '--root', '--mode', '--extent') if command == 'unmap' else ('--disk', '--root', '--mode')
+            for option in options:
+                result = subprocess.run([str(self.binary), command, option], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 1, (command, option, result.stderr))
+                self.assertIn('missing option value', result.stderr)
+            result = subprocess.run([str(self.binary), command, '--mode', 'ro', '--mode', 'rw'],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1, result.stderr)

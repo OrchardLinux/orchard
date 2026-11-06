@@ -220,11 +220,14 @@ static int command_unmap(int argc, char **argv)
 	uint64_t end = 0;
 	int i;
 	for (i = 2; i < argc; i++) {
-		if (!strcmp(argv[i], "--disk") && ++i < argc && !disk) disk = argv[i];
-		else if (!strcmp(argv[i], "--root") && ++i < argc && !requested) requested = argv[i];
-		else if (!strcmp(argv[i], "--mode") && ++i < argc && !mode) mode = argv[i];
-		else if (!strcmp(argv[i], "--extent") && ++i < argc && root.extent_count < LWVM_CHUNKS) {
-			const char *cursor = argv[i];
+		const char *option = argv[i], *value;
+		if (i + 1 >= argc) return error("missing option value");
+		value = argv[++i];
+		if (!strcmp(option, "--disk") && !disk) disk = value;
+		else if (!strcmp(option, "--root") && !requested) requested = value;
+		else if (!strcmp(option, "--mode") && !mode) mode = value;
+		else if (!strcmp(option, "--extent") && root.extent_count < LWVM_CHUNKS) {
+			const char *cursor = value;
 			struct lwvm_extent *e = &root.extents[root.extent_count];
 			if (decimal(&cursor, ':', &e->start_sector) || decimal(&cursor, ':', &e->sectors) ||
 			    decimal(&cursor, 0, &e->physical_sector) || !e->sectors || e->start_sector != end ||
@@ -258,17 +261,20 @@ int main(int argc, char **argv)
 	const char *disk = NULL, *requested = NULL, *mode = "ro", *why;
 	char name[128] = "", dm_uuid[129] = "", path[64] = "", formatted[37];
 	uint64_t media, chunk;
-	int fd, i, json = 0, mapping;
+	int fd, i, json = 0, mapping, mode_seen = 0;
 	unsigned int disk_major = 0, disk_minor = 0;
 	if (argc >= 2 && !strcmp(argv[1], "unmap")) return command_unmap(argc, argv);
 	if (argc < 2 || (strcmp(argv[1], "inspect") && strcmp(argv[1], "map")))
 		return error("usage: orchard-lwvm inspect|map --disk PATH --root UUID [--mode ro|rw] [--json]; unmap also requires --extent START:SECTORS:PHYSICAL for each expected extent");
 	mapping = !strcmp(argv[1], "map");
 	for (i = 2; i < argc; i++) {
-		if (!strcmp(argv[i], "--json")) json = 1;
-		else if (!strcmp(argv[i], "--disk") && ++i < argc && !disk) disk = argv[i];
-		else if (!strcmp(argv[i], "--root") && ++i < argc && !requested) requested = argv[i];
-		else if (!strcmp(argv[i], "--mode") && ++i < argc) mode = argv[i];
+		const char *option = argv[i], *value;
+		if (!strcmp(option, "--json")) { json = 1; continue; }
+		if (i + 1 >= argc) return error("missing option value");
+		value = argv[++i];
+		if (!strcmp(option, "--disk") && !disk) disk = value;
+		else if (!strcmp(option, "--root") && !requested) requested = value;
+		else if (!strcmp(option, "--mode") && !mode_seen) { mode = value; mode_seen = 1; }
 		else return error("invalid or repeated argument");
 	}
 	if (!disk || !requested || lwvm_uuid_parse(requested, uuid) ||
