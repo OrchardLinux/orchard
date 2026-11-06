@@ -19,7 +19,7 @@ Assisted-by: LLM
  1 file changed, 18 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/usb/dwc2/gadget.c b/drivers/usb/dwc2/gadget.c
-index 81dea78f0a45..afe0e659b513 100644
+index 81dea78f0a45..05037d6e394f 100644
 --- a/drivers/usb/dwc2/gadget.c
 +++ b/drivers/usb/dwc2/gadget.c
 @@ -1738,3 +1738,14 @@ static struct dwc2_hsotg_req *get_ep_head(struct dwc2_hsotg_ep *hs_ep)
