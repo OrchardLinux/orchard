@@ -1,0 +1,315 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 12:26:04 -0600
+Subject: [PATCH] mtd: apple-sftl: bound read-only provider lifetime
+
+Count physical page requests across map recovery and block reads. Apply a finite deadline before each provider call and check it again when the transaction completes, so one controller transaction bounds any overrun. Keep the reader failed after a provider error or exhausted policy, including logical reads that do not need flash I/O.
+
+Expose positive read-only policy parameters with defaults of 32768 requests and 600000 milliseconds for manual qualification sessions. These limits describe software lifetime rather than hardware behaviour. Add KUnit boundary cases for both limits and provider failures.
+
+Assisted-by: LLM
+---
+ Documentation/driver-api/mtd/apple-sftl.rst | 10 +++
+ drivers/mtd/apple-sftl-block.c              | 55 ++++++++++++++++-
+ drivers/mtd/apple-sftl-limits.h             | 67 +++++++++++++++++++++
+ drivers/mtd/apple-sftl-test.c               | 62 +++++++++++++++++++
+ 4 files changed, 193 insertions(+), 1 deletion(-)
+ create mode 100644 drivers/mtd/apple-sftl-limits.h
+
+diff --git a/Documentation/driver-api/mtd/apple-sftl.rst b/Documentation/driver-api/mtd/apple-sftl.rst
+index 8295a5a2a..ade96fde7 100644
+--- a/Documentation/driver-api/mtd/apple-sftl.rst
++++ b/Documentation/driver-api/mtd/apple-sftl.rst
+@@ -46,6 +46,16 @@ frontend freezes and drains requests during removal. Its request buffer is
+ allocated before the disk becomes visible, while blocking requests serialize
+ access to that buffer and the provider.
+ 
++The reader has finite operating limits. ``max_page_reads`` defaults to
++32,768 physical page requests and ``max_io_time_ms`` defaults to ten minutes
++from probe. Both are read-only module parameters and must be positive.
++Recovery and subsequent block reads consume the same budget. A limit check
++runs before each provider call; completion also checks the deadline, so an
++existing bounded provider transaction is the maximum overrun. Any provider
++failure or exhausted limit permanently stops that reader instance. These
++limits support bounded read-only qualification; a mounted root must not rely
++on an instance after its operating budget expires.
++
+ Tests
+ -----
+ 
+diff --git a/drivers/mtd/apple-sftl-block.c b/drivers/mtd/apple-sftl-block.c
+index 86d02921b..bf7a0a108 100644
+--- a/drivers/mtd/apple-sftl-block.c
++++ b/drivers/mtd/apple-sftl-block.c
+@@ -4,18 +4,31 @@
+ #include <linux/blkdev.h>
+ #include <linux/highmem.h>
+ #include <linux/idr.h>
++#include <linux/ktime.h>
+ #include <linux/module.h>
+ #include <linux/mutex.h>
+ #include <linux/platform_device.h>
+ #include <linux/slab.h>
+ 
+ #include "apple-sftl.h"
++#include "apple-sftl-limits.h"
+ 
+ #define SFTL_BLOCK_NAME "apple-sftl"
+ #define SFTL_DISK_MINORS 16
+ #define SFTL_LOGICAL_BYTES 4096U
+ 
++/* Limits bound one manually loaded reader instance, including recovery. */
++static unsigned int max_page_reads = 32768;
++module_param(max_page_reads, uint, 0400);
++MODULE_PARM_DESC(max_page_reads, "Maximum physical page reads per reader instance");
++static unsigned int max_io_time_ms = 600000;
++module_param(max_io_time_ms, uint, 0400);
++MODULE_PARM_DESC(max_io_time_ms, "Maximum reader lifetime in milliseconds");
++
+ struct sftl_disk {
++	struct apple_ppn *upstream;
++	struct apple_ppn provider;
++	struct apple_sftl_io_limit limit;
+ 	struct apple_sftl *ftl;
+ 	struct blk_mq_tag_set tags;
+ 	struct gendisk *disk;
+@@ -25,6 +38,25 @@ struct sftl_disk {
+ 	bool dead;
+ };
+ 
++static int sftl_limited_read(void *priv, unsigned int bus, unsigned int cau,
++			     unsigned int block, unsigned int page, bool context,
++			     u8 *data, u8 *oob, u8 *status)
++{
++	struct sftl_disk *sftl = priv;
++	int ret;
++
++	ret = apple_sftl_limit_begin(&sftl->limit, ktime_get_ns());
++	if (ret)
++		return ret;
++	ret = sftl->upstream->ops->read_page(sftl->upstream->priv, bus, cau,
++					   block, page, context, data, oob, status);
++	return apple_sftl_limit_end(&sftl->limit, ret, ktime_get_ns());
++}
++
++static const struct apple_ppn_ops sftl_limited_ops = {
++	.read_page = sftl_limited_read,
++};
++
+ static DEFINE_IDA(sftl_disk_ids);
+ static int sftl_major;
+ 
+@@ -77,6 +109,8 @@ static blk_status_t sftl_queue_rq(struct blk_mq_hw_ctx *hctx,
+ 	mutex_lock(&sftl->io_lock);
+ 	if (sftl->dead) {
+ 		ret = -ENODEV;
++	} else if ((ret = apple_sftl_limit_check(&sftl->limit, ktime_get_ns()))) {
++		/* Includes logical pages which need no provider transaction. */
+ 	} else if (req_op(request) == REQ_OP_FLUSH) {
+ 		/* A read-only device has no buffered writes to flush. */
+ 	} else if (req_op(request) != REQ_OP_READ) {
+@@ -125,9 +159,21 @@ static int sftl_disk_probe(struct platform_device *pdev)
+ 		ret = -ENOMEM;
+ 		goto free_state;
+ 	}
+-	ret = apple_sftl_load(provider, &sftl->ftl);
++	sftl->upstream = provider;
++	sftl->provider = *provider;
++	sftl->provider.ops = &sftl_limited_ops;
++	sftl->provider.priv = sftl;
++	ret = apple_sftl_limit_start(&sftl->limit, max_page_reads,
++				     max_io_time_ms, ktime_get_ns());
+ 	if (ret)
+ 		goto free_buffer;
++	dev_info(&pdev->dev, "reader policy: %u page reads, %u ms\n",
++		 max_page_reads, max_io_time_ms);
++	ret = apple_sftl_load(&sftl->provider, &sftl->ftl);
++	if (ret)
++		goto free_buffer;
++	dev_info(&pdev->dev, "recovery completed after %u physical page reads\n",
++		 sftl->limit.reads);
+ 	apple_sftl_get_info(sftl->ftl, &info);
+ 	if (!info.disk_pages || info.disk_pages > info.logical_pages) {
+ 		ret = -EINVAL;
+@@ -176,6 +222,9 @@ static int sftl_disk_probe(struct platform_device *pdev)
+ free_ftl:
+ 	apple_sftl_free(sftl->ftl);
+ free_buffer:
++	if (sftl->limit.failed)
++		dev_err(&pdev->dev, "reader stopped after %u page requests: %d\n",
++			sftl->limit.reads, ret);
+ 	kfree(sftl->buffer);
+ free_state:
+ 	kfree(sftl);
+@@ -187,6 +236,8 @@ static void sftl_disk_remove(struct platform_device *pdev)
+ 	struct sftl_disk *sftl = platform_get_drvdata(pdev);
+ 
+ 	mutex_lock(&sftl->io_lock);
++	dev_info(&pdev->dev, "reader retired after %u physical page reads; failed=%u\n",
++		 sftl->limit.reads, sftl->limit.failed);
+ 	sftl->dead = true;
+ 	mutex_unlock(&sftl->io_lock);
+ 	/* del_gendisk freezes and drains the queue before the provider is freed. */
+@@ -211,6 +262,8 @@ static int __init sftl_init(void)
+ {
+ 	int ret;
+ 
++	if (!max_page_reads || !max_io_time_ms)
++		return -EINVAL;
+ 	sftl_major = register_blkdev(0, SFTL_BLOCK_NAME);
+ 	if (sftl_major < 0)
+ 		return sftl_major;
+diff --git a/drivers/mtd/apple-sftl-limits.h b/drivers/mtd/apple-sftl-limits.h
+new file mode 100644
+index 000000000..315bb8499
+--- /dev/null
++++ b/drivers/mtd/apple-sftl-limits.h
+@@ -0,0 +1,67 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _APPLE_SFTL_LIMITS_H
++#define _APPLE_SFTL_LIMITS_H
++
++#include <linux/errno.h>
++#include <linux/overflow.h>
++#include <linux/types.h>
++
++/* The caller serializes begin/end with the provider transaction. */
++struct apple_sftl_io_limit {
++	u64 deadline_ns;
++	u32 maximum_reads;
++	u32 reads;
++	bool failed;
++};
++
++static inline int apple_sftl_limit_start(struct apple_sftl_io_limit *limit,
++				       u32 reads, u32 milliseconds, u64 now)
++{
++	u64 duration = (u64)milliseconds * 1000000ULL;
++
++	if (!reads || !milliseconds ||
++	    check_add_overflow(now, duration, &limit->deadline_ns))
++		return -EINVAL;
++	limit->maximum_reads = reads;
++	limit->reads = 0;
++	limit->failed = false;
++	return 0;
++}
++
++static inline int apple_sftl_limit_check(struct apple_sftl_io_limit *limit, u64 now)
++{
++	if (limit->failed)
++		return -EIO;
++	if (now < limit->deadline_ns)
++		return 0;
++	limit->failed = true;
++	return -ETIMEDOUT;
++}
++
++static inline int apple_sftl_limit_begin(struct apple_sftl_io_limit *limit, u64 now)
++{
++	int ret = apple_sftl_limit_check(limit, now);
++
++	if (ret)
++		return ret;
++	if (limit->reads >= limit->maximum_reads)
++		ret = -E2BIG;
++	if (ret) {
++		limit->failed = true;
++		return ret;
++	}
++	limit->reads++;
++	return 0;
++}
++
++static inline int apple_sftl_limit_end(struct apple_sftl_io_limit *limit,
++				     int result, u64 now)
++{
++	if (!result && now >= limit->deadline_ns)
++		result = -ETIMEDOUT;
++	if (result)
++		limit->failed = true;
++	return result;
++}
++
++#endif
+diff --git a/drivers/mtd/apple-sftl-test.c b/drivers/mtd/apple-sftl-test.c
+index e451704c9..88308aadb 100644
+--- a/drivers/mtd/apple-sftl-test.c
++++ b/drivers/mtd/apple-sftl-test.c
+@@ -8,6 +8,7 @@
+ #include <linux/unaligned.h>
+ 
+ #include "apple-sftl.h"
++#include "apple-sftl-limits.h"
+ 
+ #define TEST_LOGICAL_PAGES 15625016U
+ #define TEST_STRIDE 8192U
+@@ -414,7 +415,68 @@ static void sftl_test_runtime_failure_stops_reads(struct kunit *test)
+ 	apple_sftl_free(sftl);
+ }
+ 
++static void sftl_test_page_budget_stops_before_next_read(struct kunit *test)
++{
++	struct apple_sftl_io_limit limit;
++
++	KUNIT_ASSERT_EQ(test, apple_sftl_limit_start(&limit, 2, 1, 0), 0);
++	KUNIT_EXPECT_EQ(test, apple_sftl_limit_begin(&limit, 0), 0);
++	KUNIT_EXPECT_EQ(test, apple_sftl_limit_end(&limit, 0, 1), 0);
++	KUNIT_EXPECT_EQ(test, apple_sftl_limit_begin(&limit, 2), 0);
++	KUNIT_EXPECT_EQ(test, apple_sftl_limit_end(&limit, 0, 3), 0);
++	KUNIT_EXPECT_EQ(test, apple_sftl_limit_begin(&limit, 4), -E2BIG);
++	KUNIT_EXPECT_EQ(test, limit.reads, 2U);
++	KUNIT_EXPECT_EQ(test, apple_sftl_limit_begin(&limit, 5), -EIO);
++	KUNIT_EXPECT_EQ(test, limit.reads, 2U);
++}
++
++static void sftl_test_deadline_stops_before_next_read(struct kunit *test)
++{
++	struct apple_sftl_io_limit limit;
++
++	KUNIT_ASSERT_EQ(test, apple_sftl_limit_start(&limit, 4, 1, 10), 0);
++	KUNIT_EXPECT_EQ(test, apple_sftl_limit_begin(&limit, 1000010), -ETIMEDOUT);
++	KUNIT_EXPECT_EQ(test, limit.reads, 0U);
++	KUNIT_EXPECT_EQ(test, apple_sftl_limit_begin(&limit, 10), -EIO);
++}
++
++static void sftl_test_one_transaction_deadline_overrun(struct kunit *test)
++{
++	struct apple_sftl_io_limit limit;
++
++	KUNIT_ASSERT_EQ(test, apple_sftl_limit_start(&limit, 4, 1, 0), 0);
++	KUNIT_EXPECT_EQ(test, apple_sftl_limit_begin(&limit, 999999), 0);
++	KUNIT_EXPECT_EQ(test, apple_sftl_limit_end(&limit, 0, 1000000), -ETIMEDOUT);
++	KUNIT_EXPECT_EQ(test, apple_sftl_limit_begin(&limit, 1000001), -EIO);
++	KUNIT_EXPECT_EQ(test, limit.reads, 1U);
++}
++
++static void sftl_test_provider_failure_is_sticky(struct kunit *test)
++{
++	struct apple_sftl_io_limit limit;
++
++	KUNIT_ASSERT_EQ(test, apple_sftl_limit_start(&limit, 4, 1, 0), 0);
++	KUNIT_EXPECT_EQ(test, apple_sftl_limit_begin(&limit, 0), 0);
++	KUNIT_EXPECT_EQ(test, apple_sftl_limit_end(&limit, -EBADMSG, 1), -EBADMSG);
++	KUNIT_EXPECT_EQ(test, apple_sftl_limit_begin(&limit, 2), -EIO);
++	KUNIT_EXPECT_EQ(test, limit.reads, 1U);
++}
++
++static void sftl_test_invalid_reader_policy(struct kunit *test)
++{
++	struct apple_sftl_io_limit limit;
++
++	KUNIT_EXPECT_EQ(test, apple_sftl_limit_start(&limit, 0, 1, 0), -EINVAL);
++	KUNIT_EXPECT_EQ(test, apple_sftl_limit_start(&limit, 1, 0, 0), -EINVAL);
++	KUNIT_EXPECT_EQ(test, apple_sftl_limit_start(&limit, 1, 1, ~0ULL), -EINVAL);
++}
++
+ static struct kunit_case apple_sftl_cases[] = {
++	KUNIT_CASE(sftl_test_page_budget_stops_before_next_read),
++	KUNIT_CASE(sftl_test_deadline_stops_before_next_read),
++	KUNIT_CASE(sftl_test_one_transaction_deadline_overrun),
++	KUNIT_CASE(sftl_test_provider_failure_is_sticky),
++	KUNIT_CASE(sftl_test_invalid_reader_policy),
+ 	KUNIT_CASE(sftl_test_complete_medium),
+ 	KUNIT_CASE(sftl_test_scan_after_open_lane_hole),
+ 	KUNIT_CASE(sftl_test_runtime_failure_stops_reads),
