@@ -39,6 +39,9 @@ def boot_ram(output, *, yes=False, logs=None):
 
     output = Path(output).resolve()
     receipt = verify_ram(output)
+    if receipt.get('loader_format') == 'cascadia':
+        from .apple import cascadia
+        return cascadia.boot_ram(output, receipt, yes=yes)
     descriptions = []
     for profile in receipt['boards']:
         try:

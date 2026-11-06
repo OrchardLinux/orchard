@@ -53,7 +53,7 @@ DRIVERS = ROOT / 'tools/catalog/drivers.json'
 HTTP_HOST, HTTPS_HOST = 'http://appldnld.apple.com/', 'https://secure-appldnld.apple.com/'
 CATALOG_SCHEMA = 1  # catalog.SCHEMA: a breaking data change publishes to a new catalog-vN
 # What the matrix shows as installable; a test keeps this equal to hardware.IMPLEMENTED_METHODS.
-IMPLEMENTED_METHODS = {'checkm8-pongo'}
+IMPLEMENTED_METHODS = {'checkm8-pongo', 'recovery-autogo'}
 # Boards an open pull request adds; generating them here would conflict with it.
 IN_REVIEW = {'j72': 'PR #59'}
 

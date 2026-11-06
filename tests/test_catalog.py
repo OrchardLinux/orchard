@@ -240,7 +240,8 @@ class InferredInstall(unittest.TestCase):
         self.assertEqual(devices.load('n61').PRODUCT, 'Orchard Recovery')
         self.assertEqual(devices.load('j96').PRODUCT, 'Orchard Recovery')
         self.assertIsNone(devices.load('k93').PRODUCT)  # no kernel
-        self.assertIsNone(devices.load('p105').PRODUCT)  # 32-bit: no recovery root yet
+        self.assertIsNone(devices.load('j1').PRODUCT)  # no implemented handoff/profile
+        self.assertEqual(devices.load('p105').PRODUCT, 'Orchard Recovery')  # ARMv7 has its own recovery producer
 
     def test_the_boards_with_every_requirement_can_install(self):
         from orchard import hardware

@@ -21,7 +21,7 @@ Arguments and return types are defined in `contracts.py`, not repeated in a seco
 
 - `SelectedDevice`: required `mode`, `location`, non-null validated `ecid` and explicit boolean `resumed`; optional observed chip/board/product/serial details. `resumed` is true for running recovery and false for DFU/Pongo. Common orchestration requires this explicit state. A USB location may change across enumeration and is not persistent device identity.
 - `Connection`: SSH arguments, validated `BootState` and a current-endpoint check performed before every RPC. Private state is keyed by profile/ECID/boot, never by USB port.
-- `BootAssets`: local paths for the selected operation. Running recovery needs no upload; other states require recovery, and DFU additionally requires Pongo. Installation root is not interpreted by the adapter's boot method.
+- `BootAssets`: local paths for the selected operation. Running recovery needs no upload; other states require recovery, and checkm8-pongo additionally requires Pongo. The recovery-autogo path reads a separately prepared private iBEC input and accepts a checked ARM32 payload. Installation root is not interpreted by the adapter's boot method.
 - `BootRequest`: minimum boot input, including the recovery SHA receipt. Both manifest-resolved and explicit-file boot use it; no source-specific fallback adapter API exists.
 - `MixinReceipt`: schema 1, `private-mixin`, exact compressed byte count and SHA-256.
 

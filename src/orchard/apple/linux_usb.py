@@ -4,7 +4,7 @@ import re
 import uuid
 
 # 0x4142: Orchard Recovery; 0x4145: an installed system (orchard's initrd).
-MODES = {0x1227: 'dfu', 0x4141: 'pongo', 0x4142: 'linux', 0x4144: 'ram', 0x4145: 'system'}
+MODES = {0x1280: 'recovery', 0x1281: 'recovery', 0x1282: 'recovery', 0x1283: 'recovery', 0x1227: 'dfu', 0x4141: 'pongo', 0x4142: 'linux', 0x4144: 'ram', 0x4145: 'system'}
 
 
 def devices(root=Path('/sys/bus/usb/devices')):
@@ -32,7 +32,7 @@ def devices(root=Path('/sys/bus/usb/devices')):
                           boot_id=str(uuid.UUID(boot.group(1))) if boot else None,
                           chip=int(chip.group(1), 16) if chip else None,
                           board=int(board.group(1), 16) if board else None,
-                          pwned='YOLO:checkra1n' in serial, profile=profile.group(1) if profile else None, product=product,
+                          pwned='YOLO:checkra1n' in serial or bool(re.search(r'\bPWND:\[(?:checkm8|ipwnder|iPwnder32)\]', serial)), profile=profile.group(1) if profile else None, product=product,
                           serial_port=next(iter(ports), None)))
     return found
 

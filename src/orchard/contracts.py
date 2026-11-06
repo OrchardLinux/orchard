@@ -27,27 +27,33 @@ class _SelectionDetails(TypedDict, total=False):
 class SelectedDevice(_SelectionDetails):
     """Validated discovery result; resumed is explicit, never inferred by the host."""
     location: USBLocation
-    mode: Literal['dfu', 'pongo', 'linux']
+    mode: Literal['dfu', 'recovery', 'pongo', 'linux']
     ecid: int
     resumed: bool
 
 
 class BootAssets(TypedDict, total=False):
-    """Verified local artifacts; Pongo is required only when starting from DFU.
+    """Verified local artifacts; Pongo is used by the checkm8-pongo chain.
 
     A running recovery needs no upload; otherwise recovery must be supplied.
+    prepared_boot names private checked iBEC inputs for recovery-autogo.
     root is used by installation, not by the adapter's boot transport.
     """
     pongo: Path
     recovery: Path
     root: Path
+    prepared_boot: Path
 
 
 class BootReceipt(TypedDict):
     sha256: str
 
 
-class BootRequest(TypedDict):
+class _BootRequestDetails(TypedDict, total=False):
+    boot_method: str
+
+
+class BootRequest(_BootRequestDetails):
     """Minimum adapter boot input, shared by resolved and explicit-file requests."""
     assets: Mapping[str, BootReceipt]
 
