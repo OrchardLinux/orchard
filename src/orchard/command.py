@@ -103,6 +103,9 @@ def main():
     for command in (run, guided, launcher, boot):
         command.add_argument('--via', choices=sorted(ENTRIES), help='how to enter the device from DFU '
                              "(default: the board's preference, else palera1n)")
+    ios = commands.add_parser('prepare-ios-launcher', help='prepare an on-device iOS launcher as private host files; no device access')
+    from orchard.apple import ios_launcher
+    ios_launcher.add_arguments(ios)
     autogo = commands.add_parser('prepare-recovery-autogo', help='prepare a private pinned ARM32 recovery stage; no device access')
     autogo.add_argument('--device', required=True)
     autogo.add_argument('--template', type=Path, required=True)
@@ -120,6 +123,9 @@ def main():
         if args.action == 'build' or (args.action == 'run' and not args.no_build):
             from orchard.cache import check_free
             check_free(build_cache(), args.directory)
+        if args.action == 'prepare-ios-launcher':
+            print(json.dumps(ios_launcher.from_arguments(args), indent=2))
+            return
         if args.action == 'prepare-recovery-autogo':
             from orchard.apple import iboot32
             output = args.output if args.output is not None else iboot32.directory(args.device)

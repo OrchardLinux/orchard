@@ -1,0 +1,6 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# A host-only producer from this Orchard snapshot.
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd -P)
+PYTHONPATH="$root/src${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m orchard.apple.ios_launcher "$@"

@@ -21,3 +21,10 @@ framing are informed by Corellium's Project Sandcastle and Paul Praschl's
 Gen2 mtprops and MTFW HBPP item conversions (mtfw.c, makez2fw.c):
 https://github.com/Pauli1Go/HoolockLinux-linux-firmware
 Reference revision: 944541e67b4c603df328c77d30093551de802c17.
+
+The on-device ARMv7 handoff utility in boot/ios-launcher/kloader preserves
+winocm's ios-kexec-utils source, distributed under GPL-2.0-or-later:
+https://github.com/axi0mX/ios-kexec-utils
+Reference revision: a1bbca8a8f2847d9c53070e76e0b5d093bda5993.
+The original files are byte-pinned. A separate Orchard patch bounds the active
+I/O/search paths and permits one sleep request; source.json records provenance.
