@@ -29,7 +29,7 @@ def chunk_size(media_bytes):
         raise Error('LwVM medium size is unsupported')
     shifted = (media_bytes - 1) >> 10
     chunk = 1 << shifted.bit_length()
-    if not shifted or shifted > 0xffffffff or chunk < HEADER_BYTES or media_bytes // chunk < 2:
+    if not shifted or shifted > 0xffffffff or chunk < 2 * HEADER_BYTES or media_bytes // chunk < 2:
         raise Error('LwVM chunk geometry is unsupported')
     return chunk
 

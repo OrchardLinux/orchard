@@ -108,7 +108,7 @@ class Planner(unittest.TestCase):
     def test_geometry_matches_native_constructor(self):
         self.assertEqual(L.chunk_size(MEDIA), CHUNK)
         self.assertEqual(L.chunk_size(32_000_000_000), 32 << 20)
-        for size in (0, 4096, MEDIA + 1, 1 << 43):
+        for size in (0, 4096, 3 << 20, 4 << 20, MEDIA + 1, 1 << 43):
             with self.assertRaises(L.Error):
                 L.chunk_size(size)
 
@@ -237,6 +237,15 @@ class MetadataCommit(unittest.TestCase):
         with self.assertRaises(L.Error):
             I.commit_headers(provider, self.plan, record=lambda r: None)
         self.assertEqual(provider.writes, [])
+
+    def test_aliased_small_media_headers_are_refused_before_provider_io(self):
+        for size in (3 << 20, 4 << 20):
+            provider = Mock(size=size)
+            provider.pair = lambda: I.Provider.pair(provider)
+            with self.subTest(size=size), self.assertRaisesRegex(L.Error, 'geometry'):
+                I.commit_headers(provider, self.plan, record=lambda _: self.fail('no intent expected'))
+            provider.read.assert_not_called()
+            provider.write_header.assert_not_called()
 
     def test_existing_partition_does_not_write_headers(self):
         after = L.unb64(self.plan['after'])

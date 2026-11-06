@@ -63,8 +63,9 @@ class Provider:
         fcntl.ioctl(self.fd, BLKFLSBUF)
 
     def pair(self):
+        offset = lwvm.chunk_size(self.size) - lwvm.HEADER_BYTES
         primary = self.read(0, lwvm.HEADER_BYTES)
-        backup = self.read(lwvm.chunk_size(self.size) - lwvm.HEADER_BYTES, lwvm.HEADER_BYTES)
+        backup = self.read(offset, lwvm.HEADER_BYTES)
         return primary, backup
 
 
