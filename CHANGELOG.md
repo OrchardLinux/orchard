@@ -37,6 +37,12 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
   (micro23)
 - iPad Air 2 (J81): the touchscreen works, with five fingers and no frame
   errors on main's kernel. (Martin Puškáč)
+- iPad 3 (Wi-Fi, J1): the display, touchscreen, Wi-Fi and USB serial and
+  network work on Orchard's kernel tree, booted from RAM with the J1 boot kit
+  on a jailbroken iOS 9.3.5. That kernel was built with GCC, because the kit's
+  loader can't start a clang build yet. Device description, device tree and a
+  firmware recipe. Orchard's launcher doesn't run this boot chain yet.
+  Experimental. (Stephen Cox)
 
 ### Install & launch
 
