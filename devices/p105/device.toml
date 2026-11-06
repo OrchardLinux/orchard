@@ -13,6 +13,7 @@ chip = 0x8942
 board = 0x0a
 
 [boot]
+# Public recovery uses a host-bound USB identity handoff; hardware qualification is pending.
 # Source-built Cascadia payload profile: cascadia.toml. External-initramfs handoff awaits testing.
 methods = ["jailbreak-kdfu", "recovery-autogo"]
 entries = ["pico-checkm8", "kdfu"]

@@ -29,6 +29,11 @@ def main():
     from .platform import boards
     described = descriptor(ROOT, args.platform)
     profile = None
+    selected = args.device
+    if selected:
+        from ..hardware import device as described_device
+        if described_device(selected)['kernel']['platform'] != described['platform']:
+            parser.error('Recovery board does not belong to the selected platform')
     if described['loader'] == 'cascadia':
         if len(args.dtb) != 1 or args.logo is not None:
             parser.error('Cascadia recovery takes one board DTB and no m1n1 logo')
@@ -65,6 +70,7 @@ def main():
                         '--base', str(args.base), '--base-receipt', str(args.base_receipt),
                         '--modules-dir', str(args.modules_dir), '--root-receipt', str(args.root_receipt),
                         '--architecture', described['arch'],
+                        *(['--device', selected] if selected else []),
                         '--output', str(stage / 'root')], check=True)
         subprocess.run([sys.executable, '-m', 'orchard.image.initramfs',
                         '--root', str(stage / 'root'),
@@ -72,6 +78,8 @@ def main():
         assembly = 'orchard.image.cascadia' if profile is not None else 'orchard.image.assemble'
         subprocess.run([sys.executable, '-m', assembly,
                         *(['--profile', str(profile)] if profile is not None else []),
+                        *(['--identity-policy', str(stage / 'root/etc/orchard/recovery-identity.json')]
+                          if (stage / 'root/etc/orchard/recovery-identity.json').is_file() else []),
                         '--manifest', str(HERE / manifest),
                         '--loader', str(args.loader), *(f'--dtb={dtb}' for dtb in args.dtb),
                         *(['--logo', str(args.logo)] if args.logo else []),

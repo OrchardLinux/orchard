@@ -20,3 +20,12 @@ loader = "cascadia"                # the payload format that boots this kernel
 # H2FMI is built in. The installed NAND backend supplies the early root
 # setup; the arm64 platforms' NVMe modules do not apply to this platform.
 storage_modules = []
+
+[recovery]
+# The guarded host transport binds a fresh USB identity to each RAM boot.
+identity_source = "host-usb"
+usb_network = "ecm"
+usb_modules = ["libcomposite", "usb_f_ecm", "usb_f_acm"]
+manual_modules = ["apple_sftl"]
+# Mapping recovery begins only after serial and authenticated SSH are ready.
+storage_activation = "manual"

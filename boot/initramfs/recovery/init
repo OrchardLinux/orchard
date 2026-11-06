@@ -17,19 +17,30 @@ case "$board" in
 apple,*) ;;
 *) echo "Not an Apple device for Orchard recovery: $board"; exec sh ;;
 esac
-/sbin/recovery-usb
-ip address add 172.16.42.1/30 dev usb0
-ip link set usb0 up
-udhcpd -f /etc/udhcpd.conf &
-echo "${board#apple,} recovery: USB serial ready; provision an SSH key before SSH starts."
-# Respawn unconditionally: a USB re-enumeration hangs up the shell, which then
-# exits non-zero, and serial is the only way to provision SSH.
+# Serial survives networking failures and repeated USB enumeration.
 (
     while true; do getty -n -l /bin/sh ttyGS0 115200 vt100; sleep 1; done
 ) &
-# Internal storage comes up read-only in the background (storage-fence); the
-# host installs over SSH once /run/orchard/storage-ready exists.
-/usr/libexec/orchard/storage-fence > /run/orchard/storage.log 2>&1 &
+if ! /sbin/recovery-usb > /run/orchard/usb.log 2>&1; then
+    echo 'Recovery USB setup failed; inspect /run/orchard/usb.log.'
+    while :; do sleep 60; done
+fi
+if ip address add 172.16.42.1/30 dev usb0 && ip link set usb0 up; then
+    udhcpd -f /etc/udhcpd.conf &
+else
+    echo 'Recovery networking failed; USB serial remains available.'
+fi
+echo "${board#apple,} recovery: USB serial ready; provision an SSH key before SSH starts."
+if storage=$(/usr/bin/python3 /usr/libexec/orchard/policy.py storage); then
+    if [ "$storage" = automatic ]; then
+        /usr/libexec/orchard/storage-fence > /run/orchard/storage.log 2>&1 &
+    else
+        echo manual > /run/orchard/storage-manual
+        echo 'Storage waits for a manual request after serial and authenticated SSH are ready.'
+    fi
+else
+    echo 'Recovery storage policy failed; storage remains unloaded.'
+fi
 # After an install, `orchard-device start` asks for the new root: if its boot
 # entry boots this same kernel, PID 1 switches into it, so the first start
 # needs no second DFU boot. Later starts go through the entry (orchard launch).

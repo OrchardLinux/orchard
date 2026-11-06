@@ -15,3 +15,6 @@ platform = "P105 on a Cascadia-based build"
 stages = "Project Cascadia P105 boot chain"
 reference_version = "Project Cascadia builds its A5 boot chain from 8.4.1 / 12H321"
 cascadia_profile = "devices/p105/cascadia.toml; external-initramfs handoff awaits hardware qualification"
+
+# Public Cascadia RAM recovery correlates a guarded host USB identity with the live FDT and boot ID.
+# Linux SoC ECID access and on-device public recovery identity remain unqualified.

@@ -122,13 +122,38 @@ def stage_runtime(base, receipt, root, architecture='arm64'):
     raise ValueError('Python runtime dependency closure did not converge')
 
 
+def check_recovery_modules(root, release, recovery):
+    """Manual storage must stay modular; declared USB dependencies must exist."""
+    normalized = lambda names: {name.replace('-', '_') for name in names}
+    if normalized(recovery['runtime']['usb_modules']) & normalized(recovery['runtime']['manual_modules']):
+        raise ValueError('A manual module cannot be loaded during USB setup')
+    directory = root / 'usr/lib/modules' / release
+    builtins = {Path(name).stem.replace('-', '_') for name in
+                (directory / 'modules.builtin').read_text().splitlines() if name}
+    available = {path.stem.replace('-', '_') for path in directory.rglob('*.ko')}
+    for name in recovery['runtime']['manual_modules']:
+        if name.replace('-', '_') in builtins:
+            raise ValueError('Manual recovery module is built in: ' + name)
+    for name in recovery['runtime']['usb_modules']:
+        if name.replace('-', '_') not in builtins | available:
+            raise ValueError('Recovery USB module is unavailable: ' + name)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('busybox', 'dropbear', 'dropbearkey', 'wpa-supplicant', 'wpa-cli', 'iw',
                  'base', 'base-receipt', 'modules-dir', 'root-receipt', 'output'):
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--architecture', choices=('arm', 'arm64'), default='arm64')
+    parser.add_argument('--device', help='stage the selected board recovery policy')
     args = parser.parse_args()
+    recovery = None
+    if args.device:
+        from ..recovery_policy import settings
+        from ..kernel import descriptor
+        if descriptor(PROJECT, args.device)['arch'] != args.architecture:
+            parser.error('Recovery board architecture differs from the runtime')
+        recovery = settings(args.device)
     root = args.output
     if root.exists():
         parser.error('Choose a new staging directory')
@@ -150,6 +175,8 @@ def main():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
         path.chmod(mode)
+    if recovery is not None:
+        check_recovery_modules(root, kernel_release, recovery)
     # The release this recovery belongs to; `orchard-device status` reports it.
     # Root images carry no kernel: the release's platform layer of the same
     # kernel bundle does, so the recovery and an installed root match.
@@ -165,6 +192,17 @@ def main():
     (root / 'etc/group').write_text('root:x:0:\n')
     (root / 'etc/shadow').write_text('root:!:0:0:99999:7:::\n')
     (root / 'etc/shadow').chmod(0o600)
+    if recovery is not None:
+        for name, value in (('recovery-identity.json', recovery['identity']), ('recovery.json', recovery['runtime'])):
+            path = root / 'etc/orchard' / name
+            path.write_text(json.dumps(value, sort_keys=True) + '\n')
+            path.chmod(0o644)
+        manual = recovery['runtime']['manual_modules']
+        if manual:
+            blacklist = root / 'etc/modprobe.d/orchard-recovery.conf'
+            blacklist.parent.mkdir(parents=True, exist_ok=True)
+            blacklist.write_text(''.join('blacklist ' + name + '\n' for name in manual))
+            blacklist.chmod(0o644)
     print('Public recovery staged:', root)
 
 

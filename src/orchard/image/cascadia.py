@@ -11,8 +11,15 @@ import hashlib
 import json
 from pathlib import Path
 import struct
+import sys
 import tomllib
 import zlib
+
+if __package__:
+    from .. import recovery_identity as identity_protocol
+else:  # The distribution contract also runs this producer by file path.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    import recovery_identity as identity_protocol
 
 
 CONFIG_OFFSET = 0x7f00
@@ -241,7 +248,7 @@ def chosen(data, bootargs, start, size):
     if not isinstance(bootargs, str) or any(char in bootargs for char in ('\0', '\n', '\r')):
         raise ValueError('Kernel arguments must be one line')
     encoded = bootargs.encode('utf-8')
-    if len(encoded) > 2047:
+    if len(encoded) > identity_protocol.MAX_CMDLINE_BYTES:
         raise ValueError('Kernel arguments exceed the ARM command-line bound')
     root, reservations, cpu = read_fdt(data)
     cell_bytes = root['properties'].get('#address-cells', struct.pack('>I', 2))
@@ -265,6 +272,16 @@ def chosen(data, bootargs, start, size):
     properties['linux,initrd-end'] = (start + size).to_bytes(width, 'big')
     reservations.append((start, size))
     return write_fdt(root, reservations, cpu)
+
+
+def _policy_compatible(data, policy):
+    check_compatible(data, policy['compatibles'])
+    tree, _, _ = read_fdt(data)
+    raw = tree['properties']['compatible']
+    if not raw.endswith(b'\0') or b'\0\0' in raw:
+        raise ValueError('Recovery DTB compatible list is incomplete')
+    if raw.split(b'\0')[0].decode('ascii') not in policy['compatibles']:
+        raise ValueError('First DTB compatible differs from the recovery identity policy')
 
 
 def decompression_bound(kernel, dtb_size, described):
@@ -301,7 +318,7 @@ def decompression_bound(kernel, dtb_size, described):
     return bound
 
 
-def assemble(loader, kernel, dtb, initramfs, described, bootargs, *, elf=None):
+def assemble(loader, kernel, dtb, initramfs, described, bootargs, *, elf=None, identity_policy=None):
     validate_profile(described)
     verify_loader(loader, described, elf)
     if (len(kernel) < 0x30 or struct.unpack_from('<I', kernel, 0x24)[0] != 0x016f2818):
@@ -311,6 +328,12 @@ def assemble(loader, kernel, dtb, initramfs, described, bootargs, *, elf=None):
         raise ValueError('zImage length differs from its header or contains appended bytes')
     if not initramfs or len(initramfs) > described['initrd_limit'] - described['initrd_address']:
         raise ValueError('Initramfs exceeds its reserved destination')
+    if identity_policy is not None:
+        policy = identity_protocol.validate_policy(identity_policy)
+        if identity_protocol.parameters(bootargs):
+            raise ValueError('Recovery template already contains identity parameters')
+        _policy_compatible(dtb, policy)
+        bootargs = bootargs + ' ' + identity_protocol.encode_parameter(identity_protocol.POLICY_PARAMETER, policy)
     tree = chosen(dtb, bootargs, described['initrd_address'], len(initramfs))
     expanded_end = decompression_bound(kernel, len(tree), described)
     kernel_at = described['kernel_offset']
@@ -348,6 +371,77 @@ def assemble(loader, kernel, dtb, initramfs, described, bootargs, *, elf=None):
                          'input_loader_sha256': digest(loader), 'input_dtb_sha256': digest(dtb)}
 
 
+def _payload_parts(data):
+    """Validate a CB32 bundle before inspecting or binding its identity."""
+    values = configuration(data)
+    if (values['image_size'] != len(data) or values['kernel_offset'] != 0x8000 or
+            data[:4] != bytes.fromhex('c0000cf1') or
+            values['crc32'] != zlib.crc32(data[CONFIG_OFFSET:CONFIG_OFFSET + CONFIG.size - 4])):
+        raise ValueError('Invalid Cascadia payload configuration')
+    kernel_at, dtb_at, dtb_size = (values[key] for key in ('kernel_offset', 'dtb_offset', 'dtb_size'))
+    initrd_at, initrd_size = values['initrd_offset'], values['initrd_size']
+    if (not kernel_at + 0x3c <= dtb_at < dtb_at + dtb_size <= initrd_at or
+            initrd_at != aligned(dtb_at + dtb_size) or initrd_at + initrd_size != len(data) or
+            any(data[dtb_at + dtb_size:initrd_at])):
+        raise ValueError('Invalid Cascadia payload component ranges')
+    described = {'schema': 1, **{key: values[key] for key in PROFILE_FIELDS - {'schema'}}}
+    validate_profile(described)
+    if values['load_address'] + len(data) > values['initrd_address']:
+        raise ValueError('Cascadia payload overlaps its initramfs destination')
+    tree, _, _ = read_fdt(data[dtb_at:dtb_at + dtb_size])
+    selected = next((child for child in tree['children'] if child['name'] == 'chosen'), None)
+    raw = selected['properties'].get('bootargs', b'') if selected else b''
+    if not raw.endswith(b'\0') or b'\0' in raw[:-1]:
+        raise ValueError('Cascadia payload lacks one complete bootargs value')
+    try:
+        bootargs = raw[:-1].decode('utf-8')
+    except UnicodeError as error:
+        raise ValueError('Cascadia bootargs are not UTF-8') from error
+    return values, described, bootargs
+
+
+def host_identity_policy(data):
+    """Return the declared host-bound recovery policy of an unbound template."""
+    values, _, bootargs = _payload_parts(data)
+    if 'orchard.recovery-' not in bootargs:
+        return None
+    parameters = identity_protocol.parameters(bootargs)
+    if identity_protocol.HANDOFF_PARAMETER in parameters:
+        raise ValueError('A public recovery template already contains an identity handoff')
+    policy = parameters.get(identity_protocol.POLICY_PARAMETER)
+    if policy is None:
+        raise ValueError('Recovery identity parameters lack a policy')
+    start = values['dtb_offset']
+    _policy_compatible(data[start:start + values['dtb_size']], policy)
+    return policy
+
+
+def bind_host_identity(data, *, ecid, chip, board, profile, handoff_id, template_sha256):
+    """Bind a guarded host USB observation to one complete, revalidated bundle."""
+    policy = host_identity_policy(data)
+    if policy is None:
+        raise ValueError('Payload does not declare host-bound recovery identity')
+    if (profile, chip, board) != (policy['profile'], policy['chip'], policy['board']):
+        raise ValueError('Selected device differs from the recovery identity policy')
+    if template_sha256 != digest(data):
+        raise ValueError('Recovery template digest differs before identity binding')
+    handoff = identity_protocol.validate_handoff({'schema': 1, 'source': 'host-usb',
+        'profile': profile, 'ecid': ecid, 'chip': chip, 'board': board,
+        'handoff_id': handoff_id, 'template_sha256': template_sha256})
+    values, described, bootargs = _payload_parts(data)
+    loader = bytearray(data[:values['kernel_offset']])
+    pristine = dict(values)
+    for key in ('dtb_offset', 'dtb_size', 'initrd_offset', 'initrd_size', 'image_size', 'crc32'):
+        pristine[key] = 0
+    loader[CONFIG_OFFSET:CONFIG_OFFSET + CONFIG.size] = CONFIG.pack(*(pristine[key] for key in CONFIG_FIELDS))
+    bootargs += ' ' + identity_protocol.encode_parameter(identity_protocol.HANDOFF_PARAMETER, handoff)
+    output, _ = assemble(bytes(loader), data[values['kernel_offset']:values['dtb_offset']],
+        data[values['dtb_offset']:values['dtb_offset'] + values['dtb_size']],
+        data[values['initrd_offset']:], described, bootargs)
+    _payload_parts(output)
+    return output
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     given = parser.add_mutually_exclusive_group(required=True)
@@ -356,6 +450,7 @@ def main():
     for name in ('loader', 'kernel', 'initramfs', 'profile', 'output'):
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--loader-elf', type=Path)
+    parser.add_argument('--identity-policy', type=Path, help='descriptor-selected public recovery identity policy')
     parser.add_argument('--dtb', action='append', type=Path, required=True)
     parser.add_argument('--logo', type=Path)
     args = parser.parse_args()
@@ -376,7 +471,9 @@ def main():
             bootargs = bootargs[len(prefix):-1]
         data, document = assemble(args.loader.read_bytes(), args.kernel.read_bytes(), args.dtb[0].read_bytes(),
                                   args.initramfs.read_bytes(), profile(args.profile), bootargs,
-                                  elf=args.loader_elf.read_bytes() if args.loader_elf else None)
+                                  elf=args.loader_elf.read_bytes() if args.loader_elf else None,
+                                  identity_policy=identity_protocol.validate_policy(identity_protocol.object_json(args.identity_policy.read_bytes()))
+                                  if args.identity_policy else None)
     except (ValueError, KeyError) as error:
         parser.error(str(error))
     document['profile_sha256'] = digest(args.profile.read_bytes())
