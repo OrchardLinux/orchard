@@ -305,7 +305,7 @@ class RamTests(unittest.TestCase):
 
     def test_mismatched_device_can_boot_after_warning(self):
         self.build()
-        device = dict(mode='pongo', chip=0x8011, board=0x04, ecid=123, location='fake')
+        device = dict(mode='pongo', chip=0x8011, board=0x7e, ecid=123, location='fake')
         for yes in (False, True):
             with self.subTest(yes=yes), \
                     patch('orchard.apple.usb.sole_target', return_value=device), \
@@ -324,8 +324,8 @@ class RamTests(unittest.TestCase):
             self.assertIn('your connected device is not one of them', str(output.call_args_list))
             self.assertIn('until you restart it', str(output.call_args_list))
             self.assertEqual(selected.call_count, 2)
-            selected.assert_any_call('fake', 123, chip=0x8011, board=0x04, mode='pongo')
-            selected.assert_any_call('fake', 123, chip=0x8011, board=0x04)
+            selected.assert_any_call('fake', 123, chip=0x8011, board=0x7e, mode='pongo')
+            selected.assert_any_call('fake', 123, chip=0x8011, board=0x7e)
             upload.assert_called_once()
 
     def test_unknown_payload_profile_warns_but_can_boot(self):
@@ -334,7 +334,7 @@ class RamTests(unittest.TestCase):
         receipt = json.loads(path.read_text())
         receipt['boards'] = ['experimental-unregistered-board']
         path.write_text(json.dumps(receipt))
-        device = dict(mode='pongo', chip=0x8011, board=0x04, ecid=123, location='fake')
+        device = dict(mode='pongo', chip=0x8011, board=0x7e, ecid=123, location='fake')
         with patch('orchard.apple.usb.sole_target', return_value=device), \
                 patch('orchard.apple.usb.selected'), \
                 patch('orchard.transports.pongo.upload') as upload, \
@@ -347,7 +347,7 @@ class RamTests(unittest.TestCase):
 
     def test_mismatched_dfu_boot_tracks_actual_device_through_pongo(self):
         self.build()
-        device = dict(mode='dfu', chip=0x8011, board=0x04, ecid=123, location='fake')
+        device = dict(mode='dfu', chip=0x8011, board=0x7e, ecid=123, location='fake')
         with patch('orchard.apple.usb.sole_target', return_value=device), \
                 patch('orchard.apple.usb.selected') as selected, \
                 patch('orchard.transports.pongo.upload') as upload, \
@@ -358,15 +358,15 @@ class RamTests(unittest.TestCase):
                 patch('builtins.print') as output:
             boot.boot_ram(self.output, yes=True)
         self.assertIn('reconnect the cable', str(output.call_args_list))
-        selected.assert_any_call('fake', 123, chip=0x8011, board=0x04, mode='dfu')
-        selected.assert_any_call('fake', 123, chip=0x8011, board=0x04)
-        wait.assert_called_once_with(device, 'pongo', chip=0x8011, board=0x04, product='', seconds=60)
+        selected.assert_any_call('fake', 123, chip=0x8011, board=0x7e, mode='dfu')
+        selected.assert_any_call('fake', 123, chip=0x8011, board=0x7e)
+        wait.assert_called_once_with(device, 'pongo', chip=0x8011, board=0x7e, product='', seconds=60)
         execute.assert_called_once()
         upload.assert_called_once()
 
     def test_mismatch_refusal_stops_before_usb_mutation(self):
         self.build()
-        device = dict(mode='pongo', chip=0x8011, board=0x04, ecid=123, location='fake')
+        device = dict(mode='pongo', chip=0x8011, board=0x7e, ecid=123, location='fake')
         with patch('orchard.apple.usb.sole_target', return_value=device), \
                 patch('orchard.apple.usb.selected') as selected, \
                 patch('orchard.transports.pongo.upload') as upload, \
@@ -379,7 +379,7 @@ class RamTests(unittest.TestCase):
 
     def test_yes_still_requires_exactly_one_device(self):
         self.build()
-        device = dict(mode='pongo', chip=0x8011, board=0x04, ecid=123, location='fake')
+        device = dict(mode='pongo', chip=0x8011, board=0x7e, ecid=123, location='fake')
         with patch('orchard.apple.usb.devices', return_value=[device, dict(device, ecid=456)]), \
                 patch('orchard.transports.pongo.upload') as upload, \
                 patch('orchard.state.operation_lock', return_value=nullcontext()), \
@@ -389,7 +389,7 @@ class RamTests(unittest.TestCase):
 
     def test_mismatched_device_identity_change_still_stops_upload(self):
         self.build()
-        device = dict(mode='pongo', chip=0x8011, board=0x04, ecid=123, location='fake')
+        device = dict(mode='pongo', chip=0x8011, board=0x7e, ecid=123, location='fake')
         with patch('orchard.apple.usb.sole_target', return_value=device), \
                 patch('orchard.apple.usb.selected', side_effect=ValueError('Wrong device identity')), \
                 patch('orchard.transports.pongo.upload') as upload, \

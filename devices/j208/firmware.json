@@ -1,0 +1,20 @@
+{
+  "schema": 2,
+  "device": "iPad7,4",
+  "ipsw": {
+    "version": "17.7.11",
+    "build": "21H461",
+    "url": "https://updates.cdn-apple.com/2025SpringFCS/fullrestores/122-77166/DCA6CFE8-90E9-4B92-880D-3DE171798E40/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw",
+    "bytes": 6835124840,
+    "sha256": "c84ad24b6981a859eec499b1802be9ac593acfd3dc0a185a76d06e4d767a1451"
+  },
+  "inputs": {
+    "DeviceTree.im4p": {
+      "ipsw": {
+        "zip": "Firmware/all_flash/DeviceTree.j208ap.im4p"
+      },
+      "sha256": "e01305edf26bfd3b8368fb47a9fdb8b91533677f38366ece720183e8e5943018"
+    }
+  },
+  "outputs": []
+}

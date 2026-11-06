@@ -1,0 +1,20 @@
+{
+  "schema": 2,
+  "device": "iPad6,8",
+  "ipsw": {
+    "version": "16.7.16",
+    "build": "20H392",
+    "url": "https://updates.cdn-apple.com/2025FallFCS/fullrestores/122-77150/627F6C0C-E3B9-4601-A438-E7A3C2401848/iPadPro_12.9_16.7.16_20H392_Restore.ipsw",
+    "bytes": 5547711023,
+    "sha256": "6d7dae731af949e1c730cd07ec5106f8db459b8ce7409222a7505452bb50b85a"
+  },
+  "inputs": {
+    "DeviceTree.im4p": {
+      "ipsw": {
+        "zip": "Firmware/all_flash/DeviceTree.j99aap.im4p"
+      },
+      "sha256": "1c284d10098a2b76236275cdc09858b6bb7e621f16c037b66dfc995a933c456c"
+    }
+  },
+  "outputs": []
+}

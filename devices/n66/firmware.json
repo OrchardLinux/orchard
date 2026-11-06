@@ -1,0 +1,20 @@
+{
+  "schema": 2,
+  "device": "iPhone8,2",
+  "ipsw": {
+    "version": "15.8.8",
+    "build": "19H422",
+    "url": "https://updates.cdn-apple.com/2025FallFCS/fullrestores/122-77536/9EE30DC1-EC4B-47CE-A002-24CD6B18947D/iPhone_5.5_15.8.8_19H422_Restore.ipsw",
+    "bytes": 5427724348,
+    "sha256": "bfa590392f10d4b4c7600921f8c3158e861bd2680d9e188351f478b54406332b"
+  },
+  "inputs": {
+    "DeviceTree.im4p": {
+      "ipsw": {
+        "zip": "Firmware/all_flash/DeviceTree.n66ap.im4p"
+      },
+      "sha256": "3e5d36cbe1951d25e6f44e6d71088c1bb00c174e15df440109c92d9682fe173b"
+    }
+  },
+  "outputs": []
+}

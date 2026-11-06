@@ -1,0 +1,20 @@
+{
+  "schema": 2,
+  "device": "iPad5,1",
+  "ipsw": {
+    "version": "15.8.8",
+    "build": "19H422",
+    "url": "https://updates.cdn-apple.com/2025FallFCS/fullrestores/122-77369/9704B32E-FACF-4595-93E4-E35EDD25E793/iPad_64bit_TouchID_15.8.8_19H422_Restore.ipsw",
+    "bytes": 5046203202,
+    "sha256": "4de5c8c453328205b1e741faae218ee0f7848993334ff77f690c5a64a765a623"
+  },
+  "inputs": {
+    "DeviceTree.im4p": {
+      "ipsw": {
+        "zip": "Firmware/all_flash/DeviceTree.j96ap.im4p"
+      },
+      "sha256": "25490e39397732522e96cdc7dc66764e8cf6994b0a444eaa88a755049857e354"
+    }
+  },
+  "outputs": []
+}
