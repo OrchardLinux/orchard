@@ -19,13 +19,10 @@ Assisted-by: LLM
  1 file changed, 18 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/usb/dwc2/gadget.c b/drivers/usb/dwc2/gadget.c
-index 81dea78f0a45..a8d1498aee9c 100644
+index 81dea78f0a45..afe0e659b513 100644
 --- a/drivers/usb/dwc2/gadget.c
 +++ b/drivers/usb/dwc2/gadget.c
-@@ -1745,6 +1745,17 @@ static struct dwc2_hsotg_req *get_ep_head(struct dwc2_hsotg_ep *hs_ep)
-  * in its handler. Hence we need to unmask it here to be able to do
-  * resynchronization.
-  */
+@@ -1738,3 +1738,14 @@ static struct dwc2_hsotg_req *get_ep_head(struct dwc2_hsotg_ep *hs_ep)
 +/*
 + * The core takes OUT packets into the receive FIFO shared by all OUT endpoints
 + * even with no transfer programmed. They then stay at its head, and every OUT
@@ -37,10 +34,10 @@ index 81dea78f0a45..a8d1498aee9c 100644
 +		dwc2_set_bit(hsotg, DOEPCTL(hs_ep->index), DXEPCTL_SNAK);
 +}
 +
- static void dwc2_gadget_start_next_request(struct dwc2_hsotg_ep *hs_ep)
- {
- 	struct dwc2_hsotg *hsotg = hs_ep->parent;
-@@ -1756,8 +1767,10 @@ static void dwc2_gadget_start_next_request(struct dwc2_hsotg_ep *hs_ep)
+ /**
+  * dwc2_gadget_start_next_request - Starts next request from ep queue
+  * @hs_ep: Endpoint structure
+@@ -1754,8 +1765,10 @@ static void dwc2_gadget_start_next_request(struct dwc2_hsotg_ep *hs_ep)
  		dwc2_hsotg_start_req(hsotg, hs_ep, hs_req, false);
  		return;
  	}
@@ -52,7 +49,7 @@ index 81dea78f0a45..a8d1498aee9c 100644
  
  	if (dir_in) {
  		dev_dbg(hsotg->dev, "%s: No more ISOC-IN requests\n",
-@@ -4106,6 +4119,10 @@ static int dwc2_hsotg_ep_enable(struct usb_ep *ep,
+@@ -4103,6 +4116,10 @@ static int dwc2_hsotg_ep_enable(struct usb_ep *ep,
  	 */
  	epctrl |= DXEPCTL_USBACTEP;
  
