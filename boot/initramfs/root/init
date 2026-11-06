@@ -7,9 +7,14 @@ export PATH=/bin
 mount -t proc -o nodev,noexec,nosuid proc /proc
 mount -t sysfs -o nodev,noexec,nosuid sysfs /sys
 mount -t devtmpfs -o mode=0755,nosuid dev /dev
-mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run
-mkdir -p /dev/pts
-mount -t devpts -o mode=0620,ptmxmode=0666 devpts /dev/pts
+# The install add-on owns its RAM mounts and USB session until it returns.
+install_boot=
+[ ! -e /install/run ] || install_boot=1
+if [ -z "$install_boot" ]; then
+    mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run
+    mkdir -p /dev/pts
+    mount -t devpts -o mode=0620,ptmxmode=0666 devpts /dev/pts
+fi
 exec </dev/console >/dev/console 2>&1
 
 # Available before storage discovery, so a rejected header pair leaves USB
@@ -34,7 +39,7 @@ usb_gadget() {
     basename "$(ls -d /sys/class/udc/* | head -1)" > "$g/UDC"
 }
 rescue_pid= dhcp_pid=
-if [ -x /bin/orchard-lwvm ]; then
+if [ -x /bin/orchard-lwvm ] && [ -z "$install_boot" ]; then
     usb_gadget || echo 'orchard initrd: USB gadget setup failed; console recovery remains available'
     mkdir -p /run/recovery /run/orchard/rescue
     chmod 700 /run/orchard /run/orchard/rescue
@@ -157,10 +162,12 @@ fi
 shell_pid=$(cat /run/orchard/rescue/shell.pid 2>/dev/null)
 ssh_pid=$(cat /run/recovery/dropbear.pid 2>/dev/null)
 moved=
-for name in dev proc sys run; do
+handoff_mounts='dev proc sys'
+[ -n "$install_boot" ] || handoff_mounts="$handoff_mounts run"
+for name in $handoff_mounts; do
     mkdir -p "/newroot/$name" || stop "the root lacks /$name"
 done
-for name in dev proc sys run; do
+for name in $handoff_mounts; do
     if ! mount --move "/$name" "/newroot/$name"; then
         for previous in $moved; do
             mount --move "/newroot/$previous" "/$previous" || true
