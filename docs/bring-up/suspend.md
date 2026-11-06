@@ -67,6 +67,11 @@ iPad 7), so during sleep it is the only charger event left unmasked. Because no
 source change can pass unnoticed, an identified charger keeps its limit across
 sleep. A USB host may be asleep as well and parks at the handoff.
 
+Seen on the iPad 6 (J71b) on 2026-11-07: a sleep of about 5 minutes on a wall
+charger, then waking on unplug and on plug, with the screen lighting by itself.
+The charge rate during sleep was not recorded, and neither was USB data coming
+back on a Mac after the test.
+
 ## Bringing up another board
 
 1. **Domains.** In the board's DT, find the domain of the GPIO controller the

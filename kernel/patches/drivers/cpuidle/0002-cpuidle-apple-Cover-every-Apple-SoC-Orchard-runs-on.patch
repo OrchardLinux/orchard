@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sat, 7 Nov 2026 00:17:52 +0800
+Subject: [PATCH] cpuidle: apple: Cover every Apple SoC Orchard runs on
+
+Without this driver suspend-to-idle looks fine and keeps the tick and
+CLOCK_MONOTONIC running, so any sleep over three minutes kills the service
+watchdogs on wake. The states are the WFI these SoCs already idle in. Build
+it for the 4K platform as well. Tested only on T8010.
+
+Assisted-by: LLM
+---
+ drivers/cpuidle/cpuidle-apple.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/cpuidle/cpuidle-apple.c b/drivers/cpuidle/cpuidle-apple.c
+index 94a103d05a66..f782bf2f0c7f 100644
+--- a/drivers/cpuidle/cpuidle-apple.c
++++ b/drivers/cpuidle/cpuidle-apple.c
+@@ -48,9 +48,17 @@ static struct cpuidle_driver apple_cpuidle_driver = {
+ 	.state_count = 2,
+ };
+ 
+-/* The SoCs whose suspend-to-idle has been tested with this. */
++/* WFI is what these SoCs idle in anyway, so this asks nothing new of them. */
+ static const char *const apple_cpuidle_socs[] __initconst = {
++	"apple,s5l8960x",
++	"apple,t7000",
++	"apple,t7001",
++	"apple,s8000",
++	"apple,s8003",
++	"apple,s8001",
+ 	"apple,t8010",
++	"apple,t8011",
++	"apple,t8015",
+ 	NULL
+ };
+ 
