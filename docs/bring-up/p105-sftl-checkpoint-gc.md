@@ -5,8 +5,9 @@ The kernel draft on
 at `c504eae2a214915dcf5d2c4856c52e7a6ac79d2d` stacks on the append writer at
 `c63274165870417f01cc3e1264067cef71d9c0b2`. It supplies an offline checkpoint
 encoder and GC transaction planner. Kernel patches follow Orchard's
-platform-scoped export workflow; exact-revision hardware qualification remains
-pending.
+platform-scoped export workflow. MTD patches 0009 and 0010 select only
+`apple-armv7`; applying them to the append-writer source reproduces this
+branch exactly. Exact-revision hardware qualification remains pending.
 
 The snapshot contains all 15,625,016 logical keys, including the sixteen
 internal keys beyond the exported disk. The encoder preserves opaque native
