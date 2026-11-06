@@ -117,10 +117,35 @@ The CLI used to do that; it isn't needed for recipes any more.
 | `z2fw-from-mtprops@2` | `input`, `profile`, `packet` | Z2 touch firmware from an mtprops packet array (iPhone 7 Plus) |
 | `z2fw-from-mtprops@3` | `input`, `profile`, `packet`, `touch_maximum`, `prox_maximum`, `fll_mval`, `ref_clk_div`, `clk32_clock_enable` | Legacy Gen1 Z2 touch firmware (iPhone 6), with full word counts, bounded calibration from the ADT and the board's kernel clock policy |
 | `z2fw-from-mtfw@1` | `profile`, `otp_preflight` | Z2 touch firmware from an MTFW HBPP item list (iPad 7); each calibration loads Apple's default, then its record |
+| `hidspi-from-mtfw@1` | `profile` | the op list `apple_hidspi_ts` replays, from the MTFW of a HIDSPI controller (iPhone X); calibrations are named, not loaded |
 
 Before it extracts anything, the CLI checks that it implements every step a
 recipe uses. If not, it asks for an Orchard update. New devices that reuse
 known steps need only a hardware update.
+
+## Firmware variants
+
+Some firmware comes in variants, and which one a device needs can differ from
+unit to unit of the same model. Those units select it the same way everywhere:
+
+1. The recipe installs every variant a unit could ask for, each under its own
+   file name. Apple's public files are enough for this; no device is needed.
+2. m1n1 reads what the unit asks for from its ADT and passes it to the kernel
+   in the device tree.
+3. The driver builds the file name from that and loads the file. Nothing
+   chooses a variant by guessing.
+4. If the file isn't there, the feature stays off and the log names the
+   variant that's missing. A unit never gets a different variant's firmware.
+
+Wi-Fi works this way (brcmfmac: `module-instance`, vendor and antenna values),
+and so does the iPhone X touchscreen (`hid-merge-personality`, file
+`apple/d221-touch-<variant>.bin`).
+
+So adding a variant is one more output in the recipe, with no kernel change. A
+contribution delivers what it tested and doesn't have to cover other units, but
+it must leave the rest visible: what's untested is written down in the device
+data, and it doesn't drop a fallback Apple provides, such as the default values
+in a touch firmware.
 
 ## Legacy Gen1 clock policy
 

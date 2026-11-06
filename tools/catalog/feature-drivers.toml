@@ -2,9 +2,9 @@
 # kernel looks for an enabled device tree node bound by one of these.
 # "driver:property" also needs that property on the node.
 # Features with nothing to look for (display, suspend, Touch ID...) aren't listed.
-touch = ["apple_z2"]
+touch = ["apple_z2", "apple_hidspi_ts"]
 buttons = ["gpio_keys"]
-backlight = ["apple_dwi_bl", "apple_pmic_bl"]
+backlight = ["apple_dwi_bl", "apple_pmic_bl", "apple_dsi_bl"]
 accelerometer = ["apple_aop_accel"]
 light_sensor = ["tsl2583"]
 storage_read = ["nvme_apple", "pcie_apple_h9p:apple,nvme-hmb"]

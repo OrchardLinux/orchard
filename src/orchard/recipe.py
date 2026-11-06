@@ -75,6 +75,11 @@ def _z2fw_gen1(step, data, expected):
     return output
 
 
+def _hidspi_mtfw(step, data, expected):
+    output, _ = z2fw.convert_hidspi_mtfw(apple_xml(data), step['profile'])
+    return output
+
+
 def _z2fw_mtfw(step, data, expected):
     output, _ = z2fw.convert_mtfw(apple_xml(data), step['profile'], otp_preflight=step['otp_preflight'])
     return output
@@ -106,6 +111,8 @@ STEPS = {
                                       'fll_mval': int, 'ref_clk_div': int, 'clk32_clock_enable': int}),
     # MTFW (IM4P payload) with HBPP load items per personality (iPad 7), makez2fw's layout.
     'z2fw-from-mtfw@1': (_z2fw_mtfw, {'profile': str, 'otp_preflight': bool}),
+    # MTFW (IM4P payload) of a HIDSPI controller (iPhone X), apple_hidspi_ts's op list.
+    'hidspi-from-mtfw@1': (_hidspi_mtfw, {'profile': str}),
 }
 
 
