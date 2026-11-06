@@ -267,7 +267,7 @@ def install_direct(adapter, device, name, files, firmware_files, boot_files, cha
             progress.mark('Root mounted')
             replaced = (plan.get('remove') or {}).get('partuuid')
             plan['present'] = [p['partuuid'] for p in partitions if p['partuuid'] != replaced]
-            remote.put(connection, remote.SCRIPT.read_bytes(), remote.SCRIPT.name)
+            remote.put_scripts(connection)
             remote.put(connection, json.dumps(plan).encode(), 'plan.json')
             if secrets is not None:
                 remote.put(connection, json.dumps(secrets).encode(), 'secrets.json')
@@ -313,6 +313,15 @@ def install(manifest=None, *, input_fn=input, secrets_fn=ask_secrets, progress=N
                          f'{"; ".join(adapter.INSTALL_BLOCKERS)}.{ram}')
     source = manifest or default_manifest(adapter.PROFILE)
     document = select_manifest(source, adapter.PROFILE, None, clock)[0]
+    if installs_directly(document):
+        if hfs_shrink_proof is not None:
+            raise ValueError('HFS shrink proof requires a release with a recovery image; '
+                             'block-image installation on LwVM is unavailable')
+        from . import hardware
+        methods = hardware.device(adapter.PROFILE).get('boot', {}).get('methods', [])
+        if document.get('boot_method') != 'checkm8-pongo' or 'checkm8-pongo' not in methods:
+            raise ValueError('Block-image installation is unavailable for this boot method; '
+                             'use a release with a recovery image')
     name = document.get('name', 'Linux')
     # What the chain needs to start: only when it will run from DFU.
     chain = adapter.boot_inputs() if device.get('mode') == 'dfu' else []

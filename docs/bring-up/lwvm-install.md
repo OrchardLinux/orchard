@@ -5,6 +5,14 @@ The installer can prepare a Linux root above the kernel's logical
 view of the Linux descriptor. NAND addressing, ECC, FTL replay and page
 programming belong to the kernel storage driver.
 
+This path installs releases that carry a recovery image and a root archive.
+Orchard also supports block-image releases through its GPT/Pongo installer.
+The ARMv7 LwVM path refuses those releases before boot or target selection.
+Supplying `--hfs-shrink-proof` with a block-image release also stops. A live
+LwVM signature on an explicitly selected disk is rejected before GPT table
+writes. The normal-kernel block-image installer still needs its own ARMv7
+payload, identity and LwVM integration.
+
 The public P105 install capability remains gated. This source has synthetic
 host coverage. The current ARMv7 candidate still needs device qualification
 of the complete writable backend, reclamation and recovery from an

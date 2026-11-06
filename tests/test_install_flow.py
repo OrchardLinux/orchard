@@ -11,8 +11,8 @@ from unittest.mock import Mock, patch
 
 from orchard import install_remote
 from orchard.contracts import Connection
-from orchard.progress import Progress
-from orchard.service import install
+from orchard.progress import Clock, Progress
+from orchard.service import install, install_direct
 from orchard.state import BootState, DeviceState
 
 BOOT = '11111111-1111-4111-8111-111111111111'
@@ -220,6 +220,94 @@ class InstallFlow(unittest.TestCase):
                         'partuuid': '00000000-0000-4000-8000-000000000001'}], [])
         with self.assertRaisesRegex(ValueError, 'never resizes iPadOS'):
             self.run_install(disk, [''])
+
+
+class FormatDispatch(unittest.TestCase):
+    def test_direct_finish_receives_the_matching_support_bundle_before_chroot(self):
+        from orchard import install_direct as direct
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            for name in ('root', 'layer', 'mixin', 'pongo', 'm1n1'):
+                (work / name).write_bytes(name.encode())
+            (work / 'map').write_text(json.dumps({'ranges': [[0, 1]]}))
+            assets = {name: work / name for name in ('root', 'layer', 'pongo', 'm1n1', 'map')}
+            assets['install_tools'] = work / 'install-tools'
+            record = {'release': 'fixture', 'assets': {
+                name: {'bytes': 1, 'sha256': 'a' * 64, 'expanded_bytes': 4096}
+                for name in ('root', 'layer')}}
+            ready = Mock()
+            ready.result.return_value = record, assets
+            adapter = Mock(PROFILE='j71b', DEVICETREE='t8010-j71b.dtb')
+            adapter.prepare_mixin.return_value = work / 'mixin', {'bytes': 5, 'sha256': 'b' * 64}
+            connection = Connection(['fixture-ssh'], SCOPE, lambda: None)
+            uploads = {}
+
+            def finish(inside, args, **kwargs):
+                self.assertEqual(args, ['finish', '/run/orchard/plan.json'])
+                self.assertEqual(inside.argv, ['fixture-ssh', 'chroot /newroot'])
+                for path in (*install_remote.SUPPORT_SCRIPTS, install_remote.SCRIPT):
+                    self.assertEqual(uploads[path.name], path.read_bytes())
+                return [{'event': 'finished'}]
+
+            with patch('orchard.state.cache_root', return_value=work / 'state'), \
+                 patch.object(direct, 'link_local_interfaces', return_value=set()), \
+                 patch.object(direct, 'make_keys', return_value=(work / 'client', 'HOST', 'KEY', b'HOST')), \
+                 patch.object(direct, 'add_on', return_value=b'ADDON'), \
+                 patch.object(direct, 'payload', return_value=b'PAYLOAD'), \
+                 patch.object(direct, 'session') as session, \
+                 patch.object(direct, 'inspect', return_value=layout([], [{'start': 256, 'blocks': 20 * GIB // 4096}])), \
+                 patch.object(direct, 'write_partitions', side_effect=lambda _, plan, __:
+                              ({plan['root']['partuuid']: '/dev/fixture2', plan['boot']['partuuid']: '/dev/fixture1'}, [])), \
+                 patch.object(direct.D, 'fat32_regions', return_value=[]), \
+                 patch.object(direct, 'stream_image', return_value={}), \
+                 patch.object(direct, 'grow'), patch.object(direct, 'mount_new_root'), \
+                 patch.object(direct, 'unmount_new_root'), patch.object(direct, 'shell', return_value=b''), \
+                 patch.object(install_remote, 'put', side_effect=lambda _, data, name, **kw: uploads.update({name: data})), \
+                 patch.object(install_remote, 'run', side_effect=finish):
+                session.return_value.__enter__.return_value = connection
+                report = install_direct(adapter, {'ecid': 1, 'resumed': False}, 'Fixture', ready, ready,
+                                        ready, [], None, None, clock=Clock(),
+                                        input_fn=lambda _: '', secrets_fn=Mock(), progress=Progress(io.StringIO()))
+            self.assertTrue(report['installed'])
+
+    def test_unsupported_blocks_stop_before_boot_download_or_target_selection(self):
+        for profile, method, proof in (('p105', 'recovery-autogo', None),
+                                       ('j71b', 'checkm8-pongo', 'private-proof.json')):
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as directory:
+                adapter = Mock(PROFILE=profile, INSTALL=True)
+                document = {'root': {'format': 'blocks'}, 'boot_method': method}
+                with patch('orchard.state.cache_root', return_value=Path(directory)), \
+                     patch('orchard.service.choose', return_value=(adapter, {'mode': 'dfu', 'ecid': 1})), \
+                     patch('orchard.service.select_manifest', return_value=(document, None)), \
+                     patch('orchard.service.Background') as background, \
+                     patch('orchard.service.install_direct') as direct, \
+                     patch('orchard.service.choose_target') as target:
+                    with self.assertRaisesRegex(ValueError, 'recovery image'):
+                        install('release.toml', hfs_shrink_proof=proof,
+                                input_fn=Mock(side_effect=AssertionError('unexpected question')),
+                                progress=Progress(io.StringIO()))
+                background.assert_not_called()
+                direct.assert_not_called()
+                target.assert_not_called()
+                adapter.boot_inputs.assert_not_called()
+                adapter.boot.assert_not_called()
+                adapter.connect.assert_not_called()
+
+    def test_supported_block_release_retains_the_upstream_direct_dispatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = Mock(PROFILE='j71b', INSTALL=True, NAME='iPad', FEATURES={}, STATUS='supported')
+            adapter.firmware_cached.return_value = True
+            document = {'root': {'format': 'blocks'}, 'boot_method': 'checkm8-pongo'}
+            with patch('orchard.state.cache_root', return_value=Path(directory)), \
+                 patch('orchard.service.choose', return_value=(adapter, {'mode': 'linux', 'ecid': 1})), \
+                 patch('orchard.service.select_manifest', return_value=(document, None)), \
+                 patch('orchard.service.needs_download', return_value=False), \
+                 patch('orchard.service.Background'), \
+                 patch('orchard.service.install_direct', return_value={'direct': True}) as direct:
+                self.assertEqual(install('release.toml', input_fn=lambda _: '',
+                                         progress=Progress(io.StringIO())), {'direct': True})
+            direct.assert_called_once()
+            adapter.boot.assert_not_called()
 
 
 if __name__ == '__main__':

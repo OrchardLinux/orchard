@@ -93,6 +93,21 @@ class Payload(unittest.TestCase):
 
 
 class Inspection(unittest.TestCase):
+    def test_explicit_lwvm_disk_is_refused_before_gpt_reads_or_writes(self):
+        connection = unittest.mock.Mock(argv=['fixture-ssh'])
+        prefix = bytes.fromhex('6a9088cf8afd630ae351e24887e0b98b').ljust(BLOCK, b'\0')
+        with unittest.mock.patch.object(direct.subprocess, 'run',
+                                        return_value=unittest.mock.Mock(returncode=0, stdout=b'4096')), \
+             unittest.mock.patch.object(direct, 'read_disk', return_value=prefix) as read, \
+             unittest.mock.patch.object(direct, 'new_tables') as tables, \
+             unittest.mock.patch.object(direct, 'write_at') as write:
+            with self.assertRaisesRegex(D.InstallError, 'LwVM') as error:
+                direct.write_partitions(connection, {}, '/dev/applesftl0')
+        self.assertEqual(error.exception.code, 'lwvm-block-image')
+        read.assert_called_once_with(connection, '/dev/applesftl0', 0, BLOCK, BLOCK)
+        tables.assert_not_called()
+        write.assert_not_called()
+
     def test_the_installers_system_starts_with_this_computers_keys_and_writes_nothing(self):
         with tempfile.TemporaryDirectory() as temporary:
             work = Path(temporary)
