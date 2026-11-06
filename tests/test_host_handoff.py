@@ -128,8 +128,10 @@ class CompletedHandoff(unittest.TestCase):
         self.path = folder / (NONCE + '.json')
         self.record = {'schema': 1, 'method': 'recovery-autogo', 'phase': 'complete',
                        'payload_format': 'cascadia-cb32', 'profile': 'p105', 'ecid': 123,
-                       'boot_id': BOOT, 'loader_bytes': cascadia.CONFIG_AT + cascadia.CONFIG.size,
-                       'loader_sha256': 'b' * 64, **self.handoff.fields()}
+                       'boot_id': BOOT, 'loader_bytes': cascadia.LOADER_TRIGGER_BYTES,
+                       'loader_sha256': 'b' * 64,
+                       'inter_upload_settle_seconds': cascadia.RECOVERY_REARM_SECONDS,
+                       'loader_revalidated': True, **self.handoff.fields()}
 
     def save(self):
         self.path.write_text(json.dumps(self.record))
@@ -145,6 +147,9 @@ class CompletedHandoff(unittest.TestCase):
             cascadia.recovery_handoff('p105', self.endpoint)
         for change in ({'phase': 'awaiting-linux'}, {'identity_source': 'adt'}, {'handoff_id': 'f' * 32},
                        {'ecid': 124}, {'profile': 'j71b'}, {'loader_bytes': 0x8000},
+                       {'inter_upload_settle_seconds': 0.5},
+                       {'inter_upload_settle_seconds': 1}, {'loader_revalidated': False},
+                       {'loader_revalidated': 1}, {'loader_revalidated': 'true'},
                        {'loader_sha256': 'B' * 64},
                        {'boot_id': '22222222-2222-4222-8222-222222222222'}):
             original = self.record
@@ -153,7 +158,8 @@ class CompletedHandoff(unittest.TestCase):
             with self.subTest(change=change), self.assertRaisesRegex(ValueError, 'handoff receipt'):
                 cascadia.recovery_handoff('p105', self.endpoint)
             self.record = original
-        for field in ('loader_bytes', 'loader_sha256'):
+        for field in ('loader_bytes', 'loader_sha256', 'inter_upload_settle_seconds',
+                      'loader_revalidated'):
             original = self.record
             self.record = dict(original)
             del self.record[field]

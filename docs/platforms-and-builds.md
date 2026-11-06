@@ -494,8 +494,11 @@ Project Cascadia's chain, as shaynelegault ran it on a P105:
    unencrypted: after iOS has booted, the GID key is unavailable.
 3. **iBEC with an auto-go hook** at fixed offsets of the iOS 8.4.1 (12H321)
    iBEC. The host uploads the complete bound bundle, followed by its exact
-   checked loader prefix. The small second upload makes iBEC enter the bundle
-   already stored at `0x80000000`.
+   checked loader prefix. It leaves at least one second for the Recovery
+   endpoint to rearm and rechecks the exact device between those uploads. The
+   small second upload covers the loader code while retaining the bound
+   configuration from the full bundle, then makes iBEC enter the image already
+   stored at `0x80000000`.
 4. **Staging bundle** at `0x80000000`: the `linux_boot` trampoline paints
    status and turns MMU and caches off. Padding reaches `0x8000`, followed by
    `zImage` with the DTB appended and entry at `0x80008000`. Current Orchard

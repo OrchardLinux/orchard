@@ -129,8 +129,16 @@ class PayloadTests(unittest.TestCase):
     def test_loader_trigger_is_the_exact_sub_packet_bundle_prefix(self):
         data = payload()
         trigger = cascadia.loader_trigger(data)
-        self.assertEqual(trigger, data[:cascadia.CONFIG_AT + cascadia.CONFIG.size])
+        self.assertEqual(trigger, data[:cascadia.LOADER_TRIGGER_BYTES])
+        self.assertEqual(len(trigger), 0x6001)
+        self.assertLess(len(trigger), cascadia.CONFIG_AT)
         self.assertLess(len(trigger), cascadia.AUTOGO_TRIGGER_LIMIT)
+        self.assertNotEqual(data[cascadia.CONFIG_AT:cascadia.CONFIG_AT + 4], bytes(4))
+        for offset in (cascadia.LOADER_CODE_LIMIT, cascadia.CONFIG_AT - 1):
+            gap = bytearray(data)
+            gap[offset] = 1
+            with self.subTest(offset=offset), self.assertRaisesRegex(ValueError, 'bundle prefix'):
+                cascadia.loader_trigger(gap)
         with self.assertRaisesRegex(ValueError, 'bundle prefix'):
             cascadia.loader_trigger(data, trigger[:-1])
         with self.assertRaisesRegex(ValueError, 'bundle prefix'):
@@ -184,6 +192,7 @@ class TransportTests(unittest.TestCase):
             patch.object(cascadia.usb, 'devices', return_value=[self.endpoint]),
             patch.object(cascadia.subprocess, 'run', return_value=Mock(returncode=0, stdout=b'100%')),
             patch.object(cascadia.payload_image, 'host_identity_policy', return_value=None, create=True),
+            patch.object(cascadia, 'settle_recovery', return_value=({'pwned': True}, {'mode': 'recovery'})),
         ]
         self.mocks = [item.start() for item in self.patches]
         for item in self.patches:
@@ -202,8 +211,54 @@ class TransportTests(unittest.TestCase):
         self.assertTrue(self.device['resumed'])
         receipts = list(self.attempts.glob('*.json'))
         self.assertEqual(len(receipts), 1)
-        self.assertEqual(json.loads(receipts[0].read_text())['phase'], 'complete')
+        record = json.loads(receipts[0].read_text())
+        self.assertEqual(record['phase'], 'complete')
+        self.assertEqual(record['inter_upload_settle_seconds'], cascadia.RECOVERY_REARM_SECONDS)
+        self.assertIs(record['loader_revalidated'], True)
+        self.assertEqual(self.mocks[8].call_count, 1)
         self.assertFalse(list(self.attempts.glob('*-loader.bin')))
+
+    def test_bundle_settle_revalidation_receipt_and_trigger_are_ordered(self):
+        events = []
+        recovery_state = []
+        real_save = cascadia.save
+
+        def saving(path, record):
+            real_save(path, record)
+            if record['phase'] in ('loader-settle', 'loader-upload-outcome-unknown'):
+                events.append(('receipt', record['phase'], record['loader_revalidated']))
+
+        def settling(device, executable, *, product):
+            recovery_state.append(dict(device))
+            events.append(('settle', executable, product))
+            return {'pwned': True}, {'mode': 'recovery'}
+
+        def sending(argv, **kwargs):
+            uploaded = Path(argv[-1])
+            if not events:
+                events.append(('upload', 'bundle', len(uploaded.read_bytes())))
+            else:
+                record = json.loads(next(self.attempts.glob('*.json')).read_text())
+                events.append(('upload', 'loader', record['phase'],
+                               record['loader_revalidated'], len(uploaded.read_bytes())))
+            return Mock(returncode=0, stdout=b'100%')
+
+        self.mocks[6].side_effect = sending
+        self.mocks[8].side_effect = settling
+        with patch.object(cascadia, 'save', side_effect=saving):
+            self.run_boot()
+        self.assertEqual(events, [
+            ('upload', 'bundle', len(self.data)),
+            ('receipt', 'loader-settle', False),
+            ('settle', 'irecovery', 'Synthetic1,1'),
+            ('receipt', 'loader-upload-outcome-unknown', True),
+            ('upload', 'loader', 'loader-upload-outcome-unknown', True,
+             cascadia.LOADER_TRIGGER_BYTES),
+        ])
+        self.assertEqual(recovery_state, [{
+            'mode': 'recovery', 'ecid': 123, 'chip': 0x8942, 'board': 10,
+            'location': 456, 'resumed': False,
+        }])
 
     def test_zlp_length_stops_before_device_selection_or_upload(self):
         extra = -len(self.data) % cascadia.RECOVERY_PACKET_BYTES
@@ -241,8 +296,26 @@ class TransportTests(unittest.TestCase):
         receipt = next(self.attempts.glob('*.json'))
         record = json.loads(receipt.read_text())
         self.assertEqual(record['phase'], 'loader-upload-outcome-unknown')
-        self.assertEqual(record['loader_bytes'], cascadia.CONFIG_AT + cascadia.CONFIG.size)
+        self.assertEqual(record['loader_bytes'], cascadia.LOADER_TRIGGER_BYTES)
         self.assertEqual(record['loader_sha256'], hashlib.sha256(cascadia.loader_trigger(self.data)).hexdigest())
+
+    def test_settle_failure_stops_before_loader_and_retains_durable_phase(self):
+        def fail_after_checking_receipt(*args, **kwargs):
+            receipt = next(self.attempts.glob('*.json'))
+            record = json.loads(receipt.read_text())
+            self.assertEqual(record['phase'], 'loader-settle')
+            self.assertEqual(record['inter_upload_settle_seconds'], cascadia.RECOVERY_REARM_SECONDS)
+            self.assertIs(record['loader_revalidated'], False)
+            self.assertEqual(self.mocks[6].call_count, 1)
+            raise ValueError('identity changed after settle')
+
+        self.mocks[8].side_effect = fail_after_checking_receipt
+        with self.assertRaisesRegex(ValueError, 'identity changed after settle'):
+            self.run_boot()
+        self.assertEqual(self.mocks[6].call_count, 1)
+        record = json.loads(next(self.attempts.glob('*.json')).read_text())
+        self.assertEqual(record['phase'], 'loader-settle')
+        self.assertIs(record['loader_revalidated'], False)
 
     def test_failed_ibec_upload_is_not_repeated(self):
         self.device['mode'] = 'dfu'
@@ -455,6 +528,29 @@ class TransportTests(unittest.TestCase):
 
 
 class QueryTests(unittest.TestCase):
+    def test_settle_waits_one_monotonic_second_before_exact_revalidation(self):
+        device = {'ecid': 123, 'chip': 0x8942, 'board': 10, 'location': 456}
+        now = [10.0]
+        sleeps = []
+
+        def sleep(seconds):
+            sleeps.append(seconds)
+            now[0] += 0.25 if len(sleeps) == 1 else seconds
+
+        def checked(*args, **kwargs):
+            self.assertGreaterEqual(now[0], 10.0 + cascadia.RECOVERY_REARM_SECONDS)
+            return 'observed', 'queried'
+
+        with patch.object(cascadia.time, 'monotonic', side_effect=lambda: now[0]), \
+             patch.object(cascadia.time, 'sleep', side_effect=sleep), \
+             patch.object(cascadia, 'selected', side_effect=checked) as selected:
+            result = cascadia.settle_recovery(device, 'irecovery', product='Synthetic1,1')
+        self.assertEqual(result, ('observed', 'queried'))
+        self.assertEqual(len(sleeps), 2)
+        self.assertAlmostEqual(sleeps[0], 1.0)
+        self.assertAlmostEqual(sleeps[1], 0.75)
+        selected.assert_called_once_with(device, 'irecovery', mode='recovery', product='Synthetic1,1')
+
     def test_query_binds_all_identity_fields_and_rejects_duplicates(self):
         device = {'ecid': 123, 'chip': 0x8942, 'board': 10}
         text = 'ECID: 0x7b\nCPID: 0x8942\nBDID: 0x0a\nPRODUCT: Synthetic1,1\nMODE: Recovery\n'

@@ -27,7 +27,10 @@ from . import iboot32, usb
 CONFIG_AT = 0x7f00
 CONFIG = struct.Struct('<4s16I')
 AUTOGO_TRIGGER_LIMIT = 0x8000
+LOADER_CODE_LIMIT = payload_image.LOADER_CODE_LIMIT
+LOADER_TRIGGER_BYTES = LOADER_CODE_LIMIT + 1
 RECOVERY_PACKET_BYTES = 512
+RECOVERY_REARM_SECONDS = 1.0
 
 
 def tool():
@@ -102,9 +105,10 @@ def validate_bundle(data, selected):
 
 def loader_trigger(data, candidate=None):
     """Return the exact small loader prefix that makes the patched iBEC run it."""
-    size = CONFIG_AT + CONFIG.size
+    size = LOADER_TRIGGER_BYTES
     trigger = data[:size] if candidate is None else candidate
-    if (size >= AUTOGO_TRIGGER_LIMIT or len(trigger) != size or
+    if (size >= AUTOGO_TRIGGER_LIMIT or any(data[LOADER_CODE_LIMIT:CONFIG_AT]) or
+            len(trigger) != size or
             trigger != data[:size]):
         raise ValueError('Recovery loader trigger differs from the checked bundle prefix')
     checked_recovery_upload_size(len(trigger))
@@ -140,9 +144,12 @@ def recovery_handoff(profile, endpoint):
             type(record.get('schema')) is not int or record.get('schema') != 1 or
             record.get('method') != 'recovery-autogo' or
             record.get('phase') != 'complete' or record.get('payload_format') != 'cascadia-cb32' or
-            record.get('loader_bytes') != CONFIG_AT + CONFIG.size or
+            record.get('loader_bytes') != LOADER_TRIGGER_BYTES or
             not isinstance(record.get('loader_sha256'), str) or
             not re.fullmatch('[0-9a-f]{64}', record['loader_sha256']) or
+            type(record.get('inter_upload_settle_seconds')) is not float or
+            record['inter_upload_settle_seconds'] != RECOVERY_REARM_SECONDS or
+            record.get('loader_revalidated') is not True or
             record.get('identity_source') != 'host-usb' or handoff.handoff_id != identifier or
             endpoint.get('profile') != profile):
         raise ValueError('Recovery differs from its completed host handoff receipt')
@@ -170,6 +177,17 @@ def selected(device, executable, *, mode, product):
     if current['mode'] != mode or current.get('PRODUCT') != product:
         raise ValueError('Selected Apple boot stage changed')
     return observed, current
+
+
+def settle_recovery(device, executable, *, product):
+    """Wait for iBEC's endpoint to rearm, then recheck the exact boot stage."""
+    deadline = time.monotonic() + RECOVERY_REARM_SECONDS
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(remaining)
+    return selected(device, executable, mode='recovery', product=product)
 
 
 def wait_recovery(device, executable, *, product, seconds=30):
@@ -250,7 +268,9 @@ def boot(device, assets, manifest, progress, *, profile, chip, board, product):
     record = {'schema': 1, 'method': 'recovery-autogo', 'ecid': device['ecid'], 'profile': profile,
               'build': recipe['build'], 'recovery_sha256': expected,
               'payload_format': 'cascadia-cb32',
-              'ibec_sha256': source_receipt['ibec']['sha256'], 'phase': 'validated'}
+              'ibec_sha256': source_receipt['ibec']['sha256'], 'phase': 'validated',
+              'inter_upload_settle_seconds': RECOVERY_REARM_SECONDS,
+              'loader_revalidated': False}
     record['recovery_sha256'] = upload_hash
     record['loader_sha256'] = trigger_hash
     record['loader_bytes'] = len(trigger)
@@ -278,7 +298,11 @@ def boot(device, assets, manifest, progress, *, profile, chip, board, product):
         save(attempt, record)
         progress.phase('Uploading ARM32 recovery')
         upload(device, image_copy, executable, product=recipe['device'], expected=upload_hash)
-        record['phase'] = 'loader-upload-outcome-unknown'
+        record['phase'] = 'loader-settle'
+        save(attempt, record)
+        progress.phase('Waiting for the ARM32 recovery endpoint')
+        settle_recovery(device, executable, product=recipe['device'])
+        record.update(phase='loader-upload-outcome-unknown', loader_revalidated=True)
         save(attempt, record)
         progress.phase('Starting the checked ARM32 recovery loader')
         upload(device, trigger_copy, executable, product=recipe['device'], expected=trigger_hash)

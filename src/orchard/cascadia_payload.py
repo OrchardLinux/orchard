@@ -18,6 +18,7 @@ import zlib
 from . import recovery_identity as identity_protocol
 
 
+LOADER_CODE_LIMIT = 0x6000
 CONFIG_OFFSET = 0x7f00
 CONFIG = struct.Struct('<4s16I')
 CONFIG_FIELDS = ('magic', 'version', 'header_size', 'load_address', 'kernel_offset',
@@ -98,7 +99,7 @@ def verify_loader(binary, described, elf=None):
         if (kind == 8 or relative < 0 or source + length > len(elf) or
                 relative + length > len(binary) or binary[relative:relative + length] != elf[source:source + length]):
             raise ValueError('ELF allocated section differs from the raw loader')
-        if relative != CONFIG_OFFSET and relative + length > 0x6000:
+        if relative != CONFIG_OFFSET and relative + length > LOADER_CODE_LIMIT:
             raise ValueError('ELF section overlaps the loader stack or configuration')
         allocated.append((relative, flags, length))
     if not allocated or min(allocated)[0] != 0 or not min(allocated)[1] & 4:
