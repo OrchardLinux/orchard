@@ -167,6 +167,11 @@ class Progress:
             else:
                 print(self.indent + message, file=self.output, flush=True)
 
+    def mark(self, message):
+        """A point in the operation's report, not shown."""
+        with self.lock:
+            self.timings.append([round(time.monotonic() - self.opened, 1), message])
+
     def done(self, message=None):
         """End the current step line, leaving MESSAGE (if any) in its place."""
         with self.lock:

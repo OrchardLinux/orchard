@@ -60,7 +60,8 @@ def translate(value, mounts):
     return value
 
 
-def run(image, command, mounts=(), *, env=None, cwd=None, root=False, network=False, arch=None):
+def run(image, command, mounts=(), *, env=None, cwd=None, root=False, network=False, arch=None, memory=None):
+    """MEMORY: keep ORCHARD_WORK in memory of this size where a container runs it (e.g. '12g')."""
     if native():
         if arch not in (None, 'arm64'):
             raise ValueError('Native builds require ARM64 inputs')
@@ -80,6 +81,8 @@ def run(image, command, mounts=(), *, env=None, cwd=None, root=False, network=Fa
             argv += ['--arch', arch]
         if not network:
             argv += ['--network', 'none']
+        if memory:
+            argv += ['--tmpfs', f'/work:size={memory},exec']
         paths = {'ORCHARD_WORK': '/work', 'ORCHARD_TMP': '/tmp'}
         for source, target, readonly in mounts:
             # Shared labels allow concurrent recipe containers to read the same

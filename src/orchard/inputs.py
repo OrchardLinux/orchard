@@ -29,7 +29,7 @@ import sys
 SCHEMA = 1
 
 
-TOOLS = ('busybox', 'dropbear', 'dropbearkey', 'wpa_supplicant', 'wpa_cli', 'iw')
+TOOLS = ('busybox', 'dropbear', 'dropbearkey', 'wpa_supplicant', 'wpa_cli', 'iw', 'orchard-write', 'resize2fs', 'tune2fs')
 
 
 def resolve(platforms=None, explicit=None, *, hardware=None, cache=None, shared=None, kernel_tree=None):

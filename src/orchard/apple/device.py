@@ -91,6 +91,10 @@ class Device:
                                profile=self.PROFILE, chip=self.CHIP, board=self.BOARD, product=self.PRODUCT,
                                entry=entries.select(self._descriptor))
 
+    def boot_payload(self, device: SelectedDevice, payload: Path, pongo_image: Path, progress: Progress) -> Dict[str, Any]:
+        return apple_boot.boot_payload(device, payload, pongo_image, progress, profile=self.PROFILE, chip=self.CHIP,
+                                       board=self.BOARD, product=self.PRODUCT, entry=entries.select(self._descriptor))
+
     def start_loader(self, device: SelectedDevice, loader: Dict[str, Path], progress: Progress,
                      quiet: bool = False) -> str:
         return apple_boot.start_loader(device, loader, progress, profile=self.PROFILE,

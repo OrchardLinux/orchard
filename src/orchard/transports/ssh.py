@@ -49,8 +49,8 @@ def bootstrap_reply(code, text, scope):
     return host, port, host_key(result['host_key'])
 
 
-def ssh_argv(identity, hosts, host, port, timeout=8, *, control=None, master=False):
-    return ['ssh', '-p', str(port), '-i', str(identity), '-o', 'IdentitiesOnly=yes',
+def ssh_argv(identity, hosts, host, port, timeout=8, *, control=None, master=False, alias=None):
+    return ['ssh', *(['-o', f'HostKeyAlias={alias}'] if alias else []), '-p', str(port), '-i', str(identity), '-o', 'IdentitiesOnly=yes',
             '-o', 'Compression=no', '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=3',
             '-o', f'UserKnownHostsFile="{hosts}"', '-o', 'StrictHostKeyChecking=yes',
             '-o', 'BatchMode=yes', '-o', f'ControlMaster={"yes" if master else "no"}',
@@ -105,7 +105,7 @@ def verify_peer(connection):
 
 
 @contextmanager
-def one_connection(identity, hosts, host, port):
+def one_connection(identity, hosts, host, port, *, alias=None):
     """SSH argv whose calls all share one connection, so that each step skips the handshake.
 
     If the shared connection doesn't come up, ssh connects by itself as usual. The master
@@ -115,13 +115,14 @@ def one_connection(identity, hosts, host, port):
     # A socket path is limited to about 100 characters, so not under the cache directory.
     directory = tempfile.mkdtemp(prefix='orchard-ssh-', dir='/tmp')
     path = str(Path(directory) / 'c')
-    master = subprocess.Popen(ssh_argv(identity, hosts, host, port, control=path, master=True)[:-1] + ['-N', f'root@{host}'],
+    master = subprocess.Popen(ssh_argv(identity, hosts, host, port, control=path, master=True, alias=alias)[:-1] +
+                              ['-N', f'root@{host}'],
                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         deadline = time.monotonic() + 3
         while not Path(path).exists() and master.poll() is None and time.monotonic() < deadline:
             time.sleep(0.01)
-        yield ssh_argv(identity, hosts, host, port, control=path)
+        yield ssh_argv(identity, hosts, host, port, control=path, alias=alias)
     finally:
         master.terminate()
         try:

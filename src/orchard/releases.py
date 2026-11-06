@@ -177,14 +177,38 @@ def select_manifest(source, profile, progress=None, clock=None, purpose='install
     return document, bundle
 
 
+def direct(document):
+    """Whether this release installs from a block image, with no recovery (install_direct.py)."""
+    return document.get('root', {}).get('format') == 'blocks'
+
+
+def receipts_for(document, profile, purpose):
+    """(platform, {role: receipt}) of what an install or a boot of this manifest needs."""
+    platform = platform_for(document, profile)
+    files = document['platforms'][platform]
+    receipts = {'pongo': document['pongo'], 'layer': files['layer']}
+    if direct(document):
+        receipts.update(m1n1=document['m1n1'], install_tools=document['install_tools'])
+        if 'logo' in document:
+            receipts['logo'] = document['logo']
+        if purpose == 'install':
+            receipts.update(root=document['root'], map=document['root']['map'])
+    else:
+        receipts['recovery'] = files['boot']
+        if purpose == 'install':
+            receipts['root'] = document['root']
+        else:
+            del receipts['layer']
+    return platform, receipts
+
+
 def needs_download(document, profile):
     """Whether an install of this manifest would download any file; looks at names, hashes nothing."""
     if document.get('kind') != 'orchard.install':
         return False
-    files = document['platforms'][platform_for(document, profile)]
     folder = cache_root() / 'artifacts/sha256'
     return any('file' not in receipt and not (folder / receipt['sha256']).exists()
-               for receipt in (document['pongo'], document['root'], files['boot'], files['layer']))
+               for receipt in receipts_for(document, profile, 'install')[1].values())
 
 
 def resolve(manifest, profile, progress=None, clock=None, purpose='install'):
@@ -195,16 +219,13 @@ def resolve(manifest, profile, progress=None, clock=None, purpose='install'):
     """
     document, bundle = select_manifest(manifest, profile, progress, clock, purpose)
     if document['kind'] == 'orchard.install':
-        platform = platform_for(document, profile)
-        files = document['platforms'][platform]
-        receipts = {'pongo': document['pongo'], 'recovery': files['boot']}
-        if purpose == 'install':
-            receipts.update(root=document['root'], layer=files['layer'])
+        platform, receipts = receipts_for(document, profile, purpose)
     else:
         platform = None
         receipts = {'pongo': document['pongo'], 'recovery': document['boot']}
     labels = {'pongo': 'Pongo', 'recovery': 'Recovery', 'root': document.get('name', 'Linux'),
-              'layer': 'Kernel and modules'}
+              'layer': 'Kernel and modules', 'map': 'Image map', 'logo': 'Logo',
+              'm1n1': 'm1n1', 'install_tools': 'Install tools'}
     paths = {}
     with ThreadPoolExecutor(max_workers=len(receipts)) as pool:
         futures = {role: pool.submit(materialize, receipt, bundle, progress, clock, label=labels[role])

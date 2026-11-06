@@ -24,7 +24,7 @@ class PlatformsIndex(unittest.TestCase):
         for tool in (*platforms_index.INSTALL_TOOLS, 'busybox', 'iw'):
             (self.tools / tool).write_bytes(tool.encode())
 
-    def build(self, output=None):
+    def build(self):
         def layer(name, directory, *, bundle, busybox):
             self.assertEqual(bundle, self.work / 'kernels' / name / 'components/kernel')
             self.assertEqual(busybox, self.tools / 'busybox')
@@ -33,7 +33,9 @@ class PlatformsIndex(unittest.TestCase):
             return {'file': path.name, 'bytes': path.stat().st_size, 'sha256': hashlib.sha256(name.encode()).hexdigest(),
                     'kernel_release': '6.18.0-' + name, 'boards': ['j71b']}
         with mock.patch.object(platform, 'build', layer):
-            return platforms_index.build(self.published, kernels=self.work / 'kernels', tools=self.tools, commit='abc')
+            return platforms_index.build(self.published, tools=self.tools, commit='abc',
+                                         kernels={name: self.work / 'kernels' / name / 'components/kernel'
+                                                  for name in platform.platforms()})
 
     def test_the_index_names_every_file_by_relative_name_with_its_hash(self):
         self.build()
