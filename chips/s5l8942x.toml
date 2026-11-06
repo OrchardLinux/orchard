@@ -22,3 +22,5 @@ cascadia_profile = "devices/p105/cascadia.toml; external-initramfs handoff await
 # Public Cascadia RAM recovery correlates a guarded host USB identity with the live FDT and boot ID.
 # Linux SoC ECID access and on-device public recovery identity remain unqualified.
 nand_append = "The measured P105 64 GB kernel append path has native data/footer replay, verified programs, default-off write policy and finite operating bounds; synthetic Linux KUnit and ARMv7 object checks passed, while hardware writes remain unqualified (docs/bring-up/p105-sftl-append.md)."
+
+nand_checkpoint_gc = "The measured P105 64 GB checkpoint encoder and GC transaction planner passed synthetic Linux KUnit and exact ARMv7 object checks; media GC stays disconnected pending native accounting, ownership and interruption recovery qualification (docs/bring-up/p105-sftl-checkpoint-gc.md)."
