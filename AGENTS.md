@@ -78,6 +78,15 @@ builds and can hang the VM. Treat space as scarce and time as scarce too:
   device into DFU, replug it, unlock it), ring it once with
   `tools/dfu-bell/dfu-bell`, say in one line what you need, then wait.
 
+## Device specs and capabilities
+
+- Device data must always match the code. When a change affects what a board
+  or chip is or can do (a driver, kernel config, firmware, boot method, a test
+  result), update `devices/<board>/device.toml` and `chips/*.toml` in the same
+  change, including a change that breaks or removes something.
+- Regenerate the hardware support matrix with `tools/catalog/generate matrix`;
+  never edit `docs/compatibility.md` by hand.
+
 ## Changelog
 
 - CHANGELOG.md is curated: one entry per meaningful unit of work (a device, a
