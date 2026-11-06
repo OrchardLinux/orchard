@@ -19,7 +19,9 @@ import time
 import zlib
 
 from orchard.integrity import digest
-from orchard.state import DeviceState, private_directory
+from orchard.contracts import HostHandoff
+from orchard.image import cascadia as payload_image
+from orchard.state import BootState, DeviceState, private_directory
 from . import iboot32, usb
 
 CONFIG_AT = 0x7f00
@@ -72,6 +74,14 @@ def bundle(path, expected, selected):
         raise ValueError('Recovery payload changed beyond its upload bound')
     if hashlib.sha256(data).hexdigest() != expected:
         raise ValueError('Recovery payload differs from its manifest')
+    validate_bundle(data, selected)
+    return data
+
+
+def validate_bundle(data, selected):
+    """Check the final bytes after an attempt identity changes the DTB size."""
+    if not 0x8000 < len(data) <= selected['maximum_payload_bytes']:
+        raise ValueError('Recovery payload exceeds the selected iBEC upload bound')
     if len(data) < 0x8000 + 0x30 or data[:4] != bytes.fromhex('c0000cf1'):
         raise ValueError('Expected an ARM32 recovery payload')
     values = CONFIG.unpack_from(data, CONFIG_AT)
@@ -85,7 +95,34 @@ def bundle(path, expected, selected):
             or watchdog % 4 or l2 % 4 or initrd_address % 4096
             or struct.unpack_from('<I', data, kernel + 0x24)[0] != 0x016f2818):
         raise ValueError('Recovery loader ranges differ from the selected platform')
-    return data
+
+
+def recovery_handoff(profile, endpoint):
+    """Recover the exact completed host handoff before resuming a USB session."""
+    identifier = endpoint.get('handoff_id')
+    if identifier is None:
+        return None
+    if not isinstance(identifier, str) or not re.fullmatch('[0-9a-f]{32}', identifier):
+        raise ValueError('Invalid recovery handoff identity')
+    scope = BootState(DeviceState(profile, endpoint['ecid']), endpoint['boot_id'])
+    folder = private_directory(scope.device.root / 'boot-attempts')
+    path = folder / (identifier + '.json')
+    if (path.is_symlink() or not path.is_file() or path.stat().st_size > 65536 or
+            path.stat().st_uid != os.getuid() or path.stat().st_mode & 0o077):
+        raise ValueError('The host-bound recovery has no private completed attempt receipt')
+    try:
+        record = json.loads(path.read_text())
+        handoff = HostHandoff(record['handoff_id'], record['template_sha256'], record['chip'], record['board'])
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        raise ValueError('Invalid completed recovery handoff receipt') from error
+    if (not scope.matches(record) or record.get('profile') != profile or
+            type(record.get('schema')) is not int or record.get('schema') != 1 or
+            record.get('method') != 'recovery-autogo' or
+            record.get('phase') != 'complete' or record.get('payload_format') != 'cascadia-cb32' or
+            record.get('identity_source') != 'host-usb' or handoff.handoff_id != identifier or
+            endpoint.get('profile') != profile):
+        raise ValueError('Recovery differs from its completed host handoff receipt')
+    return handoff
 
 
 def save(path, record):
@@ -149,6 +186,10 @@ def boot(device, assets, manifest, progress, *, profile, chip, board, product):
         current = usb.recovery(product, profile)
         if current['ecid'] != device['ecid'] or current['boot_id'] != device.get('boot_id'):
             raise ValueError('Selected running recovery changed')
+        if current.get('handoff_id') != device.get('handoff_id'):
+            raise ValueError('Selected running recovery handoff changed')
+        BootState(DeviceState(profile, current['ecid']), current['boot_id'])
+        recovery_handoff(profile, current)
         return
     if device['mode'] not in ('dfu', 'recovery') or (device.get('chip'), device.get('board')) != (chip, board):
         raise ValueError('Enter the selected board in kDFU or iBEC Recovery first')
@@ -158,11 +199,20 @@ def boot(device, assets, manifest, progress, *, profile, chip, board, product):
     recovery = Path(assets['recovery'])
     expected = manifest['assets']['recovery']['sha256']
     payload = bundle(recovery, expected, recipe)
+    policy = payload_image.host_identity_policy(payload)
     observed, queried = selected(device, executable, mode=device['mode'], product=recipe['device'])
     if device['mode'] == 'dfu' and not observed.get('pwned'):
         raise ValueError('Plain DFU is unsupported here; enter a pwned iBSS or iBEC Recovery first')
     folder = private_directory(DeviceState(profile, device['ecid']).root / 'boot-attempts')
     identifier = secrets.token_hex(16)
+    handoff = None
+    if policy is not None:
+        handoff = HostHandoff(identifier, expected, chip, board)
+        payload = payload_image.bind_host_identity(payload, ecid=device['ecid'], chip=chip,
+                                                   board=board, profile=profile,
+                                                   handoff_id=identifier, template_sha256=expected)
+        validate_bundle(payload, recipe)
+    upload_hash = hashlib.sha256(payload).hexdigest()
     attempt = folder / (identifier + '.json')
     image_copy = folder / (identifier + '-recovery.bin')
     stage_copy = folder / (identifier + '-ibec.img3')
@@ -170,10 +220,13 @@ def boot(device, assets, manifest, progress, *, profile, chip, board, product):
               'build': recipe['build'], 'recovery_sha256': expected,
               'payload_format': 'cascadia-cb32',
               'ibec_sha256': source_receipt['ibec']['sha256'], 'phase': 'validated'}
+    record['recovery_sha256'] = upload_hash
+    if handoff is not None:
+        record.update(handoff.fields())
     try:
         # Freeze inputs so another checkout rebuilding a shared component cannot
         # replace an upload after this operation has validated it.
-        for data, path, checksum in ((payload, image_copy, expected),
+        for data, path, checksum in ((payload, image_copy, upload_hash),
                                      (stage.read_bytes(), stage_copy, record['ibec_sha256'])):
             if hashlib.sha256(data).hexdigest() != checksum:
                 raise ValueError('Boot input changed while creating its private snapshot')
@@ -190,7 +243,7 @@ def boot(device, assets, manifest, progress, *, profile, chip, board, product):
         record['phase'] = 'recovery-upload-outcome-unknown'
         save(attempt, record)
         progress.phase('Uploading ARM32 recovery')
-        upload(device, image_copy, executable, product=recipe['device'], expected=expected)
+        upload(device, image_copy, executable, product=recipe['device'], expected=upload_hash)
         record['phase'] = 'awaiting-linux'
         save(attempt, record)
         deadline = time.monotonic() + 120
@@ -207,6 +260,16 @@ def boot(device, assets, manifest, progress, *, profile, chip, board, product):
                 endpoint = usb.recovery(product, profile)
                 if endpoint['ecid'] != device['ecid']:
                     raise RuntimeError('Another device appeared after the payload upload')
+                if endpoint.get('profile') != profile:
+                    raise RuntimeError('Another board appeared after the payload upload')
+                try:
+                    BootState(DeviceState(profile, endpoint['ecid']), endpoint['boot_id'])
+                except (KeyError, ValueError) as error:
+                    raise RuntimeError('Linux recovery has no valid device boot identity') from error
+                if handoff is not None and endpoint.get('handoff_id') != handoff.handoff_id:
+                    raise RuntimeError('Linux recovery differs from the uploaded host handoff')
+                if handoff is None and endpoint.get('handoff_id') is not None:
+                    raise RuntimeError('Linux recovery advertised an unexpected host handoff')
                 record.update(phase='complete', boot_id=endpoint['boot_id'])
                 save(attempt, record)
                 device.update(endpoint, resumed=True)

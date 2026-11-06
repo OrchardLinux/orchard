@@ -7,6 +7,7 @@ Runtime artifact/identity verification remains in the existing implementations.
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Protocol, Tuple, TypedDict, Union, runtime_checkable
 
 from .progress import Clock, Progress
@@ -22,6 +23,7 @@ class _SelectionDetails(TypedDict, total=False):
     serial_port: Optional[str]
     pwned: bool
     boot_id: Optional[str]
+    handoff_id: Optional[str]
 
 
 class SelectedDevice(_SelectionDetails):
@@ -66,10 +68,39 @@ class MixinReceipt(TypedDict):
 
 
 @dataclass(frozen=True)
+class HostHandoff:
+    """A host-observed Apple identity carried by one ARM32 RAM upload."""
+    handoff_id: str
+    template_sha256: str
+    chip: int
+    board: int
+
+    def __post_init__(self) -> None:
+        if (not isinstance(self.handoff_id, str) or
+                not re.fullmatch('[0-9a-f]{32}', self.handoff_id) or
+                not int(self.handoff_id, 16) or
+                not isinstance(self.template_sha256, str) or
+                not re.fullmatch('[0-9a-f]{64}', self.template_sha256) or
+                type(self.chip) is not int or not 0 < self.chip < 2**32 or
+                type(self.board) is not int or not 0 <= self.board < 2**32):
+            raise ValueError('Invalid host-bound recovery identity')
+
+    def fields(self) -> Dict[str, Any]:
+        return {'identity_source': 'host-usb', 'handoff_id': self.handoff_id,
+                'template_sha256': self.template_sha256, 'chip': self.chip, 'board': self.board}
+
+    def matches(self, observation: Any) -> bool:
+        return (isinstance(observation, dict) and
+                type(observation.get('chip')) is int and type(observation.get('board')) is int and
+                all(observation.get(key) == value for key, value in self.fields().items()))
+
+
+@dataclass(frozen=True)
 class Connection:
     argv: List[str]
     scope: BootState
     check: Callable[[], None]
+    handoff: Optional[HostHandoff] = None
 
 
 @runtime_checkable

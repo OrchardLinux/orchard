@@ -59,8 +59,10 @@ class Device:
         return usb.recovery(self.PRODUCT, self.PROFILE)
 
     def connect(self, device: SelectedDevice) -> AbstractContextManager[Connection]:
+        from .cascadia import recovery_handoff
+        handoff = recovery_handoff(self.PROFILE, {**device, 'profile': self.PROFILE})
         return ssh.session(DeviceState(self.PROFILE, device['ecid']), self.recovery_endpoint,
-                           expected_boot=device.get('boot_id'))
+                           expected_boot=device.get('boot_id'), handoff=handoff)
 
     def capture_adt(self, device: Optional[SelectedDevice] = None) -> bytes:
         # Bring-up and diagnostics only; installs do not need the ADT.
@@ -80,6 +82,8 @@ class Device:
         if device['mode'] == 'linux':
             endpoint = self.recovery_endpoint()
             BootState(DeviceState(self.PROFILE, endpoint['ecid']), endpoint['boot_id'])
+            from .cascadia import recovery_handoff
+            recovery_handoff(self.PROFILE, endpoint)
             return cast(SelectedDevice, {**endpoint, 'resumed': True})
         if not self.matches_dfu(device) or not device['ecid']:
             raise ValueError(f'The connected device is not a {self.NAME}')

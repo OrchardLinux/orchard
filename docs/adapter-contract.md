@@ -20,12 +20,22 @@ Arguments and return types are defined in `contracts.py`, not repeated in a seco
 ## Records
 
 - `SelectedDevice`: required `mode`, `location`, non-null validated `ecid` and explicit boolean `resumed`; optional observed chip/board/product/serial details. `resumed` is true for running recovery and false for DFU/Pongo. Common orchestration requires this explicit state. A USB location may change across enumeration and is not persistent device identity.
-- `Connection`: SSH arguments, validated `BootState` and a current-endpoint check performed before every RPC. Private state is keyed by profile/ECID/boot, never by USB port.
+- `Connection`: SSH arguments, validated `BootState` and a current-endpoint check performed before every RPC. A host-bound ARM32 recovery also carries its `HostHandoff`. Private state is keyed by profile/ECID/boot.
+- `HostHandoff`: the attempt's 128-bit nonce, template SHA-256 and observed chip/board IDs. Serial bootstrap and authenticated SSH status must report these fields with `identity_source=host-usb`; the USB endpoint must retain the matching `HND` nonce throughout the session.
 - `BootAssets`: local paths for the selected operation. Running recovery needs no upload; other states require recovery, and checkm8-pongo additionally requires Pongo. The recovery-autogo path reads a separately prepared private iBEC input and accepts a checked ARM32 payload. Installation root is not interpreted by the adapter's boot method.
 - `BootRequest`: minimum boot input, including the recovery SHA receipt. Both manifest-resolved and explicit-file boot use it; no source-specific fallback adapter API exists.
 - `MixinReceipt`: schema 1, `private-mixin`, exact compressed byte count and SHA-256.
 
 TypedDict records describe the boundary. They do not replace validation of untrusted USB data or manifests, and do not imply that every dictionary constructed by an arbitrary caller is safe.
+
+For a recovery-autogo template carrying a host identity policy, the transport
+queries the selected Apple boot stage and binds that identity to a fresh attempt.
+It retains the template hash and the hash of the bound upload in a private
+receipt. Resuming a USB recovery that advertises `HND` requires its completed
+receipt with the same profile, ECID and Linux boot ID. The serial and SSH checks
+then compare the runtime's provenance to that receipt before granting phase RPC
+access. ARM64 ADT identity and caller-owned ARM32 payloads without this policy
+keep their existing identity paths.
 
 ## Enforcement
 
