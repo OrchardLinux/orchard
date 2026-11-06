@@ -12,6 +12,7 @@ executable by its source inputs and target architecture.
 orchard-lwvm inspect --disk image.raw --root UUID --json
 orchard-lwvm map --disk /dev/applesftl0 --root UUID --mode ro
 orchard-lwvm map --disk /dev/applesftl0 --root UUID --mode rw --json
+orchard-lwvm unmap --disk /dev/applesftl0 --root UUID --mode rw --extent START:SECTORS:PHYSICAL
 ```
 
 `inspect` accepts a regular image or block device. `map` requires a block
@@ -28,6 +29,14 @@ table also requires a writable kernel provider; it grants no additional FTL
 write capability. Existing mappings are reused only when their complete
 linear table, provider identity, DM UUID and access mode match. Failure while
 creating a new map removes that map. An existing mismatch remains untouched.
+
+Cleanup uses `unmap` with the original provider path, root UUID, access mode
+and one `--extent START:SECTORS:PHYSICAL` for every ordered receipt extent.
+It verifies the complete table and DM identity before removing an unused
+map. A missing map succeeds; a busy or mismatching map remains in place.
+This operation only stats the original provider and reads DM metadata. It
+opens no storage provider and reads no headers, allowing cleanup after the
+reader budget is exhausted. Recovery needs no external `dmsetup` for this.
 
 ## Accepted format
 

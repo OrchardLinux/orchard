@@ -37,6 +37,18 @@ static int read_header(int fd, uint8_t *out, uint64_t offset)
 
 #ifdef __linux__
 #define DM_BUFFER (256 * 1024)
+static int mapper_lock(void)
+{
+	struct stat st;
+	int fd = open("/run/orchard-lwvm.lock", O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+	if (fd < 0) return -1;
+	if (fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_uid != 0 ||
+	    st.st_nlink != 1 || flock(fd, LOCK_EX | LOCK_NB)) {
+		close(fd);
+		return -1;
+	}
+	return fd;
+}
 static void dm_init(struct dm_ioctl *d, const char *name)
 {
 	memset(d, 0, DM_BUFFER);
@@ -100,9 +112,8 @@ static int map_root(const struct lwvm_root *root, dev_t disk, int readonly,
 	lwvm_uuid_format(root->uuid, text);
 	snprintf(name, DM_NAME_LEN, "orchard-lwvm-%s", text);
 	snprintf(uuid, DM_UUID_LEN, "ORCHARD-LWVM-%s", text);
-	lock = open("/run/orchard-lwvm.lock", O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
-	if (lock < 0 || fstat(lock, &st) || !S_ISREG(st.st_mode) || st.st_uid != 0 ||
-	    st.st_nlink != 1 || flock(lock, LOCK_EX | LOCK_NB)) goto out;
+	lock = mapper_lock();
+	if (lock < 0) goto out;
 	control = open("/dev/mapper/control", O_RDWR | O_NOFOLLOW | O_CLOEXEC);
 	if (control < 0) goto out;
 	dm_init(d, name);
@@ -153,7 +164,91 @@ out:
 	free(d);
 	return rc;
 }
+
+static int unmap_root(const struct lwvm_root *root, dev_t disk, int readonly)
+{
+	struct dm_ioctl *d = calloc(1, DM_BUFFER);
+	char name[DM_NAME_LEN], uuid[DM_UUID_LEN], text[37];
+	int control = -1, lock = -1, rc = -1;
+	dev_t device;
+	if (!d) return -1;
+	lwvm_uuid_format(root->uuid, text);
+	snprintf(name, sizeof(name), "orchard-lwvm-%s", text);
+	snprintf(uuid, sizeof(uuid), "ORCHARD-LWVM-%s", text);
+	lock = mapper_lock();
+	if (lock < 0) goto out;
+	control = open("/dev/mapper/control", O_RDWR | O_NOFOLLOW | O_CLOEXEC);
+	if (control < 0) goto out;
+	dm_init(d, name);
+	if (ioctl(control, DM_DEV_STATUS, d)) {
+		if (errno == ENXIO || errno == ENODEV) rc = 0;
+		goto out;
+	}
+	if (dm_check(control, d, name, uuid, root, disk, readonly, &device)) goto out;
+	dm_init(d, name);
+	if (ioctl(control, DM_DEV_REMOVE, d)) goto out;
+	dm_init(d, name);
+	if (ioctl(control, DM_DEV_STATUS, d) && (errno == ENXIO || errno == ENODEV)) rc = 0;
+out:
+	if (control >= 0) close(control);
+	if (lock >= 0) close(lock);
+	free(d);
+	return rc;
+}
 #endif
+
+static int decimal(const char **cursor, char end, uint64_t *out)
+{
+	const char *start = *cursor;
+	uint64_t value = 0;
+	while (**cursor >= '0' && **cursor <= '9') {
+		unsigned int digit = *(*cursor)++ - '0';
+		if (value > (UINT64_MAX - digit) / 10) return -1;
+		value = value * 10 + digit;
+	}
+	if (*cursor == start || **cursor != end) return -1;
+	if (end) (*cursor)++;
+	*out = value;
+	return 0;
+}
+
+static int command_unmap(int argc, char **argv)
+{
+	struct lwvm_root root = {0};
+	struct stat st;
+	const char *disk = NULL, *requested = NULL, *mode = NULL;
+	uint64_t end = 0;
+	int i;
+	for (i = 2; i < argc; i++) {
+		if (!strcmp(argv[i], "--disk") && ++i < argc && !disk) disk = argv[i];
+		else if (!strcmp(argv[i], "--root") && ++i < argc && !requested) requested = argv[i];
+		else if (!strcmp(argv[i], "--mode") && ++i < argc && !mode) mode = argv[i];
+		else if (!strcmp(argv[i], "--extent") && ++i < argc && root.extent_count < LWVM_CHUNKS) {
+			const char *cursor = argv[i];
+			struct lwvm_extent *e = &root.extents[root.extent_count];
+			if (decimal(&cursor, ':', &e->start_sector) || decimal(&cursor, ':', &e->sectors) ||
+			    decimal(&cursor, 0, &e->physical_sector) || !e->sectors || e->start_sector != end ||
+			    e->sectors > UINT64_MAX - end || e->sectors > UINT64_MAX - e->physical_sector)
+				return error("invalid expected extent");
+			end += e->sectors;
+			root.extent_count++;
+		} else return error("unmap needs disk, root, mode and ordered expected extents");
+	}
+	if (!disk || !requested || !mode || !root.extent_count || end > UINT64_MAX / 512 ||
+	    lwvm_uuid_parse(requested, root.uuid) || (strcmp(mode, "ro") && strcmp(mode, "rw")))
+		return error("invalid expected mapping identity or mode");
+	root.bytes = end * 512;
+	/* Cleanup must work after the provider's read budget expires. Metadata from
+	 * stat supplies its identity; no provider is opened and no header is read. */
+	if (lstat(disk, &st) || !S_ISBLK(st.st_mode)) return error("unmap requires the original block provider");
+#ifdef __linux__
+	if (unmap_root(&root, st.st_rdev, !strcmp(mode, "ro")))
+		return error("could not verify and remove the exact expected mapping");
+	return 0;
+#else
+	return error("unmap requires Linux device mapper");
+#endif
+}
 
 int main(int argc, char **argv)
 {
@@ -165,8 +260,9 @@ int main(int argc, char **argv)
 	uint64_t media, chunk;
 	int fd, i, json = 0, mapping;
 	unsigned int disk_major = 0, disk_minor = 0;
+	if (argc >= 2 && !strcmp(argv[1], "unmap")) return command_unmap(argc, argv);
 	if (argc < 2 || (strcmp(argv[1], "inspect") && strcmp(argv[1], "map")))
-		return error("usage: orchard-lwvm inspect|map --disk PATH --root UUID [--mode ro|rw] [--json]");
+		return error("usage: orchard-lwvm inspect|map --disk PATH --root UUID [--mode ro|rw] [--json]; unmap also requires --extent START:SECTORS:PHYSICAL for each expected extent");
 	mapping = !strcmp(argv[1], "map");
 	for (i = 2; i < argc; i++) {
 		if (!strcmp(argv[i], "--json")) json = 1;

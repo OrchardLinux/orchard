@@ -161,3 +161,19 @@ class LwvmCParser(unittest.TestCase):
                                  '--root', ROOT_UUID], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('block device', result.stderr)
+
+    def test_unmap_requires_an_ordered_bounded_expected_table_and_original_block_provider(self):
+        self.invoke()
+        command = [str(self.binary), 'unmap', '--disk', str(self.work / 'media.img'),
+                   '--root', ROOT_UUID, '--mode', 'ro']
+        for extents in (['0:0:32'], ['1:1:32'], ['0:1:32', '2:1:64'], ['0:-1:32'],
+                        ['0:1:18446744073709551616'], ['0:18446744073709551615:32'],
+                        ['0:1:32:extra'], ['0:1:32', '1:1:not-a-number']):
+            result = subprocess.run([*command, *(part for value in extents for part in ('--extent', value))],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0, extents)
+            self.assertIn('expected extent', result.stderr)
+        result = subprocess.run([*command, '--extent', '0:32:320', '--extent', '32:48:192'],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('original block provider', result.stderr)

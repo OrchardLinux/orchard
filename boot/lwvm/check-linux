@@ -50,6 +50,12 @@ def main():
             def map_root(mode='ro', check=True):
                 return run(str(args.helper), 'map', '--disk', loop, '--root', identity,
                            '--mode', mode, '--json', check=check)
+            def unmap(receipt, check=True):
+                command = [str(args.helper), 'unmap', '--disk', loop, '--root', identity,
+                           '--mode', receipt['mapping']['mode']]
+                for extent in receipt['extents']:
+                    command += ['--extent', f'{extent["start_sector"]}:{extent["sectors"]}:{extent["physical_sector"]}']
+                return run(*command, check=check)
             first = json.loads(map_root().stdout)
             second = json.loads(map_root().stdout)
             assert first == second, 'exact mapping reuse changed the receipt'
@@ -70,7 +76,23 @@ def main():
                     os.close(descriptor)
             assert map_root('rw', check=False).returncode, 'access-mode mismatch was reused'
             assert json.loads(map_root().stdout) == first, 'failed reuse changed the live map'
-            run('dmsetup', 'remove', name)
+            with mapped.open('rb', buffering=0):
+                assert unmap(first, check=False).returncode, 'an open mapping was removed'
+            altered = json.loads(json.dumps(first))
+            altered['extents'][0]['physical_sector'] += 1
+            assert unmap(altered, check=False).returncode, 'a mismatching expected table was removed'
+            # Cleanup reads DM metadata only, even when the current headers
+            # can no longer be read or validated through the provider.
+            with image.open('r+b', buffering=0) as stream:
+                stream.write(bytes(4096))
+                stream.seek(fixture.CHUNK - 4096)
+                stream.write(bytes(4096))
+            unmap(first)
+            unmap(first)
+            with image.open('r+b', buffering=0) as stream:
+                stream.write(h)
+                stream.seek(fixture.CHUNK - 4096)
+                stream.write(h)
             writable = json.loads(map_root('rw').stdout)
             with open(writable['mapping']['device'], 'r+b', buffering=0) as stream:
                 stream.seek(fixture.CHUNK)
@@ -82,13 +104,15 @@ def main():
                     assert stream.read(512) == value * 512, 'write escaped the Linux extent'
                 stream.seek(6 * fixture.CHUNK)
                 assert stream.read(512) == b'W' * 512, 'write missed the Linux physical extent'
-            run('dmsetup', 'remove', name)
+            unmap(writable)
             # Reusing a name/UUID with a different table must fail without removal.
             table = f'0 {first["bytes"] // 512} linear {loop} {11 * fixture.CHUNK // 512}'
             run('dmsetup', 'create', name, '--uuid', 'ORCHARD-LWVM-' + identity, '--table', table)
             assert map_root('rw', check=False).returncode, 'foreign table was reused'
             assert run('dmsetup', 'info', name, check=False).returncode == 0, 'foreign map was removed'
-            print('PASS: real DM create, reuse, ro/rw mismatch, fragmented reads, bounded writes and foreign-table refusal')
+            assert unmap(writable, check=False).returncode, 'foreign table was removed by cleanup'
+            print('PASS: real DM create/reuse, ro/rw mismatch, fragmented reads, bounded writes, '
+                  'verified unmap with invalid headers, busy/mismatch refusal and idempotent cleanup')
         finally:
             run('dmsetup', 'remove', name, check=False)
             if loop:
