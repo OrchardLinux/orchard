@@ -22,7 +22,7 @@ Assisted-by: LLM
  1 file changed, 40 insertions(+), 8 deletions(-)
 
 diff --git a/drivers/power/supply/apple_tristar_charger.c b/drivers/power/supply/apple_tristar_charger.c
-index 39af0e577c6f..a90675c8d944 100644
+index 172158d0f9e1..a953cedcb99f 100644
 --- a/drivers/power/supply/apple_tristar_charger.c
 +++ b/drivers/power/supply/apple_tristar_charger.c
 @@ -65,6 +65,8 @@
@@ -42,7 +42,7 @@ index 39af0e577c6f..a90675c8d944 100644
  	u32 status_base;
  	u32 control_base;
  	u32 adc_base;
-@@ -1303,6 +1306,9 @@ static int tristar_probe(struct platform_device *pdev)
+@@ -1323,6 +1326,9 @@ static int tristar_probe(struct platform_device *pdev)
  		chg->irqs[i] = platform_get_irq(pdev, i);
  		if (chg->irqs[i] < 0)
  			return chg->irqs[i];
@@ -52,7 +52,7 @@ index 39af0e577c6f..a90675c8d944 100644
  	}
  
  	ret = devm_mutex_init(dev, &chg->lock);
-@@ -1348,6 +1354,12 @@ static int tristar_probe(struct platform_device *pdev)
+@@ -1368,6 +1374,12 @@ static int tristar_probe(struct platform_device *pdev)
  	if (ret)
  		return ret;
  
@@ -64,8 +64,8 @@ index 39af0e577c6f..a90675c8d944 100644
 +
  	/* Whatever is attached gets identified before USB data comes on. */
  	mutex_lock(&chg->lock);
- 	tristar_set_usb(chg, false);
-@@ -1366,25 +1378,43 @@ static void tristar_shutdown(struct platform_device *pdev)
+ 	chg->hold_ns = ktime_get_ns();
+@@ -1387,25 +1399,43 @@ static void tristar_shutdown(struct platform_device *pdev)
  }
  
  /*
@@ -117,7 +117,7 @@ index 39af0e577c6f..a90675c8d944 100644
  	return 0;
  }
  
-@@ -1392,6 +1422,8 @@ static int tristar_resume(struct device *dev)
+@@ -1413,6 +1443,8 @@ static int tristar_resume(struct device *dev)
  {
  	struct tristar_charger *chg = dev_get_drvdata(dev);
  
