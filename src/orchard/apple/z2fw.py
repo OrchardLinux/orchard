@@ -439,7 +439,7 @@ def convert_mtfw(mtfw, profile, *, otp_preflight):
 
 # iPhone X (hid-transport,k1): the MTFW personality as the op list apple_hidspi_ts replays.
 
-HIDSPI_MAGIC = b'D221OPS1'
+HIDSPI_MAGIC = b'D221OPS2'
 HBPP_ACK_BLOB = 0x4bc1
 HBPP_ACK_WRITE = 0x4ad1
 # DT names of the ADT calibrations m1n1 copies to the touchscreen0 node; others are apple,<ADT name>.
@@ -449,16 +449,19 @@ HIDSPI_CALIBRATION_NAMES = {'multi-touch-calibration': 'apple,z2-cal-blob'}
 def convert_hidspi_mtfw(mtfw, profile):
     """MTFW personality of a HIDSPI controller (Config Protocol "HIDSPI") as apple_hidspi_ts's op list.
 
-    The file is "D221OPS1" then little-endian ops:
+    The file is "D221OPS2" then little-endian ops:
       'T' u32 len, label                        (logged by the driver)
       'S' u16 ack (0: none), u32 len, packet    (an HBPP packet; ack 4bc1 for blobs, 4ad1 for writes)
       'P' u32 address, mask, value, timeout_ms  (poll a controller register)
       'R' u32 address                           (read and log a register)
-      'C' u32 address, max, u32 len, DT name    (the unit's calibration, sent as an HBPP blob)
+      'C' u32 address, max, u32 len, DT name, u32 len, default
+                                                (the unit's calibration, sent as an HBPP blob;
+                                                 Apple's default if the unit has none)
     Items are replayed in order: ReadModifyWrite as masked writes (SkipCheck: no ack), Binary
     as blobs, Poll as polls, Property as calibration records; Metadata and Config load nothing.
     The ReadOnError metadata address is read before and after, for the driver's log. No
-    per-unit bytes enter the file: m1n1 copies each Property from the ADT to the device tree.
+    per-unit bytes enter the file: m1n1 copies each Property from the ADT to the device tree,
+    and the file holds only the default Apple ships for a unit without one.
     """
     items = mtfw.get(profile) if isinstance(mtfw, dict) else None
     if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
@@ -517,7 +520,11 @@ def convert_hidspi_mtfw(mtfw, profile):
                 raise ValueError('Empty calibration range: ' + prop)
             dt_name = HIDSPI_CALIBRATION_NAMES.get(prop, 'apple,' + prop).encode()
             label(f'{index} calibration {address:#x} up to {maximum} bytes {dt_name.decode()}')
-            op(b'C', struct.pack('<III', address, maximum, len(dt_name)) + dt_name)
+            default = item.get('Payload', b'')
+            if not isinstance(default, bytes):
+                raise ValueError('Calibration default is not data: ' + prop)
+            op(b'C', struct.pack('<III', address, maximum, len(dt_name)) + dt_name +
+               struct.pack('<I', len(default)) + default)
             calibration.append(dt_name.decode())
         elif kind == 'Poll':
             label(f'{index} poll {address:#x} {name}'.rstrip())

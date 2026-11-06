@@ -352,8 +352,11 @@ def hidspi_ops(data):
             i += 4
         elif code == b'C':
             address, maximum, n = struct.unpack_from('<III', data, i)
-            ops.append(('C', address, maximum, data[i + 12:i + 12 + n].decode()))
+            name = data[i + 12:i + 12 + n].decode()
             i += 12 + n
+            (n,) = struct.unpack_from('<I', data, i)
+            ops.append(('C', address, maximum, name, data[i + 4:i + 4 + n]))
+            i += 4 + n
         else:
             raise AssertionError(f'bad op {code!r}')
     return ops
@@ -370,7 +373,7 @@ def hidspi_fixture(**config):
          'SysConfigKey': 'MtCl'},
         {'Type': 'Poll', 'Address': 0x140000, 'Mask': 4, 'Value': 4, 'TimeoutMs': 1000},
         {'Type': 'Property', 'Address': 0x164000, 'MaxSize': 0x8ea8, 'Property': 'luna-force-calibration',
-         'SysConfigKey': 'LFCL'},
+         'SysConfigKey': 'LFCL', 'Payload': b'default'},
         {'Type': 'Config', 'Config': {'Protocol': 'HIDSPI', **config}},
     ]}
 
@@ -384,9 +387,10 @@ class HidspiMtfwConversion(unittest.TestCase):
             ('S', 0x4ad1, z2fw.register_packet(0x400b0000, 1, 0)),
             # SkipCheck: the write restarts the controller's core, no ACK follows.
             ('S', 0, z2fw.register_packet(0x400b0000, 1, 1)),
-            ('C', 0x15800c, 0x86c, 'apple,z2-cal-blob'),
+            ('C', 0x15800c, 0x86c, 'apple,z2-cal-blob', b''),
             ('P', 0x140000, 4, 4, 1000),
-            ('C', 0x164000, 0x8ea8, 'apple,luna-force-calibration'),
+            # Apple's default travels with it, for a unit that has none of its own.
+            ('C', 0x164000, 0x8ea8, 'apple,luna-force-calibration', b'default'),
             ('R', 0x400b0fd4),
         ])
         self.assertEqual(info['calibration'], ['apple,z2-cal-blob', 'apple,luna-force-calibration'])

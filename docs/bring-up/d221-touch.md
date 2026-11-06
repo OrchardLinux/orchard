@@ -80,9 +80,11 @@ status `ac 27 68 d5`.
 The calibrations are per unit and live in the ADT's multi-touch node.
 m1n1 copies them through the `touchscreen0` alias: `multi-touch-calibration`
 as `apple,z2-cal-blob` and the ten `luna-*` under their ADT names; the op list
-names the property, so the firmware file is the same for every unit. This
-unit's ADT has no `luna-shape-graffix-calibration`; the controller keeps its
-default.
+names the property, so the firmware file is the same for every unit. If a unit
+has none, the driver loads the default Apple's firmware carries for it: real
+values for the ten `luna-*`, a 4-byte placeholder for the multi-touch one. The
+tested unit's ADT has no `luna-shape-graffix-calibration`, so it gets that
+default since this was added; the touch test below predates that.
 
 ## Tested
 
