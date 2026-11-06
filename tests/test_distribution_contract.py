@@ -16,6 +16,8 @@ from orchard import inputs  # noqa: E402
 COMMANDS = {
     'orchard.inputs': ['--output', '--platform', '--kernel-dir', '--m1n1', '--pongo', '--tools', '--kernel-tree'],
     'orchard.image.platform': ['--output', '--kernel-dir', '--busybox', '--receipt'],
+    'orchard.image.platforms_index': ['--release', '--inputs', '--kernels', '--tools', '--commit', '--platform'],
+    'orchard.image.root_image': ['--output'],
     'orchard.image.recovery': ['--dtb', '--loader', '--logo', '--kernel', '--modules-dir', '--busybox', '--dropbear',
                                '--dropbearkey', '--wpa-supplicant', '--wpa-cli', '--iw', '--base', '--base-receipt',
                                '--root-receipt', '--output', '--verbose'],
@@ -64,7 +66,8 @@ class DistributionContract(unittest.TestCase):
         self.assertIn('j71b', document['platforms']['apple-16k']['boards'])
         self.assertEqual(document['shared']['m1n1'], str((root / 'm1n1.bin').resolve()))
         self.assertEqual(set(document['shared']['tools']),
-                         {'busybox', 'dropbear', 'dropbearkey', 'wpa_supplicant', 'wpa_cli', 'iw'})
+                         {'busybox', 'dropbear', 'dropbearkey', 'wpa_supplicant', 'wpa_cli', 'iw',
+                          'orchard-write', 'resize2fs', 'tune2fs'})
         self.assertIn('commit', document['orchard'])
         json.dumps(document)
 

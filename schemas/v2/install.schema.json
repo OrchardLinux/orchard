@@ -70,12 +70,29 @@
           "type": "object",
           "description": "The image's one regular user, and what the installer sets for it.",
           "properties": {
-            "user": {"type": "string", "pattern": "^[a-z_][a-z0-9_-]{0,31}$"},
-            "password": {"type": "boolean", "description": "Ask for the user's password (for sudo and login)."},
-            "pin": {"type": "boolean", "description": "Ask for a 6-digit lock-screen PIN."},
-            "passwordless_sudo": {"type": "boolean", "description": "sudo without a password (/etc/sudoers.d/orchard)."}
+            "user": {
+              "type": "string",
+              "pattern": "^[a-z_][a-z0-9_-]{0,31}$"
+            },
+            "password": {
+              "type": "boolean",
+              "description": "Ask for the user's password (for sudo and login)."
+            },
+            "pin": {
+              "type": "boolean",
+              "description": "Ask for a 6-digit lock-screen PIN."
+            },
+            "passwordless_sudo": {
+              "type": "boolean",
+              "description": "sudo without a password (/etc/sudoers.d/orchard)."
+            }
           },
-          "required": ["user", "password", "pin", "passwordless_sudo"],
+          "required": [
+            "user",
+            "password",
+            "pin",
+            "passwordless_sudo"
+          ],
           "additionalProperties": false
         }
       },
@@ -118,11 +135,19 @@
         },
         "required": [
           "boards",
-          "boot",
           "layer"
         ],
         "additionalProperties": false
       }
+    },
+    "logo": {
+      "$ref": "#/$defs/receipt"
+    },
+    "m1n1": {
+      "$ref": "#/$defs/receipt"
+    },
+    "install_tools": {
+      "$ref": "#/$defs/receipt"
     }
   },
   "required": [
@@ -156,6 +181,42 @@
         "required": [
           "pongo"
         ]
+      }
+    },
+    {
+      "description": "A release installs from a block image (root.format), or has a recovery per platform.",
+      "if": {
+        "properties": {
+          "root": {
+            "required": [
+              "format"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "root": {
+            "required": [
+              "map"
+            ]
+          }
+        },
+        "required": [
+          "m1n1",
+          "install_tools"
+        ]
+      },
+      "else": {
+        "properties": {
+          "platforms": {
+            "additionalProperties": {
+              "required": [
+                "boot"
+              ]
+            }
+          }
+        }
       }
     }
   ],
@@ -240,6 +301,12 @@
         "members": {
           "type": "integer",
           "minimum": 1
+        },
+        "format": {
+          "const": "blocks"
+        },
+        "map": {
+          "$ref": "#/$defs/receipt"
         }
       },
       "required": [

@@ -79,6 +79,7 @@ LOADER = {'pongo': Path('/loaders/pongo.bin'), 'm1n1': Path('/loaders/j71b/m1n1.
 class LaunchFlow(unittest.TestCase):
     def run_launch(self, disk, answers=('',), entry_id=None, mode='dfu', proxy=None):
         adapter = Mock(PROFILE='j71b', NAME='iPad', DEVICETREE='t8010-j71b.dtb')
+        adapter.boot_inputs.return_value = []
         adapter.start_loader.return_value = '/dev/cu.usbmodemTEST1'
         proxy = proxy or FakeM1n1(disk)
         replies = iter(answers)
@@ -91,6 +92,30 @@ class LaunchFlow(unittest.TestCase):
         loader.assert_called_once_with('j71b', ANY)
         adapter.start_loader.assert_called_once_with({'mode': mode, 'ecid': 1}, LOADER, ANY, quiet=True)
         return report, proxy
+
+    def test_a_new_computer_downloads_the_tool_visibly_before_starting_the_device(self):
+        adapter = Mock(PROFILE='j71b', NAME='iPad', DEVICETREE='t8010-j71b.dtb')
+        order = []
+        tool = Mock(cached=Mock(return_value=False), fetch=Mock(side_effect=lambda *_: order.append('tool')))
+        adapter.boot_inputs.return_value = [tool]
+        adapter.start_loader.side_effect = lambda *_, **__: order.append('loader') or '/dev/cu.usbmodemTEST1'
+        disk = image({'omarchy-1.conf': entry('Omarchy', '6.17.9')})
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, ORCHARD_HOME=home), \
+                patch.object(launch, 'choose', return_value=(adapter, {'mode': 'dfu', 'ecid': 1})), \
+                patch.object(launch, 'loader_files', return_value=LOADER), \
+                patch.object(launch, 'M1n1Proxy', return_value=FakeM1n1(disk)):
+            launch.launch(progress=Progress(output))
+        self.assertEqual(order, ['tool', 'loader'])
+        self.assertIn('Starting download in parallel...', output.getvalue())
+
+    def test_a_cached_tool_says_nothing(self):
+        output = io.StringIO()
+        from orchard.service import fetch_chain
+        tool = Mock(cached=Mock(return_value=True))
+        fetch_chain([tool], Progress(output))
+        tool.fetch.assert_not_called()
+        self.assertEqual(output.getvalue(), '')
 
     def test_m1n1_lists_and_starts_the_chosen_entry(self):
         disk = image({'omarchy-2.conf': entry('Omarchy', '6.18.2'), 'omarchy-1.conf': entry('Omarchy', '6.17.9')})

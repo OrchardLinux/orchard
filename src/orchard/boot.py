@@ -32,6 +32,8 @@ def boot_ram(output, *, yes=False, logs=None):
     from .hardware import device as hardware_device
     from .apple import entries, usb
     from .apple.boot import start_pongo
+    from .progress import Progress
+    from .service import Background, fetch_chain
     from .state import operation_lock
     from .transports import pongo
 
@@ -69,12 +71,15 @@ def boot_ram(output, *, yes=False, logs=None):
                 print('WARNING: The intended device for this build is unknown.')
                 print('Compatibility with your connected device has not been established.')
             print('It may fail to boot or stop responding until you restart it.')
+        # Before the question, so that it can finish while it is being read.
+        entry = entries.select(description if not mismatch else None)
+        fetching = Background(fetch_chain, entries.inputs(entry) if device['mode'] == 'dfu' else [], Progress())
         if not yes:
             confirm_boot(mismatch=mismatch)
+        fetching.result()
         verify_ram(output)
         usb.selected(device['location'], ecid, chip=chip, board=board, mode=device['mode'])
         if device['mode'] == 'dfu':
-            entry = entries.select(description if not mismatch else None)
             with (Path(logs or output) / f'{entry}.log').open('wb') as log:
                 start_pongo(device, output / 'pongo.bin', log, print,
                             chip=chip, board=board, product='', seconds=60, entry=entry)

@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 
 from .devices import choose
 from .progress import Clock, Progress
-from .service import ask, save_report
+from .service import ask, fetch_chain, save_report
 from .state import exclusive_operation, private_directory
 from .state import DeviceState
 from .transports.m1n1 import M1n1Error, M1n1Proxy
@@ -86,6 +86,8 @@ def launch(*, entry=None, input_fn=input, progress=None):
     adapter, device = choose()
     if device['mode'] not in ('dfu', 'pongo'):
         raise ValueError(f'Put the {adapter.NAME} in DFU mode to launch an installed system')
+    # A computer that never booted this device has nothing yet, so show that as a download.
+    fetch_chain(adapter.boot_inputs() if device['mode'] == 'dfu' else [], progress, clock)
     # One step for the user: no transfer progress, only what to do if the device stalls.
     port = adapter.start_loader(device, loader_files(adapter.PROFILE, progress), progress, quiet=True)
     report = {'profile': adapter.PROFILE, 'ecid': device['ecid'], 'operation': 'launch',
