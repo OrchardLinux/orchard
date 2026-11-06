@@ -106,9 +106,10 @@ be extracted.
 
 ## What is untested
 
-Display (full DRM/GPU), Wi-Fi, Bluetooth, mounting the NVMe root,
-charging, audio, camera and cellular (brightness, buttons and battery:
-[d221-backlight.md](d221-backlight.md)). The A11-specific work
+Full display DRM (the console works through simpledrm; see `d221-display.md`),
+Wi-Fi, Bluetooth, mounting the NVMe root, charging, audio, camera and cellular
+(brightness, buttons and battery: [d221-backlight.md](d221-backlight.md)). The
+A11-specific work
 still needed before this board is usable beyond a RAM shell:
 
 1. `apple/pmp-t8015.bin` (and any other coprocessor firmware) in the recipe.
