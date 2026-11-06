@@ -98,7 +98,21 @@
       ]
     },
     {
-      "destination": "lib/firmware/apple/d221-touch.bin",
+      "destination": "lib/firmware/apple/d221-touch-C1R1FC0,1.bin",
+      "sha256": "e13658559f4d4fe84b99b7491ef8f282c24a2e3740cc15b8fcccef89df49a672",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "D221_Multitouch.im4p"
+        },
+        {
+          "step": "hidspi-from-mtfw@1",
+          "profile": "C1R1FC0,1"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/d221-touch-C1R1FC0,2.bin",
       "sha256": "7a73116a97899500eaf44ceb2455af32a3abbbc8b58399f862179ee13455f061",
       "steps": [
         {
@@ -108,6 +122,20 @@
         {
           "step": "hidspi-from-mtfw@1",
           "profile": "C1R1FC0,2"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/d221-touch-C1R1FC0,2-W3.bin",
+      "sha256": "e671fc65f104bb68023cd34df166b9577a4006f06ad0a7d9eac5f83b8e728bc0",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "D221_Multitouch.im4p"
+        },
+        {
+          "step": "hidspi-from-mtfw@1",
+          "profile": "C1R1FC0,2-W3"
         }
       ]
     }

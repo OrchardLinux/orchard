@@ -29,9 +29,10 @@ controller stays silent: `0x05 = 0x0f` brings its bootloader up (status register
 ## Firmware load (HBPP 0x105, SPI mode 3)
 
 The firmware is `Firmware/D221_Multitouch.im4p` from the IPSW: an MTFW with
-five personalities; the unit's ADT `hid-merge-personality` picks one. Its
+five personalities; the unit's ADT `hid-merge-personality` picks one (m1n1
+passes it on, see "Firmware variants" in [firmware-recipes.md](../firmware-recipes.md)). Its
 items are replayed in order (`hidspi-from-mtfw@1` converts them into
-`lib/firmware/apple/d221-touch.bin`, an op list the driver reads): the
+`lib/firmware/apple/d221-touch-<personality>.bin`, an op list the driver reads): the
 bootloader, vectors and boot configuration, three DCS images through the
 controller's four FIFOs, the multi-touch calibration, a poll, the command list,
 the 230 KB `d22_racer.bin`, ten 3D Touch calibrations, a final poll and the core
@@ -94,6 +95,9 @@ default.
 ## Open
 
 - The `luna` (3D Touch, interface 1) reports are ignored.
-- Only `C1R1FC0,2` is converted; a unit whose ADT names another personality
-  needs its own output.
+- Only `C1R1FC0,2` has run on a device. The recipe also installs `C1R1FC0,1`
+  (which the IPSW's device tree names) and `C1R1FC0,2-W3`, converted the same
+  way but untested. The two `-AdcDump` personalities, diagnostic builds going by
+  their name, aren't installed: a unit asking for one has its touchscreen off,
+  and the log names the variant.
 - No suspend or resume: the controller stays powered while the driver is bound.
