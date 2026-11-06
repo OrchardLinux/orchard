@@ -30,8 +30,10 @@ TypedDict records describe the boundary. They do not replace validation of untru
 
 For a recovery-autogo template carrying a host identity policy, the transport
 queries the selected Apple boot stage and binds that identity to a fresh attempt.
-It retains the template hash and the hash of the bound upload in a private
-receipt. Resuming a USB recovery that advertises `HND` requires its completed
+It retains the template, bound bundle and exact loader-prefix hashes in a
+private receipt. The transport sends the full bundle, followed by its checked
+small prefix to start the prepared iBEC hook. Resuming a USB recovery that
+advertises `HND` requires its completed
 receipt with the same profile, ECID and Linux boot ID. The serial and SSH checks
 then compare the runtime's provenance to that receipt before granting phase RPC
 access. ARM64 ADT identity and caller-owned ARM32 payloads without this policy

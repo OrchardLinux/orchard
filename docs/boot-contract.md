@@ -220,8 +220,13 @@ ECID, CPID, BDID and product. It then binds one nonzero random 128-bit
 also contains `schema`, `source`, `profile`, `ecid`, `chip` and `board`. The
 transport rebuilds the checked CB32 configuration and FDT while retaining the
 kernel and initramfs bytes, then rechecks the selected endpoint immediately
-before its single upload. Its private attempt receipt records both image
-hashes and the nonce.
+before sending the bound bundle. A second Recovery upload carries the exact
+checked loader prefix through the CB32 configuration record, which makes the
+prepared iBEC enter the complete bundle already in RAM. The transport rejects
+Recovery upload lengths on a 512-byte packet boundary because the supported
+irecovery command cannot prove the required trailing packet. Its private
+attempt receipt records the template, bound bundle and loader-prefix hashes,
+the loader-prefix byte count and the nonce.
 
 The runtime requires the live compatible, policy token and staged policy to
 agree. It publishes `identity_source = "host-usb"`, the nonce and original

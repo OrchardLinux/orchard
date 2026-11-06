@@ -69,7 +69,7 @@ class MixinReceipt(TypedDict):
 
 @dataclass(frozen=True)
 class HostHandoff:
-    """A host-observed Apple identity carried by one ARM32 RAM upload."""
+    """A host-observed Apple identity carried by one ARM32 RAM session."""
     handoff_id: str
     template_sha256: str
     chip: int

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""One-shot ARM32 recovery upload through a prepared iBEC autogo chain.
+"""Two-part ARM32 recovery upload through a prepared iBEC autogo chain.
 
 Entry into a pwned iBSS is an explicit external step. This transport sends
 ordinary RAM uploads, records each uncertain outcome before starting it, and
@@ -26,6 +26,8 @@ from . import iboot32, usb
 
 CONFIG_AT = 0x7f00
 CONFIG = struct.Struct('<4s16I')
+AUTOGO_TRIGGER_LIMIT = 0x8000
+RECOVERY_PACKET_BYTES = 512
 
 
 def tool():
@@ -62,7 +64,7 @@ def query(device, executable):
 
 
 def bundle(path, expected, selected):
-    """Validate the complete single-upload CB32 payload before device access."""
+    """Validate the complete CB32 bundle before device access."""
     path = Path(path)
     if path.is_symlink() or not path.is_file() or not re.fullmatch('[0-9a-f]{64}', expected or ''):
         raise ValueError('Expected a regular recovery bundle with a SHA-256 receipt')
@@ -75,6 +77,7 @@ def bundle(path, expected, selected):
     if hashlib.sha256(data).hexdigest() != expected:
         raise ValueError('Recovery payload differs from its manifest')
     validate_bundle(data, selected)
+    checked_recovery_upload_size(len(data))
     return data
 
 
@@ -95,6 +98,24 @@ def validate_bundle(data, selected):
             or watchdog % 4 or l2 % 4 or initrd_address % 4096
             or struct.unpack_from('<I', data, kernel + 0x24)[0] != 0x016f2818):
         raise ValueError('Recovery loader ranges differ from the selected platform')
+
+
+def loader_trigger(data, candidate=None):
+    """Return the exact small loader prefix that makes the patched iBEC run it."""
+    size = CONFIG_AT + CONFIG.size
+    trigger = data[:size] if candidate is None else candidate
+    if (size >= AUTOGO_TRIGGER_LIMIT or len(trigger) != size or
+            trigger != data[:size]):
+        raise ValueError('Recovery loader trigger differs from the checked bundle prefix')
+    checked_recovery_upload_size(len(trigger))
+    return trigger
+
+
+def checked_recovery_upload_size(size):
+    """Reject lengths whose final Recovery ZLP cannot be proved by irecovery."""
+    if type(size) is not int or size <= 0 or size % RECOVERY_PACKET_BYTES == 0:
+        raise ValueError('Recovery upload length has an unobservable trailing USB packet')
+    return size
 
 
 def recovery_handoff(profile, endpoint):
@@ -119,6 +140,9 @@ def recovery_handoff(profile, endpoint):
             type(record.get('schema')) is not int or record.get('schema') != 1 or
             record.get('method') != 'recovery-autogo' or
             record.get('phase') != 'complete' or record.get('payload_format') != 'cascadia-cb32' or
+            record.get('loader_bytes') != CONFIG_AT + CONFIG.size or
+            not isinstance(record.get('loader_sha256'), str) or
+            not re.fullmatch('[0-9a-f]{64}', record['loader_sha256']) or
             record.get('identity_source') != 'host-usb' or handoff.handoff_id != identifier or
             endpoint.get('profile') != profile):
         raise ValueError('Recovery differs from its completed host handoff receipt')
@@ -172,12 +196,15 @@ def wait_recovery(device, executable, *, product, seconds=30):
 
 
 def upload(device, path, executable, *, product, expected, mode='recovery'):
+    if mode == 'recovery':
+        checked_recovery_upload_size(Path(path).stat().st_size)
     selected(device, executable, mode=mode, product=product)
     if digest(path) != expected:
         raise ValueError('Private boot snapshot changed before upload')
     result = subprocess.run([executable, '-i', hex(device['ecid']), '-f', str(path)],
                             capture_output=True, timeout=180, check=False)
-    if result.returncode:
+    if (result.returncode or
+            not re.search(rb'(?<![0-9])100(?:\.0+)?%', result.stdout or b'')):
         raise RuntimeError('Recovery upload outcome is unknown; inspect the device before another attempt')
 
 
@@ -212,21 +239,28 @@ def boot(device, assets, manifest, progress, *, profile, chip, board, product):
                                                    board=board, profile=profile,
                                                    handoff_id=identifier, template_sha256=expected)
         validate_bundle(payload, recipe)
+    checked_recovery_upload_size(len(payload))
     upload_hash = hashlib.sha256(payload).hexdigest()
+    trigger = loader_trigger(payload)
+    trigger_hash = hashlib.sha256(trigger).hexdigest()
     attempt = folder / (identifier + '.json')
     image_copy = folder / (identifier + '-recovery.bin')
+    trigger_copy = folder / (identifier + '-loader.bin')
     stage_copy = folder / (identifier + '-ibec.img3')
     record = {'schema': 1, 'method': 'recovery-autogo', 'ecid': device['ecid'], 'profile': profile,
               'build': recipe['build'], 'recovery_sha256': expected,
               'payload_format': 'cascadia-cb32',
               'ibec_sha256': source_receipt['ibec']['sha256'], 'phase': 'validated'}
     record['recovery_sha256'] = upload_hash
+    record['loader_sha256'] = trigger_hash
+    record['loader_bytes'] = len(trigger)
     if handoff is not None:
         record.update(handoff.fields())
     try:
         # Freeze inputs so another checkout rebuilding a shared component cannot
         # replace an upload after this operation has validated it.
         for data, path, checksum in ((payload, image_copy, upload_hash),
+                                     (trigger, trigger_copy, trigger_hash),
                                      (stage.read_bytes(), stage_copy, record['ibec_sha256'])):
             if hashlib.sha256(data).hexdigest() != checksum:
                 raise ValueError('Boot input changed while creating its private snapshot')
@@ -244,6 +278,10 @@ def boot(device, assets, manifest, progress, *, profile, chip, board, product):
         save(attempt, record)
         progress.phase('Uploading ARM32 recovery')
         upload(device, image_copy, executable, product=recipe['device'], expected=upload_hash)
+        record['phase'] = 'loader-upload-outcome-unknown'
+        save(attempt, record)
+        progress.phase('Starting the checked ARM32 recovery loader')
+        upload(device, trigger_copy, executable, product=recipe['device'], expected=trigger_hash)
         record['phase'] = 'awaiting-linux'
         save(attempt, record)
         deadline = time.monotonic() + 120
@@ -281,7 +319,7 @@ def boot(device, assets, manifest, progress, *, profile, chip, board, product):
     finally:
         # Attempt-private copies are no longer needed after this command
         # exits. The outcome receipt retains their exact hashes.
-        for path in (image_copy, stage_copy):
+        for path in (image_copy, trigger_copy, stage_copy):
             path.unlink(missing_ok=True)
 
 

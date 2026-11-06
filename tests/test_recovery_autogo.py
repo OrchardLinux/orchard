@@ -33,10 +33,10 @@ def fixture():
     return bytes(raw), template, selected
 
 
-def payload():
+def payload(initramfs=b'cpio'):
     from test_cascadia_loader import PROFILE, kernel, loader, tree
     image = cascadia.payload_image
-    return image.assemble(loader(), kernel(), image.write_fdt(tree()), b'cpio', PROFILE, 'test=1')[0]
+    return image.assemble(loader(), kernel(), image.write_fdt(tree()), initramfs, PROFILE, 'test=1')[0]
 
 
 class IMG3Tests(unittest.TestCase):
@@ -126,6 +126,30 @@ class PayloadTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'configuration'):
                 cascadia.bundle(file, hashlib.sha256(broken).hexdigest(), {'payload_address': 0x80000000, 'maximum_payload_bytes': 1 << 20})
 
+    def test_loader_trigger_is_the_exact_sub_packet_bundle_prefix(self):
+        data = payload()
+        trigger = cascadia.loader_trigger(data)
+        self.assertEqual(trigger, data[:cascadia.CONFIG_AT + cascadia.CONFIG.size])
+        self.assertLess(len(trigger), cascadia.AUTOGO_TRIGGER_LIMIT)
+        with self.assertRaisesRegex(ValueError, 'bundle prefix'):
+            cascadia.loader_trigger(data, trigger[:-1])
+        with self.assertRaisesRegex(ValueError, 'bundle prefix'):
+            cascadia.loader_trigger(data, trigger + b'oversized')
+        mismatched = trigger[:-1] + bytes([trigger[-1] ^ 1])
+        with self.assertRaisesRegex(ValueError, 'bundle prefix'):
+            cascadia.loader_trigger(data, mismatched)
+        with patch.object(cascadia, 'AUTOGO_TRIGGER_LIMIT', len(trigger)):
+            with self.assertRaisesRegex(ValueError, 'bundle prefix'):
+                cascadia.loader_trigger(data)
+
+    def test_recovery_upload_sizes_exclude_the_unobservable_zlp_boundary(self):
+        for size in (1, 511, 513):
+            with self.subTest(size=size):
+                self.assertEqual(cascadia.checked_recovery_upload_size(size), size)
+        for size in (0, 512, 1024, True):
+            with self.subTest(size=size), self.assertRaisesRegex(ValueError, 'trailing USB packet'):
+                cascadia.checked_recovery_upload_size(size)
+
 
 class TransportTests(unittest.TestCase):
     def setUp(self):
@@ -158,7 +182,7 @@ class TransportTests(unittest.TestCase):
             patch.object(cascadia, 'DeviceState', return_value=Mock(root=self.root / 'private/test-device')),
             patch.object(cascadia.usb, 'recovery', return_value=self.endpoint),
             patch.object(cascadia.usb, 'devices', return_value=[self.endpoint]),
-            patch.object(cascadia.subprocess, 'run', return_value=Mock(returncode=0)),
+            patch.object(cascadia.subprocess, 'run', return_value=Mock(returncode=0, stdout=b'100%')),
             patch.object(cascadia.payload_image, 'host_identity_policy', return_value=None, create=True),
         ]
         self.mocks = [item.start() for item in self.patches]
@@ -172,7 +196,7 @@ class TransportTests(unittest.TestCase):
     def test_uploads_each_payload_once_and_binds_the_finished_boot(self):
         self.run_boot()
         calls = self.mocks[6].call_args_list
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls), 2)
         self.assertTrue(all(call.args[0][1:4] == ['-i', '0x7b', '-f'] for call in calls))
         self.assertEqual(self.device['boot_id'], BOOT_ID)
         self.assertTrue(self.device['resumed'])
@@ -180,6 +204,17 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(len(receipts), 1)
         self.assertEqual(json.loads(receipts[0].read_text())['phase'], 'complete')
         self.assertFalse(list(self.attempts.glob('*-loader.bin')))
+
+    def test_zlp_length_stops_before_device_selection_or_upload(self):
+        extra = -len(self.data) % cascadia.RECOVERY_PACKET_BYTES
+        self.data = payload(b'cpio' + b'x' * extra)
+        self.assertEqual(len(self.data) % cascadia.RECOVERY_PACKET_BYTES, 0)
+        self.recovery.write_bytes(self.data)
+        self.manifest['assets']['recovery']['sha256'] = hashlib.sha256(self.data).hexdigest()
+        with self.assertRaisesRegex(ValueError, 'trailing USB packet'):
+            self.run_boot()
+        self.mocks[2].assert_not_called()
+        self.mocks[6].assert_not_called()
 
     def test_failed_upload_is_not_repeated(self):
         self.mocks[6].return_value.returncode = 1
@@ -189,21 +224,50 @@ class TransportTests(unittest.TestCase):
         receipt = next(self.attempts.glob('*.json'))
         self.assertEqual(json.loads(receipt.read_text())['phase'], 'recovery-upload-outcome-unknown')
 
+    def test_upload_without_complete_marker_is_unknown(self):
+        self.mocks[6].return_value = Mock(returncode=0, stdout=b'99%')
+        with self.assertRaisesRegex(RuntimeError, 'outcome is unknown'):
+            self.run_boot()
+        self.assertEqual(self.mocks[6].call_count, 1)
+        receipt = next(self.attempts.glob('*.json'))
+        self.assertEqual(json.loads(receipt.read_text())['phase'], 'recovery-upload-outcome-unknown')
+
+    def test_loader_upload_without_complete_marker_is_unknown(self):
+        self.mocks[6].side_effect = [Mock(returncode=0, stdout=b'100.0%'),
+                                     Mock(returncode=0, stdout=b'99%')]
+        with self.assertRaisesRegex(RuntimeError, 'outcome is unknown'):
+            self.run_boot()
+        self.assertEqual(self.mocks[6].call_count, 2)
+        receipt = next(self.attempts.glob('*.json'))
+        record = json.loads(receipt.read_text())
+        self.assertEqual(record['phase'], 'loader-upload-outcome-unknown')
+        self.assertEqual(record['loader_bytes'], cascadia.CONFIG_AT + cascadia.CONFIG.size)
+        self.assertEqual(record['loader_sha256'], hashlib.sha256(cascadia.loader_trigger(self.data)).hexdigest())
+
+    def test_failed_ibec_upload_is_not_repeated(self):
+        self.device['mode'] = 'dfu'
+        self.mocks[6].return_value = Mock(returncode=1, stdout=b'')
+        with self.assertRaisesRegex(RuntimeError, 'outcome is unknown'):
+            self.run_boot()
+        self.assertEqual(self.mocks[6].call_count, 1)
+        receipt = next(self.attempts.glob('*.json'))
+        self.assertEqual(json.loads(receipt.read_text())['phase'], 'ibec-upload-outcome-unknown')
+
 
     def test_pwned_dfu_uploads_prepared_ibec_once_before_payload(self):
         self.device['mode'] = 'dfu'
         sent = []
         def sending(argv, **kwargs):
             sent.append(Path(argv[-1]).read_bytes())
-            return Mock(returncode=0)
+            return Mock(returncode=0, stdout=b'100%')
         self.mocks[6].side_effect = sending
         def ready(*args, **kwargs):
             self.device.update(mode='recovery', location=777)
         with patch.object(cascadia, 'wait_recovery', side_effect=ready) as wait:
             self.run_boot()
             wait.assert_called_once()
-        self.assertEqual(sent, [b'private stage', self.data])
-        self.assertEqual(self.mocks[6].call_count, 2)
+        self.assertEqual(sent, [b'private stage', self.data, cascadia.loader_trigger(self.data)])
+        self.assertEqual(self.mocks[6].call_count, 3)
 
     def test_plain_dfu_is_refused_before_any_upload(self):
         self.device['mode'] = 'dfu'
@@ -222,7 +286,7 @@ class TransportTests(unittest.TestCase):
         self.mocks[4].return_value = dict(self.endpoint, ecid=124)
         with self.assertRaisesRegex(RuntimeError, 'Another device'):
             self.run_boot()
-        self.assertEqual(self.mocks[6].call_count, 1)
+        self.assertEqual(self.mocks[6].call_count, 2)
 
 
     def test_concurrent_rebuild_does_not_replace_frozen_uploads(self):
@@ -231,10 +295,10 @@ class TransportTests(unittest.TestCase):
             content.append(Path(argv[-1]).read_bytes())
             self.recovery.write_bytes(b'next build')
             self.stage.write_bytes(b'next stage')
-            return Mock(returncode=0)
+            return Mock(returncode=0, stdout=b'100%')
         self.mocks[6].side_effect = sending
         self.run_boot()
-        self.assertEqual(content, [self.data])
+        self.assertEqual(content, [self.data, cascadia.loader_trigger(self.data)])
         self.assertFalse(list(self.attempts.glob('*.bin')))
         self.assertFalse(list(self.attempts.glob('*.img3')))
 
@@ -243,7 +307,7 @@ class TransportTests(unittest.TestCase):
         with patch.object(cascadia.time, 'monotonic', side_effect=[0, 121]):
             with self.assertRaisesRegex(RuntimeError, 'did not enumerate'):
                 self.run_boot()
-        self.assertEqual(self.mocks[6].call_count, 1)
+        self.assertEqual(self.mocks[6].call_count, 2)
 
 
     def test_persistent_recovery_remains_observation_only(self):
@@ -251,13 +315,13 @@ class TransportTests(unittest.TestCase):
         with patch.object(cascadia.time, 'monotonic', side_effect=[0, 121]):
             with self.assertRaisesRegex(RuntimeError, 'did not enumerate'):
                 self.run_boot()
-        self.assertEqual(self.mocks[6].call_count, 1)
+        self.assertEqual(self.mocks[6].call_count, 2)
 
     def test_ambiguous_identity_stops_without_another_upload(self):
         self.mocks[5].return_value = [self.endpoint, dict(self.endpoint, ecid=124)]
         with self.assertRaisesRegex(RuntimeError, 'Ambiguous'):
             self.run_boot()
-        self.assertEqual(self.mocks[6].call_count, 1)
+        self.assertEqual(self.mocks[6].call_count, 2)
 
     def test_resumed_boot_does_not_prepare_or_upload(self):
         self.device.update(mode='linux', boot_id=BOOT_ID)
@@ -277,18 +341,31 @@ class TransportTests(unittest.TestCase):
         self.endpoint['handoff_id'] = HANDOFF_ID
         bound = self.data[:-1] + b'x'
         uploaded = []
-        self.mocks[6].side_effect = lambda argv, **kw: (uploaded.append(Path(argv[-1]).read_bytes()) or Mock(returncode=0))
+        self.mocks[6].side_effect = lambda argv, **kw: (uploaded.append(Path(argv[-1]).read_bytes()) or Mock(returncode=0, stdout=b'100%'))
         with patch.object(cascadia.secrets, 'token_hex', return_value=HANDOFF_ID), \
              patch.object(cascadia.payload_image, 'bind_host_identity', return_value=bound, create=True) as bind:
             self.run_boot()
         bind.assert_called_once_with(self.data, ecid=123, chip=0x8942, board=10, profile='synthetic',
                                      handoff_id=HANDOFF_ID, template_sha256=hashlib.sha256(self.data).hexdigest())
-        self.assertEqual(uploaded, [bound])
+        self.assertEqual(uploaded, [bound, cascadia.loader_trigger(bound)])
         record = json.loads(next(self.attempts.glob('*.json')).read_text())
         self.assertEqual(record['template_sha256'], hashlib.sha256(self.data).hexdigest())
         self.assertEqual(record['recovery_sha256'], hashlib.sha256(bound).hexdigest())
+        self.assertEqual(record['loader_sha256'], hashlib.sha256(cascadia.loader_trigger(bound)).hexdigest())
+        self.assertEqual(record['loader_bytes'], len(cascadia.loader_trigger(bound)))
         self.assertEqual(record['identity_source'], 'host-usb')
         self.assertEqual(record['handoff_id'], HANDOFF_ID)
+
+    def test_bound_zlp_length_stops_before_attempt_receipt_or_upload(self):
+        self.mocks[7].return_value = {'source': 'host-usb'}
+        extra = -len(self.data) % cascadia.RECOVERY_PACKET_BYTES
+        bound = payload(b'cpio' + b'x' * extra)
+        self.assertEqual(len(bound) % cascadia.RECOVERY_PACKET_BYTES, 0)
+        with patch.object(cascadia.payload_image, 'bind_host_identity', return_value=bound, create=True):
+            with self.assertRaisesRegex(ValueError, 'trailing USB packet'):
+                self.run_boot()
+        self.mocks[6].assert_not_called()
+        self.assertFalse(list(self.attempts.glob('*.json')))
 
     def test_wrong_missing_or_unexpected_nonce_stops_without_retrying_upload(self):
         for advertised in (None, 'f' * 32):
@@ -300,7 +377,7 @@ class TransportTests(unittest.TestCase):
                 self.mocks[6].reset_mock()
                 with self.assertRaisesRegex(RuntimeError, 'host handoff'):
                     self.run_boot()
-                self.assertEqual(self.mocks[6].call_count, 1)
+                self.assertEqual(self.mocks[6].call_count, 2)
                 for path in self.attempts.glob('*.json'):
                     path.unlink()
         self.mocks[7].return_value = None
@@ -308,7 +385,7 @@ class TransportTests(unittest.TestCase):
         self.mocks[6].reset_mock()
         with self.assertRaisesRegex(RuntimeError, 'unexpected host handoff'):
             self.run_boot()
-        self.assertEqual(self.mocks[6].call_count, 1)
+        self.assertEqual(self.mocks[6].call_count, 2)
 
     def test_device_identity_change_immediately_before_upload_stops_mutation(self):
         self.mocks[2].side_effect = [({'pwned': True}, {'mode': 'recovery'}), ValueError('identity changed')]
@@ -316,11 +393,11 @@ class TransportTests(unittest.TestCase):
             self.run_boot()
         self.mocks[6].assert_not_called()
 
-    def test_zero_boot_identity_stops_after_one_upload(self):
+    def test_zero_boot_identity_stops_after_two_uploads(self):
         self.endpoint['boot_id'] = '00000000-0000-0000-0000-000000000000'
         with self.assertRaisesRegex(RuntimeError, 'valid device boot identity'):
             self.run_boot()
-        self.assertEqual(self.mocks[6].call_count, 1)
+        self.assertEqual(self.mocks[6].call_count, 2)
 
     def test_missing_irecovery_tool_stops_before_query_or_upload(self):
         self.mocks[1].side_effect = ValueError('Install libirecovery')
@@ -342,7 +419,7 @@ class TransportTests(unittest.TestCase):
                     self.run_boot()
                 self.mocks[6].assert_not_called()
 
-    def test_real_public_template_binds_one_upload_without_changing_kernel_or_initramfs(self):
+    def test_real_public_template_binds_two_uploads_without_changing_kernel_or_initramfs(self):
         from orchard import recovery_identity
         from test_cascadia_loader import PROFILE, kernel, loader, tree
         image = cascadia.payload_image
@@ -357,13 +434,14 @@ class TransportTests(unittest.TestCase):
         self.manifest['assets']['recovery']['sha256'] = hashlib.sha256(self.data).hexdigest()
         self.endpoint['handoff_id'] = HANDOFF_ID
         sent = []
-        self.mocks[6].side_effect = lambda argv, **kw: (sent.append(Path(argv[-1]).read_bytes()) or Mock(returncode=0))
+        self.mocks[6].side_effect = lambda argv, **kw: (sent.append(Path(argv[-1]).read_bytes()) or Mock(returncode=0, stdout=b'100%'))
         with patch.object(image, 'host_identity_policy', self.real_policy), \
              patch.object(cascadia.secrets, 'token_hex', return_value=HANDOFF_ID):
             self.run_boot()
-        self.assertEqual(len(sent), 1)
+        self.assertEqual(len(sent), 2)
         self.assertEqual(self.recovery.read_bytes(), self.data)
         original, bound = image.configuration(self.data), image.configuration(sent[0])
+        self.assertEqual(sent[1], cascadia.loader_trigger(sent[0]))
         self.assertEqual(self.data[original['kernel_offset']:original['dtb_offset']],
                          sent[0][bound['kernel_offset']:bound['dtb_offset']])
         self.assertEqual(self.data[original['initrd_offset']:], sent[0][bound['initrd_offset']:])

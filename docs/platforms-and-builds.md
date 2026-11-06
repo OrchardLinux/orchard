@@ -493,11 +493,13 @@ Project Cascadia's chain, as shaynelegault ran it on a P105:
 2. **Patched iBSS** from the user's own IPSW. For kDFU it must be
    unencrypted: after iOS has booted, the GID key is unavailable.
 3. **iBEC with an auto-go hook** at fixed offsets of the iOS 8.4.1 (12H321)
-   iBEC: when a Recovery-mode upload is complete, iBEC jumps into it.
-4. **Staging bundle** uploaded to `0x80000000`: the `linux_boot` trampoline
-   (paints status, turns MMU and caches off), padding to `0x8000`, then
-   `zImage` with the DTB appended, entered at `0x80008000`. The root is built
-   into the kernel: iBEC passes no initrd pointer.
+   iBEC. The host uploads the complete bound bundle, followed by its exact
+   checked loader prefix. The small second upload makes iBEC enter the bundle
+   already stored at `0x80000000`.
+4. **Staging bundle** at `0x80000000`: the `linux_boot` trampoline paints
+   status and turns MMU and caches off. Padding reaches `0x8000`, followed by
+   `zImage` with the DTB appended and entry at `0x80008000`. Current Orchard
+   recovery also carries its external initramfs in the checked CB32 layout.
 5. **Linux** with a USB gadget; the host takes `10.55.0.1`, then SSH and NFS.
 
 In orchard this is an iBoot-chain variant whose payload is the trampoline
