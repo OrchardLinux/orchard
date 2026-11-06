@@ -10,20 +10,31 @@ Device data by Stephen Cox.
 
 ## What ran, and on which build
 
-Everything below ran on one iPad3,1 (A1416) from RAM, with Cascadia's build of
-the kernel (GCC, Cascadia's config, an initramfs built in) and the
-[J1 boot kit](https://github.com/stephencox/cascadia-j1-boot). The tree was
-this one on 2026-10-26, and Cascadia PR #35's on 2026-11-05. Orchard builds
-the same tree with clang 19 and the platform's config. That build compiles,
-but it has not been booted on a J1 yet, so `device.toml` leaves these features
-`untested`.
+Everything ran on one iPad3,1 (A1416) from RAM, booted with the
+[J1 boot kit](https://github.com/stephencox/cascadia-j1-boot).
 
-| Feature | Seen on Cascadia's build | Needs |
+On 2026-11-06 orchard's tree ran: the base and all of
+`kernel/patches/import/cascadia` applied, and the `s5l8945x-j1.dtb` that
+orchard builds. The zImage was built with GCC 11.4 and the kit's config and
+initramfs, because the kit's loader hooks the decompressor at offsets that hold
+only for that compiler. Orchard's own build (clang 19, the platform's config)
+compiles, but it has not booted on a J1 yet.
+
+| Feature | Seen on orchard's tree, 2026-11-06 | Needs |
 |---|---|---|
-| USB serial (`ttyGS0`) | 2026-10-26 and 2026-11-05 | `earlycon=j1fb` in the bootargs, or the kernel stops before the gadget |
-| Display (simplefb on iBoot's scanout) | 2026-10-26 | iBEC's teardown calls patched out (below), so the scanout stays live |
-| Touch (Z2, `/dev/input/event0`) | 2026-10-26 and 2026-11-05 | a userspace bootload through `HXT_IOC_SET_DL` / `HXT_IOC_READY`, with the unit's calibration |
-| Wi-Fi (BCM4330 on HSIC: scans 2.4 and 5 GHz, joins WPA2) | 2026-10-26 and 2026-11-05 | the second USB complex brought up from userspace (no PHY driver yet), then ehci-platform bound again |
+| USB serial (`ttyGS0`) | root shell 4 s after `go` | `earlycon=j1fb` in the bootargs, or the kernel stops before the gadget |
+| USB network (CDC Ethernet) | pinged both ways | |
+| Touch (Z2, `/dev/input/event0`) | multitouch contacts while the screen was touched | a userspace bootload through `HXT_IOC_SET_DL` / `HXT_IOC_READY`, with the unit's calibration |
+| Wi-Fi (BCM4330 on HSIC) | joined WPA2 on 5 GHz, DHCP lease, gateway reachable after 5 min | the second USB complex brought up from userspace (no PHY driver yet), then ehci-platform bound again |
+| Display (simplefb on iBoot's scanout) | `fb0` at 2048x1536; a userspace dashboard drawn to it showed on the LCD | iBEC's teardown calls patched out (below), so the scanout stays live |
+
+The same boot stayed up past 2 hours. Besides the expected `-110` from
+ehci-platform at probe (the complex is not up yet) and a brcmfmac
+`p2p-dev-wlan0` timeout, the log had one warning: `BUG: mapping for 0x3f200000
+at 0xf0500000 out of vmalloc space` at t=0, which does not stop the boot.
+
+Cascadia's own build of the tree (GCC, Cascadia's config) showed the same
+features on 2026-10-26, and with Cascadia PR #35's tree on 2026-11-05.
 
 ## Boot
 
@@ -62,8 +73,8 @@ Wi-Fi MAC address that goes into the nvram.
 
 ## Open work
 
-- Boot orchard's build on the J1: find the loader's decompressor hooks for a
-  clang zImage, then set the feature states from that boot.
+- Boot orchard's clang build on the J1: find the loader's decompressor hooks
+  for a clang zImage.
 - Upstream to Cascadia first, then import here. Open as Cascadia
   [PR #35](https://github.com/rzxvx/Project-Cascadia/pull/35): CPU ids
   `0x900`/`0x901` and both cores, the battery gauge (HDQ, UART5 powered), the
