@@ -43,7 +43,7 @@ class T8010DeviceData(unittest.TestCase):
                 self.assertEqual(device['device']['apple_products'], [product])
                 self.assertEqual(device['device']['dt_compatible'], ['apple,' + profile])
                 self.assertEqual(device['match']['dfu'], {'chip': 0x8010, 'board': board})
-                self.assertIs(device['match']['linux']['recovery'], True)
+                self.assertTrue(hardware.has_recovery(device))
                 self.assertEqual(device['kernel'], {'platform': 'apple-16k', 'dtb': 't8010-' + profile})
                 self.assertEqual(hardware.install_blockers(profile), [])
                 self.assertEqual(recipe['device'], product)

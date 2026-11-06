@@ -234,6 +234,14 @@ class IdentityOnlyBoards(unittest.TestCase):
 
 
 class InferredInstall(unittest.TestCase):
+    def test_recovery_follows_from_the_kernel(self):
+        from orchard import devices
+        self.assertEqual(devices.load('j71b').PRODUCT, 'Orchard Recovery')
+        self.assertEqual(devices.load('n61').PRODUCT, 'Orchard Recovery')
+        self.assertEqual(devices.load('j96').PRODUCT, 'Orchard Recovery')
+        self.assertIsNone(devices.load('k93').PRODUCT)  # no kernel
+        self.assertIsNone(devices.load('p105').PRODUCT)  # 32-bit: no recovery root yet
+
     def test_the_boards_with_every_requirement_can_install(self):
         from orchard import hardware
         boards = {path.parent.name for path in DESCRIPTORS if not hardware.install_blockers(path.parent.name)}

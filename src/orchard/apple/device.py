@@ -30,7 +30,7 @@ class Device:
         self.NAME = identity['name']
         self.APPLE_PRODUCT = identity['apple_products'][0]
         # USB product of Orchard's recovery, the same on every device; absent until it has one.
-        self.PRODUCT = RECOVERY_PRODUCT if descriptor['match'].get('linux', {}).get('recovery') else None
+        self.PRODUCT = RECOVERY_PRODUCT if hardware.has_recovery(descriptor) else None
         self.CHIP = descriptor['match']['dfu']['chip']
         self.BOARD = descriptor['match']['dfu']['board']
         dtb = descriptor.get('kernel', {}).get('dtb')

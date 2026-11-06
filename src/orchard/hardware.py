@@ -99,6 +99,22 @@ def install_blockers(profile, described=None):
     return blockers
 
 
+def has_recovery(described, root=None):
+    """Whether Orchard's recovery runs on a board: it follows from the board's kernel.
+
+    Recovery is built per platform with every board's device tree, on the arm64 root
+    distributions build, so 32-bit boards have none until a root of their own exists.
+    """
+    if 'kernel' not in described:
+        return False
+    chips = Path(root) if root else data_root()
+    for path in (chips / 'chips').glob('*.toml'):
+        chip = tomllib.loads(path.read_text())
+        if chip['cpid'] == described['match']['dfu']['chip']:
+            return chip['architecture'] == 'arm64'
+    return False
+
+
 def _method_usable(profile, name):
     if name not in IMPLEMENTED_METHODS:
         return False
