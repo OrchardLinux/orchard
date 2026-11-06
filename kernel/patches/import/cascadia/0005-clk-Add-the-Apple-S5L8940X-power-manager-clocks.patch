@@ -3,9 +3,9 @@ From: rzxvx <rrzxznewid@gmail.com>
 Date: Sat, 19 Sep 2026 12:19:56 +0000
 Subject: [PATCH] clk: Add the Apple S5L8940X power manager clocks
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at c20b85e:
-  patches/files-sandcastle-port/drivers/clk/clk-s5l8940x-pmgr.c
-  patches/tree/0001-cascadia.patch
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+  devices/a5/patches/files-sandcastle-port/drivers/clk/clk-s5l8940x-pmgr.c
+  devices/a5/patches/tree/0001-cascadia.patch
 
 Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (3 commits).
 

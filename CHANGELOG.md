@@ -37,6 +37,12 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
   (micro23)
 - iPad Air 2 (J81): the touchscreen works, with five fingers and no frame
   errors on main's kernel. (Martin Puškáč)
+- iPad 3 (Wi-Fi, J1): the display, touchscreen, Wi-Fi and USB serial and
+  network work on Orchard's kernel tree, booted from RAM with the J1 boot kit
+  on a jailbroken iOS 9.3.5. That kernel was built with GCC, because the kit's
+  loader can't start a clang build yet. Device description, device tree and a
+  firmware recipe. Orchard's launcher doesn't run this boot chain yet.
+  Experimental. (Stephen Cox)
 
 ### Install & launch
 
@@ -71,6 +77,10 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
 - Installed systems allow suspend only on boards whose device data says it
   works (`orchard-sleep` in the platform layer); distributions decide when to
   suspend. How to bring it up on another board: docs/bring-up/suspend.md.
+- Older 32-bit devices (apple-armv7): the kernel is now Project Cascadia at
+  091d441 (it was c20b85e), with Cascadia's iPad 3 driver changes and charger
+  fixes. The importer follows Cascadia's A5 tree into its new `devices/a5/`
+  folder. (Stephen Cox)
 
 ### Development
 
