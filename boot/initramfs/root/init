@@ -24,7 +24,7 @@ usb_gadget() {
     echo 0x4145 > "$g/idProduct" &&
     mkdir -p "$g/strings/0x409" "$g/configs/c.1/strings/0x409" &&
     echo 'Orchard Linux' > "$g/strings/0x409/manufacturer" &&
-    echo 'Orchard installed root' > "$g/strings/0x409/product" &&
+    echo "${1:-Orchard installed root}" > "$g/strings/0x409/product" &&
     echo "BOOT:$(cat /proc/sys/kernel/random/boot_id) BOARD:${board#apple,}" > "$g/strings/0x409/serialnumber" &&
     echo 'USB network and serial' > "$g/configs/c.1/strings/0x409/configuration" &&
     echo 500 > "$g/configs/c.1/MaxPower" &&
@@ -33,9 +33,9 @@ usb_gadget() {
     ln -s "$g/functions/acm.usb0" "$g/configs/c.1/acm.usb0" &&
     basename "$(ls -d /sys/class/udc/* | head -1)" > "$g/UDC"
 }
-usb_gadget || echo 'orchard initrd: USB gadget setup failed; console recovery remains available'
 rescue_pid= dhcp_pid=
 if [ -x /bin/orchard-lwvm ]; then
+    usb_gadget || echo 'orchard initrd: USB gadget setup failed; console recovery remains available'
     mkdir -p /run/recovery /run/orchard/rescue
     chmod 700 /run/orchard /run/orchard/rescue
     cp /bin/busybox /run/orchard/rescue/busybox
@@ -124,6 +124,10 @@ done
 mkdir -p /newroot
 mount ${fstype:+-t "$fstype"} -o "$mode${flags:+,$flags}" "$device" /newroot || stop "could not mount $device"
 [ -x "/newroot$init" ] || [ -L "/newroot$init" ] || stop "the root has no $init"
+if [ ! -x /bin/orchard-lwvm ]; then
+    name=$(sed -n 's/^NAME=//p' /newroot/etc/os-release /newroot/usr/lib/os-release 2>/dev/null | head -1 | tr -d "\"'")
+    usb_gadget "${name:-Linux}" || echo 'orchard initrd: no USB gadget; continuing without USB'
+fi
 
 # Prepare RAM rescue before the installed init starts its own services.
 # BusyBox switch_root needs PID1; no child performs the mount handoff.
@@ -155,6 +159,8 @@ ssh_pid=$(cat /run/recovery/dropbear.pid 2>/dev/null)
 moved=
 for name in dev proc sys run; do
     mkdir -p "/newroot/$name" || stop "the root lacks /$name"
+done
+for name in dev proc sys run; do
     if ! mount --move "/$name" "/newroot/$name"; then
         for previous in $moved; do
             mount --move "/newroot/$previous" "/$previous" || true
