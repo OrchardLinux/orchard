@@ -72,7 +72,7 @@ def assemble_ram(hardware, output, *, kernel, busybox, loader, pongo, init,
     dtbs = [kernel / 'dtbs' / (dtb + '.dtb') for dtb in boards.values()]
     if profile is not None:
         from .hardware import device as described_device
-        from .image.cascadia import check_compatible
+        from .cascadia_payload import check_compatible
         check_compatible(dtbs[0].read_bytes(),
                          described_device(next(iter(boards)), hardware)['device']['dt_compatible'])
     inputs = [init, busybox, loader, kernel / described['image'], *dtbs,

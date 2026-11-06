@@ -9,7 +9,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'src'))
 from orchard import buildenv
-from orchard.image.cascadia import digest, profile, verify_loader
+from orchard.cascadia_payload import digest, profile, verify_loader
 
 
 def main():

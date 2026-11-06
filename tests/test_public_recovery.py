@@ -4,7 +4,7 @@ import unittest
 
 from orchard import recovery_identity as protocol
 from orchard.recovery_policy import settings
-from orchard.image import cascadia
+from orchard import cascadia_payload as cascadia
 from test_cascadia_loader import PROFILE, loader, kernel, tree
 
 POLICY = {'schema': 1, 'source': 'host-usb', 'profile': 'p105',

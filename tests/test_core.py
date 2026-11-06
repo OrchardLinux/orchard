@@ -38,6 +38,8 @@ class StandardLibraryOnly(unittest.TestCase):
         core = {module_name(name) for name in files}
         self.assertIn('orchard.user', core)
         self.assertIn('orchard.service', core)
+        self.assertIn('orchard.cascadia_payload', core)
+        self.assertIn('orchard.recovery_identity', core)
         self.assertNotIn('orchard.build', core)
         for name, path in files.items():
             module = module_name(name)
@@ -88,6 +90,36 @@ class Store(unittest.TestCase):
 
 
 class Zipapp(Store):
+    def test_public_cascadia_binding_runs_without_source_or_site_packages(self):
+        from orchard import cascadia_payload, recovery_identity
+        from test_cascadia_loader import PROFILE, kernel, loader, tree
+        policy = {'schema': 1, 'source': 'host-usb', 'profile': 'p105',
+                  'compatibles': ['apple,p105ap'], 'chip': 0x8942, 'board': 10}
+        dtb = tree()
+        dtb['properties']['compatible'] = b'apple,p105ap\0'
+        data, _ = cascadia_payload.assemble(loader(), kernel(), cascadia_payload.write_fdt(dtb),
+            b'cpio', PROFILE, recovery_identity.encode_parameter(recovery_identity.POLICY_PARAMETER, policy))
+        template, output = self.home / 'template.bin', self.home / 'bound.bin'
+        template.write_bytes(data)
+        archive = self.home / 'orchard-core.pyz'
+        installer.build(archive, loaders=self.loaders, boards=['j71b'])
+        self.assertEqual(self.run_core(archive, 'version').returncode, 0)
+        core, = (self.home / 'store/core').iterdir()
+        self.assertFalse((core / 'src/orchard/image').exists())
+        script = ('import sys; from pathlib import Path; sys.path.insert(0,sys.argv[1]); '
+                  'from orchard import cascadia_payload as p; '
+                  'data=Path(sys.argv[2]).read_bytes(); '
+                  'bound=p.bind_host_identity(data,ecid=123,chip=0x8942,board=10,profile="p105",'
+                  'handoff_id="0123456789abcdef0123456789abcdef",template_sha256=p.digest(data)); '
+                  'Path(sys.argv[3]).write_bytes(bound)')
+        result = subprocess.run([sys.executable, '-I', '-S', '-c', script, str(core / 'src'),
+                                 str(template), str(output)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        config = cascadia_payload.configuration(output.read_bytes())
+        self.assertEqual(config['image_size'], output.stat().st_size)
+        self.assertEqual(template.read_bytes(), data)
+        self.assertGreater(output.stat().st_size, len(data))
+
     def test_runs_without_site_packages_and_unpacks_once(self):
         archive = self.home / 'orchard-core.pyz'
         receipt = installer.build(archive, loaders=self.loaders, boards=['j71b'])

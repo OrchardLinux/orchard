@@ -47,7 +47,7 @@ def main():
         if selected not in available or args.dtb[0].stem != available[selected]:
             parser.error('The Cascadia board and supplied DTB differ')
         from ..hardware import payload_profile, device as described_device
-        from .cascadia import check_compatible
+        from ..cascadia_payload import check_compatible
         try:
             profile = payload_profile(selected, 'cascadia', ROOT)
             check_compatible(args.dtb[0].read_bytes(), described_device(selected, ROOT)['device']['dt_compatible'])

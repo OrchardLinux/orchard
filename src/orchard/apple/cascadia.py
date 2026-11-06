@@ -20,7 +20,7 @@ import zlib
 
 from orchard.integrity import digest
 from orchard.contracts import HostHandoff
-from orchard.image import cascadia as payload_image
+from orchard import cascadia_payload as payload_image
 from orchard.state import BootState, DeviceState, private_directory
 from . import iboot32, usb
 

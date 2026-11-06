@@ -208,7 +208,7 @@ class Armv7ProducerTests(unittest.TestCase):
 
     def test_armv7_ram_payload_uses_the_selected_profile_without_pongo(self):
         from orchard import ram
-        from orchard.image import cascadia
+        from orchard import cascadia_payload as cascadia
         from test_cascadia_loader import loader, kernel, tree
         bundle = self.work / 'kernel'
         (bundle / 'dtbs').mkdir(parents=True)
@@ -237,7 +237,7 @@ class Armv7ProducerTests(unittest.TestCase):
             ram.verify_ram(output)
 
     def test_cascadia_profile_requires_matching_dtb_compatible(self):
-        from orchard.image import cascadia
+        from orchard import cascadia_payload as cascadia
         from test_cascadia_loader import tree
         data = cascadia.write_fdt(tree(), [], 0)
         with self.assertRaisesRegex(ValueError, 'differs from the selected board'):

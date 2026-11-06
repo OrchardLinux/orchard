@@ -11,7 +11,7 @@ import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
-from orchard.image import cascadia
+from orchard import cascadia_payload as cascadia
 
 
 PROFILE = dict(schema=1, load_address=0x80000000, kernel_offset=0x8000,

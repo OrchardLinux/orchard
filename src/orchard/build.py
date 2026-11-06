@@ -558,7 +558,8 @@ def prepare_payload_loader(hardware=None, cache=None, *, device):
             raise ValueError('Unsupported payload loader: ' + kind)
         from .hardware import payload_profile
         profile = payload_profile(device, 'cascadia', hardware)
-        inputs = ['boot/cascadia', 'src/orchard/image/cascadia.py', str(profile.relative_to(hardware)),
+        inputs = ['boot/cascadia', 'src/orchard/image/cascadia.py', 'src/orchard/cascadia_payload.py',
+                  'src/orchard/recovery_identity.py', str(profile.relative_to(hardware)),
                   'src/orchard/buildenv.py']
         def produce(stage):
             command(hardware / 'boot/cascadia/build', '--profile', profile, '--output', stage)
