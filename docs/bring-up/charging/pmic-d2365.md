@@ -18,7 +18,7 @@ Use the corrected disassembly; the first listing was shifted by +0x80.
 | `0x4000` | ADC channel select. A write starts a conversion | Firmware (`…6b85e0c`), hardware |
 | `0x4001`–`0x4002` | ADC result: byte 0 bit 7 = error, bits 3:0 = low nibble; byte 1 = high 8 bits (12-bit result) | Firmware (`…6b85e40`), hardware |
 | `0x140`–`0x15d` | 30-byte PMU event block, read-to-clear, shared by all PMU clients | [pmu-events.md](pmu-events.md) |
-| `0x1c0`–`0x1dd` | 30-byte PMU event mask block. Not written by any Orchard code | Firmware, hardware read |
+| `0x1c0`–`0x1dd` | 30-byte PMU event mask block, set = masked; bits with no event read 0 | Firmware, hardware read |
 
 Paul Praschl's driver describes the same block as `status` at `0x180`
 (length `0x1e`) and `control` at `0xa00` (length `0x0d`). It decodes `0x18a` as:

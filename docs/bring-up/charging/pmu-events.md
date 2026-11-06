@@ -4,9 +4,10 @@
 
 - The D2365 keeps 240 event bits in a 30-byte block at `0x140`. Event *n* is
   byte *n*/8, bit *n*%8.
-- Masks are in the matching block at `0x1c0`. A plain I²C byte write there
-  reads back unchanged (J71b, 2026-10-29), so Linux cannot mask events yet
-  and runs with the mask iBoot leaves ([CH-15](experiments.md#ch-15)).
+- Masks are in the matching block at `0x1c0` (set = masked). Writes work,
+  bytewise and in bulk. Bits with no event behind them read 0, so a byte of
+  all ones reads back as what exists: on J71b writing `0xff` to `0x1c0` reads
+  `0x33`, while `0x32` reads `0x32` ([CH-15](experiments.md#ch-15)).
 - Any unmasked pending event drives AP GPIO38 low. On J71b the ADT gives the
   PMU interrupt as GPIO38 with flags 1.
 - Reading the 30-byte block acknowledges everything pending and releases
@@ -48,8 +49,8 @@ Initial snapshots after boot contained leftover bits
 40, 56, 58, 59, 72, 73, 76, 78, 80, 81, 86. Acknowledge once at start and
 ignore that first snapshot.
 
-Mask bytes read once (not interpreted): `0x1c2` = `0x00`, `0x1c5` = `0xf0`,
-`0x1c9` = `0x5a`.
+The live mask with the charger's events unmasked (J71b, 2026-11-07):
+`33 1f 00 03 01 f0 ff ff ff 5a ff 73 03 03 03 03 03 03 03 03 03 03 f2 ff ff ff ff 07 9f 01`.
 
 ## Dispatch rule (prototype, hardware-tested)
 
@@ -106,5 +107,4 @@ Unmeasured:
 - A two-sample classifier aborted on a stable Mac connection. The edge in
   its sampling window was most likely its own ADC completion. Event 176 was
   identified later and explains it.
-- Masks, polarity and full iPadOS setup were not replicated. Linux worked
-  with the masks as iBoot left them.
+- Masks, polarity and full iPadOS setup were not replicated in that prototype.

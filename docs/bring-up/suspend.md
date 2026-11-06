@@ -39,7 +39,7 @@ All in the kernel, nothing in user space:
 | `ps_gpio` always-on, manual PM | `t8010-pmgr.dtsi` | button wake |
 | `ps_disp0_fe`, `ps_disp0_be` always-on, manual PM | `t8010-pmgr.dtsi` | adopted display pipe |
 | `ps_dp` (iPads) / `ps_mipi_dsi` (iPhones, iPod) | `t8010-ipad6.dtsi` / `t8010-7.dtsi`, `t8010-n112.dts` | the panel link each family drives |
-| `apple_cpuidle` lists `apple,t8010` | `drivers/cpuidle/cpuidle-apple.c` | tick and timekeeping stop in s2idle |
+| `apple_cpuidle` lists every Apple SoC here | `drivers/cpuidle/cpuidle-apple.c` | tick and timekeeping stop in s2idle |
 | bq27xxx poll on `system_freezable_wq` | `drivers/power/supply/bq27xxx_battery.c` | the HDQ gauge poll reset the SoC in sleep |
 
 `apple,always-on` keeps a domain on while awake too, so this keeps state
@@ -50,6 +50,22 @@ The gauge bug is general: on every HDQ gauge (iPad 5, 6, 7, Air 2) the poll
 kept running into suspend and touched the suspended 1-Wire UART. The default
 poll of 360 s rarely collides; orchard's `30-orchard-battery-poll.conf` sets
 10 s, and then every sleep reset the tablet within 5 to 15 seconds.
+
+## Every other SoC
+
+The same parts are in the kernel for S5L8960X, T7000, T7001, S8000, S8003, S8001,
+T8011 and T8015: `ps_gpio` always-on in each `-pmgr.dtsi`, the framebuffer's
+display domains always-on in each family's `.dtsi`, and the `apple_cpuidle`
+entry. Only T8010 has been tested. Their state is `untested`.
+
+## Waking on plug
+
+A plug or unplug wakes the tablet, as on any tablet. The D2365 latches event 72
+on both, and the charger drivers arm it as a wake source
+(`apple_tristar_charger` on the iPad 5 and 6, `apple_d2365_charger` on the
+iPad 7), so during sleep it is the only charger event left unmasked. Because no
+source change can pass unnoticed, an identified charger keeps its limit across
+sleep. A USB host may be asleep as well and parks at the handoff.
 
 ## Bringing up another board
 
@@ -62,9 +78,7 @@ poll of 360 s rarely collides; orchard's `30-orchard-battery-poll.conf` sets
 2. **Pollers.** Check the board's drivers for delayed work that requeues itself
    on a non-freezable workqueue (`system_wq`, `system_percpu_wq`,
    `schedule_delayed_work`). Gauges, chargers and sensors are the usual ones.
-3. **Idle.** Add the SoC's compatible to `cpuidle-apple.c`. This changes the
-   SoC's idle path, which is why it is listed per SoC. The driver is built for
-   the 16K kernel only so far.
+3. **Idle.** A new SoC's compatible goes into `cpuidle-apple.c`.
 4. **Test in RAM first**, with `examples/suspend-check` or an equivalent
    `/init`: `pm_test=devices`, then `pm_test=platform`, then one real sleep.
    Load the board's drivers one at a time between real sleeps.
@@ -108,27 +122,14 @@ console that blocks resume delays the screen.
 - **Keep helpers and their output apart:** a helper copied to the path of its
   own output directory fails before any test.
 
-## Enabling it in an installed system
+## In an installed system
 
-Whether a board can suspend is device data, not a distribution's choice:
-`[features] suspend` in the board's `device.toml`. orchard's platform layer
-turns it into the installed system's sleep configuration:
+Every board may suspend. Nothing in orchard turns it off: an untested board
+can only be reported on if its owner can try it. On a board where it does not
+work yet the likely failure is a reboot, or no wake, instead of a wake.
+`[features] suspend` says what is known about a board and decides nothing.
 
-- `usr/lib/orchard/suspend-boards` lists the device-tree compatibles of the
-  platform's boards whose suspend is `working`, generated when the layer is
-  built (`orchard.image.platform`).
-- At boot, `orchard-sleep.service` (pulled in by
-  `orchard-sleep-generator`) runs `usr/lib/orchard/orchard-sleep`, which
-  compares `/proc/device-tree/compatible` with that list and writes
-  `/run/systemd/sleep.conf.d/50-orchard-board.conf` with `AllowSuspend=yes`
-  or `AllowSuspend=no`. Every board that is not `working`, `untested` ones
-  included, cannot be put to sleep by accident.
+Distributions keep the policy: when to suspend (Power key, idle) and locking
+first. omarchy-a asks logind (`CanSuspend`) before it suspends.
 
-A new device state arrives with the next platform layer; nothing is
-reinstalled. Distributions keep the policy: when to suspend (Power key,
-idle) and locking first. They must not set `AllowSuspend` themselves; a
-drop-in that sorts after `50-orchard-board.conf` would override the board's
-decision. omarchy-a asks logind (`CanSuspend`) before it suspends.
-
-To enable a board: prove it as above, set `suspend = "working"`, and the
-next release allows it.
+To report a board: prove it as above, then set `suspend = "working"`.
