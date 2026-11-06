@@ -177,6 +177,16 @@ def select_manifest(source, profile, progress=None, clock=None, purpose='install
     return document, bundle
 
 
+def needs_download(document, profile):
+    """Whether an install of this manifest would download any file; looks at names, hashes nothing."""
+    if document.get('kind') != 'orchard.install':
+        return False
+    files = document['platforms'][platform_for(document, profile)]
+    folder = cache_root() / 'artifacts/sha256'
+    return any('file' not in receipt and not (folder / receipt['sha256']).exists()
+               for receipt in (document['pongo'], document['root'], files['boot'], files['layer']))
+
+
 def resolve(manifest, profile, progress=None, clock=None, purpose='install'):
     """The selected release's record and verified local files for PROFILE.
 

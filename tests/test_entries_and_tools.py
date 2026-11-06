@@ -148,5 +148,22 @@ class EnsureTool(unittest.TestCase):
                 tools.ensure_tool('palera1n')
 
 
+
+class ChainInputs(unittest.TestCase):
+    def test_each_entry_declares_its_tool(self):
+        for name in entries.ENTRIES:
+            self.assertEqual(entries.inputs(name), [entries.ToolInput(entries.ENTRIES[name].tool)])
+
+    def test_a_tool_input_asks_the_tool_cache(self):
+        item = entries.ToolInput('palera1n')
+        with mock.patch('orchard.tools.find', return_value=None):
+            self.assertFalse(item.cached())
+        with mock.patch('orchard.tools.find', return_value='/somewhere/palera1n'):
+            self.assertTrue(item.cached())
+        with mock.patch('orchard.tools.ensure_tool', return_value='/x') as ensure:
+            self.assertEqual(item.fetch('progress', 'clock'), '/x')
+        ensure.assert_called_once_with('palera1n', progress='progress', clock='clock')
+
+
 if __name__ == '__main__':
     unittest.main()

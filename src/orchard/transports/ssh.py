@@ -5,6 +5,7 @@ import ipaddress
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -48,11 +49,12 @@ def bootstrap_reply(code, text, scope):
     return host, port, host_key(result['host_key'])
 
 
-def ssh_argv(identity, hosts, host, port, timeout=8):
+def ssh_argv(identity, hosts, host, port, timeout=8, *, control=None, master=False):
     return ['ssh', '-p', str(port), '-i', str(identity), '-o', 'IdentitiesOnly=yes',
             '-o', 'Compression=no', '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=3',
             '-o', f'UserKnownHostsFile="{hosts}"', '-o', 'StrictHostKeyChecking=yes',
-            '-o', 'BatchMode=yes', '-o', 'ControlMaster=no', '-o', 'ControlPath=none',
+            '-o', 'BatchMode=yes', '-o', f'ControlMaster={"yes" if master else "no"}',
+            '-o', f'ControlPath={control or "none"}',
             '-o', 'ControlPersist=no', '-o', 'ConnectTimeout=' + str(timeout),
             '-o', 'HostKeyAlgorithms=ssh-ed25519', f'root@{host}']
 
@@ -103,6 +105,34 @@ def verify_peer(connection):
 
 
 @contextmanager
+def one_connection(identity, hosts, host, port):
+    """SSH argv whose calls all share one connection, so that each step skips the handshake.
+
+    If the shared connection doesn't come up, ssh connects by itself as usual. The master
+    is started by hand, without ControlPersist: a master that ssh forks itself keeps its
+    caller's output pipes open, and capturing those would then never finish.
+    """
+    # A socket path is limited to about 100 characters, so not under the cache directory.
+    directory = tempfile.mkdtemp(prefix='orchard-ssh-', dir='/tmp')
+    path = str(Path(directory) / 'c')
+    master = subprocess.Popen(ssh_argv(identity, hosts, host, port, control=path, master=True)[:-1] + ['-N', f'root@{host}'],
+                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        deadline = time.monotonic() + 3
+        while not Path(path).exists() and master.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        yield ssh_argv(identity, hosts, host, port, control=path)
+    finally:
+        master.terminate()
+        try:
+            master.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            master.kill()
+            master.wait()
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+@contextmanager
 def session(device: DeviceState, select_endpoint, *, expected_boot=None):
     endpoint = select_endpoint()
     scope = BootState(device, endpoint['boot_id'])
@@ -131,9 +161,9 @@ def session(device: DeviceState, select_endpoint, *, expected_boot=None):
         name = host if ssh_port == 22 else f'[{host}]:{ssh_port}'
         hosts.write_text(name + ' ' + pinned_key + '\n')
         hosts.chmod(0o600)
-        argv = ssh_argv(identity, hosts, host, ssh_port)
-        wait_authenticated(argv, check)
-        connection = Connection(argv, scope, check)
-        verify_peer(connection)
-        yield connection
+        wait_authenticated(ssh_argv(identity, hosts, host, ssh_port), check)
+        with one_connection(identity, hosts, host, ssh_port) as argv:
+            connection = Connection(argv, scope, check)
+            verify_peer(connection)
+            yield connection
 

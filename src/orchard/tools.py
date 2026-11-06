@@ -81,7 +81,7 @@ def find(name):
     return next((str(path) for path in candidates if path and _matches(path, sha256)), None)
 
 
-def ensure_tool(name, say=None):
+def ensure_tool(name, say=None, progress=None, clock=None):
     """The path of this tool, fetched into the Orchard cache if this host doesn't have it."""
     existing = find(name)
     if existing:
@@ -90,7 +90,7 @@ def ensure_tool(name, say=None):
     url, size, sha256 = _pin(name)
     if say:
         say(f'Getting {name} {TOOLS[name]["version"]}')
-    source = materialize({'url': url, 'bytes': size, 'sha256': sha256}, None, label=name)
+    source = materialize({'url': url, 'bytes': size, 'sha256': sha256}, None, progress, clock, label=name)
     destination = _location(name)
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as output:

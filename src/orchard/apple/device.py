@@ -43,6 +43,7 @@ class Device:
         self.REBOOT_MESSAGE = ('A fresh recovery boot is required.\n'
                                f'Put the {self.NAME} in DFU mode, then run: orchard install')
         self.firmware_inputs = partial(firmware.ensure, self.PROFILE)
+        self.firmware_cached = partial(firmware.cached, self.PROFILE)
         self.prepare_mixin = partial(firmware.mixin, self.PROFILE)
 
     def matches_dfu(self, device: Dict[str, Any]) -> bool:
@@ -80,6 +81,9 @@ class Device:
             raise ValueError(f'The connected device is not a {self.NAME}')
         DeviceState(self.PROFILE, device['ecid'])
         return cast(SelectedDevice, {**device, 'resumed': False})
+
+    def boot_inputs(self) -> List[Any]:
+        return entries.inputs(entries.select(self._descriptor))
 
     def boot(self, device: SelectedDevice, assets: BootAssets,
              manifest: BootRequest, progress: Progress) -> None:
