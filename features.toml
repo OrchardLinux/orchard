@@ -1,5 +1,11 @@
 # Feature vocabulary for devices/*/device.toml [features], in display order.
-# States: working, untested, missing, none (the model has no such hardware).
+# States:
+#   working: seen working on this board.
+#   untested: a driver exists that could do it, and nobody has tried it here.
+#   missing: no driver, or one known not to do it (a read-only driver: storage_write is missing).
+#   none: the model has no such hardware.
+# A state says what's true of the feature. Don't use it to allow or block something:
+# installing follows from these states (hardware.install_blockers) and promises no working system.
 display = "Display"
 screen_off = "Screen on/off"
 backlight = "Backlight"
