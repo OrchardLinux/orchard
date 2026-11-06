@@ -14,6 +14,7 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 
 
@@ -45,7 +46,8 @@ callbacks = '\n\n'.join(function(phy, name) for name in (
     's5l_pmgr_on', 's5l_usbphy_clk_sel', 's5l_usbphy_is_ready',
     's5l_usbphy_cold_init', 's5l_usbphy_init', 's5l_usbphy_exit',
     's5l_usbphy_set_otg', 's5l_usbphy_power_on', 's5l_usbphy_power_off',
-    's5l_hostphy_init', 's5l_hostphy_exit'))
+    's5l_hostphy_init', 's5l_hostphy_exit',
+    's5l_hostphy_power_on', 's5l_hostphy_power_off'))
 quirks = dwc[dwc.index('struct dwc2_platform_quirks {'):dwc.index('/**\n * dwc2_driver_probe()')]
 prelude = r'''
 #include <assert.h>
@@ -59,10 +61,15 @@ typedef uint32_t u32;
 #define BIT(n) (1u << (n))
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #define dev_err(...) ((void)0)
+#define dev_warn(...) ((void)0)
+#define dev_dbg(...) ((void)0)
+#define EPROBE_DEFER 517
+#define PTR_ERR(p) ((long)(intptr_t)(p))
+#define IS_ERR(p) ((uintptr_t)(p) >= (uintptr_t)-4095)
 struct device_node { const char *compatible; };
 struct device { struct device_node *of_node; };
 struct of_device_id { const char *compatible; const void *data; };
-struct regulator;
+struct regulator { unsigned references; int enable_error; };
 struct mutex { int held; };
 struct clk { unsigned long rate; int enabled; int fail; };
 struct phy { void *data; };
@@ -71,10 +78,14 @@ struct dwc2_hsotg { void *regs; struct device *dev; };
 #define PCGCTL_GATEHCLK BIT(1)
 #define PCGCTL_STOPPCLK BIT(0)
 static unsigned checks, writes, phy_writes, pmgr_writes;
-static u32 phy_regs[1024], pmgr_regs[2048], dwc_regs[1024];
-static void *ignored_write;
+static u32 phy_regs[1024], pmgr_regs[2048], dwc_regs[1024], usbcplx_reg;
+static void *ignored_write, *blocked_gate;
 static bool blocked_parent, stuck_reset;
 static unsigned parent_order[16], parent_count;
+static struct regulator lpo, hsic;
+static struct device host_device;
+static int lpo_lookup_error, hsic_lookup_error;
+static unsigned disable_order[16], disable_count;
 #define CHECK(x) do { checks++; assert(x); } while (0)
 static void mutex_lock(struct mutex *m) { CHECK(!m->held); m->held = 1; }
 static void mutex_unlock(struct mutex *m) { CHECK(m->held); m->held = 0; }
@@ -85,6 +96,29 @@ static int clk_prepare_enable(struct clk *c) {
     c->enabled++; return 0;
 }
 static void clk_disable_unprepare(struct clk *c) { CHECK(c->enabled == 1); c->enabled--; }
+static struct regulator *devm_regulator_get_optional(struct device *dev, const char *name) {
+    int error;
+    CHECK(dev == &host_device);
+    CHECK(!strcmp(name, "lpo") || !strcmp(name, "hsic"));
+    error = !strcmp(name, "lpo") ? lpo_lookup_error : hsic_lookup_error;
+    if (error) return (struct regulator *)(intptr_t)error;
+    return !strcmp(name, "lpo") ? &lpo : &hsic;
+}
+static int regulator_enable(struct regulator *regulator) {
+    CHECK(regulator == &lpo || regulator == &hsic);
+    if (regulator->enable_error) return regulator->enable_error;
+    regulator->references++;
+    return 0;
+}
+static int regulator_disable(struct regulator *regulator) {
+    CHECK(regulator == &lpo || regulator == &hsic);
+    CHECK(regulator->references > 0);
+    CHECK(disable_count < ARRAY_SIZE(disable_order));
+    disable_order[disable_count++] = regulator == &hsic ? 1 : 2;
+    regulator->references--;
+    return 0;
+}
+static void msleep(unsigned n) { (void)n; }
 static void udelay(unsigned n) { (void)n; }
 static void usleep_range(unsigned a, unsigned b) { CHECK(a <= b); }
 static u32 readl(const void *p) { return *(const u32 *)p; }
@@ -96,7 +130,7 @@ static void writel(u32 value, void *p) {
         pmgr_writes++;
         CHECK(parent_count < ARRAY_SIZE(parent_order));
         parent_order[parent_count++] = (unsigned)(address - (uintptr_t)pmgr_regs);
-        if (!blocked_parent) value = (value & ~0xf0u) | ((value & 0xfu) << 4);
+        if (!blocked_parent && p != blocked_gate) value = (value & ~0xf0u) | ((value & 0xfu) << 4);
     }
     if (p == ignored_write) return;
     if (p == &phy_regs[0x08 / 4] && stuck_reset) value |= 1;
@@ -120,9 +154,13 @@ static void setup(struct s5l_usbphy *p, struct clk *clock, struct phy *otg, stru
     memset(dwc_regs, 0, sizeof(dwc_regs)); memset(p, 0, sizeof(*p));
     *clock = (struct clk){ .rate = 24000000 };
     p->base = phy_regs; p->pmgr = pmgr_regs; p->refclk = clock;
+    p->usbcplx = &usbcplx_reg; p->dev = &host_device;
     p->data = &s5l8942x_usbphy_data;
     otg->data = host->data = p;
-    ignored_write = NULL; blocked_parent = stuck_reset = false;
+    ignored_write = blocked_gate = NULL; blocked_parent = stuck_reset = false;
+    usbcplx_reg = 0;
+    lpo = hsic = (struct regulator){0};
+    lpo_lookup_error = hsic_lookup_error = 0; disable_count = 0;
     writes = phy_writes = pmgr_writes = parent_count = 0;
 }
 int main(void) {
@@ -170,6 +208,52 @@ int main(void) {
     unsigned legacy_writes = writes; CHECK(s5l_usbphy_power_on(&otg) == 0);
     CHECK(s5l_usbphy_power_off(&otg) == 0); CHECK(writes == legacy_writes);
     CHECK(s5l_usbphy_exit(&otg) == 0); CHECK(s5l_hostphy_exit(&host) == 0);
+    for (unsigned fault = 0; fault < 6; fault++) {
+        setup(&p, &clock, &otg, &host);
+        if (fault == 0) lpo_lookup_error = -EPROBE_DEFER;
+        if (fault == 1) lpo.enable_error = -EIO;
+        if (fault == 2) hsic_lookup_error = -EPROBE_DEFER;
+        if (fault == 3) hsic.enable_error = -EIO;
+        if (fault == 4) blocked_gate = &pmgr_regs[PMGR_USB_EHCI/4];
+        if (fault == 5) blocked_gate = &pmgr_regs[PMGR_USB_OHCI0/4];
+        int expected = fault == 0 || fault == 2 ? -EPROBE_DEFER : fault < 4 ? -EIO : -ETIMEDOUT;
+        CHECK(s5l_hostphy_power_on(&host) == expected);
+        CHECK(lpo.references == 0); CHECK(hsic.references == 0);
+        CHECK(!p.lpo_supply_on); CHECK(!p.hsic_supply_on);
+        CHECK(!(usbcplx_reg & USBCPLX_HSIC_EN));
+        CHECK(disable_count == (fault < 2 ? 0u : fault < 4 ? 1u : 2u));
+        if (fault == 2 || fault == 3) CHECK(disable_order[0] == 2);
+        if (fault >= 4) { CHECK(disable_order[0] == 1); CHECK(disable_order[1] == 2); }
+        lpo_lookup_error = hsic_lookup_error = lpo.enable_error = hsic.enable_error = 0;
+        blocked_gate = NULL;
+        CHECK(s5l_hostphy_power_on(&host) == 0);
+        CHECK(lpo.references == 1); CHECK(hsic.references == 1);
+        CHECK(p.lpo_supply_on); CHECK(p.hsic_supply_on);
+        CHECK(usbcplx_reg & USBCPLX_HSIC_EN);
+        CHECK(s5l_hostphy_power_off(&host) == 0);
+        CHECK(lpo.references == 0); CHECK(hsic.references == 0);
+        CHECK(!p.lpo_supply_on); CHECK(!p.hsic_supply_on);
+    }
+    setup(&p, &clock, &otg, &host);
+    lpo_lookup_error = hsic_lookup_error = -ENODEV;
+    CHECK(s5l_hostphy_power_on(&host) == 0);
+    CHECK(s5l_hostphy_power_off(&host) == 0); CHECK(disable_count == 0);
+    setup(&p, &clock, &otg, &host);
+    p.lpo_supply = &lpo; p.lpo_supply_on = true; lpo.references = 1;
+    blocked_gate = &pmgr_regs[PMGR_USB_OHCI0/4];
+    CHECK(s5l_hostphy_power_on(&host) == -ETIMEDOUT);
+    CHECK(p.lpo_supply_on); CHECK(lpo.references == 1);
+    CHECK(!p.hsic_supply_on); CHECK(hsic.references == 0);
+    CHECK(disable_count == 1); CHECK(disable_order[0] == 1);
+    CHECK(s5l_hostphy_power_off(&host) == 0); CHECK(lpo.references == 0);
+    setup(&p, &clock, &otg, &host);
+    p.lpo_supply = &lpo; p.lpo_supply_on = true; lpo.references = 1;
+    p.hsic_supply = &hsic; p.hsic_supply_on = true; hsic.references = 1;
+    blocked_gate = &pmgr_regs[PMGR_USB_EHCI/4];
+    CHECK(s5l_hostphy_power_on(&host) == -ETIMEDOUT);
+    CHECK(lpo.references == 1); CHECK(hsic.references == 1); CHECK(disable_count == 0);
+    CHECK(s5l_hostphy_power_off(&host) == 0);
+    CHECK(lpo.references == 0); CHECK(hsic.references == 0);
     struct device_node apple = {.compatible="apple,s5l8942x-dwc2"}, other = {.compatible="snps,dwc2"};
     struct device dev = {.of_node=&other}; struct dwc2_hsotg dwc = {.regs=dwc_regs, .dev=&dev};
     writes = 0; dwc_regs[PCGCTL/4] = 0xa3;
@@ -190,8 +274,11 @@ compile_command = shlex.split(args.cc) + ['-std=gnu11', '-Wall', '-Wextra', '-We
                    '-Wno-unused-function', '-fsanitize=address,undefined', '-g',
                    str(c), '-o', str(binary)]
 subprocess.run(compile_command, check=True)
-result = subprocess.run([str(binary)], check=True, capture_output=True, text=True)
+result = subprocess.run([str(binary)], capture_output=True, text=True)
 print(result.stdout, end='')
+if result.stderr:
+    print(result.stderr, file=sys.stderr, end='')
+result.check_returncode()
 (args.output / 'callbacks-result.json').write_text(json.dumps({
     'phy_sha256': hashlib.sha256(phy_path.read_bytes()).hexdigest(),
     'dwc2_sha256': hashlib.sha256(dwc_path.read_bytes()).hexdigest(),
