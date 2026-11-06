@@ -78,6 +78,11 @@ snapshot again. The two default-off NAND write configuration prerequisites
 must already be present in the approved kernel. A built-in read-only
 provider refuses installation before writes.
 
+The fresh driver's initial read-only flag must also report that its replay
+state and upstream program callback permit writes. The installer checks
+this before clearing a block fence, which preserves the driver's refusal
+when recovered journal sequences prevent a qualified write.
+
 The plan explicitly bounds the provider to one hour and at most
 `131072 + 8 * ceil(root_bytes / 4096)` read callbacks, capped at the
 driver's unsigned 32-bit limit. The budget gives headroom based on the

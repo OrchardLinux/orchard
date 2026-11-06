@@ -16,6 +16,7 @@ from . import lwvm
 
 BLKGETSIZE64 = 0x80081272
 BLKFLSBUF = 0x1261
+BLKROGET = 0x125e
 MAPPER = '/usr/sbin/orchard-lwvm'
 JOURNAL = Path('/run/orchard/lwvm-write.json')
 IDENTITY = Path('/run/orchard/identity.json')
@@ -38,6 +39,9 @@ class Provider:
 
     def close(self):
         os.close(self.fd)
+
+    def read_only(self):
+        return bool(struct.unpack('I', fcntl.ioctl(self.fd, BLKROGET, bytes(4)))[0])
 
     def read(self, offset, length):
         if offset < 0 or length < 0 or offset + length > self.size:
@@ -130,7 +134,7 @@ def check_previous_intent(path=JOURNAL):
     if path.with_suffix('.part').exists() or path.with_suffix('.part').is_symlink():
         raise lwvm.Error('An incomplete LwVM intent record requires inspection')
     if path.exists() or path.is_symlink():
-        previous = json.loads(lwvm.saved_file(path))
+        previous = json.loads(lwvm.saved_file(path, limit=1 << 20))
         if previous.get('kind') != 'orchard.lwvm-write-intent' or previous.get('outcome') != 'complete':
             raise lwvm.Error('A previous LwVM metadata outcome requires inspection')
 
@@ -197,8 +201,8 @@ def mapped_root(api, disk, allocation, snapshot, root, device):
     path = mapping['device']
     node = Provider(path)
     try:
-        if node.size != root['bytes']:
-            raise lwvm.Error('Mapped root size differs from the plan')
+        if node.size != root['bytes'] or node.read_only():
+            raise lwvm.Error('Mapped root size or access mode differs from the plan')
         sysfs = Path('/sys/dev/block', f'{node.device["major"]}:{node.device["minor"]}', 'dm')
         if sysfs.joinpath('uuid').read_text().strip() != mapping['uuid'] or sysfs.joinpath('name').read_text().strip() != mapping['name']:
             raise lwvm.Error('Mapped root identity changed')
@@ -211,7 +215,7 @@ def install(api, plan, stream):
     if os.geteuid() != 0:
         raise api.InstallError('not-root', 'The installer must run as root')
     disk = plan['disk']['path']
-    mounts, mapping, changed_policy = [], None, False
+    mounts, mapping, changed_policy, disk_verified = [], None, False, False
     account = plan.get('account')
     secrets = api.read_secrets(api.SECRETS, account) if account and (account['password'] or account['pin']) else None
     provider = None
@@ -228,10 +232,20 @@ def install(api, plan, stream):
         if plan.get('io_policy') != lwvm.install_io_policy(root['bytes']):
             raise lwvm.Error('Logical I/O policy differs from the bounded install plan')
         api.check_quiet(disk, [])
+        disk_verified = True
         api.emit('step', step='check', state='done')
         provider.close()
         provider = None
         changed_policy = enable_writes(api, plan['io_policy'])
+        provider = Provider(disk)
+        if provider.device != expected_device or provider.size != plan['disk']['bytes']:
+            raise lwvm.Error('Reprobed LwVM provider identity changed')
+        # A fresh gendisk's initial RO flag reports the kernel's capability,
+        # including replay-floor checks. Inspect it before clearing any fence.
+        if provider.read_only():
+            raise lwvm.Error('The recovered logical provider has no qualified write path')
+        provider.close()
+        provider = None
         api.run('blockdev', '--setrw', disk)
         provider = Provider(disk, writable=True)
         if provider.device != expected_device or provider.size != plan['disk']['bytes']:
@@ -291,9 +305,10 @@ def install(api, plan, stream):
             result = subprocess.run(['dmsetup', 'remove', mapping['name']], capture_output=True, timeout=30)
             if result.returncode:
                 failed.append(mapping['name'])
-        fenced = subprocess.run(['blockdev', '--setro', disk], capture_output=True, timeout=15)
-        if fenced.returncode:
-            failed.append('raw provider read-only fence')
+        if disk_verified:
+            fenced = subprocess.run(['blockdev', '--setro', disk], capture_output=True, timeout=15)
+            if fenced.returncode:
+                failed.append('raw provider read-only fence')
         if changed_policy and not failed:
             removed = subprocess.run(['modprobe', '-r', 'apple-sftl'], capture_output=True, timeout=30)
             if not removed.returncode:

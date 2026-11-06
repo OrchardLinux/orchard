@@ -38,7 +38,12 @@ elif command == 'python3 /run/orchard/install_device.py run /run/orchard/plan.js
         print(json.dumps({'event': 'error', 'code': 'layout-changed', 'detail': 'table changed'}))
         sys.exit(1)
     plan = json.loads((store / 'plan.json').read_text())
-    print(json.dumps({'event': 'finished', 'root': plan['root']['partuuid'], 'boot': plan['boot']['partuuid']}))
+    if plan.get('kind') == 'lwvm':
+        print(json.dumps({'event': 'finished', 'root': plan['root']['partuuid'],
+                          'boot': {'kind': 'orchard.ios-local-file-root', 'boot_assets_prepared': False},
+                          'boot_preparation_required': True}))
+    else:
+        print(json.dumps({'event': 'finished', 'root': plan['root']['partuuid'], 'boot': plan['boot']['partuuid']}))
 else:
     sys.exit('unexpected command: ' + command)
 '''

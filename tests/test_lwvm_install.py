@@ -6,12 +6,14 @@ from pathlib import Path
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
 import uuid
 
 from orchard import install_device, install_layout, install_lwvm as I, lwvm as L
+from orchard import install_remote
 from orchard.progress import Clock
 from orchard.service import choose_target
 from orchard.hardware import ROOT
@@ -83,6 +85,9 @@ class MemoryProvider:
 
     def close(self):
         pass
+
+    def read_only(self):
+        return False
 
     def read(self, offset, length):
         return bytes(length) if self.bad_readback else self.copies[offset]
@@ -356,6 +361,94 @@ class RootWrites(unittest.TestCase):
             link.symlink_to(path)
             with self.assertRaises(OSError):
                 I.Provider(link)
+
+    def test_reprobed_read_only_backend_stops_before_clearing_fence_or_writing(self):
+        identity = {**DEVICE, 'boot_id': 'fixture-boot'}
+        plan = {'identity': identity, 'lwvm': self.allocation,
+                'io_policy': L.install_io_policy(self.root['bytes']),
+                'disk': {'path': '/dev/applesftl0', 'bytes': MEDIA, **self.device},
+                'root': {'partuuid': LINUX, 'blocks': self.root['bytes'] // 512}}
+        provider = MemoryProvider(self.before)
+        provider.read_only = lambda: True
+        api = Mock(InstallError=install_device.InstallError)
+        with patch.object(I, 'Provider', return_value=provider), \
+             patch.object(I, 'current_identity', return_value=identity), \
+             patch.object(I, 'check_previous_intent'), \
+             patch.object(I, 'enable_writes', return_value=True), \
+             patch.object(I, 'commit_headers') as commit, \
+             patch.object(I, 'mapped_root') as mapping, \
+             patch.object(I.subprocess, 'run', return_value=Mock(returncode=0)), \
+             patch.object(I.os, 'geteuid', return_value=0), \
+             self.assertRaisesRegex(install_device.InstallError, 'no qualified write path'):
+            I.install(api, plan, io.BytesIO())
+        api.run.assert_not_called()
+        commit.assert_not_called()
+        mapping.assert_not_called()
+
+    def test_wrong_recovery_identity_runs_no_storage_or_cleanup_command(self):
+        identity = {**DEVICE, 'boot_id': 'fixture-boot'}
+        plan = {'identity': {**identity, 'boot_id': 'different-boot'}, 'lwvm': self.allocation,
+                'disk': {'path': '/dev/applesftl0'}}
+        api = Mock(InstallError=install_device.InstallError)
+        with patch.object(I, 'current_identity', return_value=identity), \
+             patch.object(I, 'Provider') as provider, \
+             patch.object(I.subprocess, 'run') as command, \
+             patch.object(I.os, 'geteuid', return_value=0), \
+             self.assertRaisesRegex(install_device.InstallError, 'different recovery boot'):
+            I.install(api, plan, io.BytesIO())
+        provider.assert_not_called()
+        command.assert_not_called()
+
+    def test_write_reload_uses_the_plan_budget_and_builtin_refusal_submits_no_write(self):
+        policy = L.install_io_policy(self.root['bytes'])
+        with tempfile.TemporaryDirectory() as directory:
+            parameter = Path(directory) / 'write_enable'
+            parameter.write_text('N\n')
+            api = Mock()
+            def command(*args, **kwargs):
+                if 'write_enable=1' in args:
+                    parameter.write_text('Y\n')
+            api.run.side_effect = command
+            with patch.object(I, 'WRITE_POLICY', parameter):
+                self.assertTrue(I.enable_writes(api, policy))
+                self.assertEqual(api.run.call_args_list[0].args, ('modprobe', '-r', 'apple-sftl'))
+                self.assertIn('max_page_reads=' + str(policy['max_page_reads']), api.run.call_args_list[1].args)
+                refused = Mock()
+                refused.run.side_effect = install_device.InstallError('command-failed', 'built-in module')
+                with self.assertRaisesRegex(install_device.InstallError, 'built-in'):
+                    I.enable_writes(refused, policy)
+                self.assertEqual(refused.run.call_count, 1)
+
+    def test_host_saves_ios_handoff_without_a_gpt_start_request(self):
+        from test_install_flow import InstallFlow
+        helper = InstallFlow()
+        self.addCleanup(helper.doCleanups)
+        layout = {'disk': {'path': '/dev/applesftl0', 'table': 'lwvm', 'sector': 512,
+                           'bytes': MEDIA, **self.device, 'table_sha256': L.digest(self.after)},
+                  'partitions': [L.public_partition(p) for p in self.snapshot['partitions']], 'free': [],
+                  'lwvm': {'primary': L.b64(self.after), 'backup': L.b64(self.after)}}
+        report, store, prompts, output = helper.run_install(layout, ['', '', 'erase 3', ''])
+        self.assertFalse(report['started'])
+        self.assertTrue(report['boot_preparation_required'])
+        self.assertEqual([call.args[0] for call in helper.status.call.call_args_list], ['status'])
+        self.assertIn('Prepare its iOS launcher', output)
+        self.assertEqual(json.loads((store / 'plan.json').read_text())['lwvm']['action'], 'replace')
+        for name in ('__init__.py', 'lwvm.py', 'install_lwvm.py', 'install_device.py'):
+            self.assertTrue((store / name).is_file())
+
+    def test_matching_recovery_bundle_runs_without_installed_orchard(self):
+        with tempfile.TemporaryDirectory() as directory:
+            package = Path(directory) / 'orchard'
+            package.mkdir()
+            (package / '__init__.py').write_bytes(b'')
+            for source in [install_remote.SCRIPT, *install_remote.SUPPORT_SCRIPTS]:
+                (package / source.name).write_bytes(source.read_bytes())
+            result = subprocess.run([sys.executable, '-I', '-S', '-c',
+                                     'import runpy, sys; namespace = runpy.run_path(sys.argv[1], run_name="shipping-test"); '
+                                     'print(namespace["lwvm"].MAGIC.hex())', str(package / 'install_device.py')],
+                                    capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), L.MAGIC.hex())
 
 
 class MapperInteroperability(unittest.TestCase):

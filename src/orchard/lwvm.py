@@ -261,16 +261,16 @@ def validate_plan(plan, primary, backup, media_bytes):
     return snapshot, after, root
 
 
-def saved_file(path, size=None):
+def saved_file(path, size=None, *, limit=65536):
     """Bounded saved-file input; a device or linked path is refused."""
     import os
     import stat
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
     with os.fdopen(fd, 'rb') as source:
         info = os.fstat(source.fileno())
-        if not stat.S_ISREG(info.st_mode) or info.st_size > 65536 or (size is not None and info.st_size != size):
+        if not stat.S_ISREG(info.st_mode) or info.st_size > limit or (size is not None and info.st_size != size):
             raise Error('Expected a bounded saved regular file')
-        data = source.read(65537)
+        data = source.read(limit + 1)
         after = os.fstat(source.fileno())
         if len(data) != info.st_size or (info.st_size, info.st_mtime_ns, info.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
             raise Error('Saved input changed while reading')
