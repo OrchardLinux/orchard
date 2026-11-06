@@ -16,6 +16,7 @@ stages = "Project Cascadia P105 boot chain"
 reference_version = "Project Cascadia builds its A5 boot chain from 8.4.1 / 12H321"
 nand_reads = "Measured P105 64 GB PPN geometry has eight CAUs per bus, 2088 blocks per CAU and 128 normal pages per block; exact ARMv7 read-topic qualification is pending (docs/bring-up/p105-nand-reads.md)."
 nand_program = "The P105 complete-page PPN program candidate defaults off, verifies blank destination and full readback, and exposes no erase operation; exact-revision hardware qualification is pending (docs/bring-up/p105-nand-program.md)."
+nand_translation = "The P105 VFL/SwissPPNFTL reader reconstructs the measured 64 GB native map from saved pages and has finite request/time bounds; exact-revision hardware qualification is pending (docs/bring-up/p105-sftl-reader.md)."
 cascadia_profile = "devices/p105/cascadia.toml; external-initramfs handoff awaits hardware qualification"
 
 # Public Cascadia RAM recovery correlates a guarded host USB identity with the live FDT and boot ID.
