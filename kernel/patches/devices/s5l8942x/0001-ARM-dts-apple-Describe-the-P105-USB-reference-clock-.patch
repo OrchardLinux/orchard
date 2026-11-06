@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 12:09:00 -0600
+Subject: [PATCH] ARM: dts: apple: Describe the P105 USB reference clock and
+ handoff
+
+Select the S5L8942X PHY and DWC2 behavior while retaining their existing
+fallback compatibles. Supply the measured 24 MHz PHY reference clock so
+Linux can initialize the common block after a cold firmware handoff.
+
+The resulting DT compiles and both USB nodes pass their binding checks.
+The exact kernel revision still awaits qualification on P105.
+
+Assisted-by: LLM
+---
+ arch/arm/boot/dts/apple/s5l8942x-p105.dts | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/boot/dts/apple/s5l8942x-p105.dts b/arch/arm/boot/dts/apple/s5l8942x-p105.dts
+index f4fe413c6..c2de0dfea 100644
+--- a/arch/arm/boot/dts/apple/s5l8942x-p105.dts
++++ b/arch/arm/boot/dts/apple/s5l8942x-p105.dts
+@@ -615,10 +615,12 @@ panel@0 {
+ 		 * 0x300000 therefore lands at 0x6400000 here, 0x36400000 physical.
+ 		 */
+ 		otgphy: phy@6000000 {
+-			compatible = "apple,s5l8940x-otgphy";
++			compatible = "apple,s5l8942x-otgphy", "apple,s5l8940x-otgphy";
+ 			reg = <0x6000000 0x1000>,	/* otgphyctrl */
+ 			      <0xf108000 0x1000>;	/* usb-complex */
+ 			#phy-cells = <1>;
++			clocks = <&refclk24mhz>;
++			clock-names = "ref";
+ 			hsic-supply = <&wlan_reg_on>;
+ 			lpo-supply = <&wlan_lpo>;
+ 			status = "okay";
+@@ -630,7 +632,8 @@ otgphy: phy@6000000 {
+ 		 * PMGR gates from usb-complex: 87, 88, 89, 90, 91 (5 gates)
+ 		 * plus main clock ID 292. */
+ 		dwc2: usb@6100000 {
+-			compatible = "apple,s5l8940x-dwc2", "snps,dwc2";
++			compatible = "apple,s5l8942x-dwc2", "apple,s5l8940x-dwc2",
++				     "snps,dwc2";
+ 			reg = <0x6100000 0x10000>;
+ 			interrupts = <11>;
+ 			phys = <&otgphy 0>;
