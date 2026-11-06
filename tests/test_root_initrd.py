@@ -4,6 +4,7 @@ import os
 import re
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 import uuid
@@ -58,10 +59,41 @@ class InstallHook(unittest.TestCase):
             binary, runtime = work / 'bin', work / 'run'
             binary.mkdir()
             runtime.mkdir()
+            (work / 'dev').mkdir()
             trace = work / 'trace'
-            for name in ('mount', 'ip', 'udhcpd', 'orchard-load-storage', 'switch_root'):
+            state = work / 'mounts.json'
+            for name in ('ip', 'udhcpd', 'orchard-load-storage'):
                 path = binary / name
                 path.write_text('#!/bin/sh\nprintf "%s\\n" "' + name + ' $*" >> "$TRACE"\n')
+                path.chmod(0o755)
+            # Model mount ownership, including descendants carried by --move.
+            # These commands only update a JSON fixture, never host mounts.
+            for name in ('mount', 'umount', 'switch_root'):
+                path = binary / name
+                path.write_text('#!' + sys.executable + '\n' + '''
+import json, os, pathlib, sys
+name, args = pathlib.Path(sys.argv[0]).name, sys.argv[1:]
+for source, target in (('/dev', os.environ['FIXTURE_DEV']), ('/run', os.environ['FIXTURE_RUN'])):
+    args = [target + arg[len(source):] if arg == source or arg.startswith(source + '/') else arg for arg in args]
+state = pathlib.Path(os.environ['MOUNTS'])
+mounts = json.loads(state.read_text()) if state.exists() else []
+with open(os.environ['TRACE'], 'a') as trace:
+    trace.write(name + ' ' + ' '.join(args) + '\\n')
+if name == 'switch_root':
+    expected = [args[0] + '/' + part for part in ('dev', 'dev/pts', 'proc', 'sys', 'run')]
+    assert all(path in mounts for path in expected), (expected, mounts)
+elif name == 'umount':
+    mounts.remove(args[-1])
+elif args[0] == '--move':
+    source, target = args[1:]
+    assert source in mounts, (source, mounts)
+    mounts = [target + path[len(source):] if path == source or path.startswith(source + '/')
+              else path for path in mounts]
+else:
+    assert args[-1] not in mounts, ('duplicate mount', args[-1])
+    mounts.append(args[-1])
+state.write_text(json.dumps(mounts))
+''')
                 path.chmod(0o755)
             busybox = binary / 'busybox'
             busybox.write_text('#!/bin/sh\n[ "$1" != sh ] || { shift; exec sh "$@"; }\n')
@@ -77,14 +109,19 @@ class InstallHook(unittest.TestCase):
             if install:
                 hook.parent.mkdir()
                 hook.write_text('echo install-hook >> "$TRACE"\n'
-                                'mount -t tmpfs tmpfs /run\n'
-                                'mount -t devpts devpts /dev/pts\n'
-                                'root=11111111-1111-4111-8111-111111111111\n')
+                                f'mount -t tmpfs tmpfs {runtime}\n'
+                                f'mount -t devpts devpts {work}/dev/pts\n'
+                                'root=11111111-1111-4111-8111-111111111111\n'
+                                'echo install-cleanup >> "$TRACE"\n'
+                                f'umount {work}/dev/pts\n'
+                                f'umount {runtime}\n')
             text = INIT.read_text()
             setup = text.split('# gpt_partuuid ')[0]
             setup = re.sub(r'^usb_gadget\(\) \{.*?^\}',
                            'usb_gadget() { echo installed-gadget >> "$TRACE"; }', setup, flags=re.M | re.S)
             setup = re.sub(r'^exec </dev/console.*$', '', setup, flags=re.M)
+            setup = re.sub(r'^stop\(\) \{.*?^\}', 'stop() { echo "$*" >&2; exit 1; }',
+                           setup, flags=re.M | re.S)
             handoff = text[text.index('moved=\n'):]
             # Rescue fixture children exit immediately; no real process is signalled.
             handoff = re.sub(r'^\[ -z .*?\|\| true$', ':', handoff, flags=re.M)
@@ -94,12 +131,15 @@ class InstallHook(unittest.TestCase):
                     ('/etc/orchard/modules', str(work / 'modules')),
                     ('/proc/cmdline', str(work / 'cmdline')),
                     ('/install/run', str(hook)), ('/bin/', str(binary) + '/'),
-                    ('/newroot', str(work / 'newroot')), ('/run', str(runtime))))
+                    ('/newroot', str(work / 'newroot')), ('/run', str(runtime)),
+                    ('/dev', str(work / 'dev'))))
             script = re.sub('|'.join(re.escape(path) for path in paths),
                             lambda match: paths[match[0]], script)
             result = subprocess.run(['sh', '-c', script], stdin=subprocess.DEVNULL,
                                     capture_output=True, text=True, timeout=5,
-                                    env={**os.environ, 'TRACE': str(trace), 'FIXTURE_BIN': str(binary)})
+                                    env={**os.environ, 'TRACE': str(trace), 'FIXTURE_BIN': str(binary),
+                                         'MOUNTS': str(state), 'FIXTURE_DEV': str(work / 'dev'),
+                                         'FIXTURE_RUN': str(runtime)})
             self.assertEqual(result.returncode, 0, result.stderr)
             return trace.read_text().splitlines()
 
@@ -108,11 +148,14 @@ class InstallHook(unittest.TestCase):
             with self.subTest(lwvm=lwvm):
                 events = self.run_init(install=True, lwvm=lwvm)
                 self.assertLess(events.index('orchard-load-storage test-storage'), events.index('install-hook'))
-                self.assertEqual(sum(line.startswith('mount -t tmpfs') for line in events), 1)
-                self.assertEqual(sum(line.startswith('mount -t devpts') for line in events), 1)
+                self.assertEqual(sum(line.startswith('mount -t tmpfs') for line in events), 2)
+                self.assertEqual(sum(line.startswith('mount -t devpts') for line in events), 2)
+                cleanup = events.index('install-cleanup')
+                self.assertTrue(any(line.startswith('mount -t tmpfs') for line in events[cleanup + 1:]))
+                self.assertTrue(any(line.startswith('mount -t devpts') for line in events[cleanup + 1:]))
                 self.assertNotIn('installed-gadget', events)
                 self.assertNotIn('serial-rescue', events)
-                self.assertFalse(any('mount --move' in line and '/run ' in line for line in events))
+                self.assertEqual(sum('mount --move' in line and '/run ' in line for line in events), 1)
                 self.assertTrue(events[-1].startswith('switch_root '))
 
     def test_ordinary_lwvm_root_keeps_early_rescue_and_moves_its_ram_state(self):
