@@ -56,7 +56,11 @@ root ISA and writes a layer for that board. Its kernel image comes from the
 platform descriptor. Optional `[root] storage_modules` in that descriptor
 names the early-root modules; an empty list requires built-in storage.
 
-An LwVM platform sets `[root] format = "lwvm"`. Its schema-1 input record
+An LwVM platform sets `[root] format = "lwvm"`. Optional `root.devices`
+restricts that installed-root path to the named device profiles; P105's
+backend therefore does not apply to J1 through their shared kernel platform.
+Platform-layer builds with different selected root backends require `--device`.
+Its schema-1 input record
 adds `platforms[P].tools.lwvm`, the absolute path of the static mapper for
 the selected architecture. `--platform-lwvm P=FILE` supplies that finished
 component for an offline build. The existing six tool paths and `shared`

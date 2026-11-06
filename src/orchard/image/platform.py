@@ -156,7 +156,7 @@ def storage_modules(hardware, platform):
     return tuple(modules)
 
 
-def root_format(hardware, platform):
+def root_format(hardware, platform, *, device=None):
     """The partition map used by this platform's installed-root provider."""
     if not re.fullmatch(r'[a-z0-9][a-z0-9_-]*', platform):
         raise ValueError('Invalid platform name')
@@ -164,6 +164,18 @@ def root_format(hardware, platform):
     value = settings.get('root', {}).get('format', 'gpt')
     if value not in ('gpt', 'lwvm'):
         raise ValueError('Unsupported platform root.format: ' + str(value))
+    selected = settings.get('root', {}).get('devices')
+    if selected is not None:
+        if (not isinstance(selected, list) or not selected or
+                any(not isinstance(name, str) or not re.fullmatch(r'[a-z0-9][a-z0-9_-]*', name)
+                    for name in selected) or len(selected) != len(set(selected))):
+            raise ValueError('Platform root.devices must be distinct device profiles')
+        if set(selected) - set(boards(platform, hardware)):
+            raise ValueError('Platform root.devices names an unknown or different-platform device')
+        if device is None:
+            raise ValueError('Platform root.devices requires a selected device')
+        if device not in selected:
+            return 'gpt'
     return value
 
 
@@ -235,13 +247,17 @@ def build(platform, output_directory, *, hardware=None, cache=None, bundle=None,
         architecture = descriptor(hardware or ROOT, sorted(board_dtbs)[0])['arch']
         if architecture != root_architecture:
             raise ValueError(f'Platform {platform} architecture {architecture} differs from root {root_architecture}')
+    root_formats = {root_format(hardware or ROOT, platform, device=board) for board in board_dtbs}
+    if len(root_formats) != 1:
+        raise ValueError('Different installed-root backends require --device')
+    selected_root_format = next(iter(root_formats))
     bundle = Path(bundle) if bundle is not None else kernel(platform, hardware=hardware, cache=cache)
     busybox = Path(busybox) if busybox is not None else tools(hardware, cache, platform)
     if root_architecture is not None:
         from .elf import architecture as elf_architecture
         if elf_architecture(busybox.read_bytes()) != root_architecture:
             raise ValueError('Platform initrd BusyBox differs from the root architecture')
-    if root_format(hardware or ROOT, platform) == 'lwvm':
+    if selected_root_format == 'lwvm':
         from ..build import prepare_lwvm, prepare_tools
         from ..kernel import descriptor
         board = device or sorted(board_dtbs)[0]

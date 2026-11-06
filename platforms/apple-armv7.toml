@@ -21,6 +21,7 @@ loader = "cascadia"                # the payload format that boots this kernel
 # setup; the arm64 platforms' NVMe modules do not apply to this platform.
 storage_modules = []
 format = "lwvm"
+devices = ["p105"]
 
 [recovery]
 # The guarded host transport binds a fresh USB identity to each RAM boot.

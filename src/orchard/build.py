@@ -549,6 +549,10 @@ def prepare_tools(hardware=None, cache=None, *, device):
 def prepare_lwvm(hardware=None, cache=None, *, device):
     """Build the static LwVM mapper separately from the recovery tool contract."""
     hardware, cache = _build_context(hardware, cache, device)
+    from .image.platform import root_format
+    platform, _ = kernels.layout(hardware, device)
+    if root_format(hardware, platform, device=device) != 'lwvm':
+        raise ValueError('Selected device has no LwVM installed-root backend')
     architecture = kernels.descriptor(hardware, device)['arch']
     inputs = ['boot/lwvm', 'boot/initramfs/recovery/Containerfile',
               'boot/initramfs/recovery/install-toolchain',

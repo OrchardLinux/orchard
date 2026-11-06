@@ -100,6 +100,22 @@ class Armv7ProducerTests(unittest.TestCase):
                            platform_loaders={'apple-armv7': loader}, platform_tools={'apple-armv7': tools},
                            platform_lwvm={'apple-armv7': helper})
 
+    def test_j1_does_not_inherit_the_p105_installed_root_backend(self):
+        loader, tools = self.components()
+        with mock.patch('orchard.build.prepare_lwvm') as prepare:
+            result = inputs.resolve(['apple-armv7'], {'apple-armv7': self.work}, device='j1',
+                                    platform_loaders={'apple-armv7': loader}, platform_tools={'apple-armv7': tools})
+        prepare.assert_not_called()
+        self.assertEqual(result['platforms']['apple-armv7']['root_format'], 'gpt')
+        self.assertNotIn('lwvm', result['platforms']['apple-armv7']['tools'])
+        with mock.patch.object(build, '_build_context', return_value=(ROOT, self.work)), \
+                mock.patch.object(build, 'command') as command:
+            with self.assertRaisesRegex(ValueError, 'no LwVM installed-root'):
+                build.prepare_lwvm(device='j1')
+        command.assert_not_called()
+        with self.assertRaisesRegex(ValueError, 'require --device'):
+            platform.build('apple-armv7', self.work, root_architecture='arm')
+
     def test_armv7_device_is_required_for_platform_with_multiple_profiles(self):
         with self.assertRaisesRegex(ValueError, 'requires --device'):
             inputs.resolve(['apple-armv7'])

@@ -113,7 +113,7 @@ def resolve(platforms=None, explicit=None, *, hardware=None, cache=None, shared=
         records[name] = {'kernel': str(Path(bundle(name)).resolve()),
                          'boards': board_sets[name],
                          'architecture': description['arch'], 'image': description['image'],
-                         'root_format': platform.root_format(hardware, name),
+                         'root_format': platform.root_format(hardware, name, device=board),
                          'loader': {'kind': description['loader'], 'file': str(Path(loader).resolve())},
                          'tools': {tool: str((target_tools / tool).resolve()) for tool in TOOLS}}
         if records[name]['root_format'] == 'lwvm':
