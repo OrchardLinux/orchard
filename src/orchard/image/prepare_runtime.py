@@ -146,6 +146,7 @@ def main():
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--architecture', choices=('arm', 'arm64'), default='arm64')
     parser.add_argument('--device', help='stage the selected board recovery policy')
+    parser.add_argument('--lwvm', type=Path, help='static orchard-lwvm mapper for LwVM installation')
     args = parser.parse_args()
     recovery = None
     if args.device:
@@ -168,6 +169,13 @@ def main():
     for source in (args.busybox, args.dropbear, args.dropbearkey, args.wpa_supplicant, args.wpa_cli, args.iw):
         if elf_architecture(source.read_bytes()) != args.architecture:
             raise ValueError('Recovery tool architecture differs: ' + str(source))
+    if args.lwvm:
+        data = args.lwvm.read_bytes()
+        native = args.busybox.read_bytes()
+        if (args.lwvm.is_symlink() or not args.lwvm.is_file() or data[:4] != b'\x7fELF' or needed(data) or
+                data[4:6] != native[4:6] or data[18:20] != native[18:20]):
+            raise ValueError('LwVM mapper must be a static native executable')
+        copy(args.lwvm, root / 'usr/sbin/orchard-lwvm', 0o755)
     stage_runtime(args.base, args.base_receipt, root, args.architecture)
     kernel_release, public = runtime_files(args.modules_dir)
     for name, (data, mode) in {**public, **recovery_files()}.items():

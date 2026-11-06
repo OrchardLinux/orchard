@@ -21,6 +21,7 @@ def main():
     parser.add_argument('--logo', type=Path, help="the distribution's m1n1 logo payload (see assemble.py)")
     parser.add_argument('--platform', default='apple-16k', help='kernel platform and payload format')
     parser.add_argument('--device', help='the board whose Cascadia handoff profile to use')
+    parser.add_argument('--lwvm', type=Path, help='static orchard-lwvm mapper for LwVM installation')
     diagnostics = parser.add_mutually_exclusive_group()
     diagnostics.add_argument('--verbose', action='store_true',
                              help='enable visible Linux framebuffer console and kernel diagnostics')
@@ -67,6 +68,7 @@ def main():
                         '--dropbearkey', str(args.dropbearkey),
                         '--wpa-supplicant', str(args.wpa_supplicant),
                         '--wpa-cli', str(args.wpa_cli), '--iw', str(args.iw),
+                        *(['--lwvm', str(args.lwvm)] if args.lwvm else []),
                         '--base', str(args.base), '--base-receipt', str(args.base_receipt),
                         '--modules-dir', str(args.modules_dir), '--root-receipt', str(args.root_receipt),
                         '--architecture', described['arch'],

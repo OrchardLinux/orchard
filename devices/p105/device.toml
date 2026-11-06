@@ -47,6 +47,8 @@ touch_id = "missing"
 storage_read = "missing"
 # The default-off complete-page primitive does not provide a qualified logical writer.
 # See docs/bring-up/p105-nand-program.md for its checks and pending hardware work.
+# LwVM planning/install code has host coverage. The complete ARMv7 writable
+# backend and interruption recovery still gate install; see docs/bring-up/lwvm-install.md.
 storage_write = "missing"
 wifi = "untested"
 bluetooth_input = "untested"

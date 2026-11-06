@@ -37,3 +37,11 @@ The generated loader checks its configuration before copying the recovery
 initramfs into the reserved high-memory range. The DTB names that initramfs.
 This extension needs a hardware boot of the final producer revision; the
 earlier installed P105 boot used an initramfs compiled into its kernel.
+
+## Internal installation
+
+The [LwVM install path](../../docs/bring-up/lwvm-install.md) plans a Linux
+descriptor from a checked native HFS shrink and confines root writes to
+its verified chunk mapping. P105's public installation remains gated by
+the complete writable backend and hardware qualification. Native iOS
+prepares the launcher and System boot assets after the root is populated.

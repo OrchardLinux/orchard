@@ -75,6 +75,7 @@ def main():
     guided.add_argument('source', nargs='?', help='registered distro, local TOML or exact HTTPS URL '
                         "(default in a distribution checkout: its last build)")
     guided.add_argument('--manifest', '--release', dest='manifest', help='explicit index or installation manifest')
+    guided.add_argument('--hfs-shrink-proof', help='owner-private native HFS shrink proof for LwVM allocation')
     launcher = commands.add_parser('launch', help="start an installed system from the device's boot entries")
     launcher.add_argument('--entry', help='boot entry id to start without asking')
     distros = commands.add_parser('distros', help='list or register distro index locations')
@@ -226,7 +227,7 @@ def main():
                     if root is None:
                         raise ValueError('Specify a distro, index or manifest: orchard install SOURCE')
                     source = str(distro.latest(root))  # in a distribution checkout: its last build
-                result = install(source, progress=progress)
+                result = install(source, progress=progress, **({'hfs_shrink_proof': args.hfs_shrink_proof} if args.hfs_shrink_proof else {}))
             elif args.action == 'launch':
                 from orchard.launch import launch
                 result = launch(entry=args.entry, progress=progress)
