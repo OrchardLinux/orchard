@@ -230,25 +230,45 @@ def cleanup_command(argv, step, failed, *, timeout):
 
 def cleanup(api, disk, mounts, mapping, provider, *, disk_verified, changed_policy):
     """Attempt the raw fence even when an earlier cleanup operation fails."""
-    failed = []
-    for point in reversed(mounts):
-        cleanup_command(['umount', str(point)], str(point), failed, timeout=60)
-    if provider is not None:
+    failed, pending = [], None
+    try:
+        for point in reversed(mounts):
+            cleanup_command(['umount', str(point)], str(point), failed, timeout=60)
+        if provider is not None:
+            try:
+                provider.close()
+            except OSError as error:
+                failed.append('provider close: ' + str(error))
+            provider = None
+        if mapping is not None and not failed:
+            argv = [MAPPER, 'unmap', '--disk', disk, '--root', mapping['root_uuid'], '--mode', mapping['mode']]
+            for extent in mapping['extents']:
+                argv += ['--extent', f'{extent["start_sector"]}:{extent["sectors"]}:{extent["physical_sector"]}']
+            cleanup_command(argv, mapping['name'], failed, timeout=30)
+        if changed_policy and not failed:
+            if disk_verified:
+                cleanup_command(['blockdev', '--setro', disk], 'raw provider read-only fence', failed, timeout=15)
+            if not failed and cleanup_command(['modprobe', '-r', 'apple-sftl'], 'logical write policy', failed, timeout=30):
+                cleanup_command(['modprobe', 'apple-sftl'], 'default read-only provider reload', failed, timeout=30)
+    except BaseException as error:
+        pending = error
+    finally:
+        # Cancellation can interrupt umount or the mapper. Release this
+        # process's raw FD, then attempt the fence before re-raising it.
+        if provider is not None:
+            try:
+                provider.close()
+            except BaseException as error:
+                if pending is None:
+                    pending = error
         try:
-            provider.close()
-        except OSError as error:
-            failed.append('provider close: ' + str(error))
-    if mapping is not None and not failed:
-        argv = [MAPPER, 'unmap', '--disk', disk, '--root', mapping['root_uuid'], '--mode', mapping['mode']]
-        for extent in mapping['extents']:
-            argv += ['--extent', f'{extent["start_sector"]}:{extent["sectors"]}:{extent["physical_sector"]}']
-        cleanup_command(argv, mapping['name'], failed, timeout=30)
-    if disk_verified:
-        cleanup_command(['blockdev', '--setro', disk], 'raw provider read-only fence', failed, timeout=15)
-    if changed_policy and not failed:
-        if cleanup_command(['modprobe', '-r', 'apple-sftl'], 'logical write policy', failed, timeout=30):
-            cleanup_command(['modprobe', 'apple-sftl'], 'default read-only provider reload', failed, timeout=30)
-            cleanup_command(['blockdev', '--setro', disk], 'reloaded provider read-only fence', failed, timeout=15)
+            if disk_verified:
+                cleanup_command(['blockdev', '--setro', disk], 'raw provider read-only fence', failed, timeout=15)
+        except BaseException as error:
+            if pending is None:
+                pending = error
+    if pending is not None:
+        raise pending
     if failed:
         raise api.InstallError('storage-cleanup-stopped', 'Installation cleanup requires inspection: ' + ', '.join(failed))
 

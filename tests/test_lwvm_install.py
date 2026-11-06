@@ -501,6 +501,28 @@ class RootWrites(unittest.TestCase):
                     self.assertEqual(commands[0], [I.MAPPER, 'unmap', '--disk', '/dev/applesftl0',
                                                   '--root', LINUX, '--mode', 'rw', '--extent', '0:8192:16384'])
 
+    def test_cleanup_cancellation_still_fences_and_preserves_the_original_cancel(self):
+        for cancelled_tool, mounts in (('umount', ['/target']), (I.MAPPER, [])):
+            with self.subTest(cancelled_tool=cancelled_tool):
+                commands = []
+                cancelled = KeyboardInterrupt('injected cleanup cancellation')
+                def command(argv, **kwargs):
+                    commands.append(argv)
+                    if argv[0] == cancelled_tool:
+                        raise cancelled
+                    return Mock(returncode=0)
+                api = Mock(InstallError=install_device.InstallError)
+                provider = Mock()
+                mapping = {'name': 'fixture-map', 'root_uuid': LINUX, 'mode': 'rw',
+                           'extents': [{'start_sector': 0, 'sectors': 8192, 'physical_sector': 16384}]}
+                with patch.object(I.subprocess, 'run', side_effect=command), self.assertRaises(KeyboardInterrupt) as raised:
+                    I.cleanup(api, '/dev/applesftl0', mounts, mapping, provider,
+                              disk_verified=True, changed_policy=True)
+                self.assertIs(raised.exception, cancelled)
+                provider.close.assert_called_once_with()
+                self.assertIn(['blockdev', '--setro', '/dev/applesftl0'], commands)
+                self.assertFalse(any(argv[0] == 'modprobe' for argv in commands))
+
 
 class MapperInteroperability(unittest.TestCase):
     @classmethod
