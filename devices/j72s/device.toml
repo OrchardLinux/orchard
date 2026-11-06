@@ -15,9 +15,6 @@ dt_compatible = ["apple,j72s"]
 chip = 0x8000
 board = 0x12
 
-[match.linux]
-recovery = true
-
 [boot]
 methods = ["checkm8-pongo"]
 

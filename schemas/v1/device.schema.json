@@ -70,18 +70,6 @@
             "board"
           ],
           "additionalProperties": false
-        },
-        "linux": {
-          "type": "object",
-          "properties": {
-            "recovery": {
-              "const": true
-            }
-          },
-          "required": [
-            "recovery"
-          ],
-          "additionalProperties": false
         }
       },
       "required": [

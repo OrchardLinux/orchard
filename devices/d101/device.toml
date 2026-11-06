@@ -14,10 +14,6 @@ dt_compatible = ["apple,d101"]
 chip = 0x8010
 board = 0x0c
 
-# Orchard Recovery runs here (USB "Orchard Recovery", serial BOARD:<profile>).
-[match.linux]
-recovery = true
-
 [boot]
 methods = ["checkm8-pongo"]
 # Not published yet: no d101 launcher release exists. Mirrors the j71b URL pattern.
