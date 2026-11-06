@@ -32,6 +32,10 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
   Feature states are more detailed, for example separate storage read and write.
 - iPhone X (GSM, d221): Linux boots from RAM, with a device description and a
   Wi-Fi firmware recipe. Experimental. (Eduardo Martins)
+- iPhone X (GSM, d221): the touchscreen works, with its firmware converted from
+  the IPSW and its calibration from the device; each phone gets the firmware
+  variant it asks for. Brightness works over the panel's DSI command, and buttons
+  and battery are confirmed working. (Eduardo Martins)
 - iPad mini 4 (J96): RAM-boot bring-up record: desktop, touch, battery and
   native Wi-Fi measured on a local kernel tree. Not a device profile yet. (Tom Ballard)
 - iPad Air (J85): measured RAM-boot status documented. (Christopher M. Smith)
