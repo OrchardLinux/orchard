@@ -51,6 +51,11 @@ u32 cascadia_main(void)
 	volatile u8 *to;
 	u32 i;
 
+	if (WATCHDOG_ADDRESS) {
+		volatile u32 *wdt = (volatile u32 *)WATCHDOG_ADDRESS;
+		for (i = 0; i < 4; i++)
+			wdt[i] = 0;
+	}
 	if (c->magic[0] != 'C' || c->magic[1] != 'B' ||
 	    c->magic[2] != '3' || c->magic[3] != '2' ||
 	    c->version != 1 || c->header_size != sizeof(struct config) ||
@@ -74,11 +79,6 @@ u32 cascadia_main(void)
 	dtb = (volatile const u8 *)(LOAD_ADDRESS + c->dtb_offset);
 	if (big_endian(dtb) != 0xd00dfeedu || big_endian(dtb + 4) != c->dtb_size)
 		return 0;
-	if (WATCHDOG_ADDRESS) {
-		volatile u32 *wdt = (volatile u32 *)WATCHDOG_ADDRESS;
-		for (i = 0; i < 4; i++)
-			wdt[i] = 0;
-	}
 	from = (volatile const u8 *)(LOAD_ADDRESS + c->initrd_offset);
 	to = (volatile u8 *)INITRD_ADDRESS;
 	for (i = 0; i < c->initrd_size; i++)
