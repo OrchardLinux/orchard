@@ -3,10 +3,10 @@ From: rzxvx <rrzxznewid@gmail.com>
 Date: Sun, 20 Sep 2026 02:21:32 +0000
 Subject: [PATCH] pinctrl: Add the Apple S5L8940X GPIO controller
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at c20b85e:
-  patches/files-sandcastle-port/drivers/pinctrl/pinctrl-new/pinctrl-s5l8940x-gpio.c
-  patches/files-sandcastle-port/drivers/pinctrl/pinctrl-s5l8940x-gpio.c
-  patches/tree/0001-cascadia.patch
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+  devices/a5/patches/files-sandcastle-port/drivers/pinctrl/pinctrl-new/pinctrl-s5l8940x-gpio.c
+  devices/a5/patches/files-sandcastle-port/drivers/pinctrl/pinctrl-s5l8940x-gpio.c
+  devices/a5/patches/tree/0001-cascadia.patch
 
 Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (4 commits).
 

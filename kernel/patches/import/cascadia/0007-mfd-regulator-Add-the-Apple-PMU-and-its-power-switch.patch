@@ -3,11 +3,11 @@ From: rzxvx <rrzxznewid@gmail.com>
 Date: Sat, 3 Oct 2026 03:21:53 +0300
 Subject: [PATCH] mfd: regulator: Add the Apple PMU and its power switches
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at c20b85e:
-  patches/files-sandcastle-port/drivers/mfd/apple-pmu-i2c.c
-  patches/files-sandcastle-port/drivers/regulator/apple-pmu-pwrsw.c
-  patches/files-sandcastle-port/include/linux/apple-pmu-i2c.h
-  patches/tree/0001-cascadia.patch
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+  devices/a5/patches/files-sandcastle-port/drivers/mfd/apple-pmu-i2c.c
+  devices/a5/patches/files-sandcastle-port/drivers/regulator/apple-pmu-pwrsw.c
+  devices/a5/patches/files-sandcastle-port/include/linux/apple-pmu-i2c.h
+  devices/a5/patches/tree/0001-cascadia.patch
 
 Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (10 commits).
 

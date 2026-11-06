@@ -3,8 +3,8 @@ From: rzxvx <rrzxznewid@gmail.com>
 Date: Fri, 23 Oct 2026 16:54:03 +0300
 Subject: [PATCH] iio: accel: st_accel: Add the LIS3DSH
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at c20b85e:
-  patches/tree/0002-st_accel-lis3dsh.patch
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+  devices/a5/patches/tree/0002-st_accel-lis3dsh.patch
 
 Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (1 commit).
 

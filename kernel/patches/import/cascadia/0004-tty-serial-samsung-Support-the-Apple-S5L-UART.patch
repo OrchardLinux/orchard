@@ -3,8 +3,8 @@ From: rzxvx <rrzxznewid@gmail.com>
 Date: Sat, 3 Oct 2026 03:21:53 +0300
 Subject: [PATCH] tty: serial: samsung: Support the Apple S5L UART
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at c20b85e:
-  patches/tree/0001-cascadia.patch
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+  devices/a5/patches/tree/0001-cascadia.patch
 
 Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (2 commits).
 

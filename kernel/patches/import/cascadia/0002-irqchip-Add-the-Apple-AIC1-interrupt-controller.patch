@@ -3,10 +3,10 @@ From: rzxvx <rrzxznewid@gmail.com>
 Date: Sun, 27 Sep 2026 14:33:19 +0300
 Subject: [PATCH] irqchip: Add the Apple AIC1 interrupt controller
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at c20b85e:
-  patches/files/Documentation/devicetree/bindings/interrupt-controller/apple,aic1.yaml
-  patches/files/drivers/irqchip/irq-apple-aic1.c
-  patches/tree/0001-cascadia.patch
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+  devices/a5/patches/files/Documentation/devicetree/bindings/interrupt-controller/apple,aic1.yaml
+  devices/a5/patches/files/drivers/irqchip/irq-apple-aic1.c
+  devices/a5/patches/tree/0001-cascadia.patch
 
 Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (10 commits);
   K <k@Ks-MacBook-Pro-4.local> (3dc80cf)
