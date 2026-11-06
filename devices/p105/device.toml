@@ -38,6 +38,8 @@ accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "missing"
 touch_id = "missing"
+# PPN geometry/read topic and native-map provider await exact-build qualification.
+# See docs/bring-up/p105-nand-reads.md.
 storage_read = "missing"
 storage_write = "missing"
 wifi = "untested"
