@@ -37,3 +37,20 @@ The generated loader checks its configuration before copying the recovery
 initramfs into the reserved high-memory range. The DTB names that initramfs.
 This extension needs a hardware boot of the final producer revision; the
 earlier installed P105 boot used an initramfs compiled into its kernel.
+
+## Unmerged code
+
+The native PPN storage reader and append writer are on the kernel source
+branch `p105/07-ftl-append`, at
+`c63274165870417f01cc3e1264067cef71d9c0b2`. The
+[append bring-up note](../../docs/bring-up/p105-sftl-append.md) records its
+software checks and write policy. Kernel patch export remains a separate
+integration step. Both storage feature states remain `missing`.
+
+## Open work
+
+The exact kernel revision needs a bounded device boot with USB recovery,
+then approved logical writes and a return to iOS. Reboot persistence,
+interruption recovery and sustained writes need physical qualification.
+The append allocator stops at `ENOSPC`; reclamation requires further work.
+The earlier unplugged Omarchy desktop used the local Python storage backend.
