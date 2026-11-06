@@ -96,6 +96,11 @@ state and upstream program callback permit writes. The installer checks
 this before clearing a block fence, which preserves the driver's refusal
 when recovered journal sequences prevent a qualified write.
 
+The installer records a policy transition as soon as the old module unloads.
+Cleanup therefore attempts the default read-only reload after a failed load,
+unavailable policy value or interrupted verification. With all holders gone,
+a failed raw fence still permits that module cleanup attempt.
+
 The plan explicitly bounds the provider to one hour and at most
 `131072 + 8 * ceil(root_bytes / 4096)` read callbacks, capped at the
 driver's unsigned 32-bit limit. The budget gives headroom based on the

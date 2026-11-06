@@ -166,7 +166,7 @@ def check_identity(plan, identity):
         raise lwvm.Error('Native HFS preparation belongs to a different device')
 
 
-def enable_writes(api, policy):
+def enable_writes(api, policy, *, changed):
     """Reload a quiet modular provider with its explicit logical-write policy.
 
     The policy is fixed at probe. A built-in read-only driver fails this step
@@ -176,13 +176,12 @@ def enable_writes(api, policy):
     if not WRITE_POLICY.is_file():
         raise lwvm.Error('Logical write policy is unavailable in this kernel')
     api.run('modprobe', '-r', 'apple-sftl', timeout=30)
-    try:
-        api.run('modprobe', 'apple-sftl', 'write_enable=1',
-                'max_page_reads=' + str(policy['max_page_reads']),
-                'max_io_time_ms=' + str(policy['max_io_time_ms']), timeout=30)
-    except BaseException:
-        subprocess.run(['modprobe', 'apple-sftl'], capture_output=True, timeout=30)
-        raise
+    # Record the transition before loading or reading sysfs can fail. The
+    # caller's cleanup owns the unload and default-policy restoration.
+    changed()
+    api.run('modprobe', 'apple-sftl', 'write_enable=1',
+            'max_page_reads=' + str(policy['max_page_reads']),
+            'max_io_time_ms=' + str(policy['max_io_time_ms']), timeout=30)
     if WRITE_POLICY.read_text().strip().lower() not in ('y', '1'):
         raise lwvm.Error('Logical write policy did not become available')
     return True
@@ -248,7 +247,7 @@ def cleanup(api, disk, mounts, mapping, provider, *, disk_verified, changed_poli
         if changed_policy and not failed:
             if disk_verified:
                 cleanup_command(['blockdev', '--setro', disk], 'raw provider read-only fence', failed, timeout=15)
-            if not failed and cleanup_command(['modprobe', '-r', 'apple-sftl'], 'logical write policy', failed, timeout=30):
+            if cleanup_command(['modprobe', '-r', 'apple-sftl'], 'logical write policy', failed, timeout=30):
                 cleanup_command(['modprobe', 'apple-sftl'], 'default read-only provider reload', failed, timeout=30)
     except BaseException as error:
         pending = error
@@ -281,6 +280,9 @@ def install(api, plan, stream):
     account = plan.get('account')
     secrets = api.read_secrets(api.SECRETS, account) if account and (account['password'] or account['pin']) else None
     provider = None
+    def policy_changed():
+        nonlocal changed_policy
+        changed_policy = True
     try:
         check_identity(plan, current_identity())
         check_previous_intent()
@@ -298,7 +300,7 @@ def install(api, plan, stream):
         api.emit('step', step='check', state='done')
         provider.close()
         provider = None
-        changed_policy = enable_writes(api, plan['io_policy'])
+        changed_policy = enable_writes(api, plan['io_policy'], changed=policy_changed)
         provider = Provider(disk)
         if provider.device != expected_device or provider.size != plan['disk']['bytes']:
             raise lwvm.Error('Reprobed LwVM provider identity changed')

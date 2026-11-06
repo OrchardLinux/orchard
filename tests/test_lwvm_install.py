@@ -437,14 +437,68 @@ class RootWrites(unittest.TestCase):
                     parameter.write_text('Y\n')
             api.run.side_effect = command
             with patch.object(I, 'WRITE_POLICY', parameter):
-                self.assertTrue(I.enable_writes(api, policy))
+                changed = Mock()
+                self.assertTrue(I.enable_writes(api, policy, changed=changed))
+                changed.assert_called_once_with()
                 self.assertEqual(api.run.call_args_list[0].args, ('modprobe', '-r', 'apple-sftl'))
                 self.assertIn('max_page_reads=' + str(policy['max_page_reads']), api.run.call_args_list[1].args)
                 refused = Mock()
                 refused.run.side_effect = install_device.InstallError('command-failed', 'built-in module')
+                unchanged = Mock()
                 with self.assertRaisesRegex(install_device.InstallError, 'built-in'):
-                    I.enable_writes(refused, policy)
+                    I.enable_writes(refused, policy, changed=unchanged)
                 self.assertEqual(refused.run.call_count, 1)
+                unchanged.assert_not_called()
+
+    def test_write_policy_verification_errors_restore_the_default_module(self):
+        identity = {**DEVICE, 'boot_id': 'fixture-boot'}
+        plan = {'identity': identity, 'lwvm': self.allocation,
+                'io_policy': L.install_io_policy(self.root['bytes']),
+                'disk': {'path': '/dev/applesftl0', 'bytes': MEDIA, **self.device},
+                'root': {'partuuid': LINUX, 'blocks': self.root['bytes'] // 512}}
+        failures = ('N\n', FileNotFoundError('parameter vanished'), OSError('parameter read failed'),
+                    KeyboardInterrupt('cancelled'), subprocess.TimeoutExpired('modprobe', 30))
+        for failure in failures:
+            with self.subTest(failure=repr(failure)):
+                parameter = Mock()
+                parameter.is_file.return_value = True
+                if isinstance(failure, BaseException):
+                    parameter.read_text.side_effect = failure
+                else:
+                    parameter.read_text.return_value = failure
+                api = Mock(InstallError=install_device.InstallError)
+                if isinstance(failure, subprocess.TimeoutExpired):
+                    api.run.side_effect = [b'', failure]
+                with patch.object(I, 'WRITE_POLICY', parameter), \
+                     patch.object(I, 'Provider', return_value=MemoryProvider(self.before)), \
+                     patch.object(I, 'current_identity', return_value=identity), \
+                     patch.object(I, 'check_previous_intent'), \
+                     patch.object(I, 'commit_headers') as commit, \
+                     patch.object(I, 'mapped_root') as mapping, \
+                     patch.object(I.subprocess, 'run', return_value=Mock(returncode=0)) as cleanup, \
+                     patch.object(I.os, 'geteuid', return_value=0):
+                    expected = type(failure) if isinstance(failure, BaseException) else install_device.InstallError
+                    with self.assertRaises(expected) as caught:
+                        I.install(api, plan, io.BytesIO())
+                if isinstance(failure, BaseException):
+                    self.assertIs(caught.exception, failure)
+                commands = [call.args[0] for call in cleanup.call_args_list]
+                self.assertIn(['modprobe', '-r', 'apple-sftl'], commands)
+                self.assertIn(['modprobe', 'apple-sftl'], commands)
+                self.assertEqual(commands[-1], ['blockdev', '--setro', '/dev/applesftl0'])
+                commit.assert_not_called()
+                mapping.assert_not_called()
+
+    def test_raw_fence_failure_still_attempts_safe_policy_restoration(self):
+        api = Mock(InstallError=install_device.InstallError)
+        def command(argv, **kwargs):
+            return Mock(returncode=1 if argv[0] == 'blockdev' else 0)
+        with patch.object(I.subprocess, 'run', side_effect=command) as cleanup, \
+             self.assertRaisesRegex(install_device.InstallError, 'cleanup requires inspection'):
+            I.cleanup(api, '/dev/applesftl0', [], None, None, disk_verified=True, changed_policy=True)
+        commands = [call.args[0] for call in cleanup.call_args_list]
+        self.assertIn(['modprobe', '-r', 'apple-sftl'], commands)
+        self.assertIn(['modprobe', 'apple-sftl'], commands)
 
     def test_host_saves_ios_handoff_without_a_gpt_start_request(self):
         from test_install_flow import InstallFlow
