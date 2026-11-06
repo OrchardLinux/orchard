@@ -16,8 +16,10 @@ boot arguments and its initrd addresses, then reserves that destination.
 
 The layout is a checked loader followed by padding to 32 KiB, the zImage,
 the edited DTB and the supplied initramfs, with each data address aligned to
-eight bytes. The loader validates its configuration checksum and bounds
-before copying the initramfs to the profile's reserved high-memory range.
+eight bytes. The loader disables the profile's watchdog before it validates
+the configuration, so a rejected image remains stopped for inspection. It
+checks the configuration checksum and bounds before copying the initramfs to
+the profile's reserved high-memory range.
 It then performs the Cascadia cache/MMU handoff with the DTB in `r2`.
 The fixed loader stack uses the gap below offset `0x7000`; code must finish
 below `0x6000`, and the configuration starts at `0x7f00`.

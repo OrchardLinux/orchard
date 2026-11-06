@@ -56,7 +56,7 @@ static void rejects(void)
 	for (unsigned int i = 0; i < 33; i++)
 		CHECK(((unsigned char *)(uintptr_t)INITRD_ADDRESS)[i] == 0x77);
 	for (unsigned int i = 0; i < 16; i++)
-		CHECK(((unsigned char *)(uintptr_t)WATCHDOG_ADDRESS)[i] == 0xa5);
+		CHECK(((unsigned char *)(uintptr_t)WATCHDOG_ADDRESS)[i] == 0);
 }
 
 int main(void)
