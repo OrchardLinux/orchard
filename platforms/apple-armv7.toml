@@ -20,6 +20,7 @@ loader = "cascadia"                # the payload format that boots this kernel
 # H2FMI is built in. The installed NAND backend supplies the early root
 # setup; the arm64 platforms' NVMe modules do not apply to this platform.
 storage_modules = []
+format = "lwvm"
 
 [recovery]
 # The guarded host transport binds a fresh USB identity to each RAM boot.

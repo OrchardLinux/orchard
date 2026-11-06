@@ -1,16 +1,62 @@
 #!/bin/busybox sh
 # orchard's initrd for installed systems: load storage, mount the root that
 # root=PARTUUID= names, start its init. The same for every distribution and
-# init system; only BusyBox and the platform's storage modules are inside.
+# init system. LwVM platforms also carry the static mapper and owner SSH rescue.
 export PATH=/bin
 /bin/busybox --install -s /bin
 mount -t proc -o nodev,noexec,nosuid proc /proc
 mount -t sysfs -o nodev,noexec,nosuid sysfs /sys
 mount -t devtmpfs -o mode=0755,nosuid dev /dev
+mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run
+mkdir -p /dev/pts
+mount -t devpts -o mode=0620,ptmxmode=0666 devpts /dev/pts
 exec </dev/console >/dev/console 2>&1
+
+# Available before storage discovery, so a rejected header pair leaves USB
+# serial and key-provisioned SSH in RAM. Root mounting never supplies the key.
+usb_gadget() {
+    g=/sys/kernel/config/usb_gadget/orchard-system
+    mkdir -p /sys/kernel/config && mount -t configfs -o nodev,noexec,nosuid configfs /sys/kernel/config 2>/dev/null
+    [ ! -e "$g" ] || return 0
+    board=$(tr '\000' '\n' < /proc/device-tree/compatible | head -1)
+    mkdir "$g" &&
+    echo 0x05ac > "$g/idVendor" &&
+    echo 0x4145 > "$g/idProduct" &&
+    mkdir -p "$g/strings/0x409" "$g/configs/c.1/strings/0x409" &&
+    echo 'Orchard Linux' > "$g/strings/0x409/manufacturer" &&
+    echo 'Orchard installed root' > "$g/strings/0x409/product" &&
+    echo "BOOT:$(cat /proc/sys/kernel/random/boot_id) BOARD:${board#apple,}" > "$g/strings/0x409/serialnumber" &&
+    echo 'USB network and serial' > "$g/configs/c.1/strings/0x409/configuration" &&
+    echo 500 > "$g/configs/c.1/MaxPower" &&
+    mkdir "$g/functions/ncm.usb0" "$g/functions/acm.usb0" &&
+    ln -s "$g/functions/ncm.usb0" "$g/configs/c.1/ncm.usb0" &&
+    ln -s "$g/functions/acm.usb0" "$g/configs/c.1/acm.usb0" &&
+    basename "$(ls -d /sys/class/udc/* | head -1)" > "$g/UDC"
+}
+usb_gadget || echo 'orchard initrd: USB gadget setup failed; console recovery remains available'
+rescue_pid= dhcp_pid=
+if [ -x /bin/orchard-lwvm ]; then
+    mkdir -p /run/recovery /run/orchard/rescue
+    chmod 700 /run/orchard /run/orchard/rescue
+    cp /bin/busybox /run/orchard/rescue/busybox
+    cp /bin/orchard-acm-rescue /run/orchard/rescue/acm-rescue
+    for tool in dropbear dropbearkey recovery-authorize-key recovery-start-ssh; do
+        cp "/bin/$tool" "/run/orchard/rescue/$tool"
+    done
+    /run/orchard/rescue/busybox --install -s /run/orchard/rescue
+    ip link set lo up
+    if ip address add 172.16.42.1/30 dev usb0 2>/dev/null && ip link set usb0 up; then
+        udhcpd -f /etc/udhcpd.conf &
+        dhcp_pid=$!
+    fi
+    /run/orchard/rescue/busybox sh /run/orchard/rescue/acm-rescue &
+    rescue_pid=$!
+    echo 'orchard initrd: USB serial ready; recovery-authorize-key and recovery-start-ssh enable owner SSH.'
+fi
 
 stop() {
     echo "orchard initrd: $1"
+    [ ! -s /run/lwvm-root.log ] || cat /run/lwvm-root.log
     echo 'Starting a shell on the console; the system did not start.'
     exec sh
 }
@@ -51,14 +97,22 @@ gpt_partuuid() {
 device=
 seconds=0
 while [ -z "$device" ]; do
+    if [ -x /bin/orchard-lwvm ]; then
+        for disk in /dev/applesftl*; do
+            [ -b "$disk" ] || continue
+            candidate=$(orchard-lwvm map --disk "$disk" --root "$root" --mode "$mode" 2>/run/lwvm-root.log) || continue
+            [ -z "$device" ] || stop "more than one LwVM provider has root $root"
+            device=$candidate
+        done
+    fi
     for number in /sys/class/block/*/partition; do
         [ -e "$number" ] || continue
         part=${number%/partition}
         disk=$(basename "$(dirname "$(readlink -f "$part")")")
         sector=$(cat "/sys/class/block/$disk/queue/logical_block_size")
         if [ "$(gpt_partuuid "/dev/$disk" "$sector" "$(cat "$number")")" = "$root" ]; then
+            [ -z "$device" ] || stop "more than one provider has root $root"
             device=/dev/${part##*/}
-            break
         fi
     done
     [ -n "$device" ] && break
@@ -71,31 +125,46 @@ mkdir -p /newroot
 mount ${fstype:+-t "$fstype"} -o "$mode${flags:+,$flags}" "$device" /newroot || stop "could not mount $device"
 [ -x "/newroot$init" ] || [ -L "/newroot$init" ] || stop "the root has no $init"
 
-# USB for the host: network (usb0) and a serial console (ttyGS0), named after
-# the system, so `orchard devices` sees it. What runs on them is the system's.
-usb_gadget() {
-    g=/sys/kernel/config/usb_gadget/orchard-system
-    mkdir -p /sys/kernel/config && mount -t configfs -o nodev,noexec,nosuid configfs /sys/kernel/config 2>/dev/null
-    [ ! -e "$g" ] || return 0
-    name=$(sed -n 's/^NAME=//p' /newroot/etc/os-release /newroot/usr/lib/os-release 2>/dev/null | head -1 | tr -d "\"'")
-    board=$(tr '\000' '\n' < /proc/device-tree/compatible | head -1)
-    mkdir "$g" &&
-    echo 0x05ac > "$g/idVendor" &&
-    echo 0x4145 > "$g/idProduct" &&
-    mkdir -p "$g/strings/0x409" "$g/configs/c.1/strings/0x409" &&
-    echo 'Orchard Linux' > "$g/strings/0x409/manufacturer" &&
-    echo "${name:-Linux}" > "$g/strings/0x409/product" &&
-    echo "BOOT:$(cat /proc/sys/kernel/random/boot_id) BOARD:${board#apple,}" > "$g/strings/0x409/serialnumber" &&
-    echo 'USB network and serial' > "$g/configs/c.1/strings/0x409/configuration" &&
-    echo 500 > "$g/configs/c.1/MaxPower" &&
-    mkdir "$g/functions/ncm.usb0" "$g/functions/acm.usb0" &&
-    ln -s "$g/functions/ncm.usb0" "$g/configs/c.1/ncm.usb0" &&
-    ln -s "$g/functions/acm.usb0" "$g/configs/c.1/acm.usb0" &&
-    basename "$(ls -d /sys/class/udc/* | head -1)" > "$g/UDC"
-}
-usb_gadget || echo 'orchard initrd: no USB gadget; continuing without USB'
+# Prepare RAM rescue before the installed init starts its own services.
+# BusyBox switch_root needs PID1; no child performs the mount handoff.
+if [ -n "$rescue_pid" ]; then
+    # systemd can supervise a replacement from RAM after switch_root. Other
+    # init systems retain their own normal USB serial service contract.
+    if [ -x /newroot/usr/lib/systemd/systemd ] && [ "$init" = /sbin/init ]; then
+        mkdir -p /run/systemd/system/sysinit.target.wants
+        cat > /run/systemd/system/orchard-acm-rescue.service <<'UNIT'
+[Unit]
+Description=Orchard physical USB RAM rescue
+DefaultDependencies=no
+Before=basic.target
+IgnoreOnIsolate=yes
 
-for name in dev proc sys; do
-    mount --move "/$name" "/newroot/$name"
+[Service]
+Type=simple
+ExecStart=/run/orchard/rescue/busybox sh /run/orchard/rescue/acm-rescue
+Restart=always
+RestartSec=1
+TimeoutStopSec=2
+KillMode=control-group
+UNIT
+        ln -s ../orchard-acm-rescue.service /run/systemd/system/sysinit.target.wants/orchard-acm-rescue.service
+    fi
+fi
+shell_pid=$(cat /run/orchard/rescue/shell.pid 2>/dev/null)
+ssh_pid=$(cat /run/recovery/dropbear.pid 2>/dev/null)
+moved=
+for name in dev proc sys run; do
+    mkdir -p "/newroot/$name" || stop "the root lacks /$name"
+    if ! mount --move "/$name" "/newroot/$name"; then
+        for previous in $moved; do
+            mount --move "/newroot/$previous" "/$previous" || true
+        done
+        stop "could not move /$name into the root"
+    fi
+    moved="$name $moved"
 done
+[ -z "$rescue_pid" ] || kill "$rescue_pid" 2>/dev/null || true
+[ -z "$shell_pid" ] || /bin/busybox kill -KILL "-$shell_pid" 2>/dev/null || true
+[ -z "$dhcp_pid" ] || kill "$dhcp_pid" 2>/dev/null || true
+[ -z "$ssh_pid" ] || kill "$ssh_pid" 2>/dev/null || true
 exec switch_root /newroot "$init"

@@ -45,6 +45,15 @@ def architecture(data):
     raise ValueError('Unsupported recovery ELF architecture')
 
 
+def require_static(data):
+    """Reject an interpreter or shared-library dependency in an initrd tool."""
+    parsed = _parts(data)
+    if parsed is None:
+        raise ValueError('Expected a static ELF executable')
+    if any(kind == 3 for kind, _, _, _ in parsed[2]) or needed(data):
+        raise ValueError('Installed root helpers must be static ELF executables')
+
+
 def needed(data):
     parsed = _parts(data)
     if parsed is None:

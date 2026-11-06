@@ -33,10 +33,31 @@ distribution needs `kernel-install`, mkinitcpio or dracut, and every init system
 works the same way.
 
 orchard's initrd (`boot/initramfs/root`) holds BusyBox and the platform's storage
-modules only. It loads them, waits up to 30 s for the partition that
+modules. It loads them, waits up to 30 s for the partition that
 `root=PARTUUID=` names, mounts it (`rootfstype=`, `rootflags=`, `ro`/`rw` as
 given) and starts its `/sbin/init` (or `init=`). If any step fails, it says
 which one and opens a shell on the console.
+
+Platforms with `[root] format = "lwvm"` also carry the static
+[`orchard-lwvm` mapper](../boot/lwvm/README.md) and owner SSH tools. They look
+for `root=PARTUUID=` in the current checked LwVM header pair on a kernel
+`/dev/applesftlN` logical provider. The helper maps only a Linux filesystem
+partition with zero attributes, preserving its ordered physical extents.
+There is no Python or NBD worker in this installed-root path. A damaged pair
+leaves the RAM console, USB serial and key-provisioned SSH available.
+`recovery-authorize-key` accepts an owner's Ed25519 public key over physical
+serial; `recovery-start-ssh` shows the ephemeral host key for pinning and starts
+key-only SSH at `172.16.42.1`. These credentials remain in RAM. After mounting,
+PID1 moves `/dev`, `/proc`, `/sys` and `/run` into the root and starts its init.
+On systemd roots, a service resumes physical serial rescue from static tools
+on `/run`; the installed system starts its normal SSH service.
+
+The mapper supplies a volume view, while the kernel backend controls flash
+writes and read limits. An installed-root entry needs an explicitly reviewed
+backend lifetime and write policy. The diagnostic defaults of 32768 page
+reads and 600000 ms from probe cannot sustain an installed desktop session.
+`rw` alone never enables the default-off SFTL writer. Device installation
+remains gated on qualification of the exact kernel, policy and initrd.
 
 ## Partitions (GPT)
 

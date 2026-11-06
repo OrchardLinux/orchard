@@ -14,8 +14,8 @@ from orchard import inputs  # noqa: E402
 
 # Every command of the contract and the options a distribution may rely on.
 COMMANDS = {
-    'orchard.inputs': ['--output', '--platform', '--kernel-dir', '--m1n1', '--pongo', '--tools', '--kernel-tree', '--device', '--platform-loader', '--platform-tools'],
-    'orchard.image.platform': ['--output', '--kernel-dir', '--busybox', '--receipt', '--root-architecture', '--device'],
+    'orchard.inputs': ['--output', '--platform', '--kernel-dir', '--m1n1', '--pongo', '--tools', '--kernel-tree', '--device', '--platform-loader', '--platform-tools', '--platform-lwvm'],
+    'orchard.image.platform': ['--output', '--kernel-dir', '--busybox', '--receipt', '--root-architecture', '--device', '--lwvm', '--rescue-tools'],
     'orchard.image.platforms_index': ['--release', '--inputs', '--kernels', '--tools', '--commit', '--platform'],
     'orchard.image.root_image': ['--output'],
     'orchard.image.recovery': ['--dtb', '--loader', '--logo', '--kernel', '--modules-dir', '--busybox', '--dropbear',
@@ -64,6 +64,8 @@ class DistributionContract(unittest.TestCase):
         self.assertEqual(document['schema'], 1)
         self.assertEqual(set(document['platforms']), {'apple-16k'})
         self.assertIn('j71b', document['platforms']['apple-16k']['boards'])
+        self.assertEqual(document['platforms']['apple-16k']['root_format'], 'gpt')
+        self.assertNotIn('lwvm', document['platforms']['apple-16k']['tools'])
         self.assertEqual(document['shared']['m1n1'], str((root / 'm1n1.bin').resolve()))
         self.assertEqual(set(document['shared']['tools']),
                          {'busybox', 'dropbear', 'dropbearkey', 'wpa_supplicant', 'wpa_cli', 'iw',

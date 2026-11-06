@@ -33,19 +33,20 @@ TOOLS = ('busybox', 'dropbear', 'dropbearkey', 'wpa_supplicant', 'wpa_cli', 'iw'
 
 
 def resolve(platforms=None, explicit=None, *, hardware=None, cache=None, shared=None, kernel_tree=None,
-            platform_loaders=None, platform_tools=None, device=None):
+            platform_loaders=None, platform_tools=None, platform_lwvm=None, device=None):
     """Resolve one architecture's inputs; default to the existing arm64 platforms.
 
     Per-platform loader/tool overrides keep offline builds independent of
     orchard's cache. A root build must choose platforms of one architecture.
     """
-    from .build import prepare_shared, prepare_payload_loader, prepare_tools
+    from .build import prepare_shared, prepare_payload_loader, prepare_tools, prepare_lwvm
     from .hardware import ROOT, revision
     from .image import platform
     from .kernel import descriptor, layout
     hardware = Path(hardware or ROOT)
     explicit = explicit or {}
     platform_loaders, platform_tools = platform_loaders or {}, platform_tools or {}
+    platform_lwvm = platform_lwvm or {}
     known = platform.platforms(hardware, architecture=None)
     if device is not None:
         selected_platform, _ = layout(hardware, device)
@@ -55,7 +56,7 @@ def resolve(platforms=None, explicit=None, *, hardware=None, cache=None, shared=
     else:
         selected = list(platforms or platform.platforms(hardware))
     unknown = (set(selected) - set(known)) | ((set(explicit) | set(platform_loaders) |
-                                            set(platform_tools)) - set(selected))
+                                            set(platform_tools) | set(platform_lwvm)) - set(selected))
     if unknown:
         raise ValueError(f'Unknown or unselected platform {", ".join(sorted(unknown))}; known: {", ".join(known)}')
     descriptions = {name: descriptor(hardware, name) for name in selected}
@@ -112,8 +113,20 @@ def resolve(platforms=None, explicit=None, *, hardware=None, cache=None, shared=
         records[name] = {'kernel': str(Path(bundle(name)).resolve()),
                          'boards': board_sets[name],
                          'architecture': description['arch'], 'image': description['image'],
+                         'root_format': platform.root_format(hardware, name),
                          'loader': {'kind': description['loader'], 'file': str(Path(loader).resolve())},
                          'tools': {tool: str((target_tools / tool).resolve()) for tool in TOOLS}}
+        if records[name]['root_format'] == 'lwvm':
+            helper = Path(platform_lwvm.get(name) or prepare_lwvm(hardware, cache, device=board))
+            if not helper.is_file() or helper.is_symlink():
+                raise ValueError(f'Missing regular LwVM helper {helper}')
+            from .image import elf
+            if elf.architecture(helper.read_bytes()) != architecture:
+                raise ValueError('LwVM helper differs from the input architecture')
+            elf.require_static(helper.read_bytes())
+            records[name]['tools']['lwvm'] = str(helper.resolve())
+        elif name in platform_lwvm:
+            raise ValueError('--platform-lwvm requires an LwVM platform')
     return {'schema': SCHEMA, 'orchard': orchard, 'architecture': architecture,
             'platforms': records, 'shared': shared_document}
 
@@ -132,6 +145,8 @@ def main():
                         help='an explicit payload loader for one platform')
     parser.add_argument('--platform-tools', action='append', default=[], metavar='PLATFORM=DIRECTORY',
                         help='an explicit static tool directory for one platform')
+    parser.add_argument('--platform-lwvm', action='append', default=[], metavar='PLATFORM=FILE',
+                        help='an explicit static LwVM mapper for one LwVM platform')
     parser.add_argument('--kernel-tree', type=Path, help='build the kernels from this kernel tree '
                         '(default: ORCHARD_KERNEL_TREE, which orchard build --kernel-tree sets)')
     args = parser.parse_args()
@@ -151,6 +166,7 @@ def main():
         return result
     platform_loaders = overrides(args.platform_loader, '--platform-loader')
     platform_tools = overrides(args.platform_tools, '--platform-tools')
+    platform_lwvm = overrides(args.platform_lwvm, '--platform-lwvm')
     try:
         import os
         tree = args.kernel_tree or (Path(os.environ['ORCHARD_KERNEL_TREE']) if os.environ.get('ORCHARD_KERNEL_TREE')
@@ -160,7 +176,8 @@ def main():
         try:
             document = resolve(args.platform, explicit, shared={'m1n1': args.m1n1, 'pongo': args.pongo,
                                                                 'tools': args.tools}, kernel_tree=tree,
-                               platform_loaders=platform_loaders, platform_tools=platform_tools, device=args.device)
+                               platform_loaders=platform_loaders, platform_tools=platform_tools,
+                               platform_lwvm=platform_lwvm, device=args.device)
         finally:
             steps = explain.stop()
     except ValueError as error:

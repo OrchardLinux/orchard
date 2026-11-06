@@ -53,6 +53,7 @@ class Armv7ProducerTests(unittest.TestCase):
         tools.mkdir()
         for name in inputs.TOOLS:
             (tools / name).write_bytes(executable())
+        (tools / 'orchard-lwvm').write_bytes(executable())
         loader = self.work / 'loader.bin'
         loader.write_bytes(b'caller-supplied loader')
         return loader, tools
@@ -62,11 +63,13 @@ class Armv7ProducerTests(unittest.TestCase):
         with mock.patch('orchard.build.prepare_shared') as shared, \
                 mock.patch('orchard.build.prepare_payload_loader') as prepare_loader, \
                 mock.patch('orchard.build.prepare_tools') as prepare_tools, \
+                mock.patch('orchard.build.prepare_lwvm') as prepare_lwvm, \
                 mock.patch('orchard.image.platform.kernel') as prepare_kernel:
             result = inputs.resolve(['apple-armv7'], {'apple-armv7': self.work}, device='p105',
                                     platform_loaders={'apple-armv7': loader},
-                                    platform_tools={'apple-armv7': tools})
-        for producer in (shared, prepare_loader, prepare_tools, prepare_kernel):
+                                    platform_tools={'apple-armv7': tools},
+                                    platform_lwvm={'apple-armv7': tools / 'orchard-lwvm'})
+        for producer in (shared, prepare_loader, prepare_tools, prepare_lwvm, prepare_kernel):
             producer.assert_not_called()
         target = result['platforms']['apple-armv7']
         self.assertEqual(result['architecture'], 'arm')
@@ -74,7 +77,28 @@ class Armv7ProducerTests(unittest.TestCase):
         self.assertEqual(target['image'], 'zImage')
         self.assertEqual(target['loader'], {'kind': 'cascadia', 'file': str(loader.resolve())})
         self.assertEqual(target['boards'], {'p105': 's5l8942x-p105'})
+        self.assertEqual(target['tools']['lwvm'], str((tools / 'orchard-lwvm').resolve()))
+        self.assertEqual(target['root_format'], 'lwvm')
         self.assertEqual(result['shared'], {})
+
+    def test_lwvm_inputs_prepare_the_selected_board_helper_and_reject_wrong_isa(self):
+        loader, tools = self.components()
+        helper = tools / 'orchard-lwvm'
+        with mock.patch('orchard.build.prepare_lwvm', return_value=helper) as prepare:
+            result = inputs.resolve(['apple-armv7'], {'apple-armv7': self.work}, device='p105',
+                                    platform_loaders={'apple-armv7': loader}, platform_tools={'apple-armv7': tools})
+        prepare.assert_called_once_with(ROOT, None, device='p105')
+        self.assertEqual(result['platforms']['apple-armv7']['tools']['lwvm'], str(helper.resolve()))
+        helper.write_bytes(executable('arm64'))
+        with self.assertRaisesRegex(ValueError, 'helper differs'):
+            inputs.resolve(['apple-armv7'], {'apple-armv7': self.work}, device='p105',
+                           platform_loaders={'apple-armv7': loader}, platform_tools={'apple-armv7': tools},
+                           platform_lwvm={'apple-armv7': helper})
+        helper.write_bytes(executable(dynamic=True))
+        with self.assertRaisesRegex(ValueError, 'static ELF'):
+            inputs.resolve(['apple-armv7'], {'apple-armv7': self.work}, device='p105',
+                           platform_loaders={'apple-armv7': loader}, platform_tools={'apple-armv7': tools},
+                           platform_lwvm={'apple-armv7': helper})
 
     def test_armv7_device_is_required_for_platform_with_multiple_profiles(self):
         with self.assertRaisesRegex(ValueError, 'requires --device'):
@@ -133,8 +157,14 @@ class Armv7ProducerTests(unittest.TestCase):
         (bundle / 'dtbs/s5l8942x-p105.dtb').write_bytes(b'caller-supplied-dtb')
         busybox = self.work / 'busybox'
         busybox.write_bytes(executable())
+        mapper = self.work / 'orchard-lwvm'
+        mapper.write_bytes(executable())
+        rescue = self.work / 'rescue'
+        rescue.mkdir()
+        for name in ('dropbear', 'dropbearkey'):
+            (rescue / name).write_bytes(executable())
         result = platform.build('apple-armv7', self.work, bundle=bundle, busybox=busybox,
-                                root_architecture='arm', device='p105')
+                                root_architecture='arm', device='p105', lwvm=mapper, rescue_tools=rescue)
         self.assertEqual(result['architecture'], 'arm')
         self.assertEqual(result['boards'], ['p105'])
         with tarfile.open(self.work / result['file']) as archive:
@@ -143,6 +173,22 @@ class Armv7ProducerTests(unittest.TestCase):
             self.assertEqual(description['image'], 'zImage')
             self.assertEqual(description['boards'], {'p105': 's5l8942x-p105'})
             self.assertEqual(archive.extractfile('usr/lib/modules/test-arm/vmlinuz').read(), kernel())
+            initrd = archive.extractfile('usr/lib/modules/test-arm/initrd').read()
+            stream = io.BytesIO(gzip.decompress(initrd))
+            entries = {}
+            while True:
+                h = stream.read(110)
+                fields = [int(h[i:i + 8], 16) for i in range(6, 110, 8)]
+                name = stream.read(fields[11])[:-1].decode()
+                stream.read(-(110 + fields[11]) % 4)
+                if name == 'TRAILER!!!': break
+                entries[name] = stream.read(fields[6])
+                stream.read(-fields[6] % 4)
+            self.assertEqual(entries['bin/orchard-lwvm'], executable())
+            self.assertEqual(entries['bin/dropbear'], executable())
+            self.assertIn(b'/run/orchard/rescue/dropbear', entries['bin/recovery-start-ssh'])
+            self.assertEqual(entries['etc/orchard/modules'], b'\n')
+            self.assertNotIn('bin/python3', entries)
         busybox.write_bytes(executable('arm64'))
         other = self.work / 'wrong'
         other.mkdir()
@@ -150,6 +196,15 @@ class Armv7ProducerTests(unittest.TestCase):
             platform.build('apple-armv7', other, bundle=bundle, busybox=busybox,
                            root_architecture='arm', device='p105')
         self.assertEqual(list(other.iterdir()), [])
+        busybox.write_bytes(executable())
+        mapper.write_bytes(executable('arm64'))
+        with self.assertRaisesRegex(ValueError, 'helper differs'):
+            platform.build('apple-armv7', other, bundle=bundle, busybox=busybox,
+                           root_architecture='arm', device='p105', lwvm=mapper, rescue_tools=rescue)
+        mapper.write_bytes(executable(dynamic=True))
+        with self.assertRaisesRegex(ValueError, 'static ELF'):
+            platform.build('apple-armv7', other, bundle=bundle, busybox=busybox,
+                           root_architecture='arm', device='p105', lwvm=mapper, rescue_tools=rescue)
 
     def test_elf_dependency_reader_handles_both_instruction_sets(self):
         for architecture in ('arm', 'arm64'):
