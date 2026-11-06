@@ -31,3 +31,11 @@ description = "A patched iBSS, optionally iBEC, entered through an external cust
 boot_json = true
 stages = ["iBSS"]
 loader = "m1n1"
+
+["ios-local-file"]
+# Starts from the running jailbroken iOS app, so it needs no DFU entry tool.
+entries = []
+description = "An on-device iOS app schedules wake and enters a pinned iBEC that loads an ARM32 file from System"
+boot_json = true
+stages = ["iBEC"]
+loader = "cascadia"

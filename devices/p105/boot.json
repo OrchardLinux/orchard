@@ -49,7 +49,42 @@
       "cache_flush": "0x9ff2134c",
       "done_flag": "0x9ff48bb0",
       "usb_continue": "0x9ff201a4",
-      "source": "rzxvx/Project-Cascadia@091d441 devices/a5/scripts/patch-ibec-autogo.py"
+      "source": "rzxvx/Project-Cascadia@091d441 devices/a5/scripts/patch-ibec-autogo.py",
+      "image_base": "0x9ff00000",
+      "payload_address": "0x80000000",
+      "prepared_ibec": {
+        "bytes": 282624,
+        "sha256": "e987b101800bedf03c086aa55854ff594fcce1b0f55ea1424f3ccf180a40abce"
+      },
+      "maximum_payload_bytes": 66060288
+    },
+    "ios-local-file": {
+      "build": "12H321",
+      "source": "Shayne Legault P105 local-file bring-up; derived from the owner-supplied patched iBEC; boot/ios-launcher/README.md",
+      "prepared_ibec_sha256": "e987b101800bedf03c086aa55854ff594fcce1b0f55ea1424f3ccf180a40abce",
+      "prepared_ibec_bytes": 282624,
+      "base": 2683305984,
+      "hook": 3190,
+      "finish_init": 2683429353,
+      "shim_start": 278072,
+      "shim_end": 278528,
+      "mount_bootfs": 2683308605,
+      "load_file": 2683454109,
+      "load_address": 2147483648,
+      "maximum_image_bytes": 66060288,
+      "boot_device": "nand0a",
+      "ibec_boot_path": "/boot/boot/omarchy-p105.bin",
+      "boot_path": "/boot/omarchy-p105.bin",
+      "ibec_path": "/usr/local/lib/orchard-p105/ibec-local.raw",
+      "kloader_path": "/usr/local/lib/orchard-p105/kloader",
+      "helper_path": "/usr/local/libexec/orchard-p105-start",
+      "lease_path": "/var/run/orchard-p105.start",
+      "wake_owner": "org.orchardlinux.p105.start",
+      "wake_delay_seconds": 60,
+      "app_path": "/Applications/Omarchy-A.app",
+      "bundle_id": "org.orchardlinux.p105.start",
+      "minimum_ios": "9.0",
+      "ios_build": "13G36"
     }
   }
 }
