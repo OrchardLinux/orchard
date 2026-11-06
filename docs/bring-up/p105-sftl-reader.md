@@ -9,7 +9,9 @@ encryption.
 The measured profile has two buses and eight CAUs per bus, each with 2,088
 blocks of 128 normal-view pages. H2FMI supplies each 16 KiB data page with its
 64 metadata bytes through a canonical provider. Context reads select the
-separate SLC address view. This provider offers no program or erase callback.
+separate SLC address view. The read-only candidate below exposes canonical
+reads. The [append work](p105-sftl-append.md) adds an optional verified program
+callback with explicit write policy; the provider has no erase operation.
 
 Recovery requires agreeing VFL context replicas and lane tables. It validates
 the saved SFTL context fragments, then replays later data and trim records in

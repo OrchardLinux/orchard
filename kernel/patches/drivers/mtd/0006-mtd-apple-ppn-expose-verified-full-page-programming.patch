@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 12:32:37 -0600
+Subject: [PATCH] mtd: apple-ppn: expose verified full-page programming
+
+Add an optional program_page operation to the aggregate canonical PPN
+provider. Its success contract includes completion and exact data/metadata
+readback, so an FTL can publish mappings only after the full unit succeeds.
+
+Route the H2FMI callback through its existing synchronized page program
+engine. The controller retains its geometry, blank-page, boot/tail block
+and default-off configuration guards.
+
+Assisted-by: LLM
+---
+ drivers/mtd/devices/mtd-apple-h2fmi.c | 12 ++++++++++++
+ include/linux/mtd/apple-ppn.h         |  4 ++++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/drivers/mtd/devices/mtd-apple-h2fmi.c b/drivers/mtd/devices/mtd-apple-h2fmi.c
+index bd7ba9110..ace9d72c7 100644
+--- a/drivers/mtd/devices/mtd-apple-h2fmi.c
++++ b/drivers/mtd/devices/mtd-apple-h2fmi.c
+@@ -671,8 +671,20 @@ static int h2fmi_ppn_read(void *priv, unsigned int bus, unsigned int cau,
+ 	return ret;
+ }
+ 
++static int h2fmi_ppn_program(void *priv, unsigned int bus, unsigned int cau,
++			     unsigned int block, unsigned int page,
++			     const u8 *data, const u8 *oob)
++{
++	struct h2fmi *fmi = priv;
++
++	if (bus >= H2FMI_BUSES)
++		return -EINVAL;
++	return h2fmi_program_page(fmi, &fmi->bus[bus], cau, block, page, data, oob);
++}
++
+ static const struct apple_ppn_ops h2fmi_ppn_ops = {
+ 	.read_page = h2fmi_ppn_read,
++	.program_page = h2fmi_ppn_program,
+ };
+ 
+ static int h2fmi_register_sftl(struct h2fmi *fmi)
+diff --git a/include/linux/mtd/apple-ppn.h b/include/linux/mtd/apple-ppn.h
+index 78ee66867..73fba467d 100644
+--- a/include/linux/mtd/apple-ppn.h
++++ b/include/linux/mtd/apple-ppn.h
+@@ -11,6 +11,10 @@ struct device;
+ 
+ /* All buffers have canonical data/OOB layout, including context reads. */
+ struct apple_ppn_ops {
++	/* Success means the complete page and metadata passed exact readback. */
++	int (*program_page)(void *priv, unsigned int bus, unsigned int cau,
++			    unsigned int block, unsigned int page,
++			    const u8 *data, const u8 *oob);
+ 	int (*read_page)(void *priv, unsigned int bus, unsigned int cau,
+ 			 unsigned int block, unsigned int page, bool context,
+ 			 u8 *data, u8 *oob, u8 *status);

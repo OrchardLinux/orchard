@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 12:39:42 -0600
+Subject: [PATCH] mtd: apple-sftl: prevent recursive reclaim during request I/O
+
+Map splits, summary preparation and H2FMI program buffers allocate while
+io_lock serializes requests to the logical root disk. GFP_KERNEL reclaim
+can otherwise queue writeback against that same disk and wait for the
+lock held by the original request.
+
+Use a NOIO allocation scope around all request processing and lower
+provider calls, restoring the previous scope on the common completion
+path. This keeps existing allocation failure handling while preventing
+recursive filesystem I/O from reclaim.
+
+The exact queue-function harness checks balanced scope and completion
+on 22 success, policy, deadline and error cases in each write config.
+
+Assisted-by: LLM
+---
+ Documentation/driver-api/mtd/apple-sftl.rst | 4 +++-
+ drivers/mtd/apple-sftl-block.c              | 5 +++++
+ 2 files changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/driver-api/mtd/apple-sftl.rst b/Documentation/driver-api/mtd/apple-sftl.rst
+index 9d65b2149..6f7a3b229 100644
+--- a/Documentation/driver-api/mtd/apple-sftl.rst
++++ b/Documentation/driver-api/mtd/apple-sftl.rst
+@@ -43,7 +43,9 @@ an error. A failed runtime read stops subsequent I/O from this map instance.
+ H2FMI unregisters the child before releasing its controller state. The block
+ frontend freezes and drains requests during removal. Its request buffer is
+ allocated before the disk becomes visible, while blocking requests serialize
+-access to that buffer and the provider.
++access to that buffer and the provider. Request processing uses a NOIO
++allocation scope so map and provider buffers cannot trigger recursive
++writeback while the queue lock is held.
+ 
+ The reader has finite operating limits. ``max_page_reads`` defaults to 32,768
+ physical page requests and ``max_io_time_ms`` defaults to ten minutes from
+diff --git a/drivers/mtd/apple-sftl-block.c b/drivers/mtd/apple-sftl-block.c
+index 29a05ae3b..4471a9176 100644
+--- a/drivers/mtd/apple-sftl-block.c
++++ b/drivers/mtd/apple-sftl-block.c
+@@ -9,6 +9,7 @@
+ #include <linux/module.h>
+ #include <linux/mutex.h>
+ #include <linux/platform_device.h>
++#include <linux/sched/mm.h>
+ #include <linux/slab.h>
+ 
+ #include "apple-sftl.h"
+@@ -182,10 +183,13 @@ static blk_status_t sftl_queue_rq(struct blk_mq_hw_ctx *hctx,
+ 	struct request *request = data->rq;
+ 	struct sftl_disk *sftl = request->q->queuedata;
+ 	sector_t capacity = get_capacity(sftl->disk);
++	unsigned int noio_flags;
+ 	blk_status_t status;
+ 	int ret = 0;
+ 
+ 	mutex_lock(&sftl->io_lock);
++	/* Map and provider buffers may allocate while the root disk is busy. */
++	noio_flags = memalloc_noio_save();
+ 	blk_mq_start_request(request);
+ 	if (sftl->dead) {
+ 		ret = -ENODEV;
+@@ -203,6 +207,7 @@ static blk_status_t sftl_queue_rq(struct blk_mq_hw_ctx *hctx,
+ 	} else {
+ 		ret = sftl_read_request(sftl, request);
+ 	}
++	memalloc_noio_restore(noio_flags);
+ 	mutex_unlock(&sftl->io_lock);
+ 	status = errno_to_blk_status(ret);
+ 	blk_mq_end_request(request, status);

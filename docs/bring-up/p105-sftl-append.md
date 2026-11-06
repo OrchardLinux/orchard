@@ -12,7 +12,8 @@ Kernel branch `p105/07-ftl-append` ends at
 `c63274165870417f01cc3e1264067cef71d9c0b2`. It contains the verified PPN
 program callback (`ab137f3be`), append/replay path (`cb20cc76a`) and request
 allocation guard (`c63274165`), following the read-only reader and program
-primitive dependencies. Kernel patch export remains pending integration.
+primitive dependencies. Exported MTD patches 0006 through 0008 carry these
+changes with `apple-armv7` scope and reproduce the source tree exactly.
 
 The allocator reserves the boot and package tails, every saved SFTL context,
 validated VFL bootstrap members and blocks referenced by the recovered map.

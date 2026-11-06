@@ -44,8 +44,8 @@ The native PPN storage reader and append writer are on the kernel source
 branch `p105/07-ftl-append`, at
 `c63274165870417f01cc3e1264067cef71d9c0b2`. The
 [append bring-up note](../../docs/bring-up/p105-sftl-append.md) records its
-software checks and write policy. Kernel patch export remains a separate
-integration step. Both storage feature states remain `missing`.
+software checks and write policy. The exported MTD patches are scoped to
+`apple-armv7`. Both storage feature states remain `missing`.
 
 ## Open work
 
