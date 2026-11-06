@@ -1,20 +1,21 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: rzxvx <rrzxznewid@gmail.com>
-Date: Tue, 29 Sep 2026 16:45:56 +0300
+Date: Wed, 14 Oct 2026 08:46:01 +0200
 Subject: [PATCH] mtd: Add the Apple H2FMI NAND controller
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at c20b85e:
-  patches/files/drivers/mtd/devices/mtd-apple-h2fmi.c
-  patches/tree/0001-cascadia.patch
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+  devices/a5/patches/files/drivers/mtd/devices/mtd-apple-h2fmi.c
+  devices/a5/patches/tree/0001-cascadia.patch
 
-Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (3 commits).
+Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (3 commits);
+  Marcolist <marco@neuraliquid.dev> (536663e)
 
 [Orchard: imported for the apple-armv7 platform; see kernel/sources.toml]
 ---
  drivers/mtd/devices/Kconfig           |  18 +
  drivers/mtd/devices/Makefile          |   1 +
- drivers/mtd/devices/mtd-apple-h2fmi.c | 646 ++++++++++++++++++++++++++
- 3 files changed, 665 insertions(+)
+ drivers/mtd/devices/mtd-apple-h2fmi.c | 656 ++++++++++++++++++++++++++
+ 3 files changed, 675 insertions(+)
  create mode 100644 drivers/mtd/devices/mtd-apple-h2fmi.c
 
 diff --git a/drivers/mtd/devices/Kconfig b/drivers/mtd/devices/Kconfig
@@ -60,10 +61,10 @@ index d11eb2b8b..8135496fe 100644
  CFLAGS_docg3.o			+= -I$(src)
 diff --git a/drivers/mtd/devices/mtd-apple-h2fmi.c b/drivers/mtd/devices/mtd-apple-h2fmi.c
 new file mode 100644
-index 000000000..d38f5b7df
+index 000000000..bdb89a700
 --- /dev/null
 +++ b/drivers/mtd/devices/mtd-apple-h2fmi.c
-@@ -0,0 +1,646 @@
+@@ -0,0 +1,656 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Apple S5L H2FMI + Hynix PPN NAND -- READ ONLY.
@@ -580,7 +581,17 @@ index 000000000..d38f5b7df
 +	ret = h2fmi_read_page_at(mtd, ofs, NULL, NULL, &st);
 +	if (ret)
 +		return ret;
-+	return st == PPN_ST_RETIRED;
++	switch (st) {
++	case PPN_ST_GOOD:
++	case PPN_ST_REFRESH:
++	case PPN_ST_ERASED:
++		return 0;
++	case PPN_ST_RETIRED:
++		return 1;
++	default:
++		/* An unknown status does not establish that the block is good. */
++		return -EIO;
++	}
 +}
 +
 +static int h2fmi_setup_mtd(struct h2fmi *fmi, int idx)

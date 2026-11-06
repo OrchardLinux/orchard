@@ -71,6 +71,10 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
 - Installed systems allow suspend only on boards whose device data says it
   works (`orchard-sleep` in the platform layer); distributions decide when to
   suspend. How to bring it up on another board: docs/bring-up/suspend.md.
+- Older 32-bit devices (apple-armv7): the kernel is now Project Cascadia at
+  091d441 (it was c20b85e), with Cascadia's iPad 3 driver changes and charger
+  fixes. The importer follows Cascadia's A5 tree into its new `devices/a5/`
+  folder. (Stephen Cox)
 
 ### Development
 

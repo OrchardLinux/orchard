@@ -3,9 +3,9 @@ From: rzxvx <rrzxznewid@gmail.com>
 Date: Sun, 27 Sep 2026 18:27:09 +0300
 Subject: [PATCH] hfsplus: Read decmpfs-compressed files
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at c20b85e:
-  patches/files/fs/hfsplus/decmpfs.c
-  patches/tree/0001-cascadia.patch
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+  devices/a5/patches/files/fs/hfsplus/decmpfs.c
+  devices/a5/patches/tree/0001-cascadia.patch
 
 Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (1 commit).
 

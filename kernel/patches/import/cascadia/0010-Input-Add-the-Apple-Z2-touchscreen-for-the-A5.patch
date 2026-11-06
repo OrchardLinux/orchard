@@ -1,13 +1,14 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: rzxvx <rrzxznewid@gmail.com>
-Date: Fri, 25 Sep 2026 16:55:57 +0300
+Date: Mon, 26 Oct 2026 13:14:36 +1300
 Subject: [PATCH] Input: Add the Apple Z2 touchscreen for the A5
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at c20b85e:
-  patches/files-sandcastle-port/drivers/input/touchscreen/apple-z2.c
-  patches/tree/0001-cascadia.patch
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+  devices/a5/patches/files-sandcastle-port/drivers/input/touchscreen/apple-z2.c
+  devices/a5/patches/tree/0001-cascadia.patch
 
-Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (11 commits).
+Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (11 commits);
+  Stephen Cox <stephencoxmail@gmail.com> (b52090e, 31b1522)
 
 The S5L8940X drivers here are Cascadia ports of Corellium's Project
 Sandcastle (https://github.com/corellium/linux-sandcastle,
@@ -18,8 +19,8 @@ drivers they were based on.
 ---
  drivers/input/touchscreen/Kconfig    |   5 +
  drivers/input/touchscreen/Makefile   |   1 +
- drivers/input/touchscreen/apple-z2.c | 711 +++++++++++++++++++++++++++
- 3 files changed, 717 insertions(+)
+ drivers/input/touchscreen/apple-z2.c | 731 +++++++++++++++++++++++++++
+ 3 files changed, 737 insertions(+)
  create mode 100644 drivers/input/touchscreen/apple-z2.c
 
 diff --git a/drivers/input/touchscreen/Kconfig b/drivers/input/touchscreen/Kconfig
@@ -47,10 +48,10 @@ index 82bc837ca..c4602d435 100644
 +obj-$(CONFIG_TOUCHSCREEN_APPLE_Z2)    += apple-z2.o
 diff --git a/drivers/input/touchscreen/apple-z2.c b/drivers/input/touchscreen/apple-z2.c
 new file mode 100644
-index 000000000..f32b41fb5
+index 000000000..c6b6d40d1
 --- /dev/null
 +++ b/drivers/input/touchscreen/apple-z2.c
-@@ -0,0 +1,711 @@
+@@ -0,0 +1,731 @@
 +/*
 + * Driver for multi-touch panels found on S5L8940X (Apple A5) SoC-base mobile devices.
 + *
@@ -91,6 +92,7 @@ index 000000000..f32b41fb5
 +#define HXT_IOC_SETUP_IRQ       _IO(HXT_IOC_MAGIC, 4)
 +#define HXT_IOC_WAIT_IRQ        _IOW(HXT_IOC_MAGIC, 5, __u32)
 +#define HXT_IOC_METRICS         _IOW(HXT_IOC_MAGIC, 6, struct hxt_metrics)
++#define HXT_IOC_SET_DL          _IOW(HXT_IOC_MAGIC, 7, __u32)
 +
 +#define MAX_DATA_CHUNK          16384
 +
@@ -118,6 +120,7 @@ index 000000000..f32b41fb5
 +    struct gpio_desc *gpiod_reset;
 +    struct gpio_desc *gpiod_cs;
 +    struct gpio_desc *gpiod_irq;
++    struct gpio_desc *gpiod_dl;
 +    struct input_dev *input_dev;
 +    struct regulator *regu_hv;
 +    struct regulator *regu_core;
@@ -530,6 +533,15 @@ index 000000000..f32b41fb5
 +            return -EINVAL;
 +        gpiod_direction_output(hxt->gpiod_cs, !arg);
 +        return 0;
++    case HXT_IOC_SET_DL:
++        /* 1 asserts enable_download, like SET_CS; the line's polarity
++         * is the DT's (active-low on J1). */
++        if(hxt->ready)
++            return -EINVAL;
++        if(!hxt->gpiod_dl)
++            return -ENODEV;
++        gpiod_direction_output(hxt->gpiod_dl, !!arg);
++        return 0;
 +    case HXT_IOC_RESET:
 +        mutex_lock(&hxt->mutex);
 +        hxt->ready = 0;
@@ -544,6 +556,8 @@ index 000000000..f32b41fb5
 +        if(hxt->ready)
 +            return -EINVAL;
 +        gpiod_direction_output(hxt->gpiod_cs, 1);
++        if(hxt->gpiod_dl)
++            gpiod_direction_output(hxt->gpiod_dl, 0);
 +
 +        mutex_lock(&hxt->mutex);
 +        hxt_trace(hxt, "READY after %u ATTN, %u other transfers (%u bytes); metrics x %d..%d y %d..%d\n",
@@ -699,6 +713,13 @@ index 000000000..f32b41fb5
 +        if(PTR_ERR(hxt->gpiod_irq) != -EPROBE_DEFER)
 +            dev_err(&spi->dev, "failed to get 'irq-gpios': %ld\n", PTR_ERR(hxt->gpiod_irq));
 +        return PTR_ERR(hxt->gpiod_irq);
++    }
++
++    hxt->gpiod_dl = devm_gpiod_get_optional(&spi->dev, "download", GPIOD_OUT_LOW);
++    if(IS_ERR(hxt->gpiod_dl)) {
++        if(PTR_ERR(hxt->gpiod_dl) != -EPROBE_DEFER)
++            dev_err(&spi->dev, "failed to get 'download-gpios': %ld\n", PTR_ERR(hxt->gpiod_dl));
++        return PTR_ERR(hxt->gpiod_dl);
 +    }
 +
 +    hxt->clk = devm_clk_get(&spi->dev, NULL);
