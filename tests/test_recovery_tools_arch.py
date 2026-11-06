@@ -1,13 +1,17 @@
 """Recovery tools must match their target ISA before entering an image."""
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
 import struct
+import subprocess
+import tempfile
 import unittest
 from unittest import mock
 
-from orchard import buildenv
+from orchard import build, buildenv, published
+from orchard.image.platforms_index import INSTALL_TOOLS
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('check_recovery_tools',
@@ -65,6 +69,56 @@ class RecoveryArchitecture(unittest.TestCase):
         self.assertTrue(lock['busybox_arm']['url'].endswith('_armhf.deb'))
         self.assertTrue(lock['busybox']['url'].endswith('_arm64.deb'))
         self.assertNotEqual(lock['busybox_arm']['sha256'], lock['busybox']['sha256'])
+
+    def test_writer_and_checker_sources_both_invalidate_the_tool_cache(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            hardware = Path(temporary)
+            for name in build.TOOL_INPUTS:
+                target = hardware / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((ROOT / name).read_bytes())
+            previous = build.recipe_key(hardware, build.TOOL_INPUTS)
+            for name in ('orchard-write.c', 'check-tools.py'):
+                path = hardware / 'boot/initramfs/recovery' / name
+                self.assertTrue(path.is_file(), name)
+                path.write_bytes(path.read_bytes() + b'\n/* cache input changed */\n')
+                changed = build.recipe_key(hardware, build.TOOL_INPUTS)
+                self.assertNotEqual(previous, changed, name)
+                previous = changed
+
+    def test_preseeded_tools_require_all_upstream_install_outputs(self):
+        required = set(published.TOOLS) | set(INSTALL_TOOLS)
+
+        def prepare(cache, arch, missing=None):
+            components = cache / 'components-v2'
+            key = build.recipe_key(ROOT, build.TOOL_INPUTS)
+            if arch == 'arm':
+                key = hashlib.sha256((key + ':arm').encode()).hexdigest()
+            name = 'recovery-tools-arm' if arch == 'arm' else 'recovery-tools'
+            binaries = cache / 'work' / name / key / 'bin'
+            binaries.mkdir(parents=True)
+            for tool in required - {missing}:
+                path = binaries / tool
+                path.write_bytes(elf(arch))
+                path.chmod(0o755)
+            return build._prepare_tools(ROOT, components, arch)
+
+        def actual_checker(*args, **kwargs):
+            self.assertEqual(Path(args[1]).name, 'check-tools.py')
+            return subprocess.run(list(map(str, args)), check=True,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        for arch in ('arm', 'arm64'):
+            for missing in ('orchard-write', 'resize2fs', 'tune2fs'):
+                with self.subTest(arch=arch, missing=missing), tempfile.TemporaryDirectory() as temporary, \
+                        mock.patch.object(build, 'command', side_effect=actual_checker):
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        prepare(Path(temporary), arch, missing)
+            with self.subTest(arch=arch), tempfile.TemporaryDirectory() as temporary, \
+                    mock.patch.object(build, 'command', side_effect=actual_checker):
+                result = prepare(Path(temporary), arch)
+                for name in required:
+                    self.assertEqual((result / name).read_bytes(), elf(arch))
 
     def test_arm_podman_build_and_run_select_the_v7_variant(self):
         with mock.patch.dict(os.environ, {'ORCHARD_BUILD_NATIVE': '0'}), \
