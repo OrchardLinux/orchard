@@ -29,14 +29,14 @@ recipe = "firmware.json"
 status = "experimental"
 
 # States: working, untested, missing, none (features.toml).
-# "working" was seen on 2026-11-06 with orchard's patch series and DTB, built
-# with GCC 11.4 and the boot kit's config (README.md); a clang zImage does
-# not boot through the kit's loader yet.
+# "untested": these ran on 2026-11-06 with orchard's patch series and DTB, built
+# with GCC 11.4 and the boot kit's config (README.md), but orchard's own clang
+# build has not booted on a J1 yet.
 [features]
-display = "working" # simplefb on iBoot's scanout; a userspace dashboard drew to fb0 on the LCD.
+display = "untested" # simplefb on iBoot's scanout; a userspace dashboard drew to fb0 on the LCD.
 screen_off = "missing"
 backlight = "missing"
-touch = "working" # Z2 bootload from userspace, then multitouch contacts on event0.
+touch = "untested" # Z2 bootload from userspace, then multitouch contacts on event0.
 buttons = "missing"
 accelerometer = "missing"
 gyroscope = "missing"
@@ -44,7 +44,7 @@ light_sensor = "missing"
 touch_id = "none"
 storage_read = "missing"
 storage_write = "missing"
-wifi = "working" # Joined WPA2 on 5 GHz and held a DHCP lease past 5 min; second USB complex brought up from userspace.
+wifi = "untested" # Joined WPA2 on 5 GHz and held a DHCP lease past 5 min; second USB complex brought up from userspace.
 bluetooth_input = "missing"
 bluetooth_audio = "missing"
 cellular = "none"
@@ -53,8 +53,8 @@ charging = "missing"
 charging_control = "missing"
 suspend = "missing"
 resume = "missing"
-usb_serial = "working" # Root shell on ttyGS0.
-usb_network = "working" # CDC Ethernet, pinged both ways.
+usb_serial = "untested" # Root shell on ttyGS0.
+usb_network = "untested" # CDC Ethernet, pinged both ways.
 audio_output = "missing"
 audio_input = "missing"
 camera = "missing"
