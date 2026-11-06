@@ -26,3 +26,31 @@ the IPSW members `058-24036-023.dmg`, `kernelcache.release.p105`, `Firmware/dfu/
 The touch calibration is per unit and private: `lib/firmware/mtcal.bin`, the
 unit's syscfg `MtCl`, captured from its jailbroken iOS. It is never part of a
 public recipe or release.
+
+## ARMv7 recovery assembly
+
+The platform's `cascadia` payload producer builds the staging loader from
+source with `cascadia.toml`. Select this board explicitly when resolving a
+release's inputs: `python -m orchard.inputs --device p105 --output inputs.json`.
+The profile identifies the memory window and handoff registers for this board.
+The generated loader checks its configuration before copying the recovery
+initramfs into the reserved high-memory range. The DTB names that initramfs.
+This extension needs a hardware boot of the final producer revision; the
+earlier installed P105 boot used an initramfs compiled into its kernel.
+
+## Unmerged code
+
+The native PPN storage reader and append writer are on the kernel source
+branch `p105/07-ftl-append`, at
+`c63274165870417f01cc3e1264067cef71d9c0b2`. The
+[append bring-up note](../../docs/bring-up/p105-sftl-append.md) records its
+software checks and write policy. The exported MTD patches are scoped to
+`apple-armv7`. Both storage feature states remain `missing`.
+
+## Open work
+
+The exact kernel revision needs a bounded device boot with USB recovery,
+then approved logical writes and a return to iOS. Reboot persistence,
+interruption recovery and sustained writes need physical qualification.
+The append allocator stops at `ENOSPC`; reclamation requires further work.
+The earlier unplugged Omarchy desktop used the local Python storage backend.

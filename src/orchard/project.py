@@ -10,6 +10,7 @@
     [release]
     build = "tools/build.py"        # relative to this file
     selects-platform = true         # optional: the script takes --platform
+    selects-device = true           # optional: preserve the chosen board as --device
 
 The file says what the project builds, never which board it is for; a
 developer's choices (platform, device, kernel tree) are arguments or

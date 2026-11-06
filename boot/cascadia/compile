@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+# SPDX-License-Identifier: GPL-2.0-only
+set -eu
+out=$1
+src=${ORCHARD_SRC:-$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)}
+clang-19 --target=armv7a-none-eabi -march=armv7-a -marm -mfloat-abi=soft \
+    -ffreestanding -fno-builtin -fno-stack-protector -fno-unwind-tables \
+    -fno-asynchronous-unwind-tables -Os -Wall -Wextra -Werror \
+    -I "$out" -c "$src/boot/cascadia/linux_boot.c" -o "$out/linux_boot.o"
+clang-19 --target=armv7a-none-eabi -march=armv7-a -marm -I "$out" \
+    -c "$src/boot/cascadia/linux_boot_start.S" -o "$out/linux_boot_start.o"
+ld.lld-19 --build-id=none -T "$out/linux-boot.ld" \
+    "$out/linux_boot_start.o" "$out/linux_boot.o" -o "$out/loader.elf"
+llvm-objcopy-19 -O binary "$out/loader.elf" "$out/loader.bin"

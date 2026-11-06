@@ -1,0 +1,1674 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 12:34:23 -0600
+Subject: [PATCH] mtd: apple-sftl: add verified append writes and fresh replay
+
+Append complete data pages in fully checked blank VFL blocks while
+retaining Apple's shared map, saved contexts and bootstrap members. Use
+native metadata and completed-block summaries, and recover a complete
+data prefix when summary completion is interrupted. Stop at ENOSPC
+without erasing or reclaiming blocks.
+
+Add block-sector read-modify-write with four-page grouping, synchronous
+flush/FUA completion and a default-false logical write_enable policy.
+MTD_APPLE_SFTL_WRITE also defaults off and requires H2FMI_WRITE, so the
+manual read-only qualification path remains fenced. Preserve the bounded
+provider policy when forwarding optional programs.
+
+Keep the current contiguous replay contract: refuse append before any
+program when the allocation floor exceeds the last replayed record.
+The saved measured 64 GB map has equal floor/journal sequence 187831212.
+
+Generate synthetic media, program them, and load a fresh map for open,
+closed, interrupted and uncertain writes. Cover all 16 lanes and maximum
+footer size, including VFL reservations and sequence overflow. Host
+sanitizers pass 26 cases with writes enabled and 13 in read-only mode.
+Hardware qualification remains separate from these tests.
+
+Assisted-by: LLM
+---
+ Documentation/driver-api/mtd/apple-sftl.rst   | 112 +++-
+ drivers/mtd/Kconfig                           |  25 +-
+ drivers/mtd/apple-sftl-block.c                | 124 +++-
+ drivers/mtd/apple-sftl-core.c                 | 312 ++++++++-
+ drivers/mtd/apple-sftl-test.c                 | 597 +++++++++++++++++-
+ drivers/mtd/apple-sftl.h                      |   4 +
+ .../kunit/configs/apple_sftl_write.config     |   8 +
+ 7 files changed, 1120 insertions(+), 62 deletions(-)
+ create mode 100644 tools/testing/kunit/configs/apple_sftl_write.config
+
+diff --git a/Documentation/driver-api/mtd/apple-sftl.rst b/Documentation/driver-api/mtd/apple-sftl.rst
+index ade96fde7..9d65b2149 100644
+--- a/Documentation/driver-api/mtd/apple-sftl.rst
++++ b/Documentation/driver-api/mtd/apple-sftl.rst
+@@ -1,7 +1,7 @@
+ .. SPDX-License-Identifier: GPL-2.0-only
+ 
+-Apple PPN VFL/SwissPPNFTL reader
+-==============================
++Apple PPN VFL/SwissPPNFTL
++========================
+ 
+ The ``apple-sftl`` driver recovers the logical medium above Apple's PPN flash
+ mapping. H2FMI supplies complete 16 KiB pages and their 64 metadata bytes
+@@ -23,49 +23,105 @@ which the reader rejects.
+ SFTL subtype-4 context fragments describe the saved logical ranges. Recovery
+ validates the complete context sequence, then applies later data and trim
+ records in sequence order. Completed blocks carry summaries at their ends.
+-Open blocks are scanned completely because an interrupted stripe may leave
+-an erased lane before another completed lane. Summary allocation spans also
++Open blocks are scanned completely because an interrupted stripe may leave an
++erased lane before another completed lane. Summary allocation spans also
+ preserve the next sequence floor when it exceeds the last visible record.
+ 
+ The map has 15,625,016 entries, including sixteen internal keys. The block
+-device exposes 15,625,000 entries, or 64,000,000,000 bytes, with 512-byte sector
+-reads. Linux's disk name is ``applesftlN``. LwVM and filesystem interpretation
+-happen above this logical provider. Encrypted partition contents remain
+-ciphertext.
++device exposes 15,625,000 entries, or 64,000,000,000 bytes, with 512-byte
++sector reads and optional read-modify-write sector updates. Linux's disk name
++is ``applesftlN``. LwVM and filesystem interpretation happen above this
++logical provider. Encrypted partition contents remain ciphertext.
+ 
+ Failure and lifetime rules
+ --------------------------
+ 
+-The disk is read-only and the provider has no programming or erase operation.
+-Malformed context copies and incomplete journal sequences prevent disk
+-registration. A refresh status requires a writer and is reported as an error.
+-A failed runtime read stops subsequent reads from this map instance.
++The disk is read-only by default. Malformed context copies and incomplete
++journal sequences prevent disk registration. A refresh status is reported as
++an error. A failed runtime read stops subsequent I/O from this map instance.
+ 
+ H2FMI unregisters the child before releasing its controller state. The block
+ frontend freezes and drains requests during removal. Its request buffer is
+ allocated before the disk becomes visible, while blocking requests serialize
+ access to that buffer and the provider.
+ 
+-The reader has finite operating limits. ``max_page_reads`` defaults to
+-32,768 physical page requests and ``max_io_time_ms`` defaults to ten minutes
+-from probe. Both are read-only module parameters and must be positive.
+-Recovery and subsequent block reads consume the same budget. A limit check
+-runs before each provider call; completion also checks the deadline, so an
+-existing bounded provider transaction is the maximum overrun. Any provider
+-failure or exhausted limit permanently stops that reader instance. These
+-limits support bounded read-only qualification; a mounted root must not rely
+-on an instance after its operating budget expires.
++The reader has finite operating limits. ``max_page_reads`` defaults to 32,768
++physical page requests and ``max_io_time_ms`` defaults to ten minutes from
++probe. Both are read-only module parameters and must be positive. Recovery,
++candidate blank scans and subsequent block reads consume the same budget.
++Programs check the deadline before and after their synchronous transaction;
++internal readback remains part of that provider operation. A limit check runs
++before each provider call; completion also checks the deadline, so an existing
++bounded provider transaction is the maximum overrun. Any provider failure or
++exhausted limit permanently stops that reader instance. These limits support
++bounded read-only qualification; a mounted root must not rely on an instance
++after its operating budget expires.
++
++Experimental append writes
++--------------------------
++
++``CONFIG_MTD_APPLE_SFTL_WRITE`` defaults off and requires the H2FMI page
++programming option. Logical writes also require the read-only module parameter
++``write_enable=1`` at module load, or ``apple_sftl.write_enable=1`` on the
++kernel command line for a built-in driver. It defaults to false and cannot
++change while the module is loaded. Recovery leaves this policy off; an
++approved installer or installed-root boot path must opt in and fence the
++intended logical partition. The aggregate provider must accept a complete 16
++KiB page with its 64 metadata bytes, wait for completion, and verify exact
++readback before reporting success. The FTL publishes the new mapping after
++that success. A short logical write repeats its final 4 KiB entry to fill the
++physical program unit; each copy carries its own sequence.
++
++The allocator reserves every saved SFTL context block, all validated VFL
++bootstrap member blocks, every block referenced by the recovered map, and the
++boot and package tail blocks. It selects a block whose head is erased, then
++checks every physical page and metadata byte on every active lane before
++programming any page. An occupied candidate is skipped permanently within the
++instance. A failed scan stops I/O. Allocation scans have a 500-second limit;
++the block queue allows 600 seconds for the scan and synchronous programs.
++
++Data records use native type-1 metadata. Once a block's data region is full,
++the driver writes eight summary pages containing native type-1c run entries.
++The old Apple checkpoint and the shared map remain intact. Fresh recovery
++replays completed data records from an open block, or uses a complete summary.
++An interrupted summary can be ignored only when its metadata identifies the
++reserved summary tail and the entire preceding data prefix validates in
++physical and sequence order. Torn or ambiguous metadata stops recovery.
++
++The recovered allocation floor can exceed the last visible journal record.
++This implementation retains its contiguous journal replay rule, so a mismatch
++keeps the disk read-only and returns ``-EOPNOTSUPP`` before any program.
++Native forward-gap handling requires a separate recovery change with format-
++specific fixtures. A program or map-publication error stops subsequent I/O; a
++fresh loader must determine which complete records reached the medium.
++
++The block frontend preserves untouched sectors in partial 4 KiB updates and
++groups up to four logical pages per program. Every acknowledged write has
++completed readback. Flush and FUA use that same completion rule. There is no
++erase, discard, checkpoint update, or garbage collection. Allocation returns
++``-ENOSPC`` when verified blank blocks run out, and reads remain available.
++The caller must fence writes to the intended logical partition. This option
++does not qualify sustained writes or all power-interruption cases on hardware.
+ 
+ Tests
+ -----
+ 
+ ``tools/testing/kunit/configs/apple_sftl.config`` enables the synthetic medium
+-tests. They generate VFL replicas and lane tables, plus an SFTL checkpoint
+-followed by completed and open data blocks. Tests cover trim ordering and
+-allocation floors. Corrupt replicas and sequence gaps must return an error
+-with no disk or usable map. Test inputs contain no captured device bytes.
++tests. ``tools/testing/kunit/configs/apple_sftl_write.config`` additionally
++enables the experimental write branches with a synthetic program provider. The
++latter config builds H2FMI through ``COMPILE_TEST`` to satisfy the production
++dependency graph; the fixtures perform no controller I/O. They generate VFL
++replicas and lane tables, plus an SFTL checkpoint followed by completed and
++open data blocks. Tests cover trim ordering and allocation floors. With the
++experimental write option enabled, they program synthetic pages and load a
++fresh map after open and closed blocks, interrupted summaries, and uncertain
++programs. Fixtures also cover complete candidate scans, VFL member
++reservations, space exhaustion, sequence-floor refusal and the final 48-bit
++sequence. Corrupt replicas and sequence gaps must return an error with no disk
++or usable map. Test inputs contain no captured device bytes.
+ 
+ The format rules were ported from Orchard's P105 Python reference
+-(``ftl_map.py``, ``ftl_load.py`` and ``ftl_log.py``), which was checked against
+-native iOS logical reads. A kernel object compile or synthetic test result
+-does not establish physical-controller timing or qualify a new device layout.
++(``ftl_map.py``, ``ftl_load.py``, ``ftl_log.py`` and ``ftl_append.py``), which
++was checked against native iOS logical reads. A kernel object compile or
++synthetic test result does not establish physical-controller timing or qualify
++a new device layout.
+diff --git a/drivers/mtd/Kconfig b/drivers/mtd/Kconfig
+index 155136a36..5e4a1e90c 100644
+--- a/drivers/mtd/Kconfig
++++ b/drivers/mtd/Kconfig
+@@ -207,7 +207,7 @@ config MTD_PARTITIONED_MASTER
+ 	  what lies behind the master.
+ 
+ config MTD_APPLE_SFTL
+-	tristate "Apple PPN read-only VFL/SwissPPNFTL translation"
++	tristate "Apple PPN VFL/SwissPPNFTL translation"
+ 	depends on BLOCK
+ 	help
+ 	  Recover the logical block medium stored in Apple VFL/SwissPPNFTL
+@@ -216,16 +216,35 @@ config MTD_APPLE_SFTL
+ 	  Unsupported checkpoints, missing journal sequences and refresh
+ 	  requirements stop recovery before a disk is registered.
+ 
+-	  The disk is read-only. This driver performs no program or erase.
++	  The disk is read-only unless experimental append writes are enabled.
++	  This driver performs no erase.
++
++config MTD_APPLE_SFTL_WRITE
++	bool "Apple PPN append writes (EXPERIMENTAL)"
++	depends on MTD_APPLE_SFTL && MTD_APPLE_H2FMI_WRITE
++	default n
++	help
++	  Append complete physical pages in verified blank blocks while retaining
++	  Apple VFL/SFTL metadata and native block summaries. The controller must
++	  complete and verify each program before the mapping is published.
++	  The shared map and saved-context blocks remain reserved. No erase or
++	  reclamation is available; exhausted blank space returns ENOSPC.
++
++	  Recovery and the installer must fence Apple logical partitions. This
++	  option is experimental and does not qualify sustained writes or all
++	  power-interruption cases. If unsure, say N.
+ 
+ config MTD_APPLE_SFTL_KUNIT_TEST
+-	tristate "KUnit tests for Apple VFL/SwissPPNFTL recovery" if !KUNIT_ALL_TESTS
++	tristate "KUnit tests for Apple VFL/SwissPPNFTL" if !KUNIT_ALL_TESTS
+ 	depends on KUNIT && MTD_APPLE_SFTL
+ 	default KUNIT_ALL_TESTS
+ 	help
+ 	  Synthesize complete VFL/SFTL media and exercise checkpoint recovery,
+ 	  native block summaries and open-block journal replay. Malformed
+ 	  replicas and unsupported layouts must fail without storage writes.
++	  With experimental append writes enabled, also test complete programs,
++	  interrupted summaries, allocation limits and fresh-loader replay.
++	  All test media and provider operations are synthetic.
+ 
+ source "drivers/mtd/chips/Kconfig"
+ 
+diff --git a/drivers/mtd/apple-sftl-block.c b/drivers/mtd/apple-sftl-block.c
+index bf7a0a108..29a05ae3b 100644
+--- a/drivers/mtd/apple-sftl-block.c
++++ b/drivers/mtd/apple-sftl-block.c
+@@ -1,9 +1,10 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+-/* Read-only block frontend for Apple's VFL/SwissPPNFTL logical medium. */
++/* Block frontend for Apple's VFL/SwissPPNFTL logical medium. */
+ #include <linux/blk-mq.h>
+ #include <linux/blkdev.h>
+ #include <linux/highmem.h>
+ #include <linux/idr.h>
++#include <linux/jiffies.h>
+ #include <linux/ktime.h>
+ #include <linux/module.h>
+ #include <linux/mutex.h>
+@@ -28,6 +29,7 @@ MODULE_PARM_DESC(max_io_time_ms, "Maximum reader lifetime in milliseconds");
+ struct sftl_disk {
+ 	struct apple_ppn *upstream;
+ 	struct apple_ppn provider;
++	struct apple_ppn_ops provider_ops;
+ 	struct apple_sftl_io_limit limit;
+ 	struct apple_sftl *ftl;
+ 	struct blk_mq_tag_set tags;
+@@ -36,6 +38,7 @@ struct sftl_disk {
+ 	u8 *buffer;
+ 	unsigned int id;
+ 	bool dead;
++	bool writable;
+ };
+ 
+ static int sftl_limited_read(void *priv, unsigned int bus, unsigned int cau,
+@@ -53,12 +56,26 @@ static int sftl_limited_read(void *priv, unsigned int bus, unsigned int cau,
+ 	return apple_sftl_limit_end(&sftl->limit, ret, ktime_get_ns());
+ }
+ 
+-static const struct apple_ppn_ops sftl_limited_ops = {
+-	.read_page = sftl_limited_read,
+-};
++static int sftl_limited_program(void *priv, unsigned int bus, unsigned int cau,
++				unsigned int block, unsigned int page,
++				const u8 *data, const u8 *oob)
++{
++	struct sftl_disk *sftl = priv;
++	int ret;
++
++	ret = apple_sftl_limit_check(&sftl->limit, ktime_get_ns());
++	if (ret)
++		return ret;
++	ret = sftl->upstream->ops->program_page(sftl->upstream->priv, bus, cau,
++					      block, page, data, oob);
++	return apple_sftl_limit_end(&sftl->limit, ret, ktime_get_ns());
++}
+ 
+ static DEFINE_IDA(sftl_disk_ids);
+ static int sftl_major;
++static bool write_enable;
++module_param(write_enable, bool, 0444);
++MODULE_PARM_DESC(write_enable, "Allow experimental logical append writes (default: off)");
+ 
+ /* The blocking queue and this lock keep the preallocated buffer exclusive. */
+ static int sftl_read_request(struct sftl_disk *sftl, struct request *request)
+@@ -96,6 +113,69 @@ static int sftl_read_request(struct sftl_disk *sftl, struct request *request)
+ 	return 0;
+ }
+ 
++/* Preserve untouched sectors at both ends and collect up to four 4 KiB
++ * pages per physical program. Request segments can split a logical page.
++ */
++static int sftl_write_request(struct sftl_disk *sftl, struct request *request)
++{
++	struct req_iterator iterator;
++	struct bio_vec bvec;
++	u64 position = (u64)blk_rq_pos(request) << SECTOR_SHIFT;
++	u32 cached = U32_MAX, first = 0;
++	unsigned int count = 0;
++	int ret;
++
++	if (request->cmd_flags & REQ_PREFLUSH) {
++		ret = apple_sftl_flush(sftl->ftl);
++		if (ret)
++			return ret;
++	}
++	rq_for_each_segment(bvec, request, iterator) {
++		unsigned int done = 0;
++
++		while (done < bvec.bv_len) {
++			u32 logical = position >> 12;
++			unsigned int offset = position & (SFTL_LOGICAL_BYTES - 1);
++			unsigned int length = min(bvec.bv_len - done,
++						  SFTL_LOGICAL_BYTES - offset);
++			void *mapped;
++
++			if (logical != cached) {
++				if (count == 4) {
++					ret = apple_sftl_write(sftl->ftl, first,
++							       sftl->buffer, count);
++					if (ret)
++						return ret;
++					count = 0;
++				}
++				if (!count)
++					first = logical;
++				ret = apple_sftl_read(sftl->ftl, logical,
++						      sftl->buffer + count * SFTL_LOGICAL_BYTES);
++				if (ret)
++					return ret;
++				count++;
++				cached = logical;
++			}
++			mapped = kmap_local_page(bvec.bv_page);
++			memcpy(sftl->buffer + (count - 1) * SFTL_LOGICAL_BYTES + offset,
++			       mapped + bvec.bv_offset + done, length);
++			kunmap_local(mapped);
++			done += length;
++			position += length;
++		}
++	}
++	if (count) {
++		ret = apple_sftl_write(sftl->ftl, first, sftl->buffer, count);
++		if (ret)
++			return ret;
++	}
++	/* Every completed write is already verified on media. FUA shares that
++	 * completion rule and never acknowledges a volatile cached page.
++	 */
++	return request->cmd_flags & REQ_FUA ? apple_sftl_flush(sftl->ftl) : 0;
++}
++
+ static blk_status_t sftl_queue_rq(struct blk_mq_hw_ctx *hctx,
+ 				  const struct blk_mq_queue_data *data)
+ {
+@@ -105,19 +185,21 @@ static blk_status_t sftl_queue_rq(struct blk_mq_hw_ctx *hctx,
+ 	blk_status_t status;
+ 	int ret = 0;
+ 
+-	blk_mq_start_request(request);
+ 	mutex_lock(&sftl->io_lock);
++	blk_mq_start_request(request);
+ 	if (sftl->dead) {
+ 		ret = -ENODEV;
+ 	} else if ((ret = apple_sftl_limit_check(&sftl->limit, ktime_get_ns()))) {
+ 		/* Includes logical pages which need no provider transaction. */
+ 	} else if (req_op(request) == REQ_OP_FLUSH) {
+-		/* A read-only device has no buffered writes to flush. */
+-	} else if (req_op(request) != REQ_OP_READ) {
++		ret = apple_sftl_flush(sftl->ftl);
++	} else if (req_op(request) != REQ_OP_READ && req_op(request) != REQ_OP_WRITE) {
+ 		ret = -EOPNOTSUPP;
+ 	} else if (blk_rq_pos(request) > capacity ||
+ 		   blk_rq_sectors(request) > capacity - blk_rq_pos(request)) {
+ 		ret = -EIO;
++	} else if (req_op(request) == REQ_OP_WRITE) {
++		ret = sftl->writable ? sftl_write_request(sftl, request) : -EROFS;
+ 	} else {
+ 		ret = sftl_read_request(sftl, request);
+ 	}
+@@ -148,20 +230,24 @@ static int sftl_disk_probe(struct platform_device *pdev)
+ 	struct gendisk *disk;
+ 	int ret, id;
+ 
+-	if (!provider)
++	if (!provider || !provider->ops || !provider->ops->read_page)
+ 		return -EINVAL;
+ 	sftl = kzalloc(sizeof(*sftl), GFP_KERNEL);
+ 	if (!sftl)
+ 		return -ENOMEM;
+ 	mutex_init(&sftl->io_lock);
+-	sftl->buffer = kmalloc(SFTL_LOGICAL_BYTES, GFP_KERNEL);
++	sftl->buffer = kmalloc(APPLE_PPN_PAGE_SIZE, GFP_KERNEL);
+ 	if (!sftl->buffer) {
+ 		ret = -ENOMEM;
+ 		goto free_state;
+ 	}
+ 	sftl->upstream = provider;
+ 	sftl->provider = *provider;
+-	sftl->provider.ops = &sftl_limited_ops;
++	sftl->provider_ops = *provider->ops;
++	sftl->provider_ops.read_page = sftl_limited_read;
++	if (provider->ops->program_page)
++		sftl->provider_ops.program_page = sftl_limited_program;
++	sftl->provider.ops = &sftl->provider_ops;
+ 	sftl->provider.priv = sftl;
+ 	ret = apple_sftl_limit_start(&sftl->limit, max_page_reads,
+ 				     max_io_time_ms, ktime_get_ns());
+@@ -179,6 +265,10 @@ static int sftl_disk_probe(struct platform_device *pdev)
+ 		ret = -EINVAL;
+ 		goto free_ftl;
+ 	}
++	sftl->writable = write_enable && IS_ENABLED(CONFIG_MTD_APPLE_SFTL_WRITE) &&
++			 provider->ops->program_page && info.sequence == info.journal_sequence;
++	if (sftl->writable)
++		limits.features |= BLK_FEAT_FUA;
+ 	id = ida_alloc_range(&sftl_disk_ids, 0, MINORMASK / SFTL_DISK_MINORS,
+ 			     GFP_KERNEL);
+ 	if (id < 0) {
+@@ -190,6 +280,11 @@ static int sftl_disk_probe(struct platform_device *pdev)
+ 				      BLK_MQ_F_SHOULD_MERGE | BLK_MQ_F_BLOCKING);
+ 	if (ret)
+ 		goto free_id;
++	/* First use verifies every page in a candidate block. Leave time for
++	 * the bounded 500-second scan and synchronous data/footer programs.
++	 */
++	if (sftl->writable)
++		sftl->tags.timeout = 600U * HZ;
+ 	disk = blk_mq_alloc_disk(&sftl->tags, &limits, sftl);
+ 	if (IS_ERR(disk)) {
+ 		ret = PTR_ERR(disk);
+@@ -203,13 +298,14 @@ static int sftl_disk_probe(struct platform_device *pdev)
+ 	disk->private_data = sftl;
+ 	snprintf(disk->disk_name, DISK_NAME_LEN, "applesftl%d", id);
+ 	set_capacity(disk, (sector_t)info.disk_pages * (SFTL_LOGICAL_BYTES / SECTOR_SIZE));
+-	set_disk_ro(disk, true);
++	set_disk_ro(disk, !sftl->writable);
+ 	platform_set_drvdata(pdev, sftl);
+ 	ret = device_add_disk(&pdev->dev, disk, NULL);
+ 	if (ret)
+ 		goto put_disk;
+-	dev_info(&pdev->dev, "%s: read-only, %u logical pages, sequence %llu\n",
+-		 disk->disk_name, info.disk_pages, info.sequence);
++	dev_info(&pdev->dev, "%s: %s, %u logical pages, sequence %llu\n",
++		 disk->disk_name, sftl->writable ? "experimental append writes" : "read-only",
++		 info.disk_pages, info.sequence);
+ 	return 0;
+ 
+ put_disk:
+@@ -282,6 +378,6 @@ static void __exit sftl_exit(void)
+ }
+ module_exit(sftl_exit);
+ 
+-MODULE_DESCRIPTION("Apple VFL/SwissPPNFTL read-only block driver");
++MODULE_DESCRIPTION("Apple VFL/SwissPPNFTL block driver");
+ MODULE_LICENSE("GPL");
+ MODULE_ALIAS("platform:" SFTL_BLOCK_NAME);
+diff --git a/drivers/mtd/apple-sftl-core.c b/drivers/mtd/apple-sftl-core.c
+index ba90916f2..6f16ecd54 100644
+--- a/drivers/mtd/apple-sftl-core.c
++++ b/drivers/mtd/apple-sftl-core.c
+@@ -1,14 +1,15 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ /*
+- * Apple VFL/SwissPPNFTL read-only recovery for the measured 64 GB PPN layout.
++ * Apple VFL/SwissPPNFTL recovery and append for the measured 64 GB PPN layout.
+  *
+  * Format and replay rules are ported from Orchard's P105 Python reference
+- * (ftl_map.py, ftl_load.py and ftl_log.py). That implementation was checked
++ * (ftl_map.py, ftl_load.py, ftl_log.py and ftl_append.py). It was checked
+  * against native iOS logical reads. This code contains no captured firmware
+  * or device data. Unsupported formats fail before a block device is created.
+  */
+ #include <linux/bitops.h>
+ #include <linux/errno.h>
++#include <linux/jiffies.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+ #include <linux/mutex.h>
+@@ -34,6 +35,9 @@
+ #define SFTL_META	16U
+ #define SFTL_CHUNK	4096U
+ #define SFTL_TRIM	0xffff0001U
++#define SFTL_FOOTER_CHUNKS 32U
++#define SFTL_CLAIM_TIMEOUT (500U * HZ)
++#define SFTL_FOOTER_BYTES (SFTL_FOOTER_CHUNKS * SFTL_CHUNK)
+ 
+ struct sftl_run {
+ 	struct rb_node node;
+@@ -62,7 +66,15 @@ struct apple_sftl {
+ 	u32 nr_runs;
+ 	u16 lanes[SFTL_BLOCKS];
+ 	DECLARE_BITMAP(reserved, SFTL_BLOCKS);
+-	u64 checkpoint_sequence, sequence;
++	DECLARE_BITMAP(vfl_reserved, SFTL_BLOCKS);
++	u64 checkpoint_sequence, sequence, journal_sequence;
++	DECLARE_BITMAP(candidates, SFTL_BLOCKS);
++	DECLARE_BITMAP(used, SFTL_BLOCKS);
++	u32 next_candidate, append_block, append_position, append_capacity;
++	u32 footer_runs;
++	u64 append_base;
++	u8 *footer;
++	bool writer_prepared;
+ 	u8 *page;
+ 	u8 oob[APPLE_PPN_OOB_SIZE];
+ 	struct mutex lock; /* serializes reads and the shared page buffer */
+@@ -375,6 +387,7 @@ static int sftl_vfl(struct apple_sftl *sftl)
+ 				ret = -EBADMSG;
+ 				goto out;
+ 			}
++		__set_bit(members[member].block, sftl->vfl_reserved);
+ 	}
+ 	for (member = 0; member < 8; member++) {
+ 		for (page = 0; page < 64; page++) {
+@@ -646,7 +659,7 @@ static int sftl_footer(struct apple_sftl *sftl, const u8 *head, u32 block,
+ 	span = get_unaligned_le32(footer_meta + 8);
+ 	if (chunks < 4 || chunks > 32 || chunks % 4 || footer_meta[1] >> 1 != chunks ||
+ 	    get_unaligned_le16(footer_meta + 14) != 0xffff ||
+-	    base != sftl_sequence(head) || !span || base + span > SFTL_SEQUENCE)
++	    base != sftl_sequence(head) || !span || base + span > SFTL_SEQUENCE + 1)
+ 		return -EBADMSG;
+ 	*floor = max(*floor, base + span - 1);
+ 	if (base + span - 1 <= sftl->checkpoint_sequence)
+@@ -722,6 +735,25 @@ static int sftl_footer(struct apple_sftl *sftl, const u8 *head, u32 block,
+ 	return ret;
+ }
+ 
++static bool sftl_partial_footer(struct apple_sftl *sftl, const u8 *head,
++				u32 position, u32 pages)
++{
++	const u8 *meta = sftl->oob;
++	unsigned int chunk;
++
++	if (position < pages - SFTL_FOOTER_CHUNKS / 4 ||
++	    meta[0] != 0x1c || meta[1] != SFTL_FOOTER_CHUNKS * 2 ||
++	    sftl_sequence(meta) != sftl_sequence(head) ||
++	    get_unaligned_le32(meta + 8) != pages * 4 - SFTL_FOOTER_CHUNKS ||
++	    get_unaligned_le16(meta + 12) != SFTL_FOOTER_CHUNKS ||
++	    get_unaligned_le16(meta + 14) != 0xffff)
++		return false;
++	for (chunk = 1; chunk < 4; chunk++)
++		if (memcmp(meta, sftl->oob + chunk * SFTL_META, SFTL_META))
++			return false;
++	return true;
++}
++
+ static int sftl_journal(struct apple_sftl *sftl, const u8 *heads)
+ {
+ 	struct sftl_records journal = {};
+@@ -732,6 +764,7 @@ static int sftl_journal(struct apple_sftl *sftl, const u8 *heads)
+ 
+ 	for (block = 1; block < SFTL_SUBBLOCKS; block++) {
+ 		const u8 *head = heads + block * SFTL_META;
++		bool complete_prefix = true, partial_footer = false;
+ 
+ 		if (head[0] != 1 && head[0] != 2)
+ 			continue;
+@@ -759,6 +792,33 @@ static int sftl_journal(struct apple_sftl *sftl, const u8 *heads)
+ 				ret = -EBADMSG;
+ 				goto out;
+ 			}
++			if (position < pages - SFTL_FOOTER_CHUNKS / 4) {
++				for (chunk = 0; chunk < 4; chunk++) {
++					const u8 *meta = sftl->oob + chunk * SFTL_META;
++					u64 sequence = sftl_sequence(head) + position * 4 + chunk;
++
++					if (meta[0] != 1 || meta[1] ||
++					    sftl_sequence(meta) != sequence ||
++					    get_unaligned_le32(meta + 12) != sequence >> 16)
++						complete_prefix = false;
++				}
++			}
++			/* An incomplete final summary leaves the last page erased.
++			 * Its full contiguous data prefix must still validate directly.
++			 * The partially written summary payload is never trusted.
++			 */
++			if (sftl_partial_footer(sftl, head, position, pages)) {
++				if (!complete_prefix) {
++					ret = -EBADMSG;
++					goto out;
++				}
++				partial_footer = true;
++				continue;
++			}
++			if (partial_footer && !sftl_erased(sftl->oob, sizeof(sftl->oob))) {
++				ret = -EBADMSG;
++				goto out;
++			}
+ 			for (chunk = 0; chunk < 4; chunk++) {
+ 				ret = sftl_add_journal(&journal, sftl->oob + chunk * SFTL_META,
+ 						       block * SFTL_STRIDE + position * 4 + chunk,
+@@ -808,6 +868,7 @@ static int sftl_journal(struct apple_sftl *sftl, const u8 *heads)
+ 		}
+ 		sftl->sequence = sequence;
+ 	}
++	sftl->journal_sequence = expected - 1;
+ 	sftl->sequence = max(sftl->sequence, floor);
+ 	ret = 0;
+ out:
+@@ -835,6 +896,8 @@ int apple_sftl_load(struct apple_ppn *provider, struct apple_sftl **out)
+ 		return -ENOMEM;
+ 	sftl->ppn = provider;
+ 	sftl->runs = RB_ROOT;
++	sftl->append_block = U32_MAX;
++	sftl->next_candidate = 1;
+ 	mutex_init(&sftl->lock);
+ 	sftl->page = kmalloc(APPLE_PPN_PAGE_SIZE, GFP_KERNEL);
+ 	heads = kcalloc(SFTL_BLOCKS, SFTL_META, GFP_KERNEL);
+@@ -857,6 +920,7 @@ int apple_sftl_load(struct apple_ppn *provider, struct apple_sftl **out)
+ 				ret = -EBADMSG;
+ 				goto failed;
+ 			}
++			__set_bit(block, sftl->candidates);
+ 		} else if (sftl->oob[0] == 0x1f || sftl->oob[0] == 1 || sftl->oob[0] == 2) {
+ 			memcpy(heads + block * SFTL_META, sftl->oob, SFTL_META);
+ 		} else {
+@@ -890,6 +954,7 @@ void apple_sftl_free(struct apple_sftl *sftl)
+ 		rb_erase(node, &sftl->runs);
+ 		kfree(rb_entry(node, struct sftl_run, node));
+ 	}
++	kvfree(sftl->footer);
+ 	kfree(sftl->page);
+ 	kfree(sftl);
+ }
+@@ -938,6 +1003,244 @@ int apple_sftl_read(struct apple_sftl *sftl, u32 logical_page, u8 *data)
+ }
+ EXPORT_SYMBOL_GPL(apple_sftl_read);
+ 
++/* Caller holds sftl->lock. Every candidate is checked in full before use. */
++static int sftl_writer_prepare(struct apple_sftl *sftl)
++{
++	struct rb_node *node;
++	u32 block;
++
++	if (sftl->writer_prepared)
++		return 0;
++	if (sftl->journal_sequence != sftl->sequence)
++		return -EOPNOTSUPP;
++	if (!sftl->ppn->ops->program_page)
++		return -EROFS;
++	sftl->footer = kvzalloc(SFTL_FOOTER_BYTES, GFP_KERNEL);
++	if (!sftl->footer)
++		return -ENOMEM;
++	for (block = 0; block < SFTL_BLOCKS; block++)
++		if (test_bit(block, sftl->reserved) || test_bit(block, sftl->vfl_reserved))
++			__set_bit(block, sftl->used);
++	__set_bit(0, sftl->used);
++	__set_bit(SFTL_SUBBLOCKS, sftl->used);
++	__set_bit(SFTL_SUBBLOCKS + 1, sftl->used);
++	for (node = rb_first(&sftl->runs); node; node = rb_next(node)) {
++		struct sftl_run *run = rb_entry(node, struct sftl_run, node);
++		u32 end;
++
++		if (run->provider == SFTL_UNMAPPED)
++			continue;
++		end = (run->provider + run->end - run->start - 1) / SFTL_STRIDE;
++		for (block = run->provider / SFTL_STRIDE; block <= end; block++)
++			__set_bit(block, sftl->used);
++	}
++	sftl->writer_prepared = true;
++	return 0;
++}
++
++static int sftl_claim_block(struct apple_sftl *sftl)
++{
++	unsigned long deadline = jiffies + SFTL_CLAIM_TIMEOUT;
++	u32 block;
++
++	while (sftl->next_candidate < SFTL_SUBBLOCKS) {
++		u32 capacity, position;
++		unsigned int chunk;
++		bool blank = true;
++		int ret;
++
++		block = sftl->next_candidate++;
++		if (!test_bit(block, sftl->candidates) ||
++		    test_bit(block, sftl->used) || !sftl->lanes[block])
++			continue;
++		/* A checked or rejected candidate is never reused in this instance. */
++		__set_bit(block, sftl->used);
++		capacity = hweight16(sftl->lanes[block]) * 128 * 4;
++		for (position = 0; position < capacity; position += 4) {
++			if (time_after_eq(jiffies, deadline)) {
++				sftl->failed = true;
++				return -ETIMEDOUT;
++			}
++			ret = sftl_read_address(sftl, block * SFTL_STRIDE + position, &chunk);
++			if (ret) {
++				sftl->failed = true;
++				return ret;
++			}
++			if (!sftl_erased(sftl->page, APPLE_PPN_PAGE_SIZE) ||
++			    !sftl_erased(sftl->oob, APPLE_PPN_OOB_SIZE)) {
++				blank = false;
++				break;
++			}
++		}
++		if (!blank)
++			continue;
++		sftl->append_block = block;
++		sftl->append_capacity = capacity - SFTL_FOOTER_CHUNKS;
++		sftl->append_position = 0;
++		sftl->append_base = sftl->sequence + 1;
++		sftl->footer_runs = 0;
++		memset(sftl->footer, 0, SFTL_FOOTER_BYTES);
++		return 0;
++	}
++	return -ENOSPC;
++}
++
++static int sftl_program_address(struct apple_sftl *sftl, u32 address,
++				const u8 *data, const u8 *oob)
++{
++	unsigned int bus, cau, block, page, chunk;
++	int ret;
++
++	ret = sftl_translate(sftl, address, &bus, &cau, &block, &page, &chunk);
++	if (ret)
++		return ret;
++	if (chunk)
++		return -EINVAL;
++	return sftl->ppn->ops->program_page(sftl->ppn->priv, bus, cau,
++					    block, page, data, oob);
++}
++
++/* A short request repeats its final logical page to fill the program unit. */
++static void sftl_data_meta(u8 *meta, u64 sequence, u32 logical_page)
++{
++	put_unaligned_le64(sequence << 16 | 1, meta);
++	put_unaligned_le32(logical_page, meta + 8);
++	put_unaligned_le32(sequence >> 16, meta + 12);
++}
++
++static void sftl_append_summary(struct apple_sftl *sftl, u64 sequence, u32 key)
++{
++	u32 relative = sequence - sftl->append_base;
++	u32 high = sequence >> 16;
++	u8 *entry;
++
++	if (sftl->footer_runs) {
++		u32 length;
++
++		entry = sftl->footer + (sftl->footer_runs - 1) * SFTL_META;
++		length = get_unaligned_le32(entry + 12);
++		if (key < 0xffff0000 && get_unaligned_le32(entry + 4) == high &&
++		    get_unaligned_le32(entry) + length == relative &&
++		    get_unaligned_le32(entry + 8) + length == key) {
++			put_unaligned_le32(length + 1, entry + 12);
++			return;
++		}
++	}
++	entry = sftl->footer + sftl->footer_runs++ * SFTL_META;
++	put_unaligned_le32(relative, entry);
++	put_unaligned_le32(high, entry + 4);
++	put_unaligned_le32(key, entry + 8);
++	put_unaligned_le32(1, entry + 12);
++}
++
++static int sftl_close_block(struct apple_sftl *sftl)
++{
++	u8 meta[SFTL_META];
++	unsigned int chunk, index;
++	int ret;
++
++	put_unaligned_le64(sftl->append_base << 16 | 0x401c, meta);
++	put_unaligned_le32(sftl->append_position, meta + 8);
++	put_unaligned_le16(SFTL_FOOTER_CHUNKS, meta + 12);
++	put_unaligned_le16(0xffff, meta + 14);
++	for (chunk = 0; chunk < 4; chunk++)
++		memcpy(sftl->oob + chunk * SFTL_META, meta, SFTL_META);
++	for (index = 0; index < SFTL_FOOTER_CHUNKS / 4; index++) {
++		u32 address = sftl->append_block * SFTL_STRIDE +
++			      sftl->append_capacity + index * 4;
++
++		ret = sftl_program_address(sftl, address,
++					   sftl->footer + index * APPLE_PPN_PAGE_SIZE,
++					   sftl->oob);
++		if (ret)
++			return ret;
++	}
++	sftl->append_block = U32_MAX;
++	return 0;
++}
++
++int apple_sftl_write(struct apple_sftl *sftl, u32 logical_page,
++		     const u8 *data, unsigned int count)
++{
++	u64 first_sequence;
++	u32 address;
++	unsigned int chunk;
++	int ret;
++
++	if (!IS_ENABLED(CONFIG_MTD_APPLE_SFTL_WRITE))
++		return -EROFS;
++	if (!sftl || !data || !count || count > 4 || logical_page >= SFTL_DISK_PAGES ||
++	    count > SFTL_DISK_PAGES - logical_page)
++		return -EINVAL;
++	mutex_lock(&sftl->lock);
++	if (sftl->failed) {
++		ret = -EIO;
++		goto out;
++	}
++	if (sftl->sequence > SFTL_SEQUENCE - 4) {
++		ret = -EOVERFLOW;
++		goto out;
++	}
++	ret = sftl_writer_prepare(sftl);
++	if (ret)
++		goto out;
++	if (sftl->append_block == U32_MAX) {
++		ret = sftl_claim_block(sftl);
++		if (ret)
++			goto out;
++	}
++	address = sftl->append_block * SFTL_STRIDE + sftl->append_position;
++	first_sequence = sftl->sequence + 1;
++	for (chunk = 0; chunk < 4; chunk++) {
++		unsigned int index = min(chunk, count - 1);
++
++		memcpy(sftl->page + chunk * SFTL_CHUNK,
++		       data + index * SFTL_CHUNK, SFTL_CHUNK);
++		sftl_data_meta(sftl->oob + chunk * SFTL_META,
++			       first_sequence + chunk, logical_page + index);
++	}
++	ret = sftl_program_address(sftl, address, sftl->page, sftl->oob);
++	if (ret)
++		goto failed;
++	for (chunk = 0; chunk < 4; chunk++) {
++		u32 key = logical_page + min(chunk, count - 1);
++
++		ret = sftl_replace(sftl, key, 1, address + chunk);
++		if (ret)
++			goto failed;
++		sftl_append_summary(sftl, first_sequence + chunk, key);
++	}
++	sftl->sequence += 4;
++	sftl->journal_sequence = sftl->sequence;
++	sftl->append_position += 4;
++	if (sftl->append_position == sftl->append_capacity) {
++		ret = sftl_close_block(sftl);
++		if (ret)
++			goto failed;
++	}
++	goto out;
++failed:
++	sftl->failed = true;
++out:
++	mutex_unlock(&sftl->lock);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(apple_sftl_write);
++
++int apple_sftl_flush(struct apple_sftl *sftl)
++{
++	int ret;
++
++	if (!sftl)
++		return -EINVAL;
++	mutex_lock(&sftl->lock);
++	/* Each program is complete and verified before apple_sftl_write returns. */
++	ret = sftl->failed ? -EIO : 0;
++	mutex_unlock(&sftl->lock);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(apple_sftl_flush);
++
+ void apple_sftl_get_info(struct apple_sftl *sftl, struct apple_sftl_info *info)
+ {
+ 	info->logical_pages = SFTL_LPAGES;
+@@ -945,5 +1248,6 @@ void apple_sftl_get_info(struct apple_sftl *sftl, struct apple_sftl_info *info)
+ 	info->nr_runs = sftl->nr_runs;
+ 	info->checkpoint_sequence = sftl->checkpoint_sequence;
+ 	info->sequence = sftl->sequence;
++	info->journal_sequence = sftl->journal_sequence;
+ }
+ EXPORT_SYMBOL_GPL(apple_sftl_get_info);
+diff --git a/drivers/mtd/apple-sftl-test.c b/drivers/mtd/apple-sftl-test.c
+index 88308aadb..e89eee42d 100644
+--- a/drivers/mtd/apple-sftl-test.c
++++ b/drivers/mtd/apple-sftl-test.c
+@@ -37,10 +37,28 @@ enum sftl_fault {
+ 	SFTL_RUNTIME_FAILURE,
+ };
+ 
++struct sftl_test_page {
++	u8 data[APPLE_PPN_PAGE_SIZE];
++	u8 oob[APPLE_PPN_OOB_SIZE];
++};
++
+ struct sftl_fixture {
++	struct kunit *test;
+ 	struct apple_ppn provider;
+ 	enum sftl_fault fault;
+ 	unsigned int reads;
++	unsigned int programs;
++	unsigned int fail_program;
++	unsigned int tear_program;
++	unsigned int program_outside;
++	bool uncertain_program;
++	bool no_candidates;
++	bool dirty_candidate;
++	bool vfl_candidate;
++	bool full_lanes;
++	u16 program_lanes;
++	u64 sequence_bias;
++	struct sftl_test_page **written[5];
+ };
+ 
+ static void sftl_test_meta(u8 *meta, u8 kind, u8 flags, u64 seq, u32 key)
+@@ -55,7 +73,7 @@ static void sftl_test_meta(u8 *meta, u8 kind, u8 flags, u64 seq, u32 key)
+ 	put_unaligned_le32(seq >> 16, meta + 12);
+ }
+ 
+-static void sftl_test_members(u8 *data, enum sftl_fault fault)
++static void sftl_test_members(struct sftl_fixture *f, u8 *data)
+ {
+ 	unsigned int i;
+ 
+@@ -64,8 +82,10 @@ static void sftl_test_members(u8 *data, enum sftl_fault fault)
+ 		data[0x102 + i * 4] = i;
+ 		data[0x103 + i * 4] = 0;
+ 	}
+-	if (fault == SFTL_BOOTSTRAP_DUPLICATE)
++	if (f->fault == SFTL_BOOTSTRAP_DUPLICATE)
+ 		data[0x106] = 0;
++	if (f->vfl_candidate)
++		put_unaligned_le16(2056, data + 0x100);
+ }
+ 
+ static int sftl_test_context(struct sftl_fixture *f, unsigned int lane,
+@@ -80,7 +100,7 @@ static int sftl_test_context(struct sftl_fixture *f, unsigned int lane,
+ 		put_unaligned_le16(16, data + 10);
+ 		put_unaligned_le16(2086, data + 12);
+ 		put_unaligned_le16(2086, data + 14);
+-		sftl_test_members(data, f->fault);
++		sftl_test_members(f, data);
+ 		for (i = 0; i < 16; i++)
+ 			put_unaligned_le16(i + 1, data + 0x200 + i * 32);
+ 		oob[0] = 0x20;
+@@ -96,6 +116,16 @@ static int sftl_test_context(struct sftl_fixture *f, unsigned int lane,
+ 		if (page <= 2)
+ 			for (i = 1; i <= 4; i++)
+ 				put_unaligned_le16(0, data + i * 2);
++		/* Three initially blank append candidates, single-lane by default. */
++		if (page == 1 && !f->no_candidates)
++			for (i = 5; i <= 7; i++)
++				put_unaligned_le16(0, data + i * 2);
++		if (f->full_lanes)
++			put_unaligned_le16(0, data + 5 * 2);
++		if (page == 1 && f->vfl_candidate) {
++			put_unaligned_le16(0, data + 2056 * 2);
++			put_unaligned_le16(0, data + 2057 * 2);
++		}
+ 		oob[0] = 0x20;
+ 		oob[1] = page - 1;
+ 		oob[2] = 0;
+@@ -116,7 +146,7 @@ static void sftl_test_checkpoint(struct sftl_fixture *f, u8 *data, u8 *oob)
+ 	memset(data, 0, 4096);
+ 	put_unaligned_le32(1, data);
+ 	put_unaligned_le32(1, data + 4);
+-	sftl_test_meta(oob, 0x1f, 1, 100, 0);
++	sftl_test_meta(oob, 0x1f, 1, 100 + f->sequence_bias, 0);
+ 	if (f->fault == SFTL_INCOMPLETE_CONTEXT)
+ 		return;
+ 	if (f->fault == SFTL_INACTIVE_ADDRESS)
+@@ -127,12 +157,12 @@ static void sftl_test_checkpoint(struct sftl_fixture *f, u8 *data, u8 *oob)
+ 	put_unaligned_le32(1, ranges + 12);
+ 	put_unaligned_le32(0x1ffffff, ranges + 16);
+ 	put_unaligned_le32(TEST_LOGICAL_PAGES - 1, ranges + 20);
+-	sftl_test_meta(oob + 16, 0x1f, 4, TEST_CHECKPOINT, 0);
++	sftl_test_meta(oob + 16, 0x1f, 4, TEST_CHECKPOINT + f->sequence_bias, 0);
+ }
+ 
+ static void sftl_test_open(struct sftl_fixture *f, u8 *data, u8 *oob)
+ {
+-	u64 first = TEST_OPEN_FIRST;
++	u64 first = TEST_OPEN_FIRST + f->sequence_bias;
+ 	unsigned int i;
+ 
+ 	if (f->fault == SFTL_JOURNAL_GAP)
+@@ -146,7 +176,7 @@ static void sftl_test_open(struct sftl_fixture *f, u8 *data, u8 *oob)
+ 	if (f->fault == SFTL_TRIM) {
+ 		memset(data, 0, 4096);
+ 		put_unaligned_le32(1, data);
+-		put_unaligned_le32(0, data + 4);
++		put_unaligned_le32((TEST_CLOSED_FIRST + f->sequence_bias) >> 16, data + 4);
+ 		put_unaligned_le32(1, data + 8);
+ 		sftl_test_meta(oob, 2, 0, first, 0xffff0001);
+ 	}
+@@ -163,19 +193,19 @@ static void sftl_test_closed(struct sftl_fixture *f, unsigned int position,
+ 
+ 			memset(data + i * 4096, (slot + 1) & 0xff, 4096);
+ 			sftl_test_meta(oob + i * 16, 1, 0,
+-				       TEST_CLOSED_FIRST + slot, slot + 1);
++				       TEST_CLOSED_FIRST + f->sequence_bias + slot, slot + 1);
+ 		}
+ 	} else {
+ 		u32 span = TEST_CLOSED_CHUNKS;
+ 
+ 		memset(data, 0, 16384);
+ 		put_unaligned_le32(0, data);
+-		put_unaligned_le32(0, data + 4);
++		put_unaligned_le32((TEST_CLOSED_FIRST + f->sequence_bias) >> 16, data + 4);
+ 		put_unaligned_le32(1, data + 8);
+ 		put_unaligned_le32(TEST_CLOSED_CHUNKS, data + 12);
+ 		if (f->fault == SFTL_ALLOCATION_FLOOR)
+ 			span += 8;
+-		sftl_test_meta(oob, 0x1c, 8, TEST_CLOSED_FIRST, span);
++		sftl_test_meta(oob, 0x1c, 8, TEST_CLOSED_FIRST + f->sequence_bias, span);
+ 		put_unaligned_le16(f->fault == SFTL_BAD_FOOTER ? 2 : 4, oob + 12);
+ 		put_unaligned_le16(0xffff, oob + 14);
+ 		for (i = 1; i < 4; i++)
+@@ -185,6 +215,24 @@ static void sftl_test_closed(struct sftl_fixture *f, unsigned int position,
+ 	}
+ }
+ 
++static int sftl_test_candidate_slot(unsigned int block)
++{
++	if (block >= 5 && block <= 7)
++		return block - 5;
++	if (block == 2056 || block == 2057)
++		return block - 2053;
++	return -1;
++}
++
++static struct sftl_test_page *sftl_test_written(struct sftl_fixture *f,
++						unsigned int slot, unsigned int lane,
++						unsigned int page)
++{
++	if (!f->written[slot])
++		return NULL;
++	return f->written[slot][lane * 128 + page];
++}
++
+ static int sftl_test_read_page(void *priv, unsigned int bus, unsigned int cau,
+ 			       unsigned int block, unsigned int page,
+ 			       bool context, u8 *data, u8 *oob, u8 *status)
+@@ -192,6 +240,7 @@ static int sftl_test_read_page(void *priv, unsigned int bus, unsigned int cau,
+ 	struct sftl_fixture *f = priv;
+ 	unsigned int lane = cau * 2 + bus;
+ 	unsigned int position = page * 2 + lane;
++	int slot = sftl_test_candidate_slot(block);
+ 
+ 	f->reads++;
+ 	if (bus >= 2 || cau >= 8 || block >= 2088 || page >= (context ? 64 : 128))
+@@ -200,13 +249,26 @@ static int sftl_test_read_page(void *priv, unsigned int bus, unsigned int cau,
+ 	memset(oob, 0xff, 64);
+ 	*status = 0x49;
+ 	if (context) {
+-		if (block == 2087)
++		if (block == 2087 || (f->vfl_candidate && block == 2056 && !lane))
+ 			return sftl_test_context(f, lane, page, data, oob, status);
+ 		return 0;
+ 	}
+ 	if (block == 3 && (f->fault == SFTL_RUNTIME_FAILURE ||
+ 			   (!position && f->fault == SFTL_READ_FAILURE)))
+ 		return -EIO;
++	if (f->dirty_candidate && block == 5 && !lane && page == 127) {
++		memset(data, 'D', APPLE_PPN_PAGE_SIZE);
++		*status = 0x40;
++		return 0;
++	}
++	if (slot >= 0 && sftl_test_written(f, slot, lane, page)) {
++		struct sftl_test_page *written = sftl_test_written(f, slot, lane, page);
++
++		memcpy(data, written->data, APPLE_PPN_PAGE_SIZE);
++		memcpy(oob, written->oob, APPLE_PPN_OOB_SIZE);
++		*status = 0x40;
++		return 0;
++	}
+ 	if (lane > 1)
+ 		return 0;
+ 	if (block == 1 && !position) {
+@@ -218,13 +280,14 @@ static int sftl_test_read_page(void *priv, unsigned int bus, unsigned int cau,
+ 
+ 		for (i = 0; i < 4; i++) {
+ 			memset(data + i * 4096, 'H' + i, 4096);
+-			sftl_test_meta(oob + i * 16, 1, 0, TEST_OPEN_FIRST + 4 + i, 3);
++			sftl_test_meta(oob + i * 16, 1, 0,
++				       TEST_OPEN_FIRST + f->sequence_bias + 4 + i, 3);
+ 		}
+ 	} else if (block == 3) {
+ 		sftl_test_closed(f, position, data, oob);
+ 	} else if (block == 4 && !position) {
+ 		memset(data, 'C', 4096);
+-		sftl_test_meta(oob, 1, 0, 10, 0);
++		sftl_test_meta(oob, 1, 0, 10 + f->sequence_bias, 0);
+ 	} else {
+ 		return 0;
+ 	}
+@@ -234,8 +297,54 @@ static int sftl_test_read_page(void *priv, unsigned int bus, unsigned int cau,
+ 	return 0;
+ }
+ 
++#if IS_ENABLED(CONFIG_MTD_APPLE_SFTL_WRITE)
++static int sftl_test_program_page(void *priv, unsigned int bus, unsigned int cau,
++				  unsigned int block, unsigned int page,
++				  const u8 *data, const u8 *oob)
++{
++	struct sftl_fixture *f = priv;
++	struct sftl_test_page *written;
++	unsigned int lane = cau * 2 + bus;
++	int slot = sftl_test_candidate_slot(block);
++	bool failure;
++
++	f->programs++;
++	if (bus >= 2 || cau >= 8 || slot < 0 || page >= 128 ||
++	    (lane && (!f->full_lanes || block != 5))) {
++		f->program_outside++;
++		return -EPERM;
++	}
++	if (sftl_test_written(f, slot, lane, page))
++		return -EEXIST;
++	failure = f->programs == f->fail_program;
++	if (failure && !f->uncertain_program)
++		return -EIO;
++	if (!f->written[slot]) {
++		f->written[slot] = kunit_kcalloc(f->test, 16 * 128,
++						 sizeof(*f->written[slot]), GFP_KERNEL);
++		if (!f->written[slot])
++			return -ENOMEM;
++	}
++	written = kunit_kmalloc(f->test, sizeof(*written), GFP_KERNEL);
++	if (!written)
++		return -ENOMEM;
++	memcpy(written->data, data, APPLE_PPN_PAGE_SIZE);
++	memcpy(written->oob, oob, APPLE_PPN_OOB_SIZE);
++	f->written[slot][lane * 128 + page] = written;
++	f->program_lanes |= 1U << lane;
++	if (f->programs == f->tear_program) {
++		written->oob[63] ^= 1;
++		return -EIO;
++	}
++	return failure ? -EIO : 0;
++}
++#endif
++
+ static const struct apple_ppn_ops sftl_test_ops = {
+ 	.read_page = sftl_test_read_page,
++#if IS_ENABLED(CONFIG_MTD_APPLE_SFTL_WRITE)
++	.program_page = sftl_test_program_page,
++#endif
+ };
+ 
+ static struct sftl_fixture *sftl_test_fixture(struct kunit *test,
+@@ -245,6 +354,7 @@ static struct sftl_fixture *sftl_test_fixture(struct kunit *test,
+ 
+ 	if (!f)
+ 		return NULL;
++	f->test = test;
+ 	f->fault = fault;
+ 	f->provider.ops = &sftl_test_ops;
+ 	f->provider.priv = f;
+@@ -471,12 +581,473 @@ static void sftl_test_invalid_reader_policy(struct kunit *test)
+ 	KUNIT_EXPECT_EQ(test, apple_sftl_limit_start(&limit, 1, 1, ~0ULL), -EINVAL);
+ }
+ 
++#if IS_ENABLED(CONFIG_MTD_APPLE_SFTL_WRITE)
++#define TEST_APPEND_FIRST (TEST_OPEN_FIRST + 4)
++#define TEST_APPEND_BASE 2000U
++#define TEST_APPEND_PROGRAMS 120U
++
++static void sftl_test_append_replay_open(struct kunit *test)
++{
++	struct sftl_fixture *f = sftl_test_fixture(test, SFTL_NO_FAULT);
++	struct apple_sftl *sftl = NULL;
++	struct apple_sftl_info info;
++	u8 *data = kunit_kmalloc(test, 16384, GFP_KERNEL);
++	u8 *readback = kunit_kmalloc(test, 4096, GFP_KERNEL);
++	unsigned int chunk;
++
++	KUNIT_ASSERT_NOT_NULL(test, f);
++	KUNIT_ASSERT_NOT_NULL(test, data);
++	KUNIT_ASSERT_NOT_NULL(test, readback);
++	KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++	memset(data, 'W', 4096);
++	KUNIT_ASSERT_EQ(test, apple_sftl_write(sftl, TEST_APPEND_BASE, data, 1), 0);
++	for (chunk = 0; chunk < 3; chunk++)
++		memset(data + chunk * 4096, 'X' + chunk, 4096);
++	KUNIT_ASSERT_EQ(test, apple_sftl_write(sftl, TEST_APPEND_BASE + 1, data, 3), 0);
++	KUNIT_EXPECT_EQ(test, apple_sftl_flush(sftl), 0);
++	KUNIT_EXPECT_EQ(test, f->programs, 2U);
++	KUNIT_EXPECT_EQ(test, f->program_outside, 0U);
++	KUNIT_ASSERT_NOT_NULL(test, sftl_test_written(f, 0, 0, 0));
++	for (chunk = 0; chunk < 4; chunk++) {
++		const u8 *meta = sftl_test_written(f, 0, 0, 0)->oob + chunk * 16;
++
++		KUNIT_EXPECT_EQ(test, meta[0], (u8)1);
++		KUNIT_EXPECT_EQ(test, get_unaligned_le64(meta) >> 16,
++				TEST_APPEND_FIRST + chunk);
++		KUNIT_EXPECT_EQ(test, get_unaligned_le32(meta + 8), TEST_APPEND_BASE);
++		KUNIT_EXPECT_EQ(test, get_unaligned_le32(meta + 12),
++				(u32)((TEST_APPEND_FIRST + chunk) >> 16));
++	}
++	apple_sftl_free(sftl);
++	sftl = NULL;
++	KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++	apple_sftl_get_info(sftl, &info);
++	KUNIT_EXPECT_EQ(test, info.sequence, TEST_APPEND_FIRST + 7);
++	for (chunk = 0; chunk < 4; chunk++) {
++		KUNIT_ASSERT_EQ(test, apple_sftl_read(sftl, TEST_APPEND_BASE + chunk, readback), 0);
++		sftl_test_expect_fill(test, readback, 'W' + chunk);
++	}
++	KUNIT_ASSERT_EQ(test, apple_sftl_read(sftl, 0, readback), 0);
++	sftl_test_expect_fill(test, readback, 'C');
++	KUNIT_ASSERT_EQ(test, apple_sftl_read(sftl, 6, readback), 0);
++	sftl_test_expect_fill(test, readback, 6);
++	apple_sftl_free(sftl);
++}
++
++static int sftl_test_fill_append(struct apple_sftl *sftl, u8 *data)
++{
++	unsigned int program;
++	int ret;
++
++	for (program = 0; program < TEST_APPEND_PROGRAMS; program++) {
++		memset(data, program + 1, 16384);
++		ret = apple_sftl_write(sftl, TEST_APPEND_BASE + program * 4, data, 4);
++		if (ret)
++			return ret;
++	}
++	return 0;
++}
++
++static void sftl_test_append_replay_closed(struct kunit *test)
++{
++	struct sftl_fixture *f = sftl_test_fixture(test, SFTL_NO_FAULT);
++	struct apple_sftl *sftl = NULL;
++	struct apple_sftl_info info;
++	u8 *data = kunit_kmalloc(test, 16384, GFP_KERNEL);
++	u8 *readback = kunit_kmalloc(test, 4096, GFP_KERNEL);
++	unsigned int page;
++
++	KUNIT_ASSERT_NOT_NULL(test, f);
++	KUNIT_ASSERT_NOT_NULL(test, data);
++	KUNIT_ASSERT_NOT_NULL(test, readback);
++	KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++	KUNIT_ASSERT_EQ(test, sftl_test_fill_append(sftl, data), 0);
++	KUNIT_EXPECT_EQ(test, f->programs, 128U);
++	KUNIT_EXPECT_EQ(test, f->program_outside, 0U);
++	for (page = 120; page < 128; page++) {
++		const u8 *meta;
++
++		KUNIT_ASSERT_NOT_NULL(test, sftl_test_written(f, 0, 0, page));
++		meta = sftl_test_written(f, 0, 0, page)->oob;
++		KUNIT_EXPECT_EQ(test, meta[0], (u8)0x1c);
++		KUNIT_EXPECT_EQ(test, meta[1], (u8)64);
++		KUNIT_EXPECT_EQ(test, get_unaligned_le64(meta) >> 16, TEST_APPEND_FIRST);
++		KUNIT_EXPECT_EQ(test, get_unaligned_le32(meta + 8), 480U);
++		KUNIT_EXPECT_EQ(test, get_unaligned_le16(meta + 12), (u16)32);
++		KUNIT_EXPECT_EQ(test, get_unaligned_le16(meta + 14), (u16)0xffff);
++		KUNIT_EXPECT_MEMEQ(test, meta, meta + 16, 16);
++		KUNIT_EXPECT_MEMEQ(test, meta, meta + 32, 16);
++		KUNIT_EXPECT_MEMEQ(test, meta, meta + 48, 16);
++	}
++	KUNIT_EXPECT_EQ(test, get_unaligned_le32(sftl_test_written(f, 0, 0, 120)->data + 8),
++			TEST_APPEND_BASE);
++	KUNIT_EXPECT_EQ(test, get_unaligned_le32(sftl_test_written(f, 0, 0, 120)->data + 12), 480U);
++	apple_sftl_free(sftl);
++	sftl = NULL;
++	KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++	apple_sftl_get_info(sftl, &info);
++	KUNIT_EXPECT_EQ(test, info.sequence, TEST_APPEND_FIRST + 479);
++	KUNIT_ASSERT_EQ(test, apple_sftl_read(sftl, TEST_APPEND_BASE, readback), 0);
++	sftl_test_expect_fill(test, readback, 1);
++	KUNIT_ASSERT_EQ(test, apple_sftl_read(sftl, TEST_APPEND_BASE + 479, readback), 0);
++	sftl_test_expect_fill(test, readback, 120);
++	apple_sftl_free(sftl);
++}
++
++/* Repeating one key prevents summary coalescing: all 8160 data records
++ * need separate entries, including those spanning each footer page.
++ */
++static void sftl_test_append_replay_full_lanes(struct kunit *test)
++{
++	struct sftl_fixture *f = sftl_test_fixture(test, SFTL_NO_FAULT);
++	struct apple_sftl *sftl = NULL;
++	struct apple_sftl_info info;
++	const unsigned int programs = 16 * 128 - 8;
++	const unsigned int chunks = programs * 4;
++	u8 *data = kunit_kmalloc(test, 4096, GFP_KERNEL);
++	unsigned int program, lane, page, entry;
++
++	KUNIT_ASSERT_NOT_NULL(test, f);
++	KUNIT_ASSERT_NOT_NULL(test, data);
++	f->full_lanes = true;
++	KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++	for (program = 0; program < programs; program++) {
++		memset(data, program + 1, 4096);
++		KUNIT_ASSERT_EQ(test, apple_sftl_write(sftl, TEST_APPEND_BASE, data, 1), 0);
++	}
++	KUNIT_EXPECT_EQ(test, apple_sftl_flush(sftl), 0);
++	KUNIT_EXPECT_EQ(test, f->programs, 16U * 128);
++	KUNIT_EXPECT_EQ(test, f->program_outside, 0U);
++	KUNIT_EXPECT_EQ(test, f->program_lanes, (u16)0xffff);
++	for (page = 0; page < 128; page++) {
++		for (lane = 0; lane < 16; lane++) {
++			struct sftl_test_page *written = sftl_test_written(f, 0, lane, page);
++			unsigned int position = page * 16 + lane;
++			unsigned int chunk;
++
++			KUNIT_ASSERT_NOT_NULL(test, written);
++			if (position >= programs) {
++				const u8 *meta = written->oob;
++
++				KUNIT_EXPECT_EQ(test, meta[0], (u8)0x1c);
++				KUNIT_EXPECT_EQ(test, meta[1], (u8)64);
++				KUNIT_EXPECT_EQ(test, get_unaligned_le64(meta) >> 16,
++						TEST_APPEND_FIRST);
++				KUNIT_EXPECT_EQ(test, get_unaligned_le32(meta + 8), chunks);
++				KUNIT_EXPECT_EQ(test, get_unaligned_le16(meta + 12), (u16)32);
++				KUNIT_EXPECT_EQ(test, get_unaligned_le16(meta + 14), (u16)0xffff);
++				for (chunk = 1; chunk < 4; chunk++)
++					KUNIT_EXPECT_MEMEQ(test, meta, meta + chunk * 16, 16);
++				continue;
++			}
++			for (chunk = 0; chunk < 4; chunk++) {
++				const u8 *meta = written->oob + chunk * 16;
++				u64 sequence = TEST_APPEND_FIRST + position * 4 + chunk;
++
++				KUNIT_EXPECT_EQ(test, meta[0], (u8)1);
++				KUNIT_EXPECT_EQ(test, meta[1], (u8)0);
++				KUNIT_EXPECT_EQ(test, get_unaligned_le64(meta) >> 16, sequence);
++				KUNIT_EXPECT_EQ(test, get_unaligned_le32(meta + 8),
++						TEST_APPEND_BASE);
++				KUNIT_EXPECT_EQ(test, get_unaligned_le32(meta + 12),
++						(u32)(sequence >> 16));
++				sftl_test_expect_fill(test, written->data + chunk * 4096,
++						      (u8)(position + 1));
++			}
++		}
++	}
++	for (entry = 0; entry < chunks; entry++) {
++		struct sftl_test_page *footer = sftl_test_written(f, 0, 8 + entry / 1024, 127);
++		const u8 *run = footer->data + (entry % 1024) * 16;
++
++		KUNIT_EXPECT_EQ(test, get_unaligned_le32(run), entry);
++		KUNIT_EXPECT_EQ(test, get_unaligned_le32(run + 4),
++				(u32)((TEST_APPEND_FIRST + entry) >> 16));
++		KUNIT_EXPECT_EQ(test, get_unaligned_le32(run + 8), TEST_APPEND_BASE);
++		KUNIT_EXPECT_EQ(test, get_unaligned_le32(run + 12), 1U);
++	}
++	KUNIT_EXPECT_EQ(test, get_unaligned_le32(sftl_test_written(f, 0, 15, 127)->data +
++					      (chunks % 1024) * 16 + 12), 0U);
++	apple_sftl_free(sftl);
++	sftl = NULL;
++	KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++	apple_sftl_get_info(sftl, &info);
++	KUNIT_EXPECT_EQ(test, info.sequence, TEST_APPEND_FIRST + chunks - 1);
++	KUNIT_ASSERT_EQ(test, apple_sftl_read(sftl, TEST_APPEND_BASE, data), 0);
++	sftl_test_expect_fill(test, data, (u8)programs);
++	KUNIT_ASSERT_EQ(test, apple_sftl_read(sftl, 0, data), 0);
++	sftl_test_expect_fill(test, data, 'C');
++	apple_sftl_free(sftl);
++}
++
++static void sftl_test_append_failure_stops_io(struct kunit *test)
++{
++	struct sftl_fixture *f = sftl_test_fixture(test, SFTL_NO_FAULT);
++	struct apple_sftl *sftl = NULL;
++	u8 *data = kunit_kmalloc(test, 4096, GFP_KERNEL);
++	unsigned int programs;
++
++	KUNIT_ASSERT_NOT_NULL(test, f);
++	KUNIT_ASSERT_NOT_NULL(test, data);
++	KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++	f->fail_program = 1;
++	memset(data, 'F', 4096);
++	KUNIT_EXPECT_EQ(test, apple_sftl_write(sftl, TEST_APPEND_BASE, data, 1), -EIO);
++	programs = f->programs;
++	KUNIT_EXPECT_EQ(test, apple_sftl_write(sftl, TEST_APPEND_BASE, data, 1), -EIO);
++	KUNIT_EXPECT_EQ(test, apple_sftl_flush(sftl), -EIO);
++	KUNIT_EXPECT_EQ(test, apple_sftl_read(sftl, 0, data), -EIO);
++	KUNIT_EXPECT_EQ(test, f->programs, programs);
++	KUNIT_EXPECT_EQ(test, f->program_outside, 0U);
++	apple_sftl_free(sftl);
++	sftl = NULL;
++	KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++	KUNIT_ASSERT_EQ(test, apple_sftl_read(sftl, TEST_APPEND_BASE, data), 0);
++	sftl_test_expect_fill(test, data, 0);
++	apple_sftl_free(sftl);
++}
++
++static void sftl_test_append_uncertain_program_replays(struct kunit *test)
++{
++	struct sftl_fixture *f = sftl_test_fixture(test, SFTL_NO_FAULT);
++	struct apple_sftl *sftl = NULL;
++	u8 *data = kunit_kmalloc(test, 4096, GFP_KERNEL);
++
++	KUNIT_ASSERT_NOT_NULL(test, f);
++	KUNIT_ASSERT_NOT_NULL(test, data);
++	KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++	f->fail_program = 1;
++	f->uncertain_program = true;
++	memset(data, 'U', 4096);
++	KUNIT_EXPECT_EQ(test, apple_sftl_write(sftl, TEST_APPEND_BASE, data, 1), -EIO);
++	KUNIT_EXPECT_EQ(test, apple_sftl_flush(sftl), -EIO);
++	KUNIT_EXPECT_EQ(test, f->programs, 1U);
++	apple_sftl_free(sftl);
++	sftl = NULL;
++	KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++	KUNIT_ASSERT_EQ(test, apple_sftl_read(sftl, TEST_APPEND_BASE, data), 0);
++	sftl_test_expect_fill(test, data, 'U');
++	apple_sftl_free(sftl);
++}
++
++static void sftl_test_append_interrupted_footer_replays(struct kunit *test)
++{
++	static const struct {
++		unsigned int program;
++		bool uncertain;
++	} stop[] = {{121, false}, {122, false}, {128, false}, {128, true}};
++	unsigned int index;
++
++	for (index = 0; index < ARRAY_SIZE(stop); index++) {
++		struct sftl_fixture *f = sftl_test_fixture(test, SFTL_NO_FAULT);
++		struct apple_sftl *sftl = NULL;
++		u8 *data = kunit_kmalloc(test, 16384, GFP_KERNEL);
++
++		KUNIT_ASSERT_NOT_NULL(test, f);
++		KUNIT_ASSERT_NOT_NULL(test, data);
++		KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++		f->fail_program = stop[index].program;
++		f->uncertain_program = stop[index].uncertain;
++		KUNIT_EXPECT_EQ(test, sftl_test_fill_append(sftl, data), -EIO);
++		KUNIT_EXPECT_EQ(test, f->programs, stop[index].program);
++		KUNIT_EXPECT_EQ(test, apple_sftl_flush(sftl), -EIO);
++		apple_sftl_free(sftl);
++		sftl = NULL;
++		KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++		KUNIT_ASSERT_EQ(test, apple_sftl_read(sftl, TEST_APPEND_BASE + 479, data), 0);
++		sftl_test_expect_fill(test, data, 120);
++		apple_sftl_free(sftl);
++	}
++}
++
++static void sftl_test_append_torn_metadata_rejected(struct kunit *test)
++{
++	static const unsigned int torn[] = {1, 121};
++	unsigned int index;
++
++	for (index = 0; index < ARRAY_SIZE(torn); index++) {
++		struct sftl_fixture *f = sftl_test_fixture(test, SFTL_NO_FAULT);
++		struct apple_sftl *sftl = NULL;
++		u8 *data = kunit_kmalloc(test, 16384, GFP_KERNEL);
++
++		KUNIT_ASSERT_NOT_NULL(test, f);
++		KUNIT_ASSERT_NOT_NULL(test, data);
++		KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++		f->tear_program = torn[index];
++		memset(data, 'T', 16384);
++		if (torn[index] == 1)
++			KUNIT_EXPECT_EQ(test,
++					apple_sftl_write(sftl, TEST_APPEND_BASE, data, 1), -EIO);
++		else
++			KUNIT_EXPECT_EQ(test, sftl_test_fill_append(sftl, data), -EIO);
++		apple_sftl_free(sftl);
++		sftl = NULL;
++		KUNIT_EXPECT_LT(test, apple_sftl_load(&f->provider, &sftl), 0);
++		KUNIT_EXPECT_PTR_EQ(test, sftl, NULL);
++		apple_sftl_free(sftl);
++	}
++}
++
++static void sftl_test_append_scans_entire_candidate(struct kunit *test)
++{
++	struct sftl_fixture *f = sftl_test_fixture(test, SFTL_NO_FAULT);
++	struct apple_sftl *sftl = NULL;
++	u8 *data = kunit_kmalloc(test, 4096, GFP_KERNEL);
++
++	KUNIT_ASSERT_NOT_NULL(test, f);
++	KUNIT_ASSERT_NOT_NULL(test, data);
++	f->dirty_candidate = true;
++	KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++	memset(data, 'B', 4096);
++	KUNIT_ASSERT_EQ(test, apple_sftl_write(sftl, TEST_APPEND_BASE, data, 1), 0);
++	KUNIT_EXPECT_PTR_EQ(test, sftl_test_written(f, 0, 0, 0), NULL);
++	KUNIT_ASSERT_NOT_NULL(test, sftl_test_written(f, 1, 0, 0));
++	KUNIT_EXPECT_EQ(test, f->programs, 1U);
++	KUNIT_EXPECT_EQ(test, f->program_outside, 0U);
++	apple_sftl_free(sftl);
++	sftl = NULL;
++	KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++	KUNIT_ASSERT_EQ(test, apple_sftl_read(sftl, TEST_APPEND_BASE, data), 0);
++	sftl_test_expect_fill(test, data, 'B');
++	apple_sftl_free(sftl);
++}
++
++static void sftl_test_append_reserves_vfl_members(struct kunit *test)
++{
++	struct sftl_fixture *f = sftl_test_fixture(test, SFTL_NO_FAULT);
++	struct apple_sftl *sftl = NULL;
++	u8 *data = kunit_kmalloc(test, 4096, GFP_KERNEL);
++
++	KUNIT_ASSERT_NOT_NULL(test, f);
++	KUNIT_ASSERT_NOT_NULL(test, data);
++	f->vfl_candidate = true;
++	f->no_candidates = true;
++	KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++	memset(data, 'V', 4096);
++	KUNIT_ASSERT_EQ(test, apple_sftl_write(sftl, TEST_APPEND_BASE, data, 1), 0);
++	KUNIT_EXPECT_PTR_EQ(test, sftl_test_written(f, 3, 0, 0), NULL);
++	KUNIT_ASSERT_NOT_NULL(test, sftl_test_written(f, 4, 0, 0));
++	KUNIT_EXPECT_EQ(test, f->programs, 1U);
++	KUNIT_EXPECT_EQ(test, f->program_outside, 0U);
++	apple_sftl_free(sftl);
++	sftl = NULL;
++	KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++	KUNIT_ASSERT_EQ(test, apple_sftl_read(sftl, TEST_APPEND_BASE, data), 0);
++	sftl_test_expect_fill(test, data, 'V');
++	apple_sftl_free(sftl);
++}
++
++static void sftl_test_append_closes_at_sequence_limit(struct kunit *test)
++{
++	struct sftl_fixture *f = sftl_test_fixture(test, SFTL_NO_FAULT);
++	struct apple_sftl *sftl = NULL;
++	struct apple_sftl_info info;
++	const u64 limit = (1ULL << 48) - 1;
++	u8 *data = kunit_kmalloc(test, 16384, GFP_KERNEL);
++	unsigned int programs;
++
++	KUNIT_ASSERT_NOT_NULL(test, f);
++	KUNIT_ASSERT_NOT_NULL(test, data);
++	f->sequence_bias = limit - TEST_APPEND_FIRST - 479;
++	KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++	KUNIT_ASSERT_EQ(test, sftl_test_fill_append(sftl, data), 0);
++	programs = f->programs;
++	KUNIT_EXPECT_EQ(test, programs, 128U);
++	apple_sftl_get_info(sftl, &info);
++	KUNIT_EXPECT_EQ(test, info.sequence, limit);
++	KUNIT_EXPECT_EQ(test, apple_sftl_write(sftl, TEST_APPEND_BASE, data, 1), -EOVERFLOW);
++	KUNIT_EXPECT_EQ(test, f->programs, programs);
++	KUNIT_EXPECT_EQ(test, apple_sftl_flush(sftl), 0);
++	apple_sftl_free(sftl);
++	sftl = NULL;
++	KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++	apple_sftl_get_info(sftl, &info);
++	KUNIT_EXPECT_EQ(test, info.sequence, limit);
++	KUNIT_ASSERT_EQ(test, apple_sftl_read(sftl, TEST_APPEND_BASE + 479, data), 0);
++	sftl_test_expect_fill(test, data, 120);
++	KUNIT_EXPECT_EQ(test, apple_sftl_write(sftl, TEST_APPEND_BASE, data, 1), -EOVERFLOW);
++	KUNIT_EXPECT_EQ(test, f->programs, programs);
++	apple_sftl_free(sftl);
++}
++
++static void sftl_test_append_no_space_keeps_reads(struct kunit *test)
++{
++	struct sftl_fixture *f = sftl_test_fixture(test, SFTL_NO_FAULT);
++	struct apple_sftl *sftl = NULL;
++	u8 *data = kunit_kmalloc(test, 4096, GFP_KERNEL);
++
++	KUNIT_ASSERT_NOT_NULL(test, f);
++	KUNIT_ASSERT_NOT_NULL(test, data);
++	f->no_candidates = true;
++	KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++	memset(data, 'N', 4096);
++	KUNIT_EXPECT_EQ(test, apple_sftl_write(sftl, TEST_APPEND_BASE, data, 1), -ENOSPC);
++	KUNIT_EXPECT_EQ(test, f->programs, 0U);
++	KUNIT_EXPECT_EQ(test, apple_sftl_read(sftl, 0, data), 0);
++	sftl_test_expect_fill(test, data, 'C');
++	apple_sftl_free(sftl);
++}
++
++static void sftl_test_append_refuses_sequence_floor_gap(struct kunit *test)
++{
++	struct sftl_fixture *f = sftl_test_fixture(test, SFTL_ALLOCATION_FLOOR);
++	struct apple_sftl *sftl = NULL;
++	u8 *data = kunit_kmalloc(test, 4096, GFP_KERNEL);
++
++	KUNIT_ASSERT_NOT_NULL(test, f);
++	KUNIT_ASSERT_NOT_NULL(test, data);
++	KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++	memset(data, 'S', 4096);
++	KUNIT_EXPECT_EQ(test, apple_sftl_write(sftl, TEST_APPEND_BASE, data, 1), -EOPNOTSUPP);
++	KUNIT_EXPECT_EQ(test, f->programs, 0U);
++	KUNIT_EXPECT_EQ(test, apple_sftl_read(sftl, 0, data), 0);
++	sftl_test_expect_fill(test, data, 'C');
++	apple_sftl_free(sftl);
++}
++
++static void sftl_test_append_rejects_invalid_window(struct kunit *test)
++{
++	struct sftl_fixture *f = sftl_test_fixture(test, SFTL_NO_FAULT);
++	struct apple_sftl *sftl = NULL;
++	u8 *data = kunit_kmalloc(test, 16384, GFP_KERNEL);
++	unsigned int reads;
++
++	KUNIT_ASSERT_NOT_NULL(test, f);
++	KUNIT_ASSERT_NOT_NULL(test, data);
++	KUNIT_ASSERT_EQ(test, apple_sftl_load(&f->provider, &sftl), 0);
++	reads = f->reads;
++	KUNIT_EXPECT_EQ(test, apple_sftl_write(sftl, TEST_APPEND_BASE, data, 0), -EINVAL);
++	KUNIT_EXPECT_EQ(test, apple_sftl_write(sftl, TEST_APPEND_BASE, data, 5), -EINVAL);
++	KUNIT_EXPECT_EQ(test, apple_sftl_write(sftl, 15625000, data, 1), -EINVAL);
++	KUNIT_EXPECT_EQ(test, apple_sftl_write(sftl, 15624999, data, 2), -EINVAL);
++	KUNIT_EXPECT_EQ(test, apple_sftl_write(sftl, TEST_APPEND_BASE, NULL, 1), -EINVAL);
++	KUNIT_EXPECT_EQ(test, f->reads, reads);
++	KUNIT_EXPECT_EQ(test, f->programs, 0U);
++	apple_sftl_free(sftl);
++}
++#endif
++
+ static struct kunit_case apple_sftl_cases[] = {
+ 	KUNIT_CASE(sftl_test_page_budget_stops_before_next_read),
+ 	KUNIT_CASE(sftl_test_deadline_stops_before_next_read),
+ 	KUNIT_CASE(sftl_test_one_transaction_deadline_overrun),
+ 	KUNIT_CASE(sftl_test_provider_failure_is_sticky),
+ 	KUNIT_CASE(sftl_test_invalid_reader_policy),
++#if IS_ENABLED(CONFIG_MTD_APPLE_SFTL_WRITE)
++	KUNIT_CASE(sftl_test_append_replay_open),
++	KUNIT_CASE(sftl_test_append_replay_closed),
++	KUNIT_CASE(sftl_test_append_replay_full_lanes),
++	KUNIT_CASE(sftl_test_append_failure_stops_io),
++	KUNIT_CASE(sftl_test_append_uncertain_program_replays),
++	KUNIT_CASE(sftl_test_append_interrupted_footer_replays),
++	KUNIT_CASE(sftl_test_append_torn_metadata_rejected),
++	KUNIT_CASE(sftl_test_append_scans_entire_candidate),
++	KUNIT_CASE(sftl_test_append_reserves_vfl_members),
++	KUNIT_CASE(sftl_test_append_closes_at_sequence_limit),
++	KUNIT_CASE(sftl_test_append_no_space_keeps_reads),
++	KUNIT_CASE(sftl_test_append_refuses_sequence_floor_gap),
++	KUNIT_CASE(sftl_test_append_rejects_invalid_window),
++#endif
+ 	KUNIT_CASE(sftl_test_complete_medium),
+ 	KUNIT_CASE(sftl_test_scan_after_open_lane_hole),
+ 	KUNIT_CASE(sftl_test_runtime_failure_stops_reads),
+diff --git a/drivers/mtd/apple-sftl.h b/drivers/mtd/apple-sftl.h
+index 7a05b95d1..0babcebb0 100644
+--- a/drivers/mtd/apple-sftl.h
++++ b/drivers/mtd/apple-sftl.h
+@@ -13,11 +13,15 @@ struct apple_sftl_info {
+ 	u32 nr_runs;
+ 	u64 checkpoint_sequence;
+ 	u64 sequence;
++	u64 journal_sequence;
+ };
+ 
+ int apple_sftl_load(struct apple_ppn *provider, struct apple_sftl **out);
+ void apple_sftl_free(struct apple_sftl *sftl);
+ int apple_sftl_read(struct apple_sftl *sftl, u32 logical_page, u8 *data);
++int apple_sftl_write(struct apple_sftl *sftl, u32 logical_page,
++		     const u8 *data, unsigned int count);
++int apple_sftl_flush(struct apple_sftl *sftl);
+ void apple_sftl_get_info(struct apple_sftl *sftl, struct apple_sftl_info *info);
+ 
+ #endif
+diff --git a/tools/testing/kunit/configs/apple_sftl_write.config b/tools/testing/kunit/configs/apple_sftl_write.config
+new file mode 100644
+index 000000000..76fe23a68
+--- /dev/null
++++ b/tools/testing/kunit/configs/apple_sftl_write.config
+@@ -0,0 +1,8 @@
++CONFIG_KUNIT=y
++CONFIG_MTD=y
++CONFIG_COMPILE_TEST=y
++CONFIG_MTD_APPLE_H2FMI=y
++CONFIG_MTD_APPLE_H2FMI_WRITE=y
++CONFIG_MTD_APPLE_SFTL=y
++CONFIG_MTD_APPLE_SFTL_WRITE=y
++CONFIG_MTD_APPLE_SFTL_KUNIT_TEST=y

@@ -57,7 +57,8 @@ class PlatformLayer(unittest.TestCase):
                               'usr/lib/orchard/platform.SHA256SUMS'}, names)
         self.assertEqual(len([name for name in names if '/dtb/' in name]), len(set(self.boards.values())))
         self.assertEqual(description, {'schema': 1, 'platform': 'apple-16k', 'kernel_release': RELEASE,
-                                       'boards': dict(sorted(self.boards.items()))})
+                                       'boards': dict(sorted(self.boards.items())),
+                                       'architecture': 'arm64', 'image': 'Image.gz'})
 
     def test_the_initrd_carries_busybox_and_the_storage_modules_only(self):
         import gzip, io

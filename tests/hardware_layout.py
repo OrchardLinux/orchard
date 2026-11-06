@@ -32,7 +32,7 @@ if sys.argv[1] == '--resolve':
     print(platform, dtb or '-')
 elif sys.argv[1] == '--platform':
     platform = resolve(sys.argv[2])[0]
-    print(json.dumps({'platform': platform, 'arch': 'arm64', 'image': 'Image.gz',
+    print(json.dumps({'platform': platform, 'arch': 'arm64', 'image': 'Image.gz', 'loader': 'm1n1',
                       'dtbs': 'arch/arm64/boot/dts/apple', 'upstream': 'kernel/upstream.lock',
                       'series': 'kernel/series/' + platform,
                       'config': 'kernel/configs/' + platform + '/config'}))
