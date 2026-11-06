@@ -349,7 +349,10 @@ class RootWrites(unittest.TestCase):
                  patch.object(I, 'check_previous_intent'), \
                  patch.object(I, 'enable_writes', return_value=False), \
                  patch.object(I, 'commit_headers', side_effect=lambda p, a: commit(p, a, record=lambda _: None)), \
-                 patch.object(I, 'mapped_root', return_value=('/dev/dm-7', {'name': 'fixture-map'})), \
+                 patch.object(I, 'mapped_root', return_value=('/dev/dm-7', {
+                     'name': 'fixture-map', 'root_uuid': LINUX, 'mode': 'rw', 'extents': [
+                         {'start_sector': p['logical'] // 512, 'sectors': p['bytes'] // 512,
+                          'physical_sector': p['physical'] // 512} for p in self.root['extents']]})), \
                  patch.object(I.subprocess, 'run', return_value=Mock(returncode=0)), \
                  patch.object(I.os, 'geteuid', return_value=0):
                 I.install(api, plan, stream)
@@ -473,6 +476,30 @@ class RootWrites(unittest.TestCase):
                                     capture_output=True, text=True, timeout=15)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.strip(), L.MAGIC.hex())
+
+    def test_cleanup_still_fences_after_unmount_or_verified_unmap_failure(self):
+        for failing_tool, mounts in (('umount', ['/target']), (I.MAPPER, [])):
+            with self.subTest(failing_tool=failing_tool):
+                commands = []
+                def command(argv, **kwargs):
+                    commands.append(argv)
+                    if argv[0] == failing_tool:
+                        raise FileNotFoundError('injected missing cleanup executable')
+                    return Mock(returncode=0)
+                api = Mock(InstallError=install_device.InstallError)
+                provider = Mock()
+                mapping = {'name': 'fixture-map', 'root_uuid': LINUX, 'mode': 'rw',
+                           'extents': [{'start_sector': 0, 'sectors': 8192, 'physical_sector': 16384}]}
+                with patch.object(I.subprocess, 'run', side_effect=command), \
+                     self.assertRaisesRegex(install_device.InstallError, 'requires inspection'):
+                    I.cleanup(api, '/dev/applesftl0', mounts, mapping, provider,
+                              disk_verified=True, changed_policy=True)
+                provider.close.assert_called_once_with()
+                self.assertIn(['blockdev', '--setro', '/dev/applesftl0'], commands)
+                self.assertFalse(any(argv[0] == 'modprobe' for argv in commands))
+                if failing_tool == I.MAPPER:
+                    self.assertEqual(commands[0], [I.MAPPER, 'unmap', '--disk', '/dev/applesftl0',
+                                                  '--root', LINUX, '--mode', 'rw', '--extent', '0:8192:16384'])
 
 
 class MapperInteroperability(unittest.TestCase):

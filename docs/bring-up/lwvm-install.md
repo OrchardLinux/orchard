@@ -106,6 +106,11 @@ complete extent table, size and writable mode. System and Data mappings
 are never opened for filesystem writes. Cleanup unmounts the target,
 removes the mapping, fences the provider and restores its default read-only
 policy. A cleanup failure is reported and requires inspection.
+Mapping removal uses the same static helper with the validated extent
+receipt. It verifies the complete DM table and provider identity without
+reading the medium, so a spent read budget still permits cleanup. Failure
+to unmount or remove a mapping leaves it for inspection while the raw
+read-only fence is still attempted.
 
 The finished result names the installed Linux UUID and filesystem UUID.
 `/etc/orchard/installed-root.json` and the host's private `last-install.json`

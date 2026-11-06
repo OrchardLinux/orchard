@@ -213,7 +213,44 @@ def mapped_root(api, disk, allocation, snapshot, root, device):
             raise lwvm.Error('Mapped root identity changed')
     finally:
         node.close()
-    return path, mapping
+    return path, {**mapping, 'root_uuid': canonical, 'extents': expected}
+
+
+def cleanup_command(argv, step, failed, *, timeout):
+    try:
+        result = subprocess.run(argv, capture_output=True, timeout=timeout)
+        if result.returncode:
+            failed.append(step)
+            return False
+    except Exception as error:
+        failed.append(step + ': ' + str(error))
+        return False
+    return True
+
+
+def cleanup(api, disk, mounts, mapping, provider, *, disk_verified, changed_policy):
+    """Attempt the raw fence even when an earlier cleanup operation fails."""
+    failed = []
+    for point in reversed(mounts):
+        cleanup_command(['umount', str(point)], str(point), failed, timeout=60)
+    if provider is not None:
+        try:
+            provider.close()
+        except OSError as error:
+            failed.append('provider close: ' + str(error))
+    if mapping is not None and not failed:
+        argv = [MAPPER, 'unmap', '--disk', disk, '--root', mapping['root_uuid'], '--mode', mapping['mode']]
+        for extent in mapping['extents']:
+            argv += ['--extent', f'{extent["start_sector"]}:{extent["sectors"]}:{extent["physical_sector"]}']
+        cleanup_command(argv, mapping['name'], failed, timeout=30)
+    if disk_verified:
+        cleanup_command(['blockdev', '--setro', disk], 'raw provider read-only fence', failed, timeout=15)
+    if changed_policy and not failed:
+        if cleanup_command(['modprobe', '-r', 'apple-sftl'], 'logical write policy', failed, timeout=30):
+            cleanup_command(['modprobe', 'apple-sftl'], 'default read-only provider reload', failed, timeout=30)
+            cleanup_command(['blockdev', '--setro', disk], 'reloaded provider read-only fence', failed, timeout=15)
+    if failed:
+        raise api.InstallError('storage-cleanup-stopped', 'Installation cleanup requires inspection: ' + ', '.join(failed))
 
 
 def install(api, plan, stream):
@@ -299,30 +336,5 @@ def install(api, plan, stream):
     except lwvm.Error as error:
         raise api.InstallError('lwvm-install-stopped', str(error)) from error
     finally:
-        failed = []
-        for point in reversed(mounts):
-            result = subprocess.run(['umount', str(point)], capture_output=True, timeout=60)
-            if result.returncode:
-                failed.append(str(point))
-        if provider is not None:
-            provider.close()
-        if mapping is not None and not failed:
-            result = subprocess.run(['dmsetup', 'remove', mapping['name']], capture_output=True, timeout=30)
-            if result.returncode:
-                failed.append(mapping['name'])
-        if disk_verified:
-            fenced = subprocess.run(['blockdev', '--setro', disk], capture_output=True, timeout=15)
-            if fenced.returncode:
-                failed.append('raw provider read-only fence')
-        if changed_policy and not failed:
-            removed = subprocess.run(['modprobe', '-r', 'apple-sftl'], capture_output=True, timeout=30)
-            if not removed.returncode:
-                loaded = subprocess.run(['modprobe', 'apple-sftl'], capture_output=True, timeout=30)
-                fenced = subprocess.run(['blockdev', '--setro', disk], capture_output=True, timeout=15)
-                if loaded.returncode or fenced.returncode:
-                    failed.append('default read-only provider reload')
-            else:
-                failed.append('logical write policy')
-        if failed:
-            raise api.InstallError('storage-cleanup-stopped', 'Installation cleanup requires inspection: ' + ', '.join(failed))
+        cleanup(api, disk, mounts, mapping, provider, disk_verified=disk_verified, changed_policy=changed_policy)
     api.emit('finished', root=root['partuuid'], boot=handoff, boot_preparation_required=True)
