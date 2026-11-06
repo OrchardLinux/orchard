@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
+"""Exercise the real mapper with a disposable sparse image and Linux loop device."""
+import argparse
+import errno
+import importlib.util
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import uuid
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'src'))
+spec = importlib.util.spec_from_file_location('fixture', ROOT / 'tests/test_lwvm.py')
+fixture = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(fixture)
+
+
+def run(*argv, check=True):
+    return subprocess.run(argv, check=check, text=True, capture_output=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--helper', type=Path, required=True)
+    args = parser.parse_args()
+    if sys.platform != 'linux' or os.geteuid() != 0:
+        parser.error('Run as root on a disposable Linux build worker')
+    identity = str(uuid.uuid4())
+    name = 'orchard-lwvm-' + identity
+    loop = None
+    with tempfile.TemporaryDirectory(prefix='orchard-lwvm-check-') as temporary:
+        image = Path(temporary) / 'media.img'
+        h = fixture.header()
+        h[0x310:0x320] = uuid.UUID(identity).bytes
+        fixture.crc(h)
+        with image.open('wb') as out:
+            out.truncate(fixture.MEDIA)
+            out.write(h)
+            out.seek(fixture.CHUNK - 4096)
+            out.write(h)
+            for physical, value in ((1, b'S'), (3, b'D'), (10, b'A'), (6, b'B'), (7, b'C')):
+                out.seek(physical * fixture.CHUNK)
+                out.write(value * fixture.CHUNK)
+        try:
+            loop = run('losetup', '--find', '--show', str(image)).stdout.strip()
+            def map_root(mode='ro', check=True):
+                return run(str(args.helper), 'map', '--disk', loop, '--root', identity,
+                           '--mode', mode, '--json', check=check)
+            first = json.loads(map_root().stdout)
+            second = json.loads(map_root().stdout)
+            assert first == second, 'exact mapping reuse changed the receipt'
+            mapped = Path(first['mapping']['device'])
+            expected = b'A' * fixture.CHUNK + b'B' * fixture.CHUNK + b'C' * 8192
+            with mapped.open('rb', buffering=0) as stream:
+                assert stream.read() == expected, 'noncontiguous logical read is incorrect'
+            descriptor = None
+            try:
+                descriptor = os.open(mapped, os.O_WRONLY)
+                os.write(descriptor, b'R' * 512)
+            except OSError as failure:
+                assert failure.errno in (errno.EROFS, errno.EACCES, errno.EPERM)
+            else:
+                raise AssertionError('read-only map accepted a write')
+            finally:
+                if descriptor is not None:
+                    os.close(descriptor)
+            assert map_root('rw', check=False).returncode, 'access-mode mismatch was reused'
+            assert json.loads(map_root().stdout) == first, 'failed reuse changed the live map'
+            run('dmsetup', 'remove', name)
+            writable = json.loads(map_root('rw').stdout)
+            with open(writable['mapping']['device'], 'r+b', buffering=0) as stream:
+                stream.seek(fixture.CHUNK)
+                stream.write(b'W' * 512)
+                os.fsync(stream.fileno())
+            with image.open('rb', buffering=0) as stream:
+                for physical, value in ((1, b'S'), (3, b'D'), (10, b'A')):
+                    stream.seek(physical * fixture.CHUNK)
+                    assert stream.read(512) == value * 512, 'write escaped the Linux extent'
+                stream.seek(6 * fixture.CHUNK)
+                assert stream.read(512) == b'W' * 512, 'write missed the Linux physical extent'
+            run('dmsetup', 'remove', name)
+            # Reusing a name/UUID with a different table must fail without removal.
+            table = f'0 {first["bytes"] // 512} linear {loop} {11 * fixture.CHUNK // 512}'
+            run('dmsetup', 'create', name, '--uuid', 'ORCHARD-LWVM-' + identity, '--table', table)
+            assert map_root('rw', check=False).returncode, 'foreign table was reused'
+            assert run('dmsetup', 'info', name, check=False).returncode == 0, 'foreign map was removed'
+            print('PASS: real DM create, reuse, ro/rw mismatch, fragmented reads, bounded writes and foreign-table refusal')
+        finally:
+            run('dmsetup', 'remove', name, check=False)
+            if loop:
+                run('losetup', '--detach', loop)
+
+
+if __name__ == '__main__':
+    main()

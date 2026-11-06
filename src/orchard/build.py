@@ -546,6 +546,22 @@ def prepare_tools(hardware=None, cache=None, *, device):
         return _prepare_tools(hardware, cache / 'components-v2', architecture)
 
 
+def prepare_lwvm(hardware=None, cache=None, *, device):
+    """Build the static LwVM mapper separately from the recovery tool contract."""
+    hardware, cache = _build_context(hardware, cache, device)
+    architecture = kernels.descriptor(hardware, device)['arch']
+    inputs = ['boot/lwvm', 'boot/initramfs/recovery/Containerfile',
+              'boot/initramfs/recovery/install-toolchain',
+              'boot/initramfs/recovery/check-tools.py', 'src/orchard/buildenv.py']
+    key = recipe_key(hardware, inputs)
+    key = hashlib.sha256((key + ':' + architecture).encode()).hexdigest()
+    def produce(stage):
+        command(hardware / 'boot/lwvm/build', '--arch', architecture, '--output', stage)
+    with component_lock(cache):
+        return cached_component(cache / 'components-v2', 'lwvm-' + architecture,
+                                lambda: key, produce) / 'orchard-lwvm'
+
+
 def prepare_payload_loader(hardware=None, cache=None, *, device):
     """Build the loader format named by the device's platform descriptor."""
     hardware, cache = _build_context(hardware, cache, device)
