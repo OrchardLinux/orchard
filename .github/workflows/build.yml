@@ -349,13 +349,17 @@ jobs:
           python -m pip install -e .
           python -m orchard.installer core out/publication/orchard-core.pyz \
             --pongo out/components/quiet/pongo.bin --m1n1 out/components/quiet/m1n1.bin
+          # Each platform's finished kernel, the installer's tools, and the index a
+          # distribution builds its release from, so it stops copying any of them.
+          python -m orchard.image.platforms_index out/publication --kernels out/platforms \
+            --tools out/components/boot --commit "$GITHUB_SHA"
           # tool-components.tar.gz stays: a distribution build takes its tools from it.
           rm out/publication/kernel-components-*.tar.gz out/publication/quiet-pongo.tar.gz
           # Source keys of each platform's kernel, m1n1 and the tools: a distribution build
           # with the same state uses these instead of building them (orchard.published).
           python -m orchard.published keys --output out/publication/component-keys.json apple-16k apple-4k apple-armv7
           git archive --format=tar.gz -o out/publication/orchard-source.tar.gz HEAD
-          (cd out/publication && sha256sum ./*.tar.gz ./*.bin ./*.pyz ./component-keys.json > SHA256SUMS)
+          (cd out/publication && sha256sum ./*.tar.gz ./*.bin ./*.pyz ./component-keys.json ./platforms.toml > SHA256SUMS)
       - name: Attest public build
         if: toJSON(github.event.repository.private) == 'false'
         id: attest

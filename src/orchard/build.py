@@ -491,7 +491,7 @@ def has_loader_patches(hardware):
 M1N1_INPUTS = ['boot/m1n1', 'boot/quiet/m1n1.patch', 'src/orchard/buildenv.py']
 TOOL_INPUTS = ['boot/initramfs/recovery/' + name for name in
                ('build-tools', 'build-tools-in-container', 'Containerfile',
-                'install-toolchain', 'upstream.lock')] + ['src/orchard/buildenv.py']
+                'install-toolchain', 'upstream.lock', 'orchard-write.c')] + ['src/orchard/buildenv.py']
 
 
 def recipe_work(components, recipe, key):

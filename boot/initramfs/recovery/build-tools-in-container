@@ -63,6 +63,21 @@ tar -xJf "$work/iw.tar.xz" -C "$build"
   cp iw "$build/bin/"
 )
 
+# The installer's writer and the tools that finish a restored root, on any system.
+tar -xzf "$work/zstd.tar.gz" -C "$build"
+make -C "$build/zstd-1.5.7/lib" -j2 libzstd.a CC=musl-gcc ZSTD_LEGACY_SUPPORT=0
+$CC $CFLAGS -static -Wall -Wextra -pthread -I"$build/zstd-1.5.7/lib" -o "$build/bin/orchard-write" \
+  /recipe/orchard-write.c "$build/zstd-1.5.7/lib/libzstd.a"
+tar -xzf "$work/e2fsprogs.tar.gz" -C "$build"
+(
+  cd "$build/e2fsprogs-1.47.4"
+  ./configure -q LDFLAGS=-static --disable-nls --disable-fuse2fs --disable-e2initrd-helper --disable-uuidd
+  make -j2 libs
+  make -j2 -C resize resize2fs
+  make -j2 -C misc tune2fs
+  cp resize/resize2fs misc/tune2fs "$build/bin/"
+)
+
 dpkg-deb -x "$work/busybox.deb" "$build/package"
 cp "$build/package/bin/busybox" "$build/bin/busybox"
 chmod 755 "$build/bin/"*
