@@ -104,7 +104,7 @@ jobs:
     strategy:
       matrix:
         # Every platform with a kernel series; distribution releases cover all of them.
-        platform: [apple-16k, apple-4k]
+        platform: [apple-16k, apple-4k, apple-armv7]
     defaults:
       run:
         shell: bash
@@ -275,10 +275,13 @@ jobs:
           tar -xzf out/downloads/quiet-pongo.tar.gz -C out/components/quiet
           # One bundle per platform carries its kernel, modules and every DTB, and the
           # shared tools and loaders; devices/<device>/device.toml names a device's DTB.
-          for platform in apple-16k apple-4k; do
+          # The tools and loaders are arm64: apple-armv7's bundle is its kernel alone.
+          for platform in apple-16k apple-4k apple-armv7; do
             mkdir -p "out/platforms/$platform"
             tar -xzf "out/downloads/kernel-components-$platform.tar.gz" -C "out/platforms/$platform"
-            cp -R out/components/boot out/components/quiet out/components/*.lock "out/platforms/$platform/components/"
+            if [[ $platform != apple-armv7 ]]; then
+              cp -R out/components/boot out/components/quiet out/components/*.lock "out/platforms/$platform/components/"
+            fi
             python ci/package_components.py --platform "$platform" --directory "out/platforms/$platform/components" \
               --output "out/publication/$platform-components.tar.gz"
           done
@@ -305,7 +308,7 @@ jobs:
           rm out/publication/kernel-components-*.tar.gz out/publication/quiet-pongo.tar.gz
           # Source keys of each platform's kernel, m1n1 and the tools: a distribution build
           # with the same state uses these instead of building them (orchard.published).
-          python -m orchard.published keys --output out/publication/component-keys.json apple-16k apple-4k
+          python -m orchard.published keys --output out/publication/component-keys.json apple-16k apple-4k apple-armv7
           git archive --format=tar.gz -o out/publication/orchard-source.tar.gz HEAD
           (cd out/publication && sha256sum ./*.tar.gz ./*.bin ./*.pyz ./component-keys.json > SHA256SUMS)
       - name: Attest public build

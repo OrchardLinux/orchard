@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import tarfile
+import tomllib
 
 
 def receipt(path):
@@ -18,26 +19,35 @@ def receipt(path):
 
 
 def package(directory, output, device='j71b', platform=None):
-    """A platform bundle carries every DTB in kernel/dtbs; a device bundle only its own."""
+    """A platform bundle carries every DTB in kernel/dtbs; a device bundle only its own.
+
+    The boot tools and m1n1/Pongo are arm64, for platforms that boot through m1n1: a
+    platform with another loader (apple-armv7) gets a bundle of its kernel alone.
+    """
     if output.exists():
         raise FileExistsError(output)
     here = Path(__file__).resolve().parents[1]
+    described = {'image': 'Image.gz', 'loader': 'm1n1'}
+    if platform:
+        described = tomllib.loads((here / 'platforms' / f'{platform}.toml').read_text())['kernel']
+    arm64 = described['loader'] == 'm1n1'
     dtb = 'kernel/dtbs' if platform else f'kernel/{device}.dtb'
     if platform and not any((directory / dtb).glob('*.dtb')):
         raise ValueError('Platform device trees are missing')
-    for name in ('kernel/Image.gz', *(() if platform else (dtb,)), 'kernel/kernel.release',
-                 'boot/busybox', 'boot/dropbear', 'boot/dropbearkey',
-                 'boot/wpa_supplicant', 'boot/wpa_cli', 'boot/iw',
-                 'quiet/m1n1.bin', 'quiet/pongo.bin'):
+    tools = ('boot/busybox', 'boot/dropbear', 'boot/dropbearkey', 'boot/wpa_supplicant', 'boot/wpa_cli', 'boot/iw',
+             'quiet/m1n1.bin', 'quiet/pongo.bin')
+    for name in (f"kernel/{described['image']}", *(() if platform else (dtb,)), 'kernel/kernel.release',
+                 *(tools if arm64 else ())):
         receipt(directory / name)
     if not any((directory / 'kernel/lib/modules').rglob('*.ko')):
         raise ValueError('Kernel modules are missing')
-    quiet = {'schema': 1, 'profile': platform or device, 'presentation': 'black',
-             'files': {role: receipt(directory / 'quiet' / name)
-                       for role, name in (('loader', 'm1n1.bin'), ('pongo', 'pongo.bin'))},
-             'patches': {name: receipt(here / 'boot/quiet' / name)['sha256']
-                         for name in ('pongo.patch', 'm1n1.patch')}}
-    (directory / 'quiet/quiet-boot.json').write_text(json.dumps(quiet, indent=2) + '\n')
+    if arm64:
+        quiet = {'schema': 1, 'profile': platform or device, 'presentation': 'black',
+                 'files': {role: receipt(directory / 'quiet' / name)
+                           for role, name in (('loader', 'm1n1.bin'), ('pongo', 'pongo.bin'))},
+                 'patches': {name: receipt(here / 'boot/quiet' / name)['sha256']
+                             for name in ('pongo.patch', 'm1n1.patch')}}
+        (directory / 'quiet/quiet-boot.json').write_text(json.dumps(quiet, indent=2) + '\n')
     files = {}
     for path in sorted(directory.rglob('*')):
         if path.is_symlink():
