@@ -53,6 +53,7 @@ charging = "missing"
 charging_control = "missing"
 suspend = "missing"
 resume = "missing"
+# The P105 USB topic preserves legacy tuning; its shared gate helper needs a J1 regression boot.
 usb_serial = "untested" # Root shell on ttyGS0.
 usb_network = "untested" # CDC Ethernet, pinged both ways.
 audio_output = "missing"

@@ -14,3 +14,4 @@ stages = ["iBSS", "iBEC"]
 platform = "P105 on a Cascadia-based build"
 stages = "Project Cascadia P105 boot chain"
 reference_version = "Project Cascadia builds its A5 boot chain from 8.4.1 / 12H321"
+usb_phy = "P105 uses a 24 MHz reference; the proposed S5L8942X cold-handoff callbacks await an exact-revision boot (docs/bring-up/p105-usb-handoff.md)."

@@ -26,3 +26,9 @@ the IPSW members `058-24036-023.dmg`, `kernelcache.release.p105`, `Firmware/dfu/
 The touch calibration is per unit and private: `lib/firmware/mtcal.bin`, the
 unit's syscfg `MtCl`, captured from its jailbroken iOS. It is never part of a
 public recipe or release.
+
+## Open work
+
+The USB cold-handoff topic has a compiled candidate and recorded hardware
+observations. Its exact revision awaits a device boot; see
+[USB handoff](../../docs/bring-up/p105-usb-handoff.md).
