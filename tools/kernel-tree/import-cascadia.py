@@ -18,13 +18,14 @@ usage: import-cascadia.py --cascadia DIR --commit REV --linux DIR --base REV --o
 import argparse
 import atexit
 import collections
+import functools
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import textwrap
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
 parser.add_argument('--cascadia', required=True, type=Path, help='clone of Project-Cascadia')
@@ -148,24 +149,31 @@ TREE_CHANGES = collections.defaultdict(list)  # kernel path -> [(sha, name, emai
 TREE_DIRS = sorted({'patches/tree', ROOT + 'patches/tree'})
 
 
+@functools.lru_cache(maxsize=None)
 def tree_sections(rev):
-    """Sections of every patches/tree patch at rev, wherever the tree was then."""
-    r = subprocess.run(['git', '-C', args.cascadia, 'ls-tree', '-r', '--name-only', rev, '--', *TREE_DIRS],
+    """Sections of the patches/tree patches at rev, wherever the tree was then:
+    {(patch file name, kernel path): section text}. Keyed by the file name, not
+    its directory, so a patch reads the same on both sides of the move, and two
+    patches that touch one kernel path keep a section each."""
+    r = subprocess.run(['git', '-C', args.cascadia, 'ls-tree', '-r', '-z', '--name-only', rev, '--', *TREE_DIRS],
                        capture_output=True)
     result = {}
-    for patch in r.stdout.decode().split():
-        result.update(sections(show(rev, patch)))
+    for patch in filter(None, r.stdout.decode().split('\0')):
+        for path, text in sections(show(rev, patch)).items():
+            result[(PurePosixPath(patch).name, path)] = text
     return result
 
 
-# A commit changed a kernel path when its section differs before and after, so
-# the move, which changes no section, is nobody's change.
-for line in cgit('log', '--format=%H\t%an\t%ae\t%aD', commit, '--', *TREE_DIRS).splitlines():
-    sha, name, email, date = line.split('\t')
-    before, after = tree_sections(sha + '^'), tree_sections(sha)
-    for path in set(before) | set(after):
-        if before.get(path) != after.get(path):
-            TREE_CHANGES[path].append((sha, name, email, date))
+# A commit changed a kernel path when one of its sections differs before and
+# after, so the move, which changes no section, is nobody's change.
+for line in cgit('log', '--format=%H\t%P\t%an\t%ae\t%aD', commit, '--', *TREE_DIRS).splitlines():
+    sha, parents, name, email, date = line.split('\t')
+    # The first parent's sha, not sha^, so a revision is listed once (cached).
+    before = tree_sections(parents.split()[0]) if parents else {}
+    after = tree_sections(sha)
+    for path in sorted({key[1] for key in before.keys() ^ after.keys()} |
+                       {key[1] for key in before.keys() & after.keys() if before[key] != after[key]}):
+        TREE_CHANGES[path].append((sha, name, email, date))
 
 
 def tree_history(path):
