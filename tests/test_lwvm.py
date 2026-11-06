@@ -23,21 +23,22 @@ def crc(header):
     return header
 
 
-def header(media=MEDIA):
+def header(media=MEDIA, chunk=CHUNK):
     """Invented identities; root's physical order is 10,6,7 with a partial tail."""
     h = bytearray(4096)
     h[:16] = bytes.fromhex('6a9088cf8afd630ae351e24887e0b98b')
     h[16:32] = uuid.UUID('aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee').bytes
     struct.pack_into('<QI', h, 0x20, media, 3)
     start = 24576
-    for i, length in enumerate((2 * CHUNK, 4 * CHUNK, 2 * CHUNK + 8192)):
+    for i, length in enumerate((2 * chunk, 4 * chunk, 2 * chunk + 8192)):
         off = 0x200 + i * 0x80
         h[off:off + 16] = LINUX if i == 2 else uuid.UUID('48465300-0000-11aa-aa11-00306543ecac').bytes
         h[off + 16:off + 32] = uuid.UUID(ROOT_UUID if i == 2 else f'1000000{i}-1111-4222-8333-444444444444').bytes
         struct.pack_into('<QQQ', h, off + 32, start, start + length, 0x3000000000000 if i == 1 else 0)
         start += length
     for index in range(1024):
-        struct.pack_into('<H', h, 0x800 + index * 2, 0xf000 if index == 0 else 0xf111)
+        word = 0xf000 if index == 0 else (0xf111 if index < media // chunk else 0xf3ff)
+        struct.pack_into('<H', h, 0x800 + index * 2, word)
     for owner, physical in enumerate(((1, 2), (3, 4, 5, 8), (10, 6, 7))):
         for logical, index in enumerate(physical):
             struct.pack_into('<H', h, 0x800 + index * 2, owner << 12 | logical)
@@ -61,14 +62,14 @@ class LwvmCParser(unittest.TestCase):
     def tearDownClass(cls):
         cls.temporary.cleanup()
 
-    def invoke(self, primary=None, backup=None, root=ROOT_UUID, media=MEDIA):
+    def invoke(self, primary=None, backup=None, root=ROOT_UUID, media=MEDIA, chunk=CHUNK):
         primary = header() if primary is None else primary
         backup = primary if backup is None else backup
         image = self.work / 'media.img'
         with image.open('wb') as stream:
             stream.truncate(media)
             stream.write(primary)
-            stream.seek(CHUNK - 4096)
+            stream.seek(chunk - 4096)
             stream.write(backup)
         return subprocess.run([str(self.binary), 'inspect', '--disk', str(image),
                                '--root', root, '--json'], capture_output=True, text=True)
@@ -143,6 +144,16 @@ class LwvmCParser(unittest.TestCase):
         result = self.invoke(crc(h), media=media)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)['chunk_bytes'], CHUNK)
+
+    def test_header_copies_must_occupy_disjoint_ranges(self):
+        for media in (3 * 1024 * 1024, 4 * 1024 * 1024):
+            result = self.invoke(media=media)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('chunk geometry', result.stderr)
+        media = 4 * 1024 * 1024 + 4096
+        result = self.invoke(header(media, chunk=8192), media=media, chunk=8192)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['chunk_bytes'], 8192)
 
     def test_map_refuses_regular_image_before_ioctl(self):
         self.invoke()

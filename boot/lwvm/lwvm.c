@@ -74,7 +74,7 @@ int lwvm_geometry(uint64_t media, uint64_t *chunk, const char **error)
 		return fail(error, "unsupported LwVM media size");
 	*chunk = 1;
 	while (shifted) { *chunk <<= 1; shifted >>= 1; }
-	if (*chunk < 4096 || media / *chunk < 2)
+	if (*chunk < 2 * LWVM_HEADER_BYTES || media / *chunk < 2)
 		return fail(error, "unsupported LwVM chunk geometry");
 	return 0;
 }

@@ -43,7 +43,8 @@ The nonzero media UUID occupies `0x10..0x1f`.
 
 To derive chunk size, take `(media_bytes - 1) >> 10`, then choose the power of
 two whose exponent is that value's bit length. The accepted value fits 32
-bits and gives a chunk of at least 4096 bytes. The primary header starts at
+bits. The mapper requires at least 8192 bytes per chunk so the two 4096-byte
+header ranges remain disjoint. The primary header starts at
 zero; the backup starts at `chunk_bytes - 4096`. No measured device size or
 owner identity selects the geometry.
 
