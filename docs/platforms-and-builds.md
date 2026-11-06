@@ -331,6 +331,10 @@ too, with its kernel, modules and device trees alone, because the boot tools
 and loaders in the other bundles are arm64. CI building it every nightly is
 also what catches a broken Cascadia re-import.
 
+CI builds Pongo only when its recipe (`boot/quiet/build-pongo.py`, `pongo.patch`)
+differs from the last nightly's, because that takes a Mac. Otherwise it reuses
+that nightly's Pongo and checks it against `SHA256SUMS`.
+
 **Planned: orchard as versioned tooling** (agreed November 2026, after
 Flutter's SDK and channels). The hidden mainline clone (`orchard-main`) is
 gone (November 2026).

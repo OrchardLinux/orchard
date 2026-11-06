@@ -47,6 +47,16 @@ class CIEfficiency(unittest.TestCase):
         self.assertIn("hashFiles('boot/quiet/build-pongo.py', 'boot/quiet/pongo.patch')", body)
         self.assertIn('xcrun --sdk iphoneos --show-sdk-build-version', body)
 
+    def test_pongo_needs_a_mac_only_when_its_recipe_changed(self):
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        check = job(workflow, 'pongo-check')
+        self.assertIn('runs-on: ubuntu-24.04', check)
+        self.assertIn('boot/quiet/build-pongo.py boot/quiet/pongo.patch', check)
+        body = job(workflow, 'pongo')
+        self.assertIn('runs-on: ${{ needs.pongo-check.outputs.runner }}', body)
+        self.assertIn('sha256sum -c', body)
+        self.assertIn("&& needs.pongo-check.outputs.tag == ''", body)
+
     def test_shared_toolchain_package_lists_can_be_queried_without_installing(self):
         recipes = [('kernel/install-toolchain', 'kmod'),
                    ('boot/m1n1/install-toolchain', 'clang-19'),

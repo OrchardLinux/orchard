@@ -191,12 +191,57 @@ jobs:
           compression-level: 0
           if-no-files-found: error
           retention-days: 2
-  pongo:
+  pongo-check:
+    # Pongo only builds on a Mac and doesn't change: while its recipe matches the last
+    # nightly's, use that nightly's Pongo, so a Mac shortage can't hold up a nightly.
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changed.outputs.nightly == 'true'
     needs: [native-smoke, changed]
-    runs-on: macos-15
-    timeout-minutes: 60
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      runner: ${{ steps.check.outputs.runner }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: check
+        env:
+          REUSE_RUN: ${{ inputs.reuse_run_id }}
+        run: |
+          tag= runner=macos-15
+          [[ -n "$REUSE_RUN" ]] && runner=ubuntu-24.04
+          if [[ -z "$REUSE_RUN" ]] && pointer=$(curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/nightly/latest.json"); then
+            commit=$(jq -r .commit <<<"$pointer")
+            if git fetch -q --depth 1 origin "$commit" && \
+               git diff --quiet "$commit" HEAD -- boot/quiet/build-pongo.py boot/quiet/pongo.patch; then
+              tag=$(jq -r .name <<<"$pointer") runner=ubuntu-24.04
+            fi
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "runner=$runner" >> "$GITHUB_OUTPUT"
+          if [[ -n "$tag" ]]; then echo "Pongo: from $tag, recipe unchanged" >> "$GITHUB_STEP_SUMMARY"; fi
+  pongo:
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changed.outputs.nightly == 'true'
+    needs: [native-smoke, changed, pongo-check]
+    runs-on: ${{ needs.pongo-check.outputs.runner }}
+    timeout-minutes: 60
+    env:
+      PONGO_TAG: ${{ needs.pongo-check.outputs.tag }}
+    steps:
+      - name: Use the Pongo of the last nightly
+        if: needs.pongo-check.outputs.tag != ''
+        run: |
+          mkdir -p out/quiet
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$PONGO_TAG"
+          curl -fsSL -o out/SHA256SUMS "$base/SHA256SUMS"
+          curl -fsSL -o out/quiet/pongo.bin "$base/pongo.bin"
+          curl -fsSL -o out/pongo-source.tar.gz "$base/pongo-source.tar.gz"
+          for file in pongo.bin pongo-source.tar.gz; do
+            sum=$(awk -v name="./$file" '$2 == name {print $1}' out/SHA256SUMS)
+            path=out/$file; [[ $file == pongo.bin ]] && path=out/quiet/pongo.bin
+            echo "$sum  $path" | sha256sum -c -
+          done
+          tar -C out/quiet -czf out/quiet-pongo.tar.gz pongo.bin
       - name: Reuse unchanged successful outputs
         if: inputs.reuse_run_id != ''
         uses: actions/download-artifact@v4
@@ -206,21 +251,21 @@ jobs:
           run-id: ${{ inputs.reuse_run_id }}
           github-token: ${{ github.token }}
       - uses: actions/checkout@v4
-        if: inputs.reuse_run_id == ''
+        if: inputs.reuse_run_id == '' && needs.pongo-check.outputs.tag == ''
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
-        if: inputs.reuse_run_id == ''
+        if: inputs.reuse_run_id == '' && needs.pongo-check.outputs.tag == ''
         with:
           python-version: '3.14'
       - name: Fingerprint the Apple toolchain
-        if: inputs.reuse_run_id == ''
+        if: inputs.reuse_run_id == '' && needs.pongo-check.outputs.tag == ''
         id: toolchain
         run: |
           fingerprint=$({ sw_vers; xcodebuild -version; xcrun --sdk iphoneos --show-sdk-build-version; xcrun clang --version; } | shasum -a 256 | awk '{print $1}')
           echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v4
-        if: inputs.reuse_run_id == ''
+        if: inputs.reuse_run_id == '' && needs.pongo-check.outputs.tag == ''
         id: pongo-cache
         with:
           path: |
@@ -228,13 +273,13 @@ jobs:
             out/pongo-source.tar.gz
           key: quiet-pongo-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('boot/quiet/build-pongo.py', 'boot/quiet/pongo.patch') }}
       - name: Build quiet Pongo once (including newlib)
-        if: steps.pongo-cache.outputs.cache-hit != 'true' && inputs.reuse_run_id == ''
+        if: steps.pongo-cache.outputs.cache-hit != 'true' && inputs.reuse_run_id == '' && needs.pongo-check.outputs.tag == ''
         run: |
           python boot/quiet/build-pongo.py --output out/quiet/pongo.bin --work-dir out/pongo-work
           tar -C out/quiet -czf out/quiet-pongo.tar.gz pongo.bin
           tar -C out/pongo-work/source --exclude=.git -czf out/pongo-source.tar.gz .
       - name: Record cache usage
-        if: inputs.reuse_run_id == ''
+        if: inputs.reuse_run_id == '' && needs.pongo-check.outputs.tag == ''
         env:
           CACHE_HIT: ${{ steps.pongo-cache.outputs.cache-hit }}
         run: |
