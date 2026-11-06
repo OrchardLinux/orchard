@@ -125,8 +125,11 @@ def choose_target(layout, clock, *, name='Linux', input_fn=input, output=print):
         raise ValueError('No valid target was chosen; nothing was changed')
     option = options[int(answer) - 1]
     if option.kind == 'replace':
-        phrase = f'erase {option.partition["number"]}'
-        if option.partition['type'] == install_layout.LINUX_DATA and layout['disk'].get('table') != 'lwvm':
+        partition = option.partition
+        if partition is None:
+            raise ValueError('Replacement target has no partition identity')
+        phrase = f'erase {partition["number"]}'
+        if partition['type'] == install_layout.LINUX_DATA and layout['disk'].get('table') != 'lwvm':
             # Installs from the previous installer were one Linux-data partition; this
             # installer writes a boot partition and an arm64 root instead.
             output('This looks like an install from the previous Orchard installer. It cannot be '
