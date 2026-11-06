@@ -66,6 +66,9 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
 
 ### Hardware
 
+- USB is about three times faster on Apple devices: SSH over USB reaches 36
+  MiB/s, up from 12 on the iPad 6. A process that pauses reading no longer takes
+  down the device's USB network and serial.
 - Add experimental PMIC power-off handling for iPad (6th generation, Wi-Fi;
   iPad7,5 / J71b).
 - iPhone X (GSM, d221): internal storage through the Apple ANS2 NVMe driver
