@@ -1,5 +1,5 @@
 # iPad mini 3 (Cellular) (J86M): identity from public sources
-# (tools/catalog/generate). No Orchard bring-up yet; see docs/device-bring-up.md.
+# (tools/catalog/generate). In its platform's kernel, no bring-up yet; see docs/device-bring-up.md.
 schema = 1
 kind = "hardware.device"
 
@@ -13,5 +13,46 @@ dt_compatible = ["apple,j86m"]
 chip = 0x8960
 board = 0x34
 
-[catalog]
-dtb = "s5l8960x-j86m" # Exists in OrchardLinux/linux; not enabled here yet.
+[boot]
+methods = ["checkm8-pongo"] # checkra1n's device list (checkra.in); not run on this board with Orchard yet.
+entries = ["checkra1n"]
+
+[kernel]
+platform = "apple-4k"
+dtb = "s5l8960x-j86m" # arch/arm64/boot/dts/apple/<dtb>.dtb
+
+[firmware]
+recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until bring-up needs it.
+
+[support]
+status = "experimental"
+
+# States: working, untested, missing, none (features.toml). Nothing here has run on
+# this board with Orchard: "untested" means a driver binds in its device tree
+# (tools/catalog/drivers.json), plus the display's boot console.
+[features]
+display = "untested"
+screen_off = "missing"
+backlight = "untested"
+touch = "missing"
+buttons = "untested"
+accelerometer = "missing"
+gyroscope = "missing"
+light_sensor = "missing"
+touch_id = "missing"
+storage_read = "missing"
+storage_write = "missing"
+wifi = "missing"
+bluetooth_input = "missing"
+bluetooth_audio = "missing"
+cellular = "missing"
+battery = "missing"
+charging = "missing"
+charging_control = "missing"
+suspend = "missing"
+resume = "missing"
+usb_serial = "untested"
+usb_network = "untested"
+audio_output = "missing"
+audio_input = "missing"
+camera = "missing"

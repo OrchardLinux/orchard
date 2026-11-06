@@ -16,5 +16,42 @@ board = 0x06
 [boot]
 methods = ["checkm8-pongo"] # palera1n's device list (palera.in).
 
-[catalog]
-dtb = "t8011-j208" # Exists in OrchardLinux/linux; not enabled here yet.
+[kernel]
+platform = "apple-16k"
+dtb = "t8011-j208" # arch/arm64/boot/dts/apple/<dtb>.dtb
+
+[firmware]
+recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until bring-up needs it.
+
+[support]
+status = "experimental"
+
+# States: working, untested, missing, none (features.toml). Nothing here has run on
+# this board with Orchard: "untested" means a driver binds in its device tree
+# (tools/catalog/drivers.json), plus the display's boot console.
+[features]
+display = "untested"
+screen_off = "missing"
+backlight = "untested"
+touch = "missing"
+buttons = "untested"
+accelerometer = "missing"
+gyroscope = "missing"
+light_sensor = "missing"
+touch_id = "missing"
+storage_read = "missing"
+storage_write = "missing"
+wifi = "missing"
+bluetooth_input = "missing"
+bluetooth_audio = "missing"
+cellular = "missing"
+battery = "missing"
+charging = "missing"
+charging_control = "missing"
+suspend = "missing"
+resume = "missing"
+usb_serial = "untested"
+usb_network = "untested"
+audio_output = "missing"
+audio_input = "missing"
+camera = "missing"

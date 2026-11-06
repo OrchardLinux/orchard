@@ -216,7 +216,7 @@ class IdentityOnlyBoards(unittest.TestCase):
     def test_no_build_selects_it(self):
         from orchard.ram import boards_by_platform
         boards = boards_by_platform(ROOT)
-        self.assertFalse(any('k93' in platform or 'd20' in platform for platform in boards.values()))
+        self.assertFalse(any('k93' in platform or 'n41' in platform for platform in boards.values()))
         self.assertIn('j71b', boards['apple-16k'])
 
     def test_asking_for_its_firmware_says_there_is_none(self):
