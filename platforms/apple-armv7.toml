@@ -15,3 +15,19 @@ config = "kernel/configs/apple-armv7/config"
 defconfig = "orchard_applearmv7_defconfig"   # the same config in OrchardLinux/linux
 branch = "armv7"                   # its branch in OrchardLinux/linux
 loader = "cascadia"                # the payload format that boots this kernel
+
+[root]
+# H2FMI is built in. The selected installed-root profile loads its logical
+# backend explicitly; other boards keep their built-in storage path.
+storage_modules = ["apple-sftl"]
+format = "lwvm"
+devices = ["p105"]
+
+[recovery]
+# The guarded host transport binds a fresh USB identity to each RAM boot.
+identity_source = "host-usb"
+usb_network = "ecm"
+usb_modules = ["libcomposite", "usb_f_ecm", "usb_f_acm"]
+manual_modules = ["apple_sftl"]
+# Mapping recovery begins only after serial and authenticated SSH are ready.
+storage_activation = "manual"

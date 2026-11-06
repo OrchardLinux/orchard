@@ -1,0 +1,65 @@
+#!/bin/busybox sh
+# SPDX-License-Identifier: GPL-2.0-only
+# Forward an explicit SFTL operating policy to BusyBox modprobe. A root's rw
+# mount option never changes the storage backend's default-off write gate.
+set -efu
+fail() { echo "orchard storage policy: $1" >&2; exit 1; }
+[ "$#" -ge 1 ] && [ "$#" -le 2 ] || fail 'expected MODULE [CMDLINE]'
+module=$1
+cmdline=${2:-/proc/cmdline}
+case "$module" in ''|[!A-Za-z0-9_]*|*[!A-Za-z0-9_+-]*) fail 'invalid module name' ;; esac
+# BusyBox can resolve a bare name to a compiled-in applet before PATH. Use
+# the installed executable path so the final argv also has a direct test seam.
+probe=
+saved_ifs=$IFS
+IFS=:
+for directory in $PATH; do
+    if [ -n "$directory" ] && [ -x "$directory/modprobe" ]; then
+        probe=$directory/modprobe
+        break
+    fi
+done
+IFS=$saved_ifs
+[ -n "$probe" ] || fail 'modprobe is unavailable'
+case "$module" in
+apple-sftl|apple_sftl) ;;
+*) exec "$probe" "$module" ;;
+esac
+write= reads= lifetime=
+IFS= read -r arguments < "$cmdline" || fail 'could not read the kernel command line'
+for argument in $arguments; do
+    case "$argument" in
+    apple_sftl.*|apple-sftl.*)
+        option=${argument#*.}
+        key=${option%%=*}
+        value=${option#*=}
+        [ "$value" != "$option" ] || fail 'storage policy needs a value'
+        case "$key" in
+        write_enable)
+            [ -z "$write" ] || fail 'repeated write_enable'
+            case "$value" in 0|1) write=$value ;; *) fail 'write_enable must be 0 or 1' ;; esac
+            ;;
+        max_page_reads|max_io_time_ms)
+            case "$value" in ''|0*|*[!0-9]*) fail 'storage limits must be positive canonical decimal integers' ;; esac
+            [ "${#value}" -le 10 ] && [ "$value" -le 4294967295 ] || fail 'storage limit exceeds uint32'
+            if [ "$key" = max_page_reads ]; then
+                [ -z "$reads" ] || fail 'repeated max_page_reads'
+                reads=$value
+            else
+                [ -z "$lifetime" ] || fail 'repeated max_io_time_ms'
+                lifetime=$value
+            fi
+            ;;
+        *) fail 'unsupported SFTL operating parameter' ;;
+        esac
+        ;;
+    esac
+done
+if [ "$write" = 1 ]; then
+    [ -n "$reads" ] && [ -n "$lifetime" ] || fail 'write opt-in also requires explicit read and lifetime limits'
+fi
+set -- "$module"
+[ -z "$write" ] || set -- "$@" "write_enable=$write"
+[ -z "$reads" ] || set -- "$@" "max_page_reads=$reads"
+[ -z "$lifetime" ] || set -- "$@" "max_io_time_ms=$lifetime"
+exec "$probe" "$@"

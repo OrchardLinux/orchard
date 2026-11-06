@@ -9,6 +9,17 @@ the platform. A device name resolves to its platform through
 `DIRECTORY/<device>.dtb`. Git and Podman are required. `series.py --platform
 NAME` prints the checked descriptor of a platform or device.
 
+`series/<platform>` lists patch directories in application order. Each
+directory contributes patches recursively in filename order. A patch can
+have an adjacent `.patch.toml` with `schema = 1` and `platforms = ["name"]` to
+restrict where it applies. Plain directory entries select unscoped patches
+and scopes matching the platform. A `scoped patches/drivers/<subsystem>`
+entry selects only matching scopes, so platforms on different kernel bases
+can use the same subsystem layout. The selector rejects unknown platforms,
+malformed or orphaned scopes, paths outside the kernel directory and duplicate
+patch selection. See [Contributing](../CONTRIBUTING.md#where-kernel-patches-go)
+and [kernel-tree](../tools/kernel-tree/README.md) for export and regeneration.
+
 `orchard build` runs it; build with `orchard build --device j71b` (platform
 `apple-16k` plus the j71b DTB) or `orchard build --platform apple-16k`, not
 with `kernel/build` directly. It holds the shared tree's lock and switches the

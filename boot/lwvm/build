@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
+"""Build the static LwVM root mapper for one ARM architecture."""
+import argparse
+import importlib.util
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'src'))
+from orchard import buildenv
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--arch', choices=('arm', 'arm64'), required=True)
+    parser.add_argument('--output', type=Path, required=True)
+    args = parser.parse_args()
+    output = args.output.resolve()
+    if output.is_symlink() or (output.exists() and any(output.iterdir())):
+        parser.error('Output must be a new or empty directory')
+    output.mkdir(parents=True, exist_ok=True)
+    recipe = ROOT / 'boot/initramfs/recovery'
+    image = 'localhost/orchard-hardware-recovery-tools' + ('-arm' if args.arch == 'arm' else '') + ':bookworm'
+    buildenv.build(image, recipe / 'Containerfile', recipe, arch=args.arch)
+    buildenv.run(image, ['sh', '/src/boot/lwvm/compile', '/out'],
+                 [(ROOT, '/src', True), (output, '/out', False)], arch=args.arch)
+    spec = importlib.util.spec_from_file_location('check_tools', recipe / 'check-tools.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.check(output / 'orchard-lwvm', args.arch)
+
+
+if __name__ == '__main__':
+    main()

@@ -33,10 +33,52 @@ distribution needs `kernel-install`, mkinitcpio or dracut, and every init system
 works the same way.
 
 orchard's initrd (`boot/initramfs/root`) holds BusyBox and the platform's storage
-modules only. It loads them, waits up to 30 s for the partition that
+modules. It loads them, waits up to 30 s for the partition that
 `root=PARTUUID=` names, mounts it (`rootfstype=`, `rootflags=`, `ro`/`rw` as
 given) and starts its `/sbin/init` (or `init=`). If any step fails, it says
 which one and opens a shell on the console.
+
+Platforms with `[root] format = "lwvm"` also carry the static
+[`orchard-lwvm` mapper](../boot/lwvm/README.md) and owner SSH tools. They look
+for `root=PARTUUID=` in the current checked LwVM header pair on a kernel
+`/dev/applesftlN` logical provider. The helper maps only a Linux filesystem
+partition with zero attributes, preserving its ordered physical extents.
+There is no Python or NBD worker in this installed-root path. A damaged pair
+leaves the RAM console, USB serial and key-provisioned SSH available.
+`recovery-authorize-key` accepts an owner's Ed25519 public key over physical
+serial; `recovery-start-ssh` shows the ephemeral host key for pinning and starts
+key-only SSH at `172.16.42.1`. These credentials remain in RAM. After mounting,
+PID1 moves `/dev`, `/proc`, `/sys` and `/run` into the root and starts its init.
+On systemd roots, a service resumes physical serial rescue from static tools
+on `/run`; the installed system starts its normal SSH service.
+
+The mapper supplies a volume view, while the kernel backend controls flash
+writes and read limits. An installed-root entry needs an explicitly reviewed
+backend lifetime and write policy. The diagnostic defaults of 32768 page
+reads and 600000 ms from probe cannot sustain an installed desktop session.
+`rw` alone never enables the default-off SFTL writer. Device installation
+remains gated on qualification of the exact kernel, policy and initrd.
+
+The selected P105 initrd loads `apple-sftl` as a module. Its loader validates
+`apple_sftl.write_enable` as `0` or `1`; `apple_sftl.max_page_reads` and
+`apple_sftl.max_io_time_ms` accept canonical decimal integers from 1 through
+4294967295. A write opt-in requires both explicit limits. Repeated, unknown
+or malformed policy parameters stop module loading and leave RAM recovery.
+The limits bound the whole module lifetime, including startup scans.
+
+An operator starts with a read-only entry and substitutes reviewed integers
+for the placeholders before building the boot image:
+
+```
+root=PARTUUID=<Linux-UUID> ro apple_sftl.write_enable=0 apple_sftl.max_page_reads=<approved-read-count> apple_sftl.max_io_time_ms=<approved-milliseconds>
+```
+
+After qualifying the kernel's write capabilities and the operating limits,
+the corresponding writable entry uses `rw` and
+`apple_sftl.write_enable=1` with both explicit limits. This document supplies
+no qualified operating values. The kernel needs `CONFIG_MTD_APPLE_SFTL=m`,
+`CONFIG_MD=y` and `CONFIG_BLK_DEV_DM=y`; the linear target is included in
+device mapper. Config export and physical qualification gate this path.
 
 ## Partitions (GPT)
 
@@ -199,3 +241,50 @@ the same m1n1 code, splash included.
 - Every change must be tested on both ways into m1n1: Pongo, and iBoot (`launcher-kit`, `./launch boot --bare`, then the client over the proxy). Device time goes through the user.
 
 Which SoCs have an m1n1 storage backend is in [bring-up/bootloader/experiments.md](bring-up/bootloader/experiments.md#per-device-menu).
+
+## Host-bound ARMv7 recovery identity
+
+Cascadia recovery templates carry a descriptor-selected identity policy in the
+standard `/chosen/bootargs` string. These are userland parameters, not hardware
+register descriptions. `orchard.recovery-policy=VALUE` and
+`orchard.recovery-handoff=VALUE` encode schema-1 JSON objects as canonical,
+unpadded base64url. Each token is bounded; the entire ARM command line remains
+at most 1,023 ASCII bytes. Duplicate JSON keys, repeated parameters, unknown
+fields, invalid types and incomplete records fail before recovery USB binds.
+
+The policy names `source = "host-usb"`, canonical `profile`, accepted live FDT
+`compatibles`, and integer `chip` and `board` identifiers. The public runtime
+contains the same policy, generated from the selected hardware descriptor.
+A template contains the policy alone. The guarded transport verifies its
+original digest and freshly queries the selected iRecovery endpoint for its
+ECID, CPID, BDID and product. It then binds one nonzero random 128-bit
+`handoff_id` to that observation and the original `template_sha256`. The handoff
+also contains `schema`, `source`, `profile`, `ecid`, `chip` and `board`. The
+transport rebuilds the checked CB32 configuration and FDT while retaining the
+kernel and initramfs bytes, then rechecks the selected endpoint immediately
+before its single upload. Its private attempt receipt records both image
+hashes and the nonce.
+
+The runtime requires the live compatible, policy token and staged policy to
+agree. It publishes `identity_source = "host-usb"`, the nonce and original
+image digest with the kernel's fresh boot ID. This records a host observation;
+it does not claim that Linux read a SoC ECID register. USB serial includes
+`HND:` followed by the nonce, alongside the canonical board, ECID and boot ID.
+The host requires that nonce before accepting this boot, then checks the full
+provenance again through serial SSH bootstrap and authenticated status. A
+later command may resume only through the matching private completed attempt
+receipt, including the same profile, ECID, nonce, boot ID and template digest.
+An unknown or changed handoff stops before a storage operation.
+
+The existing ARM64 path requires its live ADT MTD identity source. Absence of a
+host-bound policy preserves that path; an invalid host-bound policy or missing
+handoff never falls back to ADT. This handoff currently serves the guarded
+host RAM-boot path. On-device startup needs its own checked identity source
+before it can use this public recovery runtime.
+
+The platform recovery policy also selects USB function dependencies and early
+storage activation. ARMv7 loads its declared ECM/ACM modules, keeps serial
+available through network setup, and leaves SFTL unloaded until a manual
+request after serial and authenticated SSH are ready. The module's finite
+read policy bounds that later request. Hardware feature states change only
+after the exact submitted stack passes its physical checks.

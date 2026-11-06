@@ -59,6 +59,16 @@ def device_path(profile, root=None):
     return path
 
 
+def payload_profile(profile, kind, root=None):
+    """The board-owned profile for a source-built payload loader."""
+    if kind not in ('cascadia',):
+        raise ValueError('Unsupported payload profile: ' + str(kind))
+    path = device_path(profile, root).with_name(kind + '.toml')
+    if not path.is_file() or path.is_symlink():
+        raise ValueError(f'{profile} has no {kind} handoff profile')
+    return path
+
+
 def profiles(root=None):
     """Every device this hardware data describes."""
     devices = Path(root or data_root()) / 'devices'

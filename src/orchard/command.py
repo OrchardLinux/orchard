@@ -138,8 +138,14 @@ def main():
                                          '--platform or --device; update the distribution '
                                          '(orchard.toml [release] selects-platform = true)')
                     from orchard.build import resolve_kernel_tree
+                    selected = {}
+                    if distro.settings(root)['selects_device']:
+                        from orchard.build import resolve_device
+                        selected_device = resolve_device(root, args.device)
+                        if selected_device is not None:
+                            selected['device'] = selected_device
                     index = distro.build(root, version=args.version, platforms=platforms,
-                                         kernel_tree=resolve_kernel_tree(root, args.kernel_tree))
+                                         kernel_tree=resolve_kernel_tree(root, args.kernel_tree), **selected)
                     commands = index.parent.parent / f'{index.parent.name}.commands.sh'
                     if args.explain:
                         print(commands.read_text(), end='')

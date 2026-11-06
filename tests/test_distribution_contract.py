@@ -14,13 +14,13 @@ from orchard import inputs  # noqa: E402
 
 # Every command of the contract and the options a distribution may rely on.
 COMMANDS = {
-    'orchard.inputs': ['--output', '--platform', '--kernel-dir', '--m1n1', '--pongo', '--tools', '--kernel-tree'],
-    'orchard.image.platform': ['--output', '--kernel-dir', '--busybox', '--receipt'],
+    'orchard.inputs': ['--output', '--platform', '--kernel-dir', '--m1n1', '--pongo', '--tools', '--kernel-tree', '--device', '--platform-loader', '--platform-tools', '--platform-lwvm'],
+    'orchard.image.platform': ['--output', '--kernel-dir', '--busybox', '--receipt', '--root-architecture', '--device', '--lwvm', '--rescue-tools'],
     'orchard.image.platforms_index': ['--release', '--inputs', '--kernels', '--tools', '--commit', '--platform'],
     'orchard.image.root_image': ['--output'],
     'orchard.image.recovery': ['--dtb', '--loader', '--logo', '--kernel', '--modules-dir', '--busybox', '--dropbear',
                                '--dropbearkey', '--wpa-supplicant', '--wpa-cli', '--iw', '--base', '--base-receipt',
-                               '--root-receipt', '--output', '--verbose'],
+                               '--root-receipt', '--output', '--verbose', '--platform', '--device'],
     'orchard.manifests': ['--verify-local'],
     'orchard.image.publish': ['--distro', '--tag', '--release-dir', '--output'],
 }
@@ -44,7 +44,7 @@ class DistributionContract(unittest.TestCase):
             self.assertIn(option, release)
 
     def test_the_by_path_scripts_need_no_orchard_package(self):
-        for script in ('src/orchard/image/assemble.py', 'src/orchard/buildenv.py'):
+        for script in ('src/orchard/image/assemble.py', 'src/orchard/image/cascadia.py', 'src/orchard/buildenv.py'):
             with self.subTest(script=script):
                 result = subprocess.run([sys.executable, '-I', str(ROOT / script), '--help'], capture_output=True,
                                         text=True, cwd=tempfile.gettempdir())
@@ -64,6 +64,8 @@ class DistributionContract(unittest.TestCase):
         self.assertEqual(document['schema'], 1)
         self.assertEqual(set(document['platforms']), {'apple-16k'})
         self.assertIn('j71b', document['platforms']['apple-16k']['boards'])
+        self.assertEqual(document['platforms']['apple-16k']['root_format'], 'gpt')
+        self.assertNotIn('lwvm', document['platforms']['apple-16k']['tools'])
         self.assertEqual(document['shared']['m1n1'], str((root / 'm1n1.bin').resolve()))
         self.assertEqual(set(document['shared']['tools']),
                          {'busybox', 'dropbear', 'dropbearkey', 'wpa_supplicant', 'wpa_cli', 'iw',
