@@ -4,6 +4,9 @@
 Cascadia (https://github.com/rzxvx/Project-Cascadia) is not a kernel tree: its
 build takes torvalds v6.12, copies patches/files/, applies patches/tree/*.patch
 and copies patches/files-sandcastle-port/ on top (scripts/build-kernel.sh).
+Since aa6c5be (2026-11-04) that A5 tree is devices/a5/ of the repository; at
+earlier commits it is the repository's top. Histories follow a file across the
+move.
 This assembles exactly that with git plumbing, without running Cascadia's
 scripts, and splits the result into one commit per subsystem. Each commit's
 author and co-contributors come from Cascadia's history for exactly its files;
@@ -75,12 +78,15 @@ def cgit(*cmd):
 
 
 commit = cgit('rev-parse', '--short', args.commit)
+# Where the A5 tree is at this commit: devices/a5/ since aa6c5be, the top before.
+ROOT = 'devices/a5/' if cgit('ls-tree', '--name-only', commit, 'devices/a5/patches') else ''
 work = Path(tempfile.mkdtemp(prefix='cascadia-'))
 atexit.register(shutil.rmtree, work, ignore_errors=True)
 src = work / 'src'
 src.mkdir()
-run('tar', '-x', '-C', src, input=subprocess.run(['git', '-C', args.cascadia, 'archive', commit, 'patches'],
+run('tar', '-x', '-C', src, input=subprocess.run(['git', '-C', args.cascadia, 'archive', commit, ROOT + 'patches'],
                                                 capture_output=True, check=True).stdout)
+src = src / ROOT
 index = work / 'index'
 env = {**os.environ, 'GIT_INDEX_FILE': str(index)}
 
@@ -113,10 +119,10 @@ SOURCES = {'files': 'patches/files/', 'sandcastle': 'patches/files-sandcastle-po
 def origin(path):
     for kind, prefix in SOURCES.items():
         if (src / prefix / path).is_file():
-            return kind, prefix + path
+            return kind, ROOT + prefix + path
     for patch in tree_patches:  # changed by a patches/tree patch
         if path in sections(patch.read_text(errors='replace')):
-            return 'tree', f'patches/tree/{patch.name}'
+            return 'tree', f'{ROOT}patches/tree/{patch.name}'
     sys.exit(f'{path}: not found in Cascadia\'s sources')
 
 
@@ -138,13 +144,28 @@ def show(rev, path):
 
 
 TREE_CHANGES = collections.defaultdict(list)  # kernel path -> [(sha, name, email, date)]
-for line in cgit('log', '--format=%H\t%an\t%ae\t%aD', commit, '--', 'patches/tree').splitlines():
+# Both places of patches/tree: commits before the move changed it at the top.
+TREE_DIRS = sorted({'patches/tree', ROOT + 'patches/tree'})
+
+
+def tree_sections(rev):
+    """Sections of every patches/tree patch at rev, wherever the tree was then."""
+    r = subprocess.run(['git', '-C', args.cascadia, 'ls-tree', '-r', '--name-only', rev, '--', *TREE_DIRS],
+                       capture_output=True)
+    result = {}
+    for patch in r.stdout.decode().split():
+        result.update(sections(show(rev, patch)))
+    return result
+
+
+# A commit changed a kernel path when its section differs before and after, so
+# the move, which changes no section, is nobody's change.
+for line in cgit('log', '--format=%H\t%an\t%ae\t%aD', commit, '--', *TREE_DIRS).splitlines():
     sha, name, email, date = line.split('\t')
-    for patch in cgit('show', '--format=', '--name-only', sha, '--', 'patches/tree').splitlines():
-        before, after = sections(show(sha + '^', patch)), sections(show(sha, patch))
-        for path in set(before) | set(after):
-            if before.get(path) != after.get(path):
-                TREE_CHANGES[path].append((sha, name, email, date))
+    before, after = tree_sections(sha + '^'), tree_sections(sha)
+    for path in set(before) | set(after):
+        if before.get(path) != after.get(path):
+            TREE_CHANGES[path].append((sha, name, email, date))
 
 
 def tree_history(path):
@@ -156,8 +177,14 @@ def history(path):
     kind, source = origin(path)
     if kind == 'tree':
         return kind, tree_history(path)
-    lines = cgit('log', '--follow', '--format=%H\t%an\t%ae\t%aD', commit, '--', source).splitlines()
-    return kind, [tuple(l.split('\t')) for l in lines]
+    # A commit that only renamed the file (the move to devices/a5/) changed none of it.
+    log = cgit('log', '--follow', '--name-status', '--format=%x00%H\t%an\t%ae\t%aD', commit, '--', source)
+    entries = []
+    for record in log.split('\0')[1:]:
+        header, *status = record.strip().split('\n')
+        if not any(l.startswith('R100\t') for l in status):
+            entries.append(tuple(header.split('\t')))
+    return kind, entries
 
 
 grouped = collections.OrderedDict((subject, []) for subject, _ in GROUPS)
