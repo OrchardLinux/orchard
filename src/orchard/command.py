@@ -57,19 +57,24 @@ def main():
     run.add_argument('-y', '--yes', action='store_true',
                      help='boot without prompting, including without an interactive terminal')
     session = commands.add_parser('shell', help='open a shell on the running RAM payload or installed system '
-                                  '(over USB SSH; an installed system as its user)')
+                                  '(over SSH; an installed system as its user)')
     execute = commands.add_parser('exec', help='run a command on the running RAM payload or installed system: '
                                   'orchard exec -- CMD...')
     execute.add_argument('remote_command', nargs='+', metavar='CMD')
     for subcommand in (session, execute):
+        subcommand.add_argument('--host', help='connect to this SSH address instead of discovering USB')
+        subcommand.add_argument('--ram', action='store_true', help='with --host, connect to a RAM payload as root')
         subcommand.add_argument("--user", help="an installed system's user (default: the one its install allowed SSH for)")
     for action, first, second in (('push', 'local', 'remote'), ('pull', 'remote', 'local')):
         transfer = commands.add_parser(action, help=f'copy {first.upper()} to {second.upper()} '
                                        f'on the running RAM payload or installed system, checked by SHA-256')
         transfer.add_argument(first)
         transfer.add_argument(second)
-        transfer.add_argument('--serial', action='store_true',
+        endpoint = transfer.add_mutually_exclusive_group()
+        endpoint.add_argument('--serial', action='store_true',
                               help='use the USB serial shell (payloads without SSH; up to 16 MiB)')
+        endpoint.add_argument('--host', help='connect to this SSH address instead of discovering USB')
+        transfer.add_argument('--ram', action='store_true', help='with --host, connect to a RAM payload as root')
         transfer.add_argument('--user', help="an installed system's user (default: the one its install allowed SSH for)")
     guided = commands.add_parser('install', help='guided installation from distro name, index or manifest')
     guided.add_argument('source', nargs='?', help='registered distro, local TOML or exact HTTPS URL '
@@ -108,6 +113,11 @@ def main():
         os.environ['ORCHARD_VIA'] = args.via
     progress = Progress(verbose=args.verbose)
     try:
+        if args.action in ('shell', 'exec', 'push', 'pull'):
+            if args.ram and not args.host:
+                raise ValueError('--ram requires --host')
+            if args.ram and args.user:
+                raise ValueError('--ram connects as root; do not pass --user')
         from orchard.cache import check_state
         from orchard.sources import cache_root as build_cache
         check_state()
@@ -177,14 +187,14 @@ def main():
         if args.action in ('shell', 'exec', 'push', 'pull'):
             from orchard import ram_session
             if args.action == 'shell':
-                raise SystemExit(ram_session.shell(args.user))
+                raise SystemExit(ram_session.shell(args.user, host=args.host, ram=args.ram))
             if args.action == 'exec':
                 command = args.remote_command[1:] if args.remote_command[0] == '--' else args.remote_command
-                raise SystemExit(ram_session.run(command, args.user))
+                raise SystemExit(ram_session.run(command, args.user, host=args.host, ram=args.ram))
             if args.action == 'push':
-                ram_session.push(args.local, args.remote, serial=args.serial, user=args.user)
+                ram_session.push(args.local, args.remote, serial=args.serial, user=args.user, host=args.host, ram=args.ram)
             else:
-                ram_session.pull(args.remote, args.local, serial=args.serial, user=args.user)
+                ram_session.pull(args.remote, args.local, serial=args.serial, user=args.user, host=args.host, ram=args.ram)
             return
         if args.action in ('setup', 'doctor'):
             from orchard import host_setup

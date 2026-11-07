@@ -33,6 +33,31 @@ class SystemSession(unittest.TestCase):
         self.assertEqual(argv[-1], 'tablet@172.16.42.1')
         self.assertIn('StrictHostKeyChecking=accept-new', argv)
 
+    def test_network_system_does_not_discover_usb(self):
+        computer_key.remember_user('tablet')
+        with mock.patch.object(computer_key, 'identity', return_value=Path('/key')), \
+                mock.patch.object(ram_session, 'target', side_effect=AssertionError('USB used')):
+            argv = ram_session.connect(host='192.168.0.19')
+        self.assertEqual(argv[-1], 'tablet@192.168.0.19')
+        self.assertIn('StrictHostKeyChecking=accept-new', argv)
+
+    def test_network_ram_uses_ram_key_and_pins_host(self):
+        with mock.patch.object(ram_session, '_directory', return_value=Path(self.temp.name)), \
+                mock.patch.object(ram_session, 'identity', return_value=Path('/ram-key')), \
+                mock.patch.object(ram_session, 'target', side_effect=AssertionError('USB used')):
+            argv = ram_session.connect(host='192.168.0.19', ram=True)
+        self.assertEqual(argv[-1], 'root@192.168.0.19')
+        self.assertIn('/ram-key', argv)
+        self.assertIn('StrictHostKeyChecking=accept-new', argv)
+        self.assertTrue(any('network_known_hosts' in arg for arg in argv))
+
+    def test_network_rejects_options_and_ambiguous_ram_user(self):
+        for host in ('-oProxyCommand=bad', 'user@host', 'host name'):
+            with self.assertRaisesRegex(ValueError, 'Invalid SSH host'):
+                ram_session.connect(host=host)
+        with self.assertRaisesRegex(ValueError, '--ram'):
+            ram_session.connect(host='192.168.0.19', ram=True, user='tablet')
+
     def test_without_a_user_it_says_how_to_get_one(self):
         with self.assertRaisesRegex(ValueError, '--user'):
             ram_session.connect(SYSTEM)
