@@ -34,6 +34,10 @@ SCHEMA = 1
 # nvme is PCIe storage; nvme-apple is the Apple ANS2 controller of the A11
 # (d221). A platform may lack either one, but not both.
 STORAGE_MODULES = ('nvme', 'nvme-apple')
+# The USB gadget the initrd and the install add-on set up (configfs, NCM and
+# ACM). The arm64 kernels build it in; where a kernel has it as modules, the
+# initrd carries them and loads them first, and a missing one costs USB only.
+USB_MODULES = ('libcomposite', 'usb_f_ncm', 'usb_f_acm')
 # Where system/defaults may put files: vendor configuration under /usr/lib,
 # and the boards' ALSA UCM profiles where alsa-lib looks for them.
 DEFAULTS_UNDER = ('usr/lib/', 'usr/share/alsa/ucm2/')
@@ -96,7 +100,8 @@ def initrd(modules, release, busybox, *, hardware=None, storage_modules=STORAGE_
     loaded = [name for name in storage_modules if name.replace('_', '-') in by_name]
     if storage_modules and not loaded:
         raise ValueError(f'Kernel bundle has no storage module: {", ".join(storage_modules)}')
-    wanted, pending = [], [by_name[name.replace('_', '-')] for name in loaded]
+    usb = [name for name in USB_MODULES if name.replace('_', '-') in by_name]
+    wanted, pending = [], [by_name[name.replace('_', '-')] for name in loaded + usb]
     while pending:
         name = pending.pop()
         if name not in wanted:
@@ -108,6 +113,8 @@ def initrd(modules, release, busybox, *, hardware=None, storage_modules=STORAGE_
     entries['init'] = (stat.S_IFREG | 0o755, (hardware / 'boot/initramfs/root/init').read_bytes())
     entries['bin/busybox'] = (stat.S_IFREG | 0o755, Path(busybox).read_bytes())
     entries['etc/orchard/modules'] = (stat.S_IFREG | 0o644, ('\n'.join(loaded) + '\n').encode())
+    if usb:
+        entries['etc/orchard/usb-modules'] = (stat.S_IFREG | 0o644, ('\n'.join(usb) + '\n').encode())
     dependency_lines = []
     for name in sorted(wanted):
         target = f'lib/modules/{release}/{name}'

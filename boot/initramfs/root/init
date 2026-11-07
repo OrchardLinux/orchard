@@ -26,6 +26,11 @@ for argument in $(cat /proc/cmdline); do
     esac
 done
 
+# The USB gadget's modules, where the kernel has them as modules: without them
+# only USB is missing, so the boot goes on.
+[ ! -e /etc/orchard/usb-modules ] || for module in $(cat /etc/orchard/usb-modules); do
+    modprobe "$module" || echo "orchard initrd: could not load $module; no USB"
+done
 for module in $(cat /etc/orchard/modules); do
     modprobe "$module" || stop "could not load $module"
 done
