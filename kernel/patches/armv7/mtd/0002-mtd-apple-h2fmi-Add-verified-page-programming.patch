@@ -1,32 +1,33 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
 Date: Fri, 6 Nov 2026 11:49:24 -0600
-Subject: [PATCH] mtd: apple-h2fmi: Add verified complete-page programming
+Subject: [PATCH] mtd: apple-h2fmi: Add verified page programming
 
-Add the measured PPN program sequence behind a default-off Kconfig option.
-Require complete data and metadata, an erased destination and exact readback
-before publishing progress. A transport failure, uncertain completion or
-readback mismatch stops further I/O on that bus.
+Program complete pages, data and metadata together, with the PPN program
+sequence iBEC uses: 8A with four row cycles, the page by PIO, 17, then the
+status from 79 (ready at bit 6, failure at bits 0 and 4).
 
-Use the native program-completion status rule rather than the managed-read
-status classifier. Keep allocation and shared FTL ownership policy outside
-this controller interface. The driver supplies no erase operation.
+A page is only programmed when it reads back erased, and it is read back
+and compared afterwards; only then does the MTD write report progress. A
+failed program, an uncertain completion or a readback mismatch stops all
+further I/O on that bus. The boot block and the two package-reserved
+blocks at the end of each CAU are never programmed. There is no erase.
 
-The actual program functions passed 134181 ASan/UBSan assertions and the read
-path retained its 140146 assertions. Focused ARMv7 driver compilation passed
-with programming enabled and disabled; KUnit source compilation passed.
-The exact new candidate still needs hardware qualification.
+[Orchard: from shaynelegault/orchard#87, fa59001 (source cef7165b0);
+ removed the default-off MTD_APPLE_H2FMI_WRITE option, so programming is
+ part of the driver; folded the program command and status helpers into
+ the existing ones; shortened the commit message]
 
 Assisted-by: LLM
 ---
- drivers/mtd/devices/Kconfig                |  18 +-
+ drivers/mtd/devices/Kconfig                |  11 +-
  drivers/mtd/devices/mtd-apple-h2fmi-test.c |  14 ++
- drivers/mtd/devices/mtd-apple-h2fmi.c      | 237 +++++++++++++++++++++
+ drivers/mtd/devices/mtd-apple-h2fmi.c      | 242 +++++++++++++++++++--
  drivers/mtd/devices/mtd-apple-h2fmi.h      |   7 +
- 4 files changed, 272 insertions(+), 4 deletions(-)
+ 4 files changed, 246 insertions(+), 28 deletions(-)
 
 diff --git a/drivers/mtd/devices/Kconfig b/drivers/mtd/devices/Kconfig
-index 2b6e1efae..637358e20 100644
+index 2b6e1efae8af..22782e845ff9 100644
 --- a/drivers/mtd/devices/Kconfig
 +++ b/drivers/mtd/devices/Kconfig
 @@ -207,7 +207,7 @@ config MTD_ST_SPI_FSM
@@ -38,37 +39,24 @@ index 2b6e1efae..637358e20 100644
  	depends on ARCH_APPLE_S5L || COMPILE_TEST
  	help
  	  Apple's flash controller as it appears on the A5 (S5L8940X/8942X),
-@@ -215,15 +215,25 @@ config MTD_APPLE_H2FMI
+@@ -215,12 +215,9 @@ config MTD_APPLE_H2FMI
  	  package does its own ECC, so this is a plain MTD and not a raw-NAND
  	  driver.  One MTD per CAU; geometry is read from each package.
  
 -	  READ ONLY.  The driver's opcode allowlist contains no program and no
 -	  erase, so it cannot damage whatever the NAND already holds -- which
 -	  on an un-restored device is somebody's iOS install.
-+	  The default interface is read-only. Optional verified full-page
-+	  programming requires MTD_APPLE_H2FMI_WRITE. An Apple-compatible FTL
-+	  must own allocation and recovery before modifying shared NAND.
- 
- 	  Say Y to read the NAND from Linux, for instance to check a dump or
- 	  to mount iOS's own partitions.
+-
+-	  Say Y to read the NAND from Linux, for instance to check a dump or
+-	  to mount iOS's own partitions.
++	  Pages are programmed whole, only when they read back erased, and
++	  each program is verified by reading it back.  The driver has no
++	  erase operation.
  
  	  If unsure, say N.
  
-+config MTD_APPLE_H2FMI_WRITE
-+	bool "Apple H2FMI PPN page programming (EXPERIMENTAL)"
-+	depends on MTD_APPLE_H2FMI
-+	default n
-+	help
-+	  Build synchronous full-page programming with data and metadata
-+	  readback. A destination must be erased; erase operations are not
-+	  implemented. Allocation and recovery belong to an Apple-compatible
-+	  FTL that owns the shared NAND. Enable this only with such a caller.
-+
- config MTD_APPLE_H2FMI_KUNIT_TEST
- 	tristate "KUnit tests for Apple H2FMI PPN geometry" if !KUNIT_ALL_TESTS
- 	depends on KUNIT
 diff --git a/drivers/mtd/devices/mtd-apple-h2fmi-test.c b/drivers/mtd/devices/mtd-apple-h2fmi-test.c
-index 5308972e7..419c04cc8 100644
+index 5308972e7a11..419c04cc8c1a 100644
 --- a/drivers/mtd/devices/mtd-apple-h2fmi-test.c
 +++ b/drivers/mtd/devices/mtd-apple-h2fmi-test.c
 @@ -153,12 +153,26 @@ static void h2fmi_status_test(struct kunit *test)
@@ -99,48 +87,119 @@ index 5308972e7..419c04cc8 100644
  };
  
 diff --git a/drivers/mtd/devices/mtd-apple-h2fmi.c b/drivers/mtd/devices/mtd-apple-h2fmi.c
-index c83bc9624..6f17833a3 100644
+index c83bc9624299..a8f89c004d52 100644
 --- a/drivers/mtd/devices/mtd-apple-h2fmi.c
 +++ b/drivers/mtd/devices/mtd-apple-h2fmi.c
-@@ -23,6 +23,8 @@
+@@ -21,8 +21,10 @@
+  * page is 16 KiB of data with 64 bytes of OOB. One MTD is exported per
+  * CAU. Raw MTD offsets are independent of the iOS logical block addresses.
   *
-  * This interface exposes reads through MTD. Logical-address translation and
-  * allocation belong to the shared FTL above the physical page provider.
-+ * Optional programming accepts an erased full page and verifies its raw
-+ * data and metadata synchronously before reporting completion.
+- * This interface exposes reads through MTD. Logical-address translation and
+- * allocation belong to the shared FTL above the physical page provider.
++ * Pages are read and programmed whole, data and metadata together.  The
++ * driver has no erase: a page is only programmed when it reads back erased,
++ * and every program is read back and compared before it is reported done.
++ * Logical-address translation and allocation belong to the FTL above.
   */
  
  #include <linux/delay.h>
-@@ -360,6 +362,237 @@ static void h2fmi_split_page(const u8 *raw, u8 *data, u8 *oob)
- 	}
+@@ -69,15 +71,18 @@
+ #define FMC_NAND_STATUS		0x48
+ #define FMC_STATUS_MASK		0x4c
+ 
+-/* The allowlist is the safety property, not a convenience: a sequence that is
+- * not on it does not run.  Nothing here programs or erases. */
+-static const u8 h2fmi_read_only_ops[][2] = {
++/* Every command sequence the driver issues.  A sequence that is not listed
++ * does not run; in particular there is no erase. */
++static const u8 h2fmi_ops[][2] = {
+ 	{ 0x70, 0x00 },		/* read status */
+ 	{ 0x92, 0x97 },		/* PPN device parameters */
+ 	{ 0x77, 0x7d },		/* PPN operation status */
+ 	{ 0x77, 0x00 },		/* PPN end of operation */
+ 	{ 0x7a, 0x00 },		/* PPN data out */
+ 	{ 0x0a, 0x37 },		/* PPN page read */
++	{ 0x8a, 0x00 },		/* PPN program, address phase */
++	{ 0x17, 0x00 },		/* PPN program confirm */
++	{ 0x79, 0x00 },		/* PPN program status */
+ };
+ 
+ struct h2fmi_bus {
+@@ -126,20 +131,19 @@ static int h2fmi_wait(struct h2fmi *fmi, void __iomem *base, u32 off,
+ 
+ /*
+  * FMC_CMD holds the first command byte, and the second one in bits 15:8.
+- * Every command sequence passes through the read-operation allowlist.
++ * Every command sequence passes through the opcode list above.
+  */
+ static int h2fmi_cmd_write(struct h2fmi *fmi, struct h2fmi_bus *b, u8 op, u8 op2)
+ {
+ 	int i;
+ 
+-	for (i = 0; i < ARRAY_SIZE(h2fmi_read_only_ops); i++)
+-		if (h2fmi_read_only_ops[i][0] == op &&
+-		    h2fmi_read_only_ops[i][1] == op2) {
++	for (i = 0; i < ARRAY_SIZE(h2fmi_ops); i++)
++		if (h2fmi_ops[i][0] == op && h2fmi_ops[i][1] == op2) {
+ 			writel(op | op2 << 8, b->fmc + FMC_CMD);
+ 			return 0;
+ 		}
+ 
+-	dev_err(fmi->dev, "refusing NAND opcodes %02x %02x: not read-only\n", op, op2);
++	dev_err(fmi->dev, "refusing NAND opcodes %02x %02x\n", op, op2);
+ 	return -EPERM;
  }
  
-+static int h2fmi_write_cmd(struct h2fmi *fmi, struct h2fmi_bus *b,
-+			   u8 op, u8 op2)
+@@ -184,19 +188,11 @@ static int h2fmi_cmd_addr_cmd(struct h2fmi *fmi, struct h2fmi_bus *b,
+  * FMC poll the status byte until it is ready.  iBEC waits on the interrupt;
+  * this polls FMC_STATUS bit 5, as the userspace tool does.
+  */
+-static int h2fmi_status(struct h2fmi *fmi, struct h2fmi_bus *b, u8 *st)
++static int h2fmi_poll_status(struct h2fmi *fmi, struct h2fmi_bus *b, u8 *st)
+ {
+ 	int ret;
+ 	u32 v;
+ 
+-	ret = h2fmi_cmd_write(fmi, b, 0x77, 0x7d);
+-	if (ret)
+-		return ret;
+-	writel(3, b->fmc + FMC_RW_CTRL);
+-	ret = h2fmi_wait(fmi, b->fmc, FMC_STATUS, 3, 3);
+-	if (ret)
+-		return ret;
+-
+ 	h2fmi_clear_irqs(b);
+ 	writel(0x100, b->fmi + FMI_INTEN);
+ 	writel(readl(b->fmc + FMC_IF_CTRL) & ~0x100000u, b->fmc + FMC_IF_CTRL);
+@@ -221,6 +217,19 @@ static int h2fmi_status(struct h2fmi *fmi, struct h2fmi_bus *b, u8 *st)
+ 	return 0;
+ }
+ 
++static int h2fmi_status(struct h2fmi *fmi, struct h2fmi_bus *b, u8 *st)
 +{
-+	if (!IS_ENABLED(CONFIG_MTD_APPLE_H2FMI_WRITE))
-+		return -EROFS;
-+	if (!((op == 0x8a || op == 0x17 || op == 0x79) && !op2))
-+		return -EPERM;
-+	writel(op | op2 << 8, b->fmc + FMC_CMD);
-+	return 0;
-+}
-+
-+static int h2fmi_write_cmd1(struct h2fmi *fmi, struct h2fmi_bus *b, u8 op)
-+{
-+	int ret = h2fmi_write_cmd(fmi, b, op, 0);
++	int ret = h2fmi_cmd_write(fmi, b, 0x77, 0x7d);
 +
 +	if (ret)
 +		return ret;
-+	writel(1, b->fmc + FMC_RW_CTRL);
-+	return h2fmi_wait(fmi, b->fmc, FMC_STATUS, 1, 1);
++	writel(3, b->fmc + FMC_RW_CTRL);
++	ret = h2fmi_wait(fmi, b->fmc, FMC_STATUS, 3, 3);
++	if (ret)
++		return ret;
++	return h2fmi_poll_status(fmi, b, st);
 +}
 +
+ static int h2fmi_pio_read(struct h2fmi *fmi, struct h2fmi_bus *b,
+ 			  u32 *dst, u32 bytes)
+ {
+@@ -360,6 +369,195 @@ static void h2fmi_split_page(const u8 *raw, u8 *data, u8 *oob)
+ 	}
+ }
+ 
 +/* Four row-address cycles follow the PPN program command. */
 +static int h2fmi_write_address(struct h2fmi *fmi, struct h2fmi_bus *b,
 +			       u32 row)
 +{
-+	int ret = h2fmi_write_cmd(fmi, b, 0x8a, 0);
++	int ret = h2fmi_cmd_write(fmi, b, 0x8a, 0);
 +
 +	if (ret)
 +		return ret;
@@ -186,26 +245,11 @@ index c83bc9624..6f17833a3 100644
 +/* Program status uses 79, as in iBEC's write_bootpage path. */
 +static int h2fmi_write_status(struct h2fmi *fmi, struct h2fmi_bus *b, u8 *status)
 +{
-+	u32 value;
-+	int ret = h2fmi_write_cmd1(fmi, b, 0x79);
++	int ret = h2fmi_cmd1(fmi, b, 0x79);
 +
 +	if (ret)
 +		return ret;
-+	h2fmi_clear_irqs(b);
-+	writel(0x100, b->fmi + FMI_INTEN);
-+	writel(readl(b->fmc + FMC_IF_CTRL) & ~0x100000u,
-+	       b->fmc + FMC_IF_CTRL);
-+	writel(0x4040, b->fmc + FMC_STATUS_MASK);
-+	writel(0, b->fmc + FMC_DATANUM);
-+	writel(0x20, b->fmc + FMC_INTMASK);
-+	writel(0x50, b->fmc + FMC_RW_CTRL);
-+	ret = readl_poll_timeout(b->fmc + FMC_STATUS, value,
-+				 value & 0x20, 0, 2000000);
-+	if (!ret)
-+		*status = readl(b->fmc + FMC_NAND_STATUS);
-+	writel(0, b->fmc + FMC_RW_CTRL);
-+	h2fmi_clear_irqs(b);
-+	return ret;
++	return h2fmi_poll_status(fmi, b, status);
 +}
 +
 +/* Caller holds the bus lock. A failed mutation permanently stops this bus. */
@@ -216,8 +260,6 @@ index c83bc9624..6f17833a3 100644
 +	u8 status = 0;
 +	int ret;
 +
-+	if (!IS_ENABLED(CONFIG_MTD_APPLE_H2FMI_WRITE))
-+		return -EROFS;
 +	if (b->failed)
 +		return -EIO;
 +	on = readl(b->fmc + FMC_ON);
@@ -230,7 +272,7 @@ index c83bc9624..6f17833a3 100644
 +	if (!ret)
 +		ret = h2fmi_data_in(fmi, b, raw, H2FMI_PAGE_RAW);
 +	if (!ret)
-+		ret = h2fmi_write_cmd1(fmi, b, 0x17);
++		ret = h2fmi_cmd1(fmi, b, 0x17);
 +	if (!ret)
 +		ret = h2fmi_write_status(fmi, b, &status);
 +	/* CMD 79 returns NAND write status, not the managed read result.
@@ -273,8 +315,6 @@ index c83bc9624..6f17833a3 100644
 +	u8 status, *expected;
 +	int ret;
 +
-+	if (!IS_ENABLED(CONFIG_MTD_APPLE_H2FMI_WRITE))
-+		return -EROFS;
 +	if (!data || !oob)
 +		return -EINVAL;
 +	ret = h2fmi_page_row(&b->geometry, cau, block, page, &row);
@@ -330,8 +370,6 @@ index c83bc9624..6f17833a3 100644
 +
 +	ops->retlen = 0;
 +	ops->oobretlen = 0;
-+	if (!IS_ENABLED(CONFIG_MTD_APPLE_H2FMI_WRITE))
-+		return -EROFS;
 +	if (to < 0 || to >= mtd->size || to & H2FMI_PAGE_MASK ||
 +	    ops->mode != MTD_OPS_PLACE_OOB || ops->len != H2FMI_PAGE_DATA ||
 +	    ops->ooblen != H2FMI_PAGE_OOB || ops->ooboffs ||
@@ -349,19 +387,28 @@ index c83bc9624..6f17833a3 100644
  static int h2fmi_read_page_at(struct mtd_info *mtd, loff_t from,
  			      u8 *data, u8 *oob, u8 *stp)
  {
-@@ -554,6 +787,10 @@ static int h2fmi_setup_mtd(struct h2fmi *fmi, int idx)
+@@ -552,8 +750,9 @@ static int h2fmi_setup_mtd(struct h2fmi *fmi, int idx)
+ 		return -ENOMEM;
+ 
  	mtd->type = MTD_NANDFLASH;
- 	/* PPN page reads expose the package metadata through MTD OOB. */
- 	mtd->flags = MTD_NO_ERASE;
-+	if (IS_ENABLED(CONFIG_MTD_APPLE_H2FMI_WRITE)) {
-+		mtd->flags |= MTD_WRITEABLE;
-+		mtd->_write_oob = h2fmi_mtd_write_oob;
-+	}
+-	/* PPN page reads expose the package metadata through MTD OOB. */
+-	mtd->flags = MTD_NO_ERASE;
++	/* Page metadata is MTD OOB.  Pages are programmed whole, data and OOB
++	 * together; there is no erase. */
++	mtd->flags = MTD_WRITEABLE | MTD_NO_ERASE;
  	mtd->erasesize = g->pages * H2FMI_PAGE_DATA;
  	mtd->size = (u64)g->blocks * mtd->erasesize;
  	mtd->writesize = H2FMI_PAGE_DATA;
+@@ -571,6 +770,7 @@ static int h2fmi_setup_mtd(struct h2fmi *fmi, int idx)
+ 
+ 	/* _read_oob only: add_mtd_device() rejects a driver that has both. */
+ 	mtd->_read_oob = h2fmi_mtd_read_oob;
++	mtd->_write_oob = h2fmi_mtd_write_oob;
+ 	mtd->_block_isbad = h2fmi_mtd_block_isbad;
+ 
+ 	return mtd_device_register(mtd, NULL, 0);
 diff --git a/drivers/mtd/devices/mtd-apple-h2fmi.h b/drivers/mtd/devices/mtd-apple-h2fmi.h
-index ad573a5c0..aeb812f33 100644
+index ad573a5c0219..aeb812f33ee6 100644
 --- a/drivers/mtd/devices/mtd-apple-h2fmi.h
 +++ b/drivers/mtd/devices/mtd-apple-h2fmi.h
 @@ -2,6 +2,7 @@

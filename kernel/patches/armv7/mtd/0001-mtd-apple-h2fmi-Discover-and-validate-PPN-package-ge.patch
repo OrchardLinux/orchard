@@ -3,21 +3,22 @@ From: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
 Date: Fri, 6 Nov 2026 11:29:40 -0600
 Subject: [PATCH] mtd: apple-h2fmi: Discover and validate PPN package geometry
 
-Query both PPN parameter pages before registering MTD devices. The measured
-64 GB P105 has eight CAUs per bus with 128 pages per block; the imported
-fixed geometry aliases addresses on that profile. Retain support for the
-reference two-CAU package and reject unsupported or mismatched profiles.
+Read both packages' PPN device parameters before registering any MTD
+instead of assuming the 16 GB reference layout. The 64 GB iPad mini 1 has
+eight CAUs per bus and 128 pages per block, and the fixed geometry
+aliased addresses on it. Accept the two measured package profiles, and
+refuse any other profile or packages whose geometries disagree.
 
-Use four row address cycles for the supported PPN protocol. Check status
-before requesting payload, restore the inherited controller state on every
-exit, and stop I/O after a transport or cleanup failure. Report a terminal
-error for a failed zero-byte MTD read so MEMREAD cannot repeat that page.
-Keep page programming and capture interfaces outside this read change.
+Use the four row-address cycles the supported packages require. Check
+the page status before the data phase, restore the inherited controller
+state on every exit and stop I/O on the bus after a transport or cleanup
+failure. Report a failed page read as -EIO so MEMREAD does not retry it.
 
-Add synthetic KUnit tests for parameter parsing and address uniqueness,
-including offsets beyond 4 GiB and the context address view. A host harness
-of the actual read functions passed 140146 ASan/UBSan assertions. Exact
-current-base hardware qualification is pending.
+Add KUnit tests for parameter parsing and row encoding, including offsets
+beyond 4 GiB.
+
+[Orchard: from shaynelegault/orchard#86, af7369e (source fe8c2f696);
+ shortened the commit message]
 
 Assisted-by: LLM
 ---
@@ -33,7 +34,7 @@ Assisted-by: LLM
  create mode 100644 tools/testing/kunit/configs/apple_h2fmi.config
 
 diff --git a/drivers/mtd/devices/Kconfig b/drivers/mtd/devices/Kconfig
-index e73b65842..2b6e1efae 100644
+index e73b658429ad..2b6e1efae8af 100644
 --- a/drivers/mtd/devices/Kconfig
 +++ b/drivers/mtd/devices/Kconfig
 @@ -213,7 +213,7 @@ config MTD_APPLE_H2FMI
@@ -62,7 +63,7 @@ index e73b65842..2b6e1efae 100644
  config BCH_CONST_M
  	default 14
 diff --git a/drivers/mtd/devices/Makefile b/drivers/mtd/devices/Makefile
-index 8135496fe..cc0a852d2 100644
+index 8135496fe44a..cc0a852d2d3f 100644
 --- a/drivers/mtd/devices/Makefile
 +++ b/drivers/mtd/devices/Makefile
 @@ -22,3 +22,5 @@ obj-$(CONFIG_MTD_APPLE_H2FMI)	+= mtd-apple-h2fmi.o
@@ -73,7 +74,7 @@ index 8135496fe..cc0a852d2 100644
 +obj-$(CONFIG_MTD_APPLE_H2FMI_KUNIT_TEST) += mtd-apple-h2fmi-test.o
 diff --git a/drivers/mtd/devices/mtd-apple-h2fmi-test.c b/drivers/mtd/devices/mtd-apple-h2fmi-test.c
 new file mode 100644
-index 000000000..5308972e7
+index 000000000000..5308972e7a11
 --- /dev/null
 +++ b/drivers/mtd/devices/mtd-apple-h2fmi-test.c
 @@ -0,0 +1,172 @@
@@ -250,7 +251,7 @@ index 000000000..5308972e7
 +
 +MODULE_LICENSE("GPL");
 diff --git a/drivers/mtd/devices/mtd-apple-h2fmi.c b/drivers/mtd/devices/mtd-apple-h2fmi.c
-index bdb89a700..c83bc9624 100644
+index bdb89a700ba5..c83bc9624299 100644
 --- a/drivers/mtd/devices/mtd-apple-h2fmi.c
 +++ b/drivers/mtd/devices/mtd-apple-h2fmi.c
 @@ -1,6 +1,6 @@
@@ -687,7 +688,7 @@ index bdb89a700..c83bc9624 100644
  MODULE_LICENSE("GPL");
 diff --git a/drivers/mtd/devices/mtd-apple-h2fmi.h b/drivers/mtd/devices/mtd-apple-h2fmi.h
 new file mode 100644
-index 000000000..ad573a5c0
+index 000000000000..ad573a5c0219
 --- /dev/null
 +++ b/drivers/mtd/devices/mtd-apple-h2fmi.h
 @@ -0,0 +1,122 @@
@@ -815,7 +816,7 @@ index 000000000..ad573a5c0
 +#endif
 diff --git a/tools/testing/kunit/configs/apple_h2fmi.config b/tools/testing/kunit/configs/apple_h2fmi.config
 new file mode 100644
-index 000000000..8577f01ee
+index 000000000000..8577f01ee027
 --- /dev/null
 +++ b/tools/testing/kunit/configs/apple_h2fmi.config
 @@ -0,0 +1,3 @@
