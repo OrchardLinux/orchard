@@ -1,6 +1,7 @@
 """The public Cascadia producer and identity handoff operate without a device."""
 import hashlib
 import unittest
+from unittest import mock
 
 from orchard import recovery_identity as protocol
 from orchard.recovery_policy import settings
@@ -9,6 +10,8 @@ from test_cascadia_loader import PROFILE, loader, kernel, tree
 
 POLICY = {'schema': 1, 'source': 'host-usb', 'profile': 'p105',
           'compatibles': ['apple,p105ap'], 'chip': 0x8942, 'board': 0x0a}
+DUAL_POLICY = {key: value for key, value in POLICY.items() if key != 'source'}
+DUAL_POLICY.update(schema=2, sources=['host-usb', 'ios-device'])
 
 
 def payload(args='console=tty0 rdinit=/init', *, policy=POLICY, compatible=b'apple,p105ap\0apple,s5l8942x\0'):
@@ -27,11 +30,50 @@ def bind(data, **changes):
 class PublicRecovery(unittest.TestCase):
     def test_platform_policy_uses_descriptor_identity_and_manual_storage(self):
         selected = settings('p105')
-        self.assertEqual(selected['identity'], POLICY)
+        for field in ('profile', 'compatibles', 'chip', 'board'):
+            self.assertEqual(selected['identity'][field], POLICY[field])
+        self.assertTrue(protocol.allows_source(selected['identity'], 'host-usb'))
         self.assertEqual(selected['runtime']['usb_network'], 'ecm')
         self.assertEqual(selected['runtime']['manual_modules'], ['apple_sftl'])
         self.assertEqual(selected['runtime']['storage_activation'], 'manual')
         self.assertIsNone(settings('j71b'))
+
+    def test_ios_origin_needs_explicit_method_and_recipe_declaration(self):
+        from orchard import hardware
+        described = hardware.device('p105')
+        for methods, origin, expected in (
+                (['recovery-autogo', 'ios-local-file'], 'ios-device', DUAL_POLICY),
+                (['recovery-autogo', 'ios-local-file'], None, None),
+                (['recovery-autogo', 'ios-local-file'], 'host-usb', None),
+                (['recovery-autogo'], 'ios-device', POLICY)):
+            selected = {**described, 'boot': {'methods': methods}}
+            recipe = {'methods': {'ios-local-file': {'identity_source': origin}}}
+            with self.subTest(methods=methods, origin=origin), \
+                    mock.patch.object(hardware, 'device', return_value=selected), \
+                    mock.patch.object(hardware, 'boot_recipe', return_value=recipe):
+                if expected is None:
+                    with self.assertRaisesRegex(ValueError, 'explicit ios-device'):
+                        settings('p105')
+                else:
+                    self.assertEqual(settings('p105')['identity'], expected)
+
+    def test_ios_and_host_binding_use_only_policy_allowed_sources(self):
+        original = payload(policy=DUAL_POLICY)
+        for source in ('host-usb', 'ios-device'):
+            bound = cascadia.bind_recovery_identity(original, source=source, ecid=123, chip=0x8942,
+                board=0x0a, profile='p105', handoff_id='a'*32, template_sha256=hashlib.sha256(original).hexdigest())
+            values, _, args = cascadia._payload_parts(bound)
+            original_values = cascadia.configuration(original)
+            self.assertEqual(bound[values['kernel_offset']:values['dtb_offset']],
+                             original[original_values['kernel_offset']:original_values['dtb_offset']])
+            self.assertEqual(bound[values['initrd_offset']:], original[original_values['initrd_offset']:])
+            self.assertEqual(protocol.parameters(args)[protocol.HANDOFF_PARAMETER]['source'], source)
+        with self.assertRaisesRegex(ValueError, 'does not permit'):
+            cascadia.bind_recovery_identity(payload(), source='ios-device', ecid=123, chip=0x8942,
+                board=0x0a, profile='p105', handoff_id='a'*32, template_sha256=hashlib.sha256(payload()).hexdigest())
+        ios_only = {**DUAL_POLICY, 'sources': ['ios-device']}
+        with self.assertRaisesRegex(ValueError, 'does not permit'):
+            bind(payload(policy=ios_only))
 
     def test_host_binding_keeps_kernel_initrd_and_template(self):
         original = payload()

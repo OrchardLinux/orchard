@@ -7,6 +7,10 @@
 typedef unsigned int u32;
 typedef unsigned char u8;
 
+#ifdef LOCAL_BOOT_DYNAMIC_IDENTITY
+__attribute__((used)) volatile const u32 orchard_local_boot_crc32 = LOCAL_BOOT_CRC32;
+#endif
+
 __attribute__((section(".text.entry")))
 int orchard_local_boot(void)
 {
@@ -25,7 +29,11 @@ int orchard_local_boot(void)
 		for (u32 bit = 0; bit < 8; bit++)
 			crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1u)));
 	}
+#ifdef LOCAL_BOOT_DYNAMIC_IDENTITY
+	if (~crc != orchard_local_boot_crc32)
+#else
 	if (~crc != LOCAL_BOOT_CRC32)
+#endif
 		return 0;
 	/* Filesystem reads may populate the buffer through the data cache.
 	 * Clean each possible A9 cache line before instruction fetch can use it.

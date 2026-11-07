@@ -24,6 +24,7 @@ class _SelectionDetails(TypedDict, total=False):
     pwned: bool
     boot_id: Optional[str]
     handoff_id: Optional[str]
+    identity_source: Optional[str]
 
 
 class SelectedDevice(_SelectionDetails):
@@ -68,12 +69,13 @@ class MixinReceipt(TypedDict):
 
 
 @dataclass(frozen=True)
-class HostHandoff:
-    """A host-observed Apple identity carried by one ARM32 RAM session."""
+class RecoveryHandoff:
+    """Expected provenance for one checked ARM32 recovery handoff."""
     handoff_id: str
     template_sha256: str
     chip: int
     board: int
+    identity_source: str = 'host-usb'
 
     def __post_init__(self) -> None:
         if (not isinstance(self.handoff_id, str) or
@@ -81,12 +83,13 @@ class HostHandoff:
                 not int(self.handoff_id, 16) or
                 not isinstance(self.template_sha256, str) or
                 not re.fullmatch('[0-9a-f]{64}', self.template_sha256) or
+                self.identity_source not in ('host-usb', 'ios-device') or
                 type(self.chip) is not int or not 0 < self.chip < 2**32 or
                 type(self.board) is not int or not 0 <= self.board < 2**32):
             raise ValueError('Invalid host-bound recovery identity')
 
     def fields(self) -> Dict[str, Any]:
-        return {'identity_source': 'host-usb', 'handoff_id': self.handoff_id,
+        return {'identity_source': self.identity_source, 'handoff_id': self.handoff_id,
                 'template_sha256': self.template_sha256, 'chip': self.chip, 'board': self.board}
 
     def matches(self, observation: Any) -> bool:
@@ -100,7 +103,7 @@ class Connection:
     argv: List[str]
     scope: BootState
     check: Callable[[], None]
-    handoff: Optional[HostHandoff] = None
+    handoff: Optional[RecoveryHandoff] = None
 
 
 @runtime_checkable

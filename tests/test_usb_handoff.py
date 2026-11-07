@@ -38,6 +38,7 @@ class USBHandoff(unittest.TestCase):
             with self.subTest(backend=read.__name__):
                 row = read(f'{LEGACY} HND:{HANDOFF}')
                 self.assertEqual(row['handoff_id'], HANDOFF)
+                self.assertEqual(row['identity_source'], 'host-usb')
                 self.assertEqual((row['ecid'], row['chip'], row['board']), (2, 0x8942, 0x0a))
                 self.assertEqual((row['boot_id'], row['profile']), (BOOT, 'p105'))
 
@@ -45,6 +46,24 @@ class USBHandoff(unittest.TestCase):
         for read in (self.read_macos, self.read_linux):
             with self.subTest(backend=read.__name__):
                 self.assertIsNone(read(LEGACY)['handoff_id'])
+                self.assertIsNone(read(LEGACY)['identity_source'])
+
+    def test_explicit_host_and_ios_origins_match_on_both_backends(self):
+        for read in (self.read_macos, self.read_linux):
+            for flag, source in (('h', 'host-usb'), ('i', 'ios-device')):
+                with self.subTest(backend=read.__name__, flag=flag):
+                    self.assertEqual(read(f'{LEGACY} HND:{HANDOFF} ORG:{flag}')['identity_source'], source)
+
+    def test_malformed_duplicate_or_unbound_origin_is_refused(self):
+        fields = ('ORG', 'ORG:', 'ORG:H', 'ORG:ios-device', 'ORG:x', 'ORG:i!',
+                  'ORG:h ORG:i', 'ORG:i ORG:', 'ORG=h')
+        for read in (self.read_macos, self.read_linux):
+            for field in fields:
+                with self.subTest(backend=read.__name__, field=field), self.assertRaisesRegex(
+                        ValueError, 'USB identity origin'):
+                    read(f'{LEGACY} HND:{HANDOFF} {field}')
+            with self.assertRaisesRegex(ValueError, 'USB identity origin'):
+                read(f'{LEGACY} ORG:i')
 
     def test_malformed_or_duplicate_handoff_is_refused(self):
         fields = ('HND', 'HND:', f'HND:{HANDOFF[:-1]}', f'HND:{HANDOFF}0',

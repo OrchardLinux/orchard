@@ -5,7 +5,7 @@ import tomllib
 
 
 def settings(board, hardware=None):
-    from .hardware import ROOT, device
+    from .hardware import ROOT, boot_recipe, device
     from .kernel import descriptor
     from .recovery_identity import validate_policy
     hardware = Path(hardware or ROOT)
@@ -27,9 +27,16 @@ def settings(board, hardware=None):
     normalized = lambda names: {name.replace('-', '_') for name in names}
     if normalized(table['usb_modules']) & normalized(table['manual_modules']):
         raise ValueError('A manual module cannot be loaded during USB setup')
-    identity = validate_policy({'schema': 1, 'source': 'host-usb', 'profile': selected['device']['profile'],
+    identity = {'schema': 1, 'source': 'host-usb', 'profile': selected['device']['profile'],
         'compatibles': selected['device']['dt_compatible'], 'chip': selected['match']['dfu']['chip'],
-        'board': selected['match']['dfu']['board']})
+        'board': selected['match']['dfu']['board']}
+    if 'ios-local-file' in selected.get('boot', {}).get('methods', ()):
+        local = boot_recipe(board, hardware).get('methods', {}).get('ios-local-file', {})
+        if not isinstance(local, dict) or local.get('identity_source') != 'ios-device':
+            raise ValueError('The on-device boot recipe lacks an explicit ios-device identity source')
+        identity.pop('source')
+        identity.update(schema=2, sources=['host-usb', 'ios-device'])
+    identity = validate_policy(identity)
     runtime = {'schema': 1, 'profile': identity['profile'], 'usb_network': table['usb_network'],
                'usb_modules': modules, 'manual_modules': table['manual_modules'], 'storage_activation': table['storage_activation']}
     return {'identity': identity, 'runtime': runtime}

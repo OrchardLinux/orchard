@@ -41,6 +41,33 @@ The P105 recipe keeps its existing app directory and bundle identifier so instal
 The supported boot paths stay in the device recipe, so a display label does
 not change the installed filenames or firmware compatibility.
 
+Public CB32 recovery images need a policy that explicitly permits `ios-device`
+identity. Preparation creates a deterministic launch template with a bounded
+whitespace slot in `/chosen/bootargs`; the receipt retains both the original
+public input SHA-256 and the exact installed template SHA-256. The kernel and
+initramfs bytes remain unchanged. A host-only public template is refused.
+
+On each permitted tap, the helper reads the live iOS registry's exact CFData
+ECID, chip/board IDs, model and compatible aliases using the selected recipe's
+guards. It creates a fresh nonce and writes separate attempt copies of the
+payload and iBEC. Only the reserved bootargs slot and one generated iBEC CRC word
+change. Both files pass hash/CRC checks before the helper schedules its owned
+wake or starts kloader. The original installed assets stay hash-pinned, and the
+existing one-attempt-per-iOS-boot lease remains in force.
+
+An offline start reports `identity_source=ios-device` and USB `ORG:i` alongside
+its boot UUID and nonce. To attach from a Mac later, select the private output
+that prepared that launcher:
+
+```sh
+export ORCHARD_IOS_LAUNCHER=/private/path/to/prepared-launcher
+```
+
+The host checks its provision inventory and recipe, then requires matching
+template/origin/nonce/chip/board fields through serial bootstrap and authenticated
+SSH. A prior host-upload receipt is unnecessary for this origin. Preparing the
+files does not qualify the current source on hardware.
+
 ## Source and validation
 
 The launcher/helper and shim derive from Shayne Legault's P105 local-storage

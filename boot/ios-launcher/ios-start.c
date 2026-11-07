@@ -10,6 +10,7 @@
 #include <spawn.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/file.h>
@@ -19,6 +20,10 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include "ios-start-config.h"
+#ifdef IOS_IDENTITY_SLOT_OFFSET
+#include "ios-identity-bind.h"
+#include "ios-live-identity.h"
+#endif
 
 static int checked(const char *path, size_t length, const char *expected)
 {
@@ -46,6 +51,176 @@ static int checked(const char *path, size_t length, const char *expected)
 	return strcmp(text, expected) ? -1 : 0;
 }
 
+#ifdef IOS_IDENTITY_SLOT_OFFSET
+static void sha_text(const unsigned char *bytes, size_t length, char text[65])
+{
+	unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+	CC_SHA256(bytes, (CC_LONG)length, digest);
+	for (unsigned int i = 0; i < sizeof(digest); i++)
+		snprintf(text + i * 2, 3, "%02x", digest[i]);
+}
+
+static unsigned char *checked_copy(const char *path, size_t length, const char *expected)
+{
+	if (!length || length > 64u * 1024u * 1024u)
+		return NULL;
+	int fd = open(path, O_RDONLY | O_NOFOLLOW);
+	struct stat info;
+	if (fd < 0)
+		return NULL;
+	if (fstat(fd, &info) || !S_ISREG(info.st_mode) || info.st_uid ||
+	    (info.st_mode & 022) || (uint64_t)info.st_size != length) {
+		close(fd);
+		return NULL;
+	}
+	unsigned char *copy = malloc(length);
+	if (!copy) {
+		close(fd);
+		return NULL;
+	}
+	size_t at = 0;
+	while (at < length) {
+		ssize_t count = pread(fd, copy + at, length - at, (off_t)at);
+		if (count <= 0) {
+			close(fd);
+			free(copy);
+			return NULL;
+		}
+		at += (size_t)count;
+	}
+	char digest[65];
+	sha_text(copy, length, digest);
+	if (close(fd) || strcmp(digest, expected)) {
+		free(copy);
+		return NULL;
+	}
+	return copy;
+}
+
+static int sync_parent(const char *path)
+{
+	char directory[1024];
+	const char *slash;
+	size_t length;
+	if (!path || path[0] != '/')
+		return -1;
+	slash = strrchr(path, '/');
+	if (!slash || !slash[1])
+		return -1;
+	length = slash == path ? 1 : (size_t)(slash - path);
+	if (length >= sizeof(directory))
+		return -1;
+	memcpy(directory, path, length);
+	directory[length] = '\0';
+	int fd = open(directory, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+	if (fd < 0)
+		return -1;
+	int result = fsync(fd);
+	if (close(fd))
+		result = -1;
+	return result ? -1 : 0;
+}
+
+static int write_attempt(const char *path, const unsigned char *bytes, size_t length)
+{
+	char pending[1024], digest[65];
+	int count = snprintf(pending, sizeof(pending), "%s.pending", path);
+	if (count <= 0 || count >= (int)sizeof(pending))
+		return -1;
+	int fd = open(pending, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+	if (fd < 0)
+		return -1;
+	size_t at = 0;
+	while (at < length) {
+		ssize_t written = write(fd, bytes + at, length - at);
+		if (written <= 0)
+			goto failed;
+		at += (size_t)written;
+	}
+	if (fsync(fd))
+		goto failed;
+	if (close(fd)) {
+		unlink(pending);
+		return -1;
+	}
+	if (rename(pending, path)) {
+		unlink(pending);
+		return -1;
+	}
+	if (sync_parent(path))
+		return -1;
+	sha_text(bytes, length, digest);
+	return checked(path, length, digest);
+failed:
+	close(fd);
+	unlink(pending);
+	return -1;
+}
+
+static int prepare_attempt(uint64_t ecid)
+{
+	unsigned char random[16];
+	char nonce[33];
+	arc4random_buf(random, sizeof(random));
+	for (unsigned int i = 0; i < sizeof(random); i++)
+		snprintf(nonce + i * 2, 3, "%02x", random[i]);
+	unsigned char *image = checked_copy(ROOT_BOOT_PATH, ROOT_BOOT_BYTES, ROOT_BOOT_SHA256);
+	unsigned char *ibec = checked_copy(IBEC_PATH, IBEC_BYTES, IBEC_SHA256);
+	int result = -1;
+	uint32_t crc;
+	if (!image || !ibec || orchard_ios_crc32(image, ROOT_BOOT_BYTES, &crc) ||
+	    crc != IOS_TEMPLATE_CRC32 ||
+	    orchard_ios_bind_handoff(image, ROOT_BOOT_BYTES, IOS_IDENTITY_SLOT_OFFSET,
+		IOS_IDENTITY_SLOT_BYTES, TARGET_PROFILE, ecid, TARGET_CHIP, TARGET_BOARD,
+		nonce, ROOT_BOOT_SHA256) ||
+	    orchard_ios_crc32(image, ROOT_BOOT_BYTES, &crc) ||
+	    orchard_ios_patch_ibec_crc(ibec, IBEC_BYTES, IOS_IBEC_CRC_OFFSET,
+		IOS_TEMPLATE_CRC32, crc) ||
+	    write_attempt(ATTEMPT_BOOT_PATH, image, ROOT_BOOT_BYTES) ||
+	    write_attempt(ATTEMPT_IBEC_PATH, ibec, IBEC_BYTES))
+		goto done;
+	result = 0;
+done:
+	free(image);
+	free(ibec);
+	return result;
+}
+#endif
+
+static int lease_number(const char *text, size_t length, size_t *at,
+			uint64_t cutoff, uint64_t last_digit, uint64_t *value)
+{
+	size_t start = *at;
+	uint64_t number = 0;
+	while (*at < length && text[*at] >= '0' && text[*at] <= '9') {
+		uint64_t digit = (uint64_t)(text[*at] - '0');
+		if (number > cutoff || (number == cutoff && digit > last_digit))
+			return -1;
+		number = number * 10 + digit;
+		(*at)++;
+	}
+	if (*at == start)
+		return -1;
+	*value = number;
+	return 0;
+}
+
+static int valid_lease_token(const char *text, size_t length)
+{
+	char canonical[64];
+	size_t at = 3;
+	uint64_t seconds, microseconds;
+	if (length < 7 || memcmp(text, "v1:", 3) ||
+	    lease_number(text, length, &at, UINT64_C(922337203685477580), 7, &seconds) ||
+	    at >= length || text[at++] != ':' ||
+	    lease_number(text, length, &at, 99999, 9, &microseconds) ||
+	    seconds == 0 || at + 1 != length || text[at] != '\n')
+		return 0;
+	int count = snprintf(canonical, sizeof(canonical), "v1:%lld:%d\n",
+		(long long)seconds, (int)microseconds);
+	return count > 0 && count == (int)length && !memcmp(text, canonical, length);
+}
+
 static int boot_lease(void)
 {
 	struct timeval boot;
@@ -60,16 +235,25 @@ static int boot_lease(void)
 		(long long)boot.tv_sec, (int)boot.tv_usec);
 	if (count <= 0 || count >= (int)sizeof(token))
 		return -1;
-	int fd = open(LEASE_PATH, O_RDWR | O_CREAT | O_NOFOLLOW, 0600);
-	if (fd < 0)
-		return -1;
+	int created = 1;
+	int fd = open(LEASE_PATH, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+	if (fd < 0) {
+		if (errno != EEXIST)
+			return -1;
+		created = 0;
+		fd = open(LEASE_PATH, O_RDWR | O_NOFOLLOW);
+		if (fd < 0)
+			return -1;
+	}
 	if (flock(fd, LOCK_EX | LOCK_NB) || fstat(fd, &info) ||
 	    !S_ISREG(info.st_mode) || info.st_uid || (info.st_mode & 077) ||
-	    info.st_size < 0 || info.st_size >= (off_t)sizeof(previous))
+	    info.st_size < 0 || info.st_size >= (off_t)sizeof(previous) ||
+	    (!created && !info.st_size))
 		goto refused;
 	if (pread(fd, previous, (size_t)info.st_size, 0) != info.st_size)
 		goto refused;
-	if (info.st_size && (strncmp(previous, "v1:", 3) || !strcmp(previous, token)))
+	if (info.st_size && (!valid_lease_token(previous, (size_t)info.st_size) ||
+	    !strcmp(previous, token)))
 		goto refused;
 	if (ftruncate(fd, 0) || write(fd, token, (size_t)count) != count || fsync(fd))
 		goto refused;
@@ -179,7 +363,11 @@ static int start_with_wake(int lease)
 	int result = prepare_wake(&wake);
 	if (!result) {
 		char *const arguments[] = {KLOADER_PATH,
+#ifdef IOS_IDENTITY_SLOT_OFFSET
+			ATTEMPT_IBEC_PATH, NULL};
+#else
 			IBEC_PATH, NULL};
+#endif
 		char *const environment[] = {"PATH=/usr/bin:/bin:/usr/sbin:/sbin", "HOME=/var/root", NULL};
 		pid_t child;
 		int spawned = posix_spawn(&child, arguments[0], NULL, NULL, arguments, environment);
@@ -231,6 +419,11 @@ int main(int argc, char **argv)
 	    checked(IBEC_PATH, IBEC_BYTES, IBEC_SHA256) ||
 	    checked(KLOADER_PATH, KLOADER_BYTES, KLOADER_SHA256))
 		return 12;
+#ifdef IOS_IDENTITY_SLOT_OFFSET
+	uint64_t ecid;
+	if (orchard_ios_live_identity(&ecid))
+		return 16;
+#endif
 	if (inspect) {
 		struct startup_wake wake = {0};
 		int available = open_wake_api(&wake);
@@ -243,5 +436,11 @@ int main(int argc, char **argv)
 	int once = boot_lease();
 	if (once < 0)
 		return 13;
+#ifdef IOS_IDENTITY_SLOT_OFFSET
+	if (prepare_attempt(ecid)) {
+		close(once);
+		return 16;
+	}
+#endif
 	return start_with_wake(once);
 }

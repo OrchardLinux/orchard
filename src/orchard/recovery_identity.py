@@ -1,4 +1,4 @@
-"""Bounded host USB identity parameters shared by payloads and RAM recovery."""
+"""Bounded boot identity parameters shared by payloads and RAM recovery."""
 import base64
 import binascii
 import json
@@ -9,6 +9,8 @@ HANDOFF_PARAMETER = 'orchard.recovery-handoff'
 MAX_ENCODED_BYTES = 2048
 MAX_CMDLINE_BYTES = 1023
 POLICY_FIELDS = frozenset(('schema', 'source', 'profile', 'compatibles', 'chip', 'board'))
+POLICY_SOURCES_FIELDS = POLICY_FIELDS - {'source'} | {'sources'}
+SOURCES = frozenset(('host-usb', 'ios-device'))
 HANDOFF_FIELDS = frozenset(('schema', 'source', 'profile', 'ecid', 'chip', 'board',
                             'handoff_id', 'template_sha256'))
 
@@ -35,10 +37,10 @@ def object_json(raw):
     return result
 
 
-def _selected(result, fields):
+def _selected(result, fields, schema=1):
     if (not isinstance(result, dict) or set(result) != fields or
-            type(result.get('schema')) is not int or result['schema'] != 1 or
-            result.get('source') != 'host-usb' or not isinstance(result.get('profile'), str) or
+            type(result.get('schema')) is not int or result['schema'] != schema or
+            not isinstance(result.get('profile'), str) or
             not re.fullmatch(r'[a-z0-9][a-z0-9._-]*', result['profile'])):
         raise ValueError('Unsupported recovery identity fields')
     if (type(result.get('chip')) is not int or not 0 < result['chip'] <= 0xffffffff or
@@ -47,7 +49,17 @@ def _selected(result, fields):
 
 
 def validate_policy(result):
-    _selected(result, POLICY_FIELDS)
+    if isinstance(result, dict) and result.get('schema') == 2:
+        _selected(result, POLICY_SOURCES_FIELDS, 2)
+        sources = result['sources']
+        if (not isinstance(sources, list) or not 1 <= len(sources) <= len(SOURCES) or
+                any(not isinstance(value, str) or value not in SOURCES for value in sources) or
+                len(set(sources)) != len(sources)):
+            raise ValueError('Recovery identity policy has invalid sources')
+    else:
+        _selected(result, POLICY_FIELDS)
+        if result['source'] != 'host-usb':
+            raise ValueError('Schema-1 recovery identity policy requires host-usb')
     compatibles = result.get('compatibles')
     if (not isinstance(compatibles, list) or not 1 <= len(compatibles) <= 32 or
             any(not isinstance(value, str) or not re.fullmatch(r'apple,[a-zA-Z0-9._+-]{1,120}', value)
@@ -56,8 +68,16 @@ def validate_policy(result):
     return result
 
 
+def allows_source(policy, source):
+    """An origin is accepted only when the staged descriptor permits it."""
+    validate_policy(policy)
+    return source in (policy['sources'] if policy['schema'] == 2 else [policy['source']])
+
+
 def validate_handoff(result):
     _selected(result, HANDOFF_FIELDS)
+    if not isinstance(result['source'], str) or result['source'] not in SOURCES:
+        raise ValueError('Recovery handoff has an unsupported source')
     if type(result.get('ecid')) is not int or not 0 < result['ecid'] < 2**64:
         raise ValueError('Host USB handoff has an invalid ECID')
     handoff_id, template = result.get('handoff_id'), result.get('template_sha256')

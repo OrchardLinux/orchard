@@ -1,4 +1,4 @@
-"""Publish the live ADT identity or a descriptor-bound host USB boot handoff."""
+"""Publish live ADT identity or a descriptor-bound boot identity handoff."""
 import json
 import os
 from pathlib import Path
@@ -9,12 +9,12 @@ import uuid
 from adt import validate
 
 try:
-    from recovery_identity import (HANDOFF_PARAMETER, POLICY_PARAMETER, object_json,
+    from recovery_identity import (HANDOFF_PARAMETER, POLICY_PARAMETER, allows_source, object_json,
                                    parameters, validate_policy)
 except ModuleNotFoundError as error:
     if error.name != 'recovery_identity':
         raise
-    from orchard.recovery_identity import (HANDOFF_PARAMETER, POLICY_PARAMETER, object_json,
+    from orchard.recovery_identity import (HANDOFF_PARAMETER, POLICY_PARAMETER, allows_source, object_json,
                                            parameters, validate_policy)
 
 RUN = Path('/run/orchard')
@@ -67,7 +67,7 @@ def _compatible(policy):
     return first
 
 
-def _host_identity(policy):
+def _handoff_identity(policy):
     _compatible(policy)
     selected = parameters(_bounded(CMDLINE, MAX_IDENTITY_BYTES))
     if set(selected) != {POLICY_PARAMETER, HANDOFF_PARAMETER}:
@@ -75,6 +75,8 @@ def _host_identity(policy):
     if selected[POLICY_PARAMETER] != policy:
         raise ValueError('Recovery command-line policy differs from the staged descriptor')
     handoff = selected[HANDOFF_PARAMETER]
+    if not allows_source(policy, handoff['source']):
+        raise ValueError('Recovery handoff source is absent from the staged policy')
     if any(type(handoff[name]) is not type(policy[name]) or handoff[name] != policy[name]
            for name in ('profile', 'chip', 'board')):
         raise ValueError('Host USB handoff differs from the recovery identity policy')
@@ -83,7 +85,7 @@ def _host_identity(policy):
     if not boot.int:
         raise ValueError('Invalid live boot ID')
     result = {'profile': policy['profile'], 'ecid': handoff['ecid'], 'boot_id': str(boot),
-              'identity_source': 'host-usb', 'handoff_id': handoff_id,
+              'identity_source': handoff['source'], 'handoff_id': handoff_id,
               'template_sha256': template, 'chip': handoff['chip'], 'board': handoff['board']}
     serial(result)
     return result
@@ -111,7 +113,7 @@ def cached():
     policy = _policy()
     if policy is not None:
         result = object_json(_bounded(path, MAX_IDENTITY_BYTES, protected=True))
-        expected = _host_identity(policy)
+        expected = _handoff_identity(policy)
         if (set(result) != set(expected) or
                 any(type(result[name]) is not type(value) or result[name] != value
                     for name, value in expected.items())):
@@ -130,7 +132,7 @@ def initialize():
         raise ValueError('Device identity was already published')
     policy = _policy()
     if policy is not None:
-        result = _host_identity(policy)
+        result = _handoff_identity(policy)
     else:
         rows = re.findall(r'^mtd([0-9]+): ([0-9a-fA-F]+) [0-9a-fA-F]+ "adt"$', MTD.read_text(), re.M)
         if len(rows) != 1:
@@ -161,8 +163,16 @@ def initialize():
 
 def serial(record):
     result = f'ECID:{record["ecid"]:016x} BOOT:{record["boot_id"]} BOARD:{record["profile"]}'
-    if record.get('identity_source') == 'host-usb':
-        result += ' HND:' + record['handoff_id']
+    source = record.get('identity_source')
+    if source is None and ('handoff_id' in record or 'template_sha256' in record):
+        raise ValueError('Recovery serial has no handoff origin')
+    if source is not None:
+        origins = {'host-usb': 'h', 'ios-device': 'i'}
+        nonce = record.get('handoff_id')
+        if (not isinstance(source, str) or source not in origins or not isinstance(nonce, str) or
+                not re.fullmatch('[0-9a-f]{32}', nonce) or not int(nonce, 16)):
+            raise ValueError('Recovery serial has an invalid handoff origin')
+        result += ' HND:' + record['handoff_id'] + ' ORG:' + origins[source]
         if len(result) > 126:
             raise ValueError('Recovery identity exceeds the USB serial string limit')
     return result

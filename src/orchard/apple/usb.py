@@ -6,7 +6,7 @@ import sys
 import uuid
 
 from .linux_usb import devices as linux_devices, m1n1_ports as linux_m1n1_ports
-from .usb_identity import handoff_id
+from .usb_identity import handoff_id, identity_source
 from orchard.state import EndpointUnavailable
 
 # 0x4144: a RAM payload's USB session (orchard/usb-session).
@@ -56,6 +56,7 @@ def devices():
                       'ecid': int(fields[0].group(1), 16) if fields[0] else None,
                       'boot_id': str(uuid.UUID(boot.group(1))) if boot else None,
                       'handoff_id': handoff_id(serial),
+                      'identity_source': identity_source(serial),
                       'chip': int(fields[1].group(1), 16) if fields[1] else None,
                       'board': int(fields[2].group(1), 16) if fields[2] else None,
                       'profile': profile.group(1) if profile else None,

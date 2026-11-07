@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from orchard.apple import cascadia
-from orchard.contracts import Connection, HostHandoff
+from orchard.contracts import Connection, RecoveryHandoff
 from orchard.state import BootState, DeviceState, private_directory
 from orchard.transports import ssh
 
@@ -22,7 +22,7 @@ TEMPLATE = 'a' * 64
 
 class HandoffChecks(unittest.TestCase):
     def setUp(self):
-        self.handoff = HostHandoff(NONCE, TEMPLATE, 0x8942, 10)
+        self.handoff = RecoveryHandoff(NONCE, TEMPLATE, 0x8942, 10)
         self.scope = BootState(DeviceState('p105', 123), BOOT)
         self.endpoint = {'profile': 'p105', 'ecid': 123, 'boot_id': BOOT,
                          'location': 'port', 'serial_port': '/dev/fake', 'handoff_id': NONCE}
@@ -39,7 +39,7 @@ class HandoffChecks(unittest.TestCase):
                 self.assertFalse(self.handoff.matches(missing))
         for nonce in ('0' * 32, 'A' * 32, 'f' * 31):
             with self.subTest(nonce=nonce), self.assertRaises(ValueError):
-                HostHandoff(nonce, TEMPLATE, 0x8942, 10)
+                RecoveryHandoff(nonce, TEMPLATE, 0x8942, 10)
 
     def test_serial_bootstrap_checks_provenance_before_accepting_key(self):
         result = {**self.identity, 'host': '172.16.42.1', 'port': 22,
@@ -63,6 +63,18 @@ class HandoffChecks(unittest.TestCase):
             with patch('orchard.protocol.subprocess.run') as launch:
                 with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'changed'):
                     Client(connection, Mock()).call('start')
+                launch.assert_not_called()
+
+    def test_ios_origin_change_stops_rpc_even_with_the_same_boot_and_nonce(self):
+        ios = RecoveryHandoff(NONCE, TEMPLATE, 0x8942, 10, 'ios-device')
+        endpoint = {**self.endpoint, 'identity_source': 'ios-device'}
+        for source in (None, 'host-usb'):
+            check = ssh.endpoint_check(self.scope, endpoint,
+                Mock(return_value={**endpoint, 'identity_source': source}), ios)
+            from orchard.protocol import Client
+            with patch('orchard.protocol.subprocess.run') as launch:
+                with self.subTest(source=source), self.assertRaisesRegex(ValueError, 'changed'):
+                    Client(Connection(['ssh'], self.scope, check, ios), Mock()).call('start')
                 launch.assert_not_called()
 
     def test_authenticated_status_checks_template_before_yielding_connection(self):
@@ -123,7 +135,7 @@ class CompletedHandoff(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
         self.endpoint = {'profile': 'p105', 'ecid': 123, 'boot_id': BOOT, 'handoff_id': NONCE}
-        self.handoff = HostHandoff(NONCE, TEMPLATE, 0x8942, 10)
+        self.handoff = RecoveryHandoff(NONCE, TEMPLATE, 0x8942, 10)
         folder = private_directory(DeviceState('p105', 123).root / 'boot-attempts')
         self.path = folder / (NONCE + '.json')
         self.record = {'schema': 1, 'method': 'recovery-autogo', 'phase': 'complete',

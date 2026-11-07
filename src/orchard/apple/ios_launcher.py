@@ -7,6 +7,7 @@ Device connection, installation and startup stay outside this command.
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import plistlib
 import re
@@ -117,8 +118,16 @@ def boot_profile(device, *, root=None):
         raise ValueError('The board has no iOS local-file boot method')
     profile = dict(recipe.get('methods', {}).get('ios-local-file', {}))
     profile['machine'] = recipe['device']
+    profile['profile'] = described['device']['profile']
+    profile['chip'] = described['match']['dfu']['chip']
+    profile['board'] = described['match']['dfu']['board']
     validate_profile(profile)
     return profile
+
+
+def recipe_digest(device):
+    return hashlib.sha256(json.dumps(hardware.boot_recipe(device), sort_keys=True,
+                                     separators=(',', ':')).encode('ascii')).hexdigest()
 
 
 def validate_profile(profile):
@@ -159,6 +168,31 @@ def validate_profile(profile):
         value = profile.get(key)
         if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9,._-]{1,80}', value):
             raise ValueError('Invalid boot recipe string: ' + key)
+    if profile.get('identity_source') not in (None, 'ios-device'):
+        raise ValueError('Unsupported iOS identity source')
+    if profile.get('identity_source') == 'ios-device':
+        for key in ('profile', 'ios_model'):
+            if not isinstance(profile.get(key), str) or not re.fullmatch(r'[A-Za-z0-9,._-]{1,80}', profile[key]):
+                raise ValueError('Invalid iOS identity recipe: ' + key)
+        if (type(profile.get('chip')) is not int or not 0 < profile['chip'] < 2**32 or
+                type(profile.get('board')) is not int or not 0 <= profile['board'] < 2**32):
+            raise ValueError('Invalid iOS identity chip/board')
+        compatible = profile.get('ios_registry_compatible')
+        if (not isinstance(compatible, list) or not compatible or
+                any(not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9,._-]{1,80}', value) for value in compatible) or
+                len(set(compatible)) != len(compatible) or
+                sum(len(value) + 1 for value in compatible) > 128):
+            raise ValueError('Invalid iOS registry compatible list')
+        for key in ('attempt_boot_path', 'ibec_attempt_boot_path', 'attempt_ibec_path'):
+            value = profile.get(key)
+            if (not isinstance(value, str) or not value.startswith('/') or str(PurePosixPath(value)) != value or
+                    '..' in PurePosixPath(value).parts or '\\' in value or any(ord(c) < 32 or ord(c) > 126 for c in value)):
+                raise ValueError('Invalid fixed iOS attempt path')
+        if profile['ibec_attempt_boot_path'] != '/boot' + profile['attempt_boot_path']:
+            raise ValueError('iBEC and iOS attempt paths differ')
+        if len({profile[key] for key in ('boot_path', 'ibec_path', 'kloader_path', 'helper_path', 'lease_path',
+                                        'app_path', 'attempt_boot_path', 'attempt_ibec_path')}) != 8:
+            raise ValueError('Attempt paths must be distinct from the installed inputs')
 
 
 def thumb_bl(source, target):
@@ -188,7 +222,7 @@ def patch_ibec(source, stub, profile):
     return bytes(changed)
 
 
-def launcher_config(profile, title):
+def launcher_config(profile, title, identity=None, shim=None):
     validate_profile(profile)
     if not isinstance(title, str) or not 1 <= len(title) <= 40 or any(ord(c) < 32 for c in title):
         raise ValueError('Launcher title must contain 1-40 printable characters')
@@ -202,10 +236,26 @@ def launcher_config(profile, title):
     result += '#define LAUNCHER_START_TITLE @' + json.dumps('Start ' + title) + '\n'
     message = f"Starting {title}...\nThe screen may stay black for up to {profile['wake_delay_seconds']} seconds."
     result += '#define LAUNCHER_STARTING_TITLE @' + json.dumps(message) + '\n'
+    if identity is not None:
+        raw = b'\0'.join(value.encode('ascii') for value in profile['ios_registry_compatible']) + b'\0'
+        literal = '"' + ''.join(chr(value) if 32 <= value < 127 and chr(value) not in ('"', '\\')
+                                else f'\\{value:03o}' for value in raw) + '"'
+        for name, value in {'TARGET_PROFILE': profile['profile'], 'TARGET_MODEL': profile['ios_model'],
+                            'ATTEMPT_BOOT_PATH': profile['attempt_boot_path'],
+                            'ATTEMPT_IBEC_PATH': profile['attempt_ibec_path']}.items():
+            result += '#define ' + name + ' ' + json.dumps(value) + '\n'
+        result += '#define TARGET_REGISTRY_COMPATIBLE ' + literal + '\n'
+        for name, value in {'TARGET_CHIP': profile['chip'], 'TARGET_BOARD': profile['board'],
+                            'TARGET_REGISTRY_COMPATIBLE_BYTES': len(raw),
+                            'IOS_IDENTITY_SLOT_OFFSET': identity['slot_offset'],
+                            'IOS_IDENTITY_SLOT_BYTES': identity['slot_bytes'],
+                            'IOS_IBEC_CRC_OFFSET': shim['mutable_crc_offset'],
+                            'IOS_TEMPLATE_CRC32': shim['boot_image_crc32']}.items():
+            result += f'#define {name} {int(value, 16) if isinstance(value, str) else value}u\n'
     return result
 
 
-def build_shim(ibec, image, output, profile, *, clang='clang-19', linker='ld.lld-19', objcopy='llvm-objcopy-19', host_toolchain=False):
+def build_shim(ibec, image, output, profile, *, clang='clang-19', linker='ld.lld-19', objcopy='llvm-objcopy-19', host_toolchain=False, identity=None):
     validate_profile(profile)
     raw, payload = Path(ibec).read_bytes(), Path(image).read_bytes()
     # Refuse the firmware before invoking a compiler or creating an output.
@@ -222,7 +272,9 @@ def build_shim(ibec, image, output, profile, *, clang='clang-19', linker='ld.lld
         ('IBEC_FINISH_INIT', 'finish_init'), ('IBEC_MOUNT_BOOT', 'mount_bootfs'),
         ('IBEC_LOAD_FILE', 'load_file'), ('LOCAL_BOOT_ADDRESS', 'load_address')))
     config += '#define LOCAL_BOOT_DEVICE ' + json.dumps(profile['boot_device']) + '\n'
-    config += '#define LOCAL_BOOT_PATH ' + json.dumps(profile['ibec_boot_path']) + '\n'
+    config += '#define LOCAL_BOOT_PATH ' + json.dumps(profile['ibec_attempt_boot_path'] if identity is not None else profile['ibec_boot_path']) + '\n'
+    if identity is not None:
+        config += '#define LOCAL_BOOT_DYNAMIC_IDENTITY 1\n'
     config += f'#define LOCAL_BOOT_BYTES {len(payload)}u\n#define LOCAL_BOOT_CRC32 0x{crc:08x}u\n'
     (output / 'local-boot-config.h').write_text(config)
     address, end = profile['base'] + profile['shim_start'], profile['base'] + profile['shim_end']
@@ -262,11 +314,18 @@ def build_shim(ibec, image, output, profile, *, clang='clang-19', linker='ld.lld
               'boot_image_crc32': f'{crc:08x}', 'source_files': {'ibec-local.c': hashlib.sha256((source / 'ibec-local.c').read_bytes()).hexdigest(),
                                'producer': hashlib.sha256(Path(__file__).read_bytes()).hexdigest()},
               'on_device_boot_qualified': False}
+    if identity is not None:
+        from .ios_identity import elf_word_offset
+        relative = elf_word_offset((output / 'local.elf').read_bytes(), 'orchard_local_boot_crc32', address, len(stub))
+        offset = profile['shim_start'] + relative
+        if struct.unpack_from('<I', changed, offset)[0] != crc:
+            raise ValueError('The mutable iBEC CRC word differs from the launch template')
+        report['mutable_crc_offset'] = offset
     (output / 'result.json').write_text(json.dumps(report, indent=2) + '\n')
     return report
 
 
-def build_launcher(boot_image, ibec, kloader, output, profile, title='Orchard'):
+def build_launcher(boot_image, ibec, kloader, output, profile, title='Orchard', *, identity=None, shim=None):
     args = SimpleNamespace(boot_image=Path(boot_image), ibec=Path(ibec),
                            kloader=Path(kloader), output=Path(output))
     source = Path(hardware.ROOT) / 'boot/ios-launcher'
@@ -275,7 +334,7 @@ def build_launcher(boot_image, ibec, kloader, output, profile, title='Orchard'):
     out = args.output.resolve()
     out.mkdir(mode=0o700,parents=True,exist_ok=False)
     assets = {'ROOT_BOOT':args.boot_image,'IBEC':args.ibec,'KLOADER':args.kloader}
-    header = launcher_config(profile, title)
+    header = launcher_config(profile, title, identity, shim)
     inputs = {}
     for name,path in assets.items():
         raw = path.read_bytes()
@@ -298,7 +357,8 @@ def build_launcher(boot_image, ibec, kloader, output, profile, title='Orchard'):
         'setgid','setuid','snprintf','strcmp','sysctlbyname','task_for_pid','write',
         '_NSConcreteStackBlock','_dispatch_main_q','dispatch_async','dispatch_get_global_queue',
         'posix_spawn','waitpid','puts','strncmp','flock','ftruncate','pread',
-        'dlopen','dlsym','dlclose','getpid','__error','memset','floor')])
+        'dlopen','dlsym','dlclose','getpid','__error','memset','floor',
+        'malloc','free','read','rename','unlink','arc4random_buf','memcmp','memcpy','strlen','strrchr')])
     objc = library(out,'libobjc','/usr/lib/libobjc.A.dylib',[
         '_'+name for name in ('_objc_empty_cache','objc_alloc','objc_autoreleasePoolPop',
         'objc_autoreleasePoolPush','objc_msgSend','objc_msgSend_stret','objc_release',
@@ -312,10 +372,13 @@ def build_launcher(boot_image, ibec, kloader, output, profile, title='Orchard'):
         ['___CFConstantStringClassReference','_CFRelease','_CFGetTypeID','_CFArrayGetTypeID',
          '_CFArrayGetCount','_CFArrayGetValueAtIndex','_CFDictionaryGetTypeID',
          '_CFDictionaryGetValue','_CFEqual','_CFAbsoluteTimeGetCurrent','_CFDateCreate',
-         '_CFStringCreateWithCString'])
+         '_CFStringCreateWithCString','_CFDataGetTypeID','_CFDataGetLength','_CFDataGetBytePtr'])
     graphics = library(out,'CoreGraphics','/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics',
         ['_CGRectZero'])
-    run(*base,'-nostdlib',str(out/'start.o'),core,libsystem,'-Wl,-bind_at_load','-Wl,-no_uuid',
+    iokit = ([library(out,'IOKit','/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit',
+              ['_IORegistryEntryFromPath','_IORegistryEntryCreateCFProperty','_IOObjectRelease'])]
+             if identity is not None else [])
+    run(*base,'-nostdlib',str(out/'start.o'),core,*iokit,libsystem,'-Wl,-bind_at_load','-Wl,-no_uuid',
         '-o',str(out/'orchard-ios-start'))
     app = out/'Orchard.app'
     app.mkdir()
@@ -343,7 +406,8 @@ def build_launcher(boot_image, ibec, kloader, output, profile, title='Orchard'):
     report = {'schema':1,'device_operations':0,'architecture':'armv7','minimum_ios':profile['minimum_ios'],
               'inputs':inputs,'outputs':outputs,'signing':'ad-hoc SHA-1 and SHA-256; requires owner jailbreak',
               'source_files':{**{name:hashlib.sha256((source/name).read_bytes()).hexdigest()
-                              for name in ('ios-start.c','ios-launcher.m')},
+                              for name in ('ios-start.c','ios-launcher.m',
+                                           *(['ios-identity-bind.h','ios-live-identity.h'] if identity is not None else []))},
                               'producer': hashlib.sha256(Path(__file__).read_bytes()).hexdigest()},
               'on_device_startup_qualified':False}
     (out/'result.json').write_text(json.dumps(report,indent=2)+'\n')
@@ -394,11 +458,21 @@ def prepare(device, ibec, boot_image, kloader, kloader_receipt, output, *, title
         raise ValueError('Prepared iBEC differs from the exact supported image')
     if not 32768 < len(bundle) < profile['maximum_image_bytes'] or bundle[:4] != bytes.fromhex('c0000cf1'):
         raise ValueError('Expected the ARM32 staging bundle')
+    from .ios_identity import prepare_template
+    template, identity = prepare_template(bundle, profile)
+    if len(template) >= profile['maximum_image_bytes']:
+        raise ValueError('The fixed-slot launch template exceeds its upload bound')
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
+    selected_image = Path(boot_image)
+    if identity is not None:
+        selected_image = output / 'launch-template.bin'
+        selected_image.write_bytes(template)
+        selected_image.chmod(0o600)
     shim = output / 'shim'
-    shim_result = build_shim(ibec, boot_image, shim, profile, clang=clang, linker=linker, objcopy=objcopy, host_toolchain=host_toolchain)
+    shim_result = build_shim(ibec, selected_image, shim, profile, clang=clang, linker=linker, objcopy=objcopy, host_toolchain=host_toolchain, identity=identity)
     native = output / 'native'
-    native_result = build_launcher(boot_image, shim / 'ibec-local.raw', kloader, native, profile, title)
+    native_result = build_launcher(selected_image, shim / 'ibec-local.raw', kloader, native, profile, title,
+                                   identity=identity, shim=shim_result)
     files = []
     stage = output / 'files'
     def stage_file(source, destination, mode):
@@ -414,7 +488,7 @@ def prepare(device, ibec, boot_image, kloader, kloader_receipt, output, *, title
         files.append({'source': str(target.relative_to(output)), 'destination': destination,
                       'uid': 0, 'gid': 0, 'mode': mode, 'bytes': len(data),
                       'sha256': hashlib.sha256(data).hexdigest()})
-    stage_file(boot_image, profile['boot_path'], '0644')
+    stage_file(selected_image, profile['boot_path'], '0644')
     stage_file(shim / 'ibec-local.raw', profile['ibec_path'], '0644')
     stage_file(kloader, profile['kloader_path'], '0755')
     stage_file(native / 'orchard-ios-start', profile['helper_path'], '4755')
@@ -427,8 +501,81 @@ def prepare(device, ibec, boot_image, kloader, kloader_receipt, output, *, title
               'machine': profile['machine'], 'device_operations': 0, 'files': files,
               'shim': shim_result, 'native': native_result, 'kloader': kloader_result,
               'on_device_startup_qualified': False}
+    if identity is not None:
+        report['identity'] = identity
+        report['boot_recipe_sha256'] = recipe_digest(device)
     (output / 'installation.json').write_text(json.dumps(report, indent=2) + '\n')
+    (output / 'installation.json').chmod(0o600)
     return report
+
+
+def provision_handoff(device, endpoint, receipt=None):
+    """Pin an offline start to an explicitly selected private provision output."""
+    from orchard.contracts import RecoveryHandoff
+    from orchard import cascadia_payload as cascadia
+    from orchard import recovery_identity
+    from orchard.state import BootState, DeviceState
+
+    supplied = receipt or os.environ.get('ORCHARD_IOS_LAUNCHER')
+    if not supplied:
+        raise ValueError('Select the private iOS launcher output with ORCHARD_IOS_LAUNCHER before attaching')
+    path = Path(supplied)
+    if path.is_dir():
+        path = path / 'installation.json'
+    folder = path.parent.resolve()
+    if (path.is_symlink() or not path.is_file() or path.stat().st_size > 1 << 20 or
+            path.stat().st_uid != os.getuid() or path.stat().st_mode & 0o077 or
+            path.parent.is_symlink() or folder.stat().st_uid != os.getuid() or folder.stat().st_mode & 0o077):
+        raise ValueError('Expected a private regular iOS provision receipt')
+    try:
+        record = json.loads(path.read_text())
+        identity = record['identity']
+        profile = boot_profile(device)
+        if (type(record['schema']) is not int or record['schema'] != 1 or record['kind'] != 'ios-local-file-launcher' or
+                record['device'] != device or record['machine'] != profile['machine'] or
+                record['boot_recipe_sha256'] != recipe_digest(device) or
+                type(identity['schema']) is not int or identity['schema'] != 1 or identity['identity_source'] != 'ios-device' or
+                (identity['profile'], identity['chip'], identity['board']) !=
+                (device, profile['chip'], profile['board']) or
+                not re.fullmatch('[0-9a-f]{64}', identity['public_input_sha256'])):
+            raise ValueError('iOS provision identity differs from the selected recipe')
+        checked = {}
+        for asset in record['files']:
+            source = asset['source']
+            if (not isinstance(source, str) or str(PurePosixPath(source)) != source or
+                    PurePosixPath(source).is_absolute() or '..' in PurePosixPath(source).parts):
+                raise ValueError('iOS provision asset escapes its private output')
+            candidate = folder / source
+            if (candidate.is_symlink() or not candidate.is_file() or
+                    any(parent.is_symlink() for parent in candidate.parents if parent != folder and folder in parent.parents) or
+                    candidate.stat().st_uid != os.getuid() or candidate.stat().st_mode & 0o077 or
+                    not 0 < candidate.stat().st_size <= profile['maximum_image_bytes'] or
+                    candidate.stat().st_size != asset['bytes']):
+                raise ValueError('iOS provision asset is not a private checked file')
+            data = candidate.read_bytes()
+            if hashlib.sha256(data).hexdigest() != asset['sha256'] or asset['destination'] in checked:
+                raise ValueError('iOS provision asset differs from its receipt')
+            checked[asset['destination']] = (asset, data)
+        if not {profile[key] for key in ('boot_path', 'ibec_path', 'kloader_path', 'helper_path')} <= checked.keys():
+            raise ValueError('The iOS provision inventory lacks a required boot asset')
+        asset, template = checked[profile['boot_path']]
+        if (asset['sha256'] != identity['template_sha256'] or len(template) != identity['template_bytes'] or
+                type(identity['slot_offset']) is not int or type(identity['slot_bytes']) is not int or
+                not 0 < identity['slot_bytes'] <= 1023 or
+                not 0 <= identity['slot_offset'] <= len(template) - identity['slot_bytes'] or
+                template[identity['slot_offset']:identity['slot_offset'] + identity['slot_bytes']] != b' ' * identity['slot_bytes']):
+            raise ValueError('iOS provision template differs from its fixed identity slot')
+        policy = cascadia.host_identity_policy(template)
+        if (policy is None or not recovery_identity.allows_source(policy, 'ios-device') or
+                (policy['profile'], policy['chip'], policy['board']) != (device, profile['chip'], profile['board'])):
+            raise ValueError('The selected iOS template lacks its public identity policy')
+        if endpoint.get('identity_source') != 'ios-device' or endpoint.get('profile') != device:
+            raise ValueError('The recovery has no explicit iOS device origin')
+        BootState(DeviceState(device, endpoint['ecid']), endpoint['boot_id'])
+        return RecoveryHandoff(endpoint['handoff_id'], identity['template_sha256'],
+                               profile['chip'], profile['board'], 'ios-device')
+    except (OSError, KeyError, TypeError, ValueError) as error:
+        raise ValueError('The selected iOS provision receipt does not match this recovery: ' + str(error)) from error
 
 
 def add_arguments(parser):

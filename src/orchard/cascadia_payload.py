@@ -415,14 +415,20 @@ def host_identity_policy(data):
 
 def bind_host_identity(data, *, ecid, chip, board, profile, handoff_id, template_sha256):
     """Bind a guarded host USB observation to one complete, revalidated bundle."""
+    return bind_recovery_identity(data, source='host-usb', ecid=ecid, chip=chip, board=board,
+                                  profile=profile, handoff_id=handoff_id, template_sha256=template_sha256)
+
+
+def bind_recovery_identity(data, *, source, ecid, chip, board, profile, handoff_id, template_sha256):
+    """Bind one permitted origin without changing the kernel or initramfs."""
     policy = host_identity_policy(data)
-    if policy is None:
-        raise ValueError('Payload does not declare host-bound recovery identity')
+    if policy is None or not identity_protocol.allows_source(policy, source):
+        raise ValueError('Payload does not permit the selected recovery identity source')
     if (profile, chip, board) != (policy['profile'], policy['chip'], policy['board']):
         raise ValueError('Selected device differs from the recovery identity policy')
     if template_sha256 != digest(data):
         raise ValueError('Recovery template digest differs before identity binding')
-    handoff = identity_protocol.validate_handoff({'schema': 1, 'source': 'host-usb',
+    handoff = identity_protocol.validate_handoff({'schema': 1, 'source': source,
         'profile': profile, 'ecid': ecid, 'chip': chip, 'board': board,
         'handoff_id': handoff_id, 'template_sha256': template_sha256})
     values, described, bootargs = _payload_parts(data)

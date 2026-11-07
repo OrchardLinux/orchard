@@ -19,7 +19,7 @@ import time
 import zlib
 
 from orchard.integrity import digest
-from orchard.contracts import HostHandoff
+from orchard.contracts import RecoveryHandoff
 from orchard import cascadia_payload as payload_image
 from orchard.state import BootState, DeviceState, private_directory
 from . import iboot32, usb
@@ -129,6 +129,12 @@ def recovery_handoff(profile, endpoint):
         return None
     if not isinstance(identifier, str) or not re.fullmatch('[0-9a-f]{32}', identifier):
         raise ValueError('Invalid recovery handoff identity')
+    source = endpoint.get('identity_source') or 'host-usb'
+    if source == 'ios-device':
+        from .ios_launcher import provision_handoff
+        return provision_handoff(profile, endpoint)
+    if source != 'host-usb':
+        raise ValueError('Unsupported recovery identity origin')
     scope = BootState(DeviceState(profile, endpoint['ecid']), endpoint['boot_id'])
     folder = private_directory(scope.device.root / 'boot-attempts')
     path = folder / (identifier + '.json')
@@ -137,7 +143,7 @@ def recovery_handoff(profile, endpoint):
         raise ValueError('The host-bound recovery has no private completed attempt receipt')
     try:
         record = json.loads(path.read_text())
-        handoff = HostHandoff(record['handoff_id'], record['template_sha256'], record['chip'], record['board'])
+        handoff = RecoveryHandoff(record['handoff_id'], record['template_sha256'], record['chip'], record['board'])
     except (OSError, ValueError, TypeError, KeyError) as error:
         raise ValueError('Invalid completed recovery handoff receipt') from error
     if (not scope.matches(record) or record.get('profile') != profile or
@@ -233,6 +239,8 @@ def boot(device, assets, manifest, progress, *, profile, chip, board, product):
             raise ValueError('Selected running recovery changed')
         if current.get('handoff_id') != device.get('handoff_id'):
             raise ValueError('Selected running recovery handoff changed')
+        if (current.get('identity_source') or 'host-usb') != (device.get('identity_source') or 'host-usb'):
+            raise ValueError('Selected running recovery origin changed')
         BootState(DeviceState(profile, current['ecid']), current['boot_id'])
         recovery_handoff(profile, current)
         return
@@ -252,7 +260,7 @@ def boot(device, assets, manifest, progress, *, profile, chip, board, product):
     identifier = secrets.token_hex(16)
     handoff = None
     if policy is not None:
-        handoff = HostHandoff(identifier, expected, chip, board)
+        handoff = RecoveryHandoff(identifier, expected, chip, board)
         payload = payload_image.bind_host_identity(payload, ecid=device['ecid'], chip=chip,
                                                    board=board, profile=profile,
                                                    handoff_id=identifier, template_sha256=expected)
@@ -330,6 +338,8 @@ def boot(device, assets, manifest, progress, *, profile, chip, board, product):
                     raise RuntimeError('Linux recovery has no valid device boot identity') from error
                 if handoff is not None and endpoint.get('handoff_id') != handoff.handoff_id:
                     raise RuntimeError('Linux recovery differs from the uploaded host handoff')
+                if handoff is not None and (endpoint.get('identity_source') or 'host-usb') != handoff.identity_source:
+                    raise RuntimeError('Linux recovery differs from the uploaded identity origin')
                 if handoff is None and endpoint.get('handoff_id') is not None:
                     raise RuntimeError('Linux recovery advertised an unexpected host handoff')
                 record.update(phase='complete', boot_id=endpoint['boot_id'])

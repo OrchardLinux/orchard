@@ -95,7 +95,8 @@ def endpoint_check(scope, endpoint, select_endpoint, handoff=None):
         current = select_endpoint()
         if (not scope.matches(current) or
                 (current['location'], current['serial_port']) != address or
-                (handoff is not None and current.get('handoff_id') != handoff.handoff_id)):
+                (handoff is not None and (current.get('handoff_id') != handoff.handoff_id or
+                    (current.get('identity_source') or 'host-usb') != handoff.identity_source))):
             raise ValueError('Selected device/boot or USB endpoint changed')
     return check
 
@@ -146,6 +147,8 @@ def session(device: DeviceState, select_endpoint, *, expected_boot=None, handoff
         raise ValueError('Recovery identity differs from the selected device/boot')
     if handoff is not None and endpoint.get('handoff_id') != handoff.handoff_id:
         raise ValueError('Recovery differs from the selected host-bound handoff')
+    if handoff is not None and (endpoint.get('identity_source') or 'host-usb') != handoff.identity_source:
+        raise ValueError('Recovery differs from the selected identity origin')
     if handoff is None and endpoint.get('handoff_id') is not None:
         raise ValueError('Recovery requires its completed host handoff receipt')
     check = endpoint_check(scope, endpoint, select_endpoint, handoff)

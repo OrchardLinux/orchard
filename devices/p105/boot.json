@@ -59,6 +59,12 @@
       "maximum_payload_bytes": 66060288
     },
     "ios-local-file": {
+      "identity_source": "ios-device",
+      "ios_model": "P105AP",
+      "ios_registry_compatible": ["P105AP", "iPad2,5", "AppleARM"],
+      "attempt_boot_path": "/boot/omarchy-p105-attempt.bin",
+      "ibec_attempt_boot_path": "/boot/boot/omarchy-p105-attempt.bin",
+      "attempt_ibec_path": "/usr/local/lib/orchard-p105/ibec-attempt.raw",
       "build": "12H321",
       "source": "Shayne Legault P105 local-file bring-up; derived from the owner-supplied patched iBEC; boot/ios-launcher/README.md",
       "prepared_ibec_sha256": "e987b101800bedf03c086aa55854ff594fcce1b0f55ea1424f3ccf180a40abce",

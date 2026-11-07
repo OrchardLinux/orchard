@@ -21,6 +21,8 @@ with mock.patch.dict(sys.modules, {'adt': adt}):
 BOOT = '11111111-1111-4111-8111-111111111111'
 POLICY = {'schema': 1, 'source': 'host-usb', 'profile': 'p105',
           'compatibles': ['apple,p105ap'], 'chip': 0x8942, 'board': 0x0a}
+DUAL_POLICY = {key: value for key, value in POLICY.items() if key != 'source'}
+DUAL_POLICY.update(schema=2, sources=['host-usb', 'ios-device'])
 HANDOFF = {'schema': 1, 'source': 'host-usb', 'profile': 'p105', 'ecid': 123,
            'chip': 0x8942, 'board': 0x0a, 'handoff_id': 'a'*32, 'template_sha256': 'b'*64}
 
@@ -30,6 +32,23 @@ def raw_token(name, raw):
 
 
 class IdentityCodec(unittest.TestCase):
+    def test_exact_origin_allowlist_preserves_schema_one_host_policy(self):
+        self.assertTrue(codec.allows_source(POLICY, 'host-usb'))
+        self.assertFalse(codec.allows_source(POLICY, 'ios-device'))
+        for source in ('host-usb', 'ios-device'):
+            self.assertTrue(codec.allows_source(DUAL_POLICY, source))
+            value = {**HANDOFF, 'source': source}
+            token = codec.encode_parameter(codec.HANDOFF_PARAMETER, value)
+            self.assertEqual(codec.parameters(token), {codec.HANDOFF_PARAMETER: value})
+        for value in ([], ['host-usb']*2, ['ios-device', 'unknown'], [None], 'ios-device'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                codec.validate_policy({**DUAL_POLICY, 'sources': value})
+        for change in ({'source': 'ios-device'}, {'schema': 2}, {'sources': ['host-usb']}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                codec.validate_policy({**POLICY, **change})
+        self.assertEqual(codec.parameters(codec.encode_parameter(codec.POLICY_PARAMETER, DUAL_POLICY)),
+                         {codec.POLICY_PARAMETER: DUAL_POLICY})
+
     def test_roundtrip_partial_and_complete_parameters(self):
         policy = codec.encode_parameter(codec.POLICY_PARAMETER, POLICY)
         handoff = codec.encode_parameter(codec.HANDOFF_PARAMETER, HANDOFF)
@@ -139,7 +158,8 @@ class HostIdentity(unittest.TestCase):
             self.assertEqual(identity.cached(), record)
             self.assertEqual(stat.S_IMODE((identity.RUN/'identity.json').stat().st_mode), 0o600)
             serial = identity.serial(record)
-            self.assertTrue(serial.endswith(' BOARD:p105 HND:'+'a'*32))
+            self.assertTrue(serial.endswith(' BOARD:p105 HND:'+'a'*32+' ORG:h'))
+            self.assertEqual(len(serial), 117)
             self.assertLessEqual(len(serial), 126)
             with self.assertRaisesRegex(ValueError, 'already published'):
                 identity.initialize()
@@ -152,6 +172,31 @@ class HostIdentity(unittest.TestCase):
                     self.assertRaisesRegex(ValueError, 'policy and host USB handoff'):
                 identity.initialize()
             self.assertFalse((identity.RUN/'identity.json').exists())
+
+    def test_ios_device_origin_requires_staged_allowlist_and_stays_explicit(self):
+        ios_handoff = {**HANDOFF, 'source': 'ios-device'}
+        self.command_line(handoff=ios_handoff)
+        with self.assertRaisesRegex(ValueError, 'source is absent'):
+            identity.initialize()
+        identity.POLICY.write_text(json.dumps(DUAL_POLICY))
+        self.command_line(policy=DUAL_POLICY, handoff=ios_handoff)
+        with mock.patch.object(identity, 'validate', side_effect=AssertionError('ADT fallback')):
+            record = identity.initialize()
+            self.assertEqual(record['identity_source'], 'ios-device')
+            self.assertTrue(identity.serial(record).endswith('HND:'+'a'*32+' ORG:i'))
+            self.assertEqual(identity.cached(), record)
+        # Changing the allowed origin in the live command line cannot reuse the cache.
+        self.command_line(policy=DUAL_POLICY, handoff=HANDOFF)
+        with self.assertRaisesRegex(ValueError, 'differs'):
+            identity.cached()
+
+    def test_serial_rejects_missing_unknown_or_empty_origin(self):
+        record = {'profile': 'p105', 'ecid': 123, 'boot_id': BOOT,
+                  'identity_source': 'ios-device', 'handoff_id': 'a'*32,
+                  'template_sha256': 'b'*64, 'chip': 0x8942, 'board': 0x0a}
+        for source in (None, '', 'ios', 'configuration', []):
+            with self.subTest(source=source), self.assertRaises(ValueError):
+                identity.serial({**record, 'identity_source': source})
 
     def test_descriptor_policy_and_live_first_compatible_must_match(self):
         for raw in (b'apple,p105\0', b'apple,j1\0', b'apple,s5l8942x\0apple,p105ap\0',
