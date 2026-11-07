@@ -174,12 +174,13 @@ class Armv7ProducerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'offset exceeds'):
             elf.needed(raw)
 
-    def runtime(self, foreign=False):
+    def runtime(self, foreign=False, extra=None):
         base, receipt = self.work / 'base.tar.gz', self.work / 'base.json'
         files = {'usr/bin/python3.12': executable(), 'usr/lib/ld-linux-armhf.so.3': executable(),
                  'usr/lib/libm.so.6': executable('arm64' if foreign else 'arm'),
                  'usr/sbin/blkid': executable(), 'usr/sbin/sfdisk': executable(),
                  'usr/sbin/mke2fs': executable(), 'etc/mke2fs.conf': b'[defaults]\n'}
+        files.update(extra or {})
         with tarfile.open(base, 'w:gz') as archive:
             for name, data in files.items():
                 member = tarfile.TarInfo(name)
@@ -200,6 +201,23 @@ class Armv7ProducerTests(unittest.TestCase):
         prepare_runtime.stage_runtime(base, receipt, output, 'arm')
         self.assertTrue((output / 'usr/lib/ld-linux-armhf.so.3').is_file())
         self.assertTrue((output / 'usr/bin/python3').exists())
+
+    def test_runtime_excludes_python_build_support_objects(self):
+        # Arch ARM's python.o is ET_REL/EABI5 with no executable float-ABI
+        # flag. Runtime code must still pass the existing strict ELF guard.
+        obj = bytearray(executable())
+        struct.pack_into('<H', obj, 16, 1)
+        struct.pack_into('<I', obj, 36, 0x05000000)
+        directory = 'usr/lib/python3.12/config-3.12-arm-linux-gnueabihf'
+        extension = 'usr/lib/python3.12/lib-dynload/_example.so'
+        base, receipt, output = self.runtime(extra={directory + '/python.o': bytes(obj),
+                                                   directory + '/Makefile': b'build support\n',
+                                                   extension: executable()})
+        with self.assertRaisesRegex(ValueError, 'hard-float'):
+            elf.architecture(obj)
+        prepare_runtime.stage_runtime(base, receipt, output, 'arm')
+        self.assertFalse((output / directory).exists())
+        self.assertEqual((output / extension).read_bytes(), executable())
 
     def test_runtime_refuses_foreign_architecture_library(self):
         base, receipt, output = self.runtime(foreign=True)

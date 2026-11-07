@@ -41,7 +41,10 @@ def stage_runtime(base, receipt, root, architecture='arm64'):
             selected = (tool or name == 'etc/mke2fs.conf' or
                         re.fullmatch(r'usr/bin/python3(?:\.[0-9]+)?', name) or
                         re.match(r'usr/lib/python3\.[0-9]+(?:/|$)', name) or libraries.fullmatch(name))
-            if (not selected or any('/' + component + '/' in '/' + name + '/' for component in
+            # Python's config directory contains build support, including
+            # relocatable objects that do not belong in the recovery runtime.
+            if (not selected or re.match(r'usr/lib/python3\.[0-9]+/config-[^/]+(?:/|$)', name) or
+                    any('/' + component + '/' in '/' + name + '/' for component in
                                     ('site-packages', 'test', 'tests', '__pycache__', 'idlelib', 'tkinter')) or
                     ('/lib-dynload/' in name and Path(name).name.startswith(
                         ('_tkinter', '_curses', '_test', '_ctypes_test', '_dbm', '_gdbm', '_sqlite3', 'readline')))):
