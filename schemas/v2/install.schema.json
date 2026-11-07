@@ -146,6 +146,18 @@
     "m1n1": {
       "$ref": "#/$defs/receipt"
     },
+    "cascadia": {
+      "type": "object",
+      "description": "32-bit releases: per board, the Cascadia loader that a patched iBEC starts in place of Pongo and m1n1. orchard assembles the board's payload from it, the platform layer and its own device data.",
+      "minProperties": 1,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9._-]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/receipt"
+      }
+    },
     "install_tools": {
       "$ref": "#/$defs/receipt"
     }
@@ -184,7 +196,7 @@
       }
     },
     {
-      "description": "A release installs from a block image (root.format), or has a recovery per platform.",
+      "description": "A release installs from a block image (root.format), or has a recovery per platform. A block-image release names its loader: m1n1 (arm64 roots) or per board the Cascadia loader (32-bit roots).",
       "if": {
         "properties": {
           "root": {
@@ -203,8 +215,19 @@
           }
         },
         "required": [
-          "m1n1",
           "install_tools"
+        ],
+        "oneOf": [
+          {
+            "required": [
+              "m1n1"
+            ]
+          },
+          {
+            "required": [
+              "cascadia"
+            ]
+          }
         ]
       },
       "else": {
