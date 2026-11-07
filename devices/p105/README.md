@@ -29,10 +29,11 @@ public recipe or release.
 
 ## Open work
 
-- Storage: the NAND driver (OrchardLinux/orchard#86, #87) is in
-  `kernel/patches/armv7/mtd`. The iOS disk translation layer and its append
-  writes (#89, #91) follow on top of it. Reclamation (#93) is unfinished:
-  until it lands, writes stop once the blank flash blocks are used up.
+- Storage: the NAND driver (OrchardLinux/orchard#86, #87), the iOS disk
+  translation layer and its append writes (#89, #91) are in
+  `kernel/patches/armv7/mtd`; the disk is `applesftlN`, on the 64 GB model
+  only. Reclamation (#93) is unfinished: until it lands, writes stop once
+  the blank flash blocks are used up.
 - A Linux root on LwVM: the kernel reads LwVM partitions
   (`kernel/patches/armv7/block`), but the shared initrd finds its root by
   reading a GPT itself and needs to learn LwVM partitions.
@@ -48,3 +49,7 @@ public recipe or release.
   is part of the driver.
 - #90's gadget config change (39b60b1, built-in CDC gadget off): not taken
   yet; it waits until 32-bit boots bind their own configfs gadget.
+- #89's read budget and lifetime module parameters (ffa74e8, source
+  e7d118292) and its module build (a607325): dropped; the reader is built in.
+- #91's `MTD_APPLE_SFTL_WRITE` option and `write_enable` parameter (e049bb4):
+  removed, writing is part of the driver.
