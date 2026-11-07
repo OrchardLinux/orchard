@@ -496,11 +496,16 @@ Project Cascadia's chain, as shaynelegault ran it on a P105:
    iBEC. The host uploads the complete bound bundle, followed by its exact
    checked loader prefix. It leaves at least one second for the Recovery
    endpoint to rearm and rechecks the exact device between those uploads. The
-   small second upload covers the loader code while retaining the bound
-   configuration from the full bundle, then makes iBEC enter the image already
-   stored at `0x80000000`.
-4. **Staging bundle** at `0x80000000`: the `linux_boot` trampoline paints
-   status and turns MMU and caches off. Padding reaches `0x8000`, followed by
+   second upload resends the exact loader prefix through the complete bound
+   configuration at offset `0x7f00`, ending at `0x7f44`. Its length stays below
+   the `0x8000` auto-go threshold and ends with a short USB packet. iBEC then
+   enters the image stored at `0x80000000`; the kernel, DTB and initramfs remain
+   from the full upload. Resume requires a completed receipt with this exact
+   trigger length. Earlier `0x6001` trigger receipts remain as evidence and
+   are refused for resume; a fresh authorized boot creates a current receipt.
+4. **Staging bundle** at `0x80000000`: the `linux_boot` trampoline validates
+   the bundle, then turns MMU and caches off before relocating the initramfs.
+   Padding reaches `0x8000`, followed by
    `zImage` with the DTB appended and entry at `0x80008000`. Current Orchard
    recovery also carries its external initramfs in the checked CB32 layout.
 5. **Linux** with a USB gadget; the host takes `10.55.0.1`, then SSH and NFS.

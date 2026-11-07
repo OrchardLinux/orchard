@@ -5,6 +5,7 @@ from pathlib import Path
 import struct
 from tempfile import TemporaryDirectory
 import unittest
+import zlib
 from unittest.mock import Mock, patch
 
 from orchard.apple import cascadia, iboot32
@@ -130,8 +131,9 @@ class PayloadTests(unittest.TestCase):
         data = payload()
         trigger = cascadia.loader_trigger(data)
         self.assertEqual(trigger, data[:cascadia.LOADER_TRIGGER_BYTES])
-        self.assertEqual(len(trigger), 0x6001)
-        self.assertLess(len(trigger), cascadia.CONFIG_AT)
+        self.assertEqual(len(trigger), 0x7f44)
+        self.assertEqual(len(trigger), cascadia.CONFIG_AT + cascadia.CONFIG.size)
+        self.assertNotEqual(len(trigger) % cascadia.RECOVERY_PACKET_BYTES, 0)
         self.assertLess(len(trigger), cascadia.AUTOGO_TRIGGER_LIMIT)
         self.assertNotEqual(data[cascadia.CONFIG_AT:cascadia.CONFIG_AT + 4], bytes(4))
         for offset in (cascadia.LOADER_CODE_LIMIT, cascadia.CONFIG_AT - 1):
@@ -515,6 +517,14 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(self.recovery.read_bytes(), self.data)
         original, bound = image.configuration(self.data), image.configuration(sent[0])
         self.assertEqual(sent[1], cascadia.loader_trigger(sent[0]))
+        config = sent[1][cascadia.CONFIG_AT:]
+        self.assertEqual(config, sent[0][cascadia.CONFIG_AT:cascadia.CONFIG_AT + cascadia.CONFIG.size])
+        self.assertNotEqual(config, self.data[cascadia.CONFIG_AT:cascadia.CONFIG_AT + cascadia.CONFIG.size])
+        self.assertGreater(bound['dtb_size'], original['dtb_size'])
+        self.assertEqual(cascadia.CONFIG.unpack(config)[-1], zlib.crc32(config[:-4]))
+        for candidate in (sent[1][:-1], sent[1][:0x6001], cascadia.loader_trigger(self.data)):
+            with self.subTest(length=len(candidate)), self.assertRaisesRegex(ValueError, 'bundle prefix'):
+                cascadia.loader_trigger(sent[0], candidate)
         self.assertEqual(self.data[original['kernel_offset']:original['dtb_offset']],
                          sent[0][bound['kernel_offset']:bound['dtb_offset']])
         self.assertEqual(self.data[original['initrd_offset']:], sent[0][bound['initrd_offset']:])

@@ -150,9 +150,16 @@ class CompletedHandoff(unittest.TestCase):
         self.path.chmod(0o600)
 
     def test_completed_private_receipt_recovers_exact_handoff(self):
+        self.assertEqual(self.record['loader_bytes'], 0x7f44)
         self.save()
         self.assertEqual(cascadia.recovery_handoff('p105', self.endpoint), self.handoff)
         self.assertIsNone(cascadia.recovery_handoff('p105', {**self.endpoint, 'handoff_id': None}))
+
+    def test_previous_code_only_trigger_receipt_cannot_resume(self):
+        self.record['loader_bytes'] = 0x6001
+        self.save()
+        with self.assertRaisesRegex(ValueError, 'handoff receipt'):
+            cascadia.recovery_handoff('p105', self.endpoint)
 
     def test_unknown_incomplete_or_changed_receipt_cannot_resume(self):
         with self.assertRaisesRegex(ValueError, 'private completed'):

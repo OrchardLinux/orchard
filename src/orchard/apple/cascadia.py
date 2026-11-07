@@ -28,7 +28,7 @@ CONFIG_AT = 0x7f00
 CONFIG = struct.Struct('<4s16I')
 AUTOGO_TRIGGER_LIMIT = 0x8000
 LOADER_CODE_LIMIT = payload_image.LOADER_CODE_LIMIT
-LOADER_TRIGGER_BYTES = LOADER_CODE_LIMIT + 1
+LOADER_TRIGGER_BYTES = CONFIG_AT + CONFIG.size
 RECOVERY_PACKET_BYTES = 512
 RECOVERY_REARM_SECONDS = 1.0
 
@@ -104,7 +104,7 @@ def validate_bundle(data, selected):
 
 
 def loader_trigger(data, candidate=None):
-    """Return the exact small loader prefix that makes the patched iBEC run it."""
+    """Resend the exact loader and bound configuration before iBEC enters it."""
     size = LOADER_TRIGGER_BYTES
     trigger = data[:size] if candidate is None else candidate
     if (size >= AUTOGO_TRIGGER_LIMIT or any(data[LOADER_CODE_LIMIT:CONFIG_AT]) or

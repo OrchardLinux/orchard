@@ -231,9 +231,10 @@ initramfs bytes, then rechecks the selected endpoint immediately before sending
 the bound bundle. After that upload completes, it records a durable settle
 phase, waits at least one monotonic second for iBEC to rearm its Recovery
 endpoint, and rechecks the exact ECID, chip, board, product and mode. A second
-Recovery upload carries the checked loader prefix through its reserved code
-area. The bound configuration stays in RAM from the first upload, and this small
-transfer starts the complete bundle already in RAM. The transport rejects
+Recovery upload carries the checked loader prefix through the complete bound
+configuration, ending at offset `0x7f44`. This transfer starts the complete bundle
+already in RAM. Resume requires the current trigger length; earlier `0x6001`
+receipts remain as evidence and are refused for resume. The transport rejects
 Recovery upload lengths on a 512-byte packet boundary because the supported
 irecovery command cannot prove the required trailing packet. Its private attempt
 receipt records the template, bound bundle and loader-prefix hashes, loader
