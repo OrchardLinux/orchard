@@ -41,6 +41,7 @@ def main(argv=None, *, core=None, origin=None):
     install = commands.add_parser('install', help='install a distribution on the connected device')
     install.add_argument('source', nargs='?', help="an index (local or HTTPS) or a registered distro "
                          "(default: the release this installer carries)")
+    install.add_argument('--hfs-shrink-proof', help='owner-private native HFS shrink proof for LwVM allocation')
     launch = commands.add_parser('launch', help="start an installed system from the device's boot entries")
     launch.add_argument('--entry', help='boot entry id to start without asking')
     commands.add_parser('devices', help='list USB devices without modifying them')
@@ -85,7 +86,7 @@ def main(argv=None, *, core=None, origin=None):
             source = args.source or bundled_release(core, origin)
             if source is None:
                 raise ValueError('Specify what to install: orchard install INDEX_OR_DISTRO')
-            run(str(source), progress=progress)
+            run(str(source), progress=progress, **({'hfs_shrink_proof': args.hfs_shrink_proof} if args.hfs_shrink_proof else {}))
         else:
             from .launch import launch as run
             run(entry=args.entry, progress=progress)

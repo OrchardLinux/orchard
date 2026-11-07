@@ -1,6 +1,9 @@
 #!/bin/sh
 # USB NCM networking and ACM serial, restricted to the attached host.
 set -eu
+network=$(/usr/bin/python3 /usr/libexec/orchard/policy.py network)
+modules=$(/usr/bin/python3 /usr/libexec/orchard/policy.py modules)
+for module in $modules; do modprobe "$module"; done
 mkdir -p /sys/kernel/config
 mount -t configfs -o nodev,noexec,nosuid configfs /sys/kernel/config
 g=/sys/kernel/config/usb_gadget/linux-recovery
@@ -16,8 +19,8 @@ echo 'Orchard Recovery' > "$g/strings/0x409/product"
 printf '%s\n' "$identity" > "$g/strings/0x409/serialnumber"
 echo 'USB network and serial' > "$g/configs/c.1/strings/0x409/configuration"
 echo 500 > "$g/configs/c.1/MaxPower"
-mkdir "$g/functions/ncm.usb0" "$g/functions/acm.usb0"
-ln -s "$g/functions/ncm.usb0" "$g/configs/c.1/ncm.usb0"
+mkdir "$g/functions/$network.usb0" "$g/functions/acm.usb0"
+ln -s "$g/functions/$network.usb0" "$g/configs/c.1/$network.usb0"
 ln -s "$g/functions/acm.usb0" "$g/configs/c.1/acm.usb0"
 set -- /sys/class/udc/*
 [ "$#" -eq 1 ] && [ -e "$1" ]

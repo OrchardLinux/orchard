@@ -1,0 +1,11 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+set -eu
+out=$1
+source=${ORCHARD_SRC:-/src}/boot/lwvm
+headers=$(mktemp -d)
+trap 'rm -rf "$headers"' EXIT
+ln -s /usr/include/linux /usr/include/asm-generic "$headers/"
+ln -s "/usr/include/$(gcc -dumpmachine)/asm" "$headers/asm"
+musl-gcc -std=c11 -Os -Wall -Wextra -Werror -static -isystem "$headers" \
+    "$source/lwvm.c" "$source/main.c" -o "$out/orchard-lwvm"

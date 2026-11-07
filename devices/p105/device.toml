@@ -13,6 +13,8 @@ chip = 0x8942
 board = 0x0a
 
 [boot]
+# Public recovery uses a host-bound USB identity handoff; hardware qualification is pending.
+# Source-built Cascadia payload profile: cascadia.toml. External-initramfs handoff awaits testing.
 methods = ["jailbreak-kdfu", "recovery-autogo"]
 entries = ["pico-checkm8", "kdfu"]
 # The CLI consumes an owner-private boot manifest. Public launch assets await release integration.
@@ -38,7 +40,15 @@ accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "missing"
 touch_id = "missing"
+# PPN geometry/read topic and native-map provider await exact-build qualification.
+# See docs/bring-up/p105-nand-reads.md.
+# The bounded native VFL/SFTL reader awaits an exact-revision device boot.
+# See docs/bring-up/p105-sftl-reader.md; logical storage capabilities stay missing.
 storage_read = "missing"
+# The default-off complete-page primitive does not provide a qualified logical writer.
+# See docs/bring-up/p105-nand-program.md for its checks and pending hardware work.
+# LwVM planning/install code has host coverage. The complete ARMv7 writable
+# backend and interruption recovery still gate install; see docs/bring-up/lwvm-install.md.
 storage_write = "missing"
 wifi = "untested"
 bluetooth_input = "untested"

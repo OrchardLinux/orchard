@@ -12,8 +12,19 @@ failed() {
     [ "$rc" = 0 ] || echo "$step (exit $rc)" > /run/orchard/storage-failed
 }
 trap failed EXIT
-[ "$(grep -c '/dev/nvme' /proc/mounts || true)" = 0 ]
-modprobe nvme
+[ "$(grep -Ec '/dev/(nvme|applesftl)' /proc/mounts || true)" = 0 ]
+# Load only modules built for this recovery's platform. Built-in providers
+# are listed in modules.builtin; modprobe also accepts their names.
+modules="/lib/modules/$(uname -r)"
+if grep -Eq '/mtd-apple-h2fmi\.ko' "$modules/modules.dep" "$modules/modules.builtin" 2>/dev/null; then
+    modprobe mtd-apple-h2fmi
+fi
+if grep -Eq '/apple-sftl\.ko' "$modules/modules.dep" "$modules/modules.builtin" 2>/dev/null; then
+    modprobe apple-sftl
+fi
+if grep -Eq '/nvme\.ko' "$modules/modules.dep" "$modules/modules.builtin" 2>/dev/null; then
+    modprobe nvme
+fi
 # The A11 (T8015) has no PCIe storage port: its NAND is the ANS2 controller
 # (nvme-apple). Other platforms leave it unbound or lack the module.
 if grep -q '/nvme-apple\.ko' "/lib/modules/$(uname -r)/modules.dep"; then
@@ -21,7 +32,22 @@ if grep -q '/nvme-apple\.ko' "/lib/modules/$(uname -r)/modules.dep"; then
 fi
 step=wait
 n=0
-while [ "$(cat /sys/class/nvme/nvme0/state 2>/dev/null)" != live ]; do n=$((n+1)); [ "$n" -le 30 ]; sleep 1; done
+while [ "$(cat /sys/class/nvme/nvme0/state 2>/dev/null)" != live ] && ! ls /sys/class/block/applesftl[0-9]* >/dev/null 2>&1; do
+    n=$((n+1)); [ "$n" -le 30 ]; sleep 1
+done
+if ls /sys/class/block/applesftl[0-9]* >/dev/null 2>&1; then
+    # LwVM describes its own chunks. No kernel partition scan is needed.
+    # Fence the complete logical medium; only an approved saved plan may
+    # temporarily enable header writes and create a bounded Linux mapping.
+    [ ! -e /sys/class/block/nvme0n1 ]
+    step=logical-provider
+    for block in /sys/class/block/applesftl[0-9]*; do
+        blockdev --setro "/dev/${block##*/}"
+        [ "$(cat "$block/ro")" = 1 ]
+    done
+    echo ready > /run/orchard/storage-ready
+    exit 0
+fi
 step=partitions
 n=0
 while ! ls /sys/class/block/nvme0n1p* >/dev/null 2>&1; do n=$((n+1)); [ "$n" -le 10 ]; sleep 1; done

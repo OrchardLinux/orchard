@@ -24,6 +24,7 @@ from . import install_device as D
 from . import install_remote as remote
 from .contracts import Connection
 from .hardware import ROOT
+from .lwvm import MAGIC as LWVM_MAGIC
 from .state import BootState, DeviceState, private_directory
 from .transports.ssh import KEY, one_connection, ssh_argv, wait_authenticated
 
@@ -182,6 +183,12 @@ def read_table(connection, disk):
             raise ValueError('Storage did not come up within 30 s')
         time.sleep(0.1)
     block = int(result.stdout)
+    # An explicit disk override must not route an Apple LwVM medium through
+    # the GPT installer, even if another sector resembles a GPT header.
+    prefix = read_disk(connection, disk, 0, block, block)
+    if prefix[:len(LWVM_MAGIC)] == LWVM_MAGIC:
+        raise D.InstallError('lwvm-block-image', 'Block-image installation on LwVM is unavailable; '
+                             'use a release with a recovery image')
     header = read_disk(connection, disk, block, block, block)
     if header[:8] != b'EFI PART':
         raise D.InstallError('no-gpt', f'{disk} has no GPT')

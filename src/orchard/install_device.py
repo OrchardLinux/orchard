@@ -4,15 +4,16 @@
     install_device.py inspect
     install_device.py run PLAN.json < rootfs.tar.zst
 
-The CLI copies this one file to the device for each install, so it uses the
+The CLI copies this script and its matching storage helpers for each install, using the
 standard library and the recovery's sfdisk, blkid, mke2fs, blockdev and
 mount only. `inspect` is read-only. `run` installs top to bottom: it
 re-checks the live partition table against the plan (made from an earlier
 inspect, see install_layout.py), changes only the ranges the plan names,
 and writes the boot entry last. It never touches APFS or any partition the
 plan does not name. Every step reports one JSON line on stdout and in
-/run/orchard/install.log; a run interrupted after its partition-table
-write is rerun from a fresh inspect, which then sees the new partitions.
+/run/orchard/install.log. A GPT install interrupted after its table write
+starts with a fresh inspect. An uncertain LwVM header write stops for
+inspection of its saved intent; no retry or repair runs automatically.
 
 A plan with `account` also sets the system's one user account: the CLI
 uploads /run/orchard/secrets.json (root-only, {"password", "pin"}) for the
@@ -42,6 +43,10 @@ import tarfile
 import time
 import uuid
 
+if not __package__:  # the matching private package is copied to recovery RAM
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from orchard import install_lwvm, lwvm
+
 LOG = Path('/run/orchard/install.log')
 TARGET = Path('/run/orchard/target')
 XBOOTLDR = 'bc13c2ff-59e6-4262-a352-b275fd6f7172'
@@ -53,6 +58,7 @@ SECRETS = Path('/run/orchard/secrets.json')
 STORAGE_FENCE = Path('/usr/libexec/orchard/storage-fence')
 STORAGE_READY = Path('/run/orchard/storage-ready')
 STORAGE_FAILED = Path('/run/orchard/storage-failed')
+STORAGE_MANUAL = Path('/run/orchard/storage-manual')
 
 PIN_CHECK = r'''#!/bin/sh
 # Lock-screen PIN check for the orchard-pin PAM service (pam_exec expose_authtok).
@@ -183,21 +189,46 @@ def check_quiet(disk, partitions):
 
 # --- inspect -----------------------------------------------------------------
 
+def start_storage():
+    """Consume recovery's manual request once, before waiting for its fence."""
+    if not STORAGE_FENCE.exists():
+        return
+    try:
+        STORAGE_MANUAL.unlink()
+    except FileNotFoundError:
+        return
+    if STORAGE_READY.exists() or STORAGE_FAILED.exists():
+        return
+    try:
+        run(str(STORAGE_FENCE), timeout=60)
+    except BaseException:
+        if not STORAGE_FAILED.exists():
+            STORAGE_FAILED.write_text('Manual storage activation requires inspection\n')
+        raise
+
+
 def wait_for_storage(seconds=60):
     """On the recovery, wait until its storage fence has finished; elsewhere (tests) there is none."""
     if not STORAGE_FENCE.exists():
         return
     deadline = time.monotonic() + seconds
-    while not STORAGE_READY.exists():
+    while True:
         if STORAGE_FAILED.exists():
             raise InstallError('storage-unavailable', 'Storage did not come up: ' +
                                STORAGE_FAILED.read_text(errors='replace').strip())
+        if STORAGE_READY.exists():
+            return
         if time.monotonic() >= deadline:
             raise InstallError('storage-unavailable', f'Storage was not ready after {seconds} s')
         time.sleep(0.5)
 
 
 def inspect(disk):
+    with open(disk, 'rb') as source:
+        magic = source.read(16)
+    if magic == lwvm.MAGIC:
+        emit('layout', **install_lwvm.inspect(disk))
+        return
     info, partitions, free = read_gpt(disk)
     for part in partitions:
         part.update(filesystem(node(disk, part['number'])))
@@ -780,6 +811,10 @@ def finish(plan, target, present, secrets):
 
 
 def install(plan, stream):
+    if plan.get('kind') == 'lwvm':
+        if plan.get('version') != 3:
+            raise InstallError('plan-version', 'Unknown LwVM installation plan version')
+        return install_lwvm.install(sys.modules[__name__], plan, stream)
     disk = plan['disk']['path']
     if os.geteuid() != 0:
         raise InstallError('not-root', 'The installer must run as root')
@@ -843,11 +878,11 @@ def install(plan, stream):
 
 
 def main(argv):
-    disk = os.environ.get('ORCHARD_INSTALL_DISK', DEFAULT_DISK)
     try:
         if argv[1:] == ['inspect']:
+            start_storage()
             wait_for_storage()
-            inspect(disk)
+            inspect(discover_disk())
         elif len(argv) == 3 and argv[1] == 'finish':
             # Inside the new root, which the host has written and mounted (install_direct.py).
             plan = json.loads(Path(argv[2]).read_text())
@@ -856,6 +891,7 @@ def main(argv):
             finish(plan, Path('/'), set(plan['present']), secrets)
             emit('finished', root=plan['root']['partuuid'], boot=plan['boot']['partuuid'])
         elif len(argv) == 3 and argv[1] == 'run':
+            start_storage()
             wait_for_storage()
             install(json.loads(Path(argv[2]).read_text()), sys.stdin.buffer)
         else:
@@ -867,6 +903,17 @@ def main(argv):
         emit('error', code='unexpected', detail=f'{type(error).__name__}: {error}')
         return 1
     return 0
+
+
+def discover_disk():
+    explicit = os.environ.get('ORCHARD_INSTALL_DISK')
+    if explicit:
+        return explicit
+    candidates = ([DEFAULT_DISK] if Path(DEFAULT_DISK).exists() else [])
+    candidates += [str(p) for p in Path('/dev').glob('applesftl[0-9]*') if re.fullmatch(r'applesftl[0-9]+', p.name)]
+    if len(candidates) != 1:
+        raise InstallError('storage-ambiguous', 'Expected exactly one internal storage provider')
+    return candidates[0]
 
 
 if __name__ == '__main__':

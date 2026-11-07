@@ -61,13 +61,16 @@ def settings(root):
     if kind != 'release':
         raise ValueError(f'{root} has no orchard.toml with [release]')
     value = {**value, 'name': name}
-    unknown = set(value) - {'name', 'build', 'selects-platform'}
+    unknown = set(value) - {'name', 'build', 'selects-platform', 'selects-device'}
     if unknown:
         raise ValueError(f'{path}: unknown settings {", ".join(sorted(unknown))}; '
-                         'expected name, build, selects-platform')
+                         'expected name, build, selects-platform, selects-device')
     selects = value.get('selects-platform', False)
     if not isinstance(selects, bool):
         raise ValueError(f'{path}: selects-platform must be true or false')
+    selects_device = value.get('selects-device', False)
+    if not isinstance(selects_device, bool) or (selects_device and not selects):
+        raise ValueError(f'{path}: selects-device requires selects-platform and must be true or false')
     name, build = value.get('name'), value.get('build')
     if not isinstance(name, str) or not _NAME.fullmatch(name):
         raise ValueError(f'{path}: name must be the distro name of its index, e.g. "omarchy-a"')
@@ -79,7 +82,7 @@ def settings(root):
         raise ValueError(f'{path}: the build entry {build} is not a file')
     if entry.suffix != '.py' and not os.access(entry, os.X_OK):
         raise ValueError(f'{path}: the build entry {build} is not executable')
-    return {'name': name, 'build': entry, 'selects_platform': selects}
+    return {'name': name, 'build': entry, 'selects_platform': selects, 'selects_device': selects_device}
 
 
 def default_version(now=None):
@@ -88,7 +91,7 @@ def default_version(now=None):
     return now.strftime('dev-%Y%m%d-%H%M%S')
 
 
-def build(root, *, version=None, platforms=None, kernel_tree=None):
+def build(root, *, version=None, platforms=None, kernel_tree=None, device=None):
     """Run ROOT's build entry into out/releases/VERSION, check the release, record it; returns its index.
 
     PLATFORMS: a list of platform names or 'all', passed as --platform to an
@@ -118,6 +121,10 @@ def build(root, *, version=None, platforms=None, kernel_tree=None):
     elif distro['selects_platform']:
         raise ValueError(f'{distro["name"]} selects its platforms: choose with --platform, --device, '
                          'orchard.local.toml or the attached board')
+    if device is not None:
+        if not distro['selects_device']:
+            raise ValueError('Distribution build entry does not accept --device')
+        argv += ['--device', device]
     print('+', ' '.join(argv), flush=True)
     environment = {**os.environ, 'ORCHARD_PYTHON': sys.executable, 'ORCHARD_CHECKOUT': str(ROOT)}
     tree = ''
@@ -185,7 +192,8 @@ def run(root, *, build_first=True, version=None, yes=False, progress=None, kerne
             if board is None:
                 raise ValueError('No described device is attached: connect it, then run again')
             platforms = [ram.resolve_platform(root, ROOT, device=board)]
-        index = build(root, version=version, platforms=platforms, kernel_tree=kernel_tree)
+        index = build(root, version=version, platforms=platforms, kernel_tree=kernel_tree,
+                      **({'device': board} if settings(root)['selects_device'] else {}))
     else:
         index = latest(root)
     with operation_lock():

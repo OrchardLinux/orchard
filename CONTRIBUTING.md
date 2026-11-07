@@ -58,6 +58,20 @@ the follow-ups under "Open work", so you can pick them up from there.
 Patches are applied in the layer order of `kernel/series/<platform>`; within a
 directory, in file-name order.
 
+Platforms with different upstream bases can share a subsystem directory.
+An adjacent `<patch>.patch.toml` restricts a patch to named platforms:
+
+```toml
+schema = 1
+platforms = ["apple-armv7"]
+```
+
+A plain directory entry includes its unscoped patches and those scoped to
+that platform. `scoped patches/drivers/usb` includes only patches explicitly
+scoped to the platform. Use this form when adding a shared directory to a
+series whose upstream base differs from the existing patches. Each patch
+must be selected once; repeated and overlapping layers are refused.
+
 - `kernel/patches/drivers/<subsystem>/`: changes to drivers and their
   bindings, including new drivers. Use the subsystem directory that matches the
   kernel's (`spi`, `input`, `power`, …); add one when none fits.
@@ -69,6 +83,12 @@ directory, in file-name order.
 
 Number a new patch with the next free number in its directory. Don't renumber
 existing patches.
+
+After testing the source branch on hardware, use
+`tools/kernel-tree/export.py --platform <platform>` to write scoped patches
+and add missing scoped layers. Repeat `--platform` for each platform that
+shares the generated kernel branch. The export keeps subsystem directories
+and assigns the next free patch number.
 
 A driver patch filed under `devices/` hides that it changes behaviour on other
 devices, which is why the split matters.

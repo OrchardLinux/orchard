@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from .state import exclusive_operation, private_directory
 from .progress import Clock, Progress
 from .protocol import Client
-from . import install_layout, install_remote as remote
+from . import install_layout, install_remote as remote, lwvm
 from .install_account import ask_secrets
 from .releases import default_manifest, direct as installs_directly, needs_download, resolve, select_manifest
 from .devices import choose
@@ -110,6 +110,9 @@ def choose_target(layout, clock, *, name='Linux', input_fn=input, output=print):
     """Pick one install target from the device's layout; replacing a partition is typed out."""
     options = install_layout.options(layout)
     if not options:
+        if layout['disk'].get('table') == 'lwvm':
+            raise ValueError('No eligible Linux partition or checked Data tail. New LwVM allocation '
+                             'requires --hfs-shrink-proof from the native HFS shrink preparation.')
         needed = (install_layout.MIN_ROOT_BYTES + install_layout.BOOT_BYTES) / 1024**3
         raise ValueError(f'No free space or Linux partition of at least {needed:.0f} GiB. '
                          'The installer never resizes iPadOS; free space has to exist already.')
@@ -122,8 +125,11 @@ def choose_target(layout, clock, *, name='Linux', input_fn=input, output=print):
         raise ValueError('No valid target was chosen; nothing was changed')
     option = options[int(answer) - 1]
     if option.kind == 'replace':
-        phrase = f'erase {option.partition["number"]}'
-        if option.partition['type'] == install_layout.LINUX_DATA:
+        partition = option.partition
+        if partition is None:
+            raise ValueError('Replacement target has no partition identity')
+        phrase = f'erase {partition["number"]}'
+        if partition['type'] == install_layout.LINUX_DATA and layout['disk'].get('table') != 'lwvm':
             # Installs from the previous installer were one Linux-data partition; this
             # installer writes a boot partition and an arm64 root instead.
             output('This looks like an install from the previous Orchard installer. It cannot be '
@@ -131,6 +137,11 @@ def choose_target(layout, clock, *, name='Linux', input_fn=input, output=print):
         output('Everything on that partition will be deleted. No backup is made.')
         if ask(clock, f'Type "{phrase}" to confirm: ', input_fn) != phrase:
             raise ValueError('Not confirmed; nothing was changed')
+    elif option.kind == 'allocate':
+        output('This assigns the tail beyond the checked HFS filesystem to Linux. '
+               'The native proof must still describe the current Data size and identity.')
+        if ask(clock, 'Type "allocate Data tail" to confirm: ', input_fn) != 'allocate Data tail':
+            raise ValueError('Allocation was not confirmed')
     return option
 
 
@@ -256,7 +267,7 @@ def install_direct(adapter, device, name, files, firmware_files, boot_files, cha
             progress.mark('Root mounted')
             replaced = (plan.get('remove') or {}).get('partuuid')
             plan['present'] = [p['partuuid'] for p in partitions if p['partuuid'] != replaced]
-            remote.put(connection, remote.SCRIPT.read_bytes(), remote.SCRIPT.name)
+            remote.put_scripts(connection)
             remote.put(connection, json.dumps(plan).encode(), 'plan.json')
             if secrets is not None:
                 remote.put(connection, json.dumps(secrets).encode(), 'secrets.json')
@@ -293,7 +304,7 @@ def install_direct(adapter, device, name, files, firmware_files, boot_files, cha
 
 
 @exclusive_operation
-def install(manifest=None, *, input_fn=input, secrets_fn=ask_secrets, progress=None):
+def install(manifest=None, *, input_fn=input, secrets_fn=ask_secrets, progress=None, hfs_shrink_proof=None):
     clock, progress = Clock(), progress or Progress()
     adapter, device = choose()  # Definition of installation timing begins here.
     if not adapter.INSTALL:
@@ -302,6 +313,15 @@ def install(manifest=None, *, input_fn=input, secrets_fn=ask_secrets, progress=N
                          f'{"; ".join(adapter.INSTALL_BLOCKERS)}.{ram}')
     source = manifest or default_manifest(adapter.PROFILE)
     document = select_manifest(source, adapter.PROFILE, None, clock)[0]
+    if installs_directly(document):
+        if hfs_shrink_proof is not None:
+            raise ValueError('HFS shrink proof requires a release with a recovery image; '
+                             'block-image installation on LwVM is unavailable')
+        from . import hardware
+        methods = hardware.device(adapter.PROFILE).get('boot', {}).get('methods', [])
+        if document.get('boot_method') != 'checkm8-pongo' or 'checkm8-pongo' not in methods:
+            raise ValueError('Block-image installation is unavailable for this boot method; '
+                             'use a release with a recovery image')
     name = document.get('name', 'Linux')
     # What the chain needs to start: only when it will run from DFU.
     chain = adapter.boot_inputs() if device.get('mode') == 'dfu' else []
@@ -350,8 +370,15 @@ def install(manifest=None, *, input_fn=input, secrets_fn=ask_secrets, progress=N
         status = Client(connection, progress).call('status')
         if status['release'] != boot_record['release']:
             raise ValueError('Running recovery is not the selected release.\n' + adapter.REBOOT_MESSAGE)
-        remote.put(connection, remote.SCRIPT.read_bytes(), remote.SCRIPT.name)
+        remote.put_scripts(connection)
         (layout,) = [e for e in remote.run(connection, ['inspect']) if e['event'] == 'layout']
+        if hfs_shrink_proof is not None:
+            if layout['disk'].get('table') != 'lwvm':
+                raise ValueError('HFS shrink proof applies only to LwVM storage')
+            proof = json.loads(lwvm.saved_file(hfs_shrink_proof))
+            if proof.get('device') != {key: identity[key] for key in ('profile', 'ecid')}:
+                raise ValueError('HFS shrink proof belongs to a different device')
+            layout['shrink_proof'] = proof
         progress.done()
         option = choose_target(layout, clock, name=name, input_fn=input_fn, output=progress.say)
         # The account is what the release declares; it may ask for nothing.
@@ -383,6 +410,8 @@ def install(manifest=None, *, input_fn=input, secrets_fn=ask_secrets, progress=N
             **{key: layer[key] for key in ('bytes', 'sha256', 'expanded_bytes')}}, firmware={
             'path': remote.DIRECTORY + '/firmware.tar.gz',
             'bytes': mixin_record['bytes'], 'sha256': mixin_record['sha256']})
+        if plan.get('kind') == 'lwvm':
+            plan['identity'] = identity
         remote.put(connection, json.dumps(plan).encode(), 'plan.json')
         if secrets is not None:
             remote.put(connection, json.dumps(secrets).encode(), 'secrets.json')
@@ -399,6 +428,15 @@ def install(manifest=None, *, input_fn=input, secrets_fn=ask_secrets, progress=N
                   'boot': finished[0]['boot'], 'timing': clock.result()}
         path = private / 'last-install.json'
         save_report(path, report)
+        if finished[0].get('boot_preparation_required'):
+            report['started'] = False
+            report['boot_preparation_required'] = True
+            report['phases'] = progress.timings
+            save_report(path, report)
+            progress.done('System files installed')
+            progress.say('The installed root is saved. Prepare its iOS launcher and boot assets '
+                         'from the saved installation receipt before starting it.')
+            return report
         # The recovery runs the same kernel the new entry boots, so it switches
         # into the new root right away: the first start needs no second DFU boot.
         # The switch adds nothing: the system boots as from its own entry.

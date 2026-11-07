@@ -11,6 +11,14 @@ import threading
 
 DIRECTORY = '/run/orchard'
 SCRIPT = Path(__file__).with_name('install_device.py')
+SUPPORT_SCRIPTS = [SCRIPT.with_name(name) for name in ('lwvm.py', 'install_lwvm.py')]
+
+
+def put_scripts(connection):
+    """Ship the matching installer and its standard-library storage helpers."""
+    put(connection, b'"""Installer package copied to private recovery RAM."""\n', '__init__.py')
+    for path in [*SUPPORT_SCRIPTS, SCRIPT]:
+        put(connection, path.read_bytes(), path.name)
 
 
 class RemoteError(RuntimeError):

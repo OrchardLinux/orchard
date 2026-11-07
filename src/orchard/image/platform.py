@@ -17,12 +17,15 @@ import argparse
 import gzip
 import io
 import json
+import re
+import tomllib
 from pathlib import Path
 import stat
 import tarfile
 import tempfile
 
 from ..hardware import ROOT
+from .elf import require_static
 from .integrity import sha
 from .runtime import checksums, module_files, regulatory_files
 
@@ -49,7 +52,7 @@ def boards(platform, hardware=None):
 ROOT_ARCH = 'arm64'  # distributions build one arm64 root for every platform
 
 
-def platforms(hardware=None):
+def platforms(hardware=None, architecture=ROOT_ARCH):
     """Every platform with at least one described board whose kernel runs the
     shared arm64 root, sorted. A platform of another architecture (apple-armv7)
     has no platform layer until a root of its architecture exists."""
@@ -57,7 +60,7 @@ def platforms(hardware=None):
     from ..ram import boards_by_platform
     hardware = hardware or ROOT
     return sorted(platform for platform, boards in boards_by_platform(hardware).items()
-                  if descriptor(hardware, sorted(boards)[0])['arch'] == ROOT_ARCH)
+                  if architecture is None or descriptor(hardware, sorted(boards)[0])['arch'] == architecture)
 
 
 def kernel(platform, *, hardware=None, cache=None):
@@ -79,7 +82,8 @@ def tools(hardware=None, cache=None, platform='apple-16k'):
     return prepare_tools(hardware, cache, device=sorted(boards(platform, hardware))[0]) / 'busybox'
 
 
-def initrd(modules, release, busybox, *, hardware=None):
+def initrd(modules, release, busybox, *, hardware=None, storage_modules=STORAGE_MODULES,
+           lwvm=None, rescue_tools=None):
     """orchard's initrd for installed systems: BusyBox, the storage modules and their dependencies.
 
     MODULES is {path: (data, mode)} as module_files gives it.
@@ -91,9 +95,9 @@ def initrd(modules, release, busybox, *, hardware=None):
         name, _, needs = line.partition(':')
         depends[name] = needs.split()
     by_name = {Path(name).name.split('.ko')[0].replace('_', '-'): name for name in depends}
-    loaded = [name for name in STORAGE_MODULES if name.replace('_', '-') in by_name]
-    if not loaded:
-        raise ValueError(f'Kernel bundle has no storage module: {", ".join(STORAGE_MODULES)}')
+    loaded = [name for name in storage_modules if name.replace('_', '-') in by_name]
+    if storage_modules and not loaded:
+        raise ValueError(f'Kernel bundle has no storage module: {", ".join(storage_modules)}')
     wanted, pending = [], [by_name[name.replace('_', '-')] for name in loaded]
     while pending:
         name = pending.pop()
@@ -101,11 +105,31 @@ def initrd(modules, release, busybox, *, hardware=None):
             wanted.append(name)
             pending.extend(depends[name])
     directory = stat.S_IFDIR | 0o755
-    entries = {name: (directory, b'') for name in ('bin', 'dev', 'proc', 'sys', 'etc', 'etc/orchard', 'newroot',
+    entries = {name: (directory, b'') for name in ('bin', 'dev', 'proc', 'sys', 'run', 'root', 'etc', 'etc/orchard', 'newroot',
                                                     'lib', 'lib/modules', 'lib/modules/' + release)}
     entries['init'] = (stat.S_IFREG | 0o755, (hardware / 'boot/initramfs/root/init').read_bytes())
+    entries['bin/orchard-load-storage'] = (stat.S_IFREG | 0o755,
+                                          (hardware / 'boot/initramfs/root/load-storage').read_bytes())
     entries['bin/busybox'] = (stat.S_IFREG | 0o755, Path(busybox).read_bytes())
     entries['etc/orchard/modules'] = (stat.S_IFREG | 0o644, ('\n'.join(loaded) + '\n').encode())
+    if lwvm is not None:
+        if rescue_tools is None:
+            raise ValueError('LwVM installed root requires owner SSH recovery tools')
+        entries['bin/orchard-lwvm'] = (stat.S_IFREG | 0o755, Path(lwvm).read_bytes())
+        entries['etc/passwd'] = (stat.S_IFREG | 0o644, b'root:x:0:0:root:/root:/bin/sh\n')
+        entries['etc/group'] = (stat.S_IFREG | 0o644, b'root:x:0:\n')
+        entries['etc/shadow'] = (stat.S_IFREG | 0o600, b'root:!:0:0:99999:7:::\n')
+        entries['etc/udhcpd.conf'] = (stat.S_IFREG | 0o644,
+                                     (hardware / 'boot/initramfs/recovery/udhcpd.conf').read_bytes())
+        entries['bin/orchard-acm-rescue'] = (stat.S_IFREG | 0o755,
+                                            (hardware / 'boot/initramfs/nfs/acm-rescue').read_bytes())
+        for name in ('dropbear', 'dropbearkey'):
+            entries['bin/' + name] = (stat.S_IFREG | 0o755, (Path(rescue_tools) / name).read_bytes())
+        for source, target in (('authorize-key', 'recovery-authorize-key'), ('start-ssh', 'recovery-start-ssh')):
+            data = (hardware / 'boot/initramfs/recovery' / source).read_bytes()
+            data = data.replace(b'/usr/bin/dropbearkey', b'/run/orchard/rescue/dropbearkey')
+            data = data.replace(b'/usr/sbin/dropbear', b'/run/orchard/rescue/dropbear')
+            entries['bin/' + target] = (stat.S_IFREG | 0o755, data)
     dependency_lines = []
     for name in sorted(wanted):
         target = f'lib/modules/{release}/{name}'
@@ -121,14 +145,63 @@ def initrd(modules, release, busybox, *, hardware=None):
         return output.read_bytes()
 
 
-def files(bundle, platform, board_dtbs, *, busybox, hardware=None):
+def storage_modules(hardware, platform, *, device=None):
+    """The platform's early-root modules; an empty list denotes built-in storage."""
+    if not re.fullmatch(r'[a-z0-9][a-z0-9_-]*', platform):
+        raise ValueError('Invalid platform name')
+    settings = tomllib.loads((Path(hardware) / 'platforms' / (platform + '.toml')).read_text())
+    selected = settings.get('root', {}).get('devices')
+    if selected is not None:
+        root_format(hardware, platform, device=device)
+        if device not in selected:
+            return ()
+    modules = settings.get('root', {}).get('storage_modules', list(STORAGE_MODULES))
+    if (not isinstance(modules, list) or
+            any(not isinstance(name, str) or not re.fullmatch(r'[a-zA-Z0-9_+-]+', name) for name in modules) or
+            len(modules) != len(set(modules))):
+        raise ValueError('Platform root.storage_modules must be distinct kernel module names')
+    return tuple(modules)
+
+
+def root_format(hardware, platform, *, device=None):
+    """The partition map used by this platform's installed-root provider."""
+    if not re.fullmatch(r'[a-z0-9][a-z0-9_-]*', platform):
+        raise ValueError('Invalid platform name')
+    settings = tomllib.loads((Path(hardware) / 'platforms' / (platform + '.toml')).read_text())
+    value = settings.get('root', {}).get('format', 'gpt')
+    if value not in ('gpt', 'lwvm'):
+        raise ValueError('Unsupported platform root.format: ' + str(value))
+    selected = settings.get('root', {}).get('devices')
+    if selected is not None:
+        if (not isinstance(selected, list) or not selected or
+                any(not isinstance(name, str) or not re.fullmatch(r'[a-z0-9][a-z0-9_-]*', name)
+                    for name in selected) or len(selected) != len(set(selected))):
+            raise ValueError('Platform root.devices must be distinct device profiles')
+        if set(selected) - set(boards(platform, hardware)):
+            raise ValueError('Platform root.devices names an unknown or different-platform device')
+        if device is None:
+            raise ValueError('Platform root.devices requires a selected device')
+        if device not in selected:
+            return 'gpt'
+    return value
+
+
+def files(bundle, platform, board_dtbs, *, busybox, hardware=None, lwvm=None, rescue_tools=None):
     """(kernel release, {path: (data, mode)}) of PLATFORM's layer from a staged kernel BUNDLE."""
     hardware = Path(hardware or ROOT)
+    from ..kernel import descriptor
+    described = descriptor(hardware, sorted(board_dtbs)[0])
     bundle = Path(bundle)
     release, result = module_files(bundle / 'lib/modules')
     base = f'usr/lib/modules/{release}/'
-    result[base + 'vmlinuz'] = ((bundle / 'Image.gz').read_bytes(), 0o644)
-    result[base + 'initrd'] = (initrd(result, release, busybox, hardware=hardware), 0o644)
+    result[base + 'vmlinuz'] = ((bundle / described['image']).read_bytes(), 0o644)
+    choices = {storage_modules(hardware, platform, device=board) for board in board_dtbs}
+    if len(choices) != 1:
+        raise ValueError('Different early-root module sets require --device')
+    modules_to_load = next(iter(choices))
+    result[base + 'initrd'] = (initrd(result, release, busybox, hardware=hardware,
+                                     storage_modules=modules_to_load, lwvm=lwvm,
+                                     rescue_tools=rescue_tools), 0o644)
     for dtb in sorted(set(board_dtbs.values())):
         path = bundle / 'dtbs' / (dtb + '.dtb')
         if path.is_symlink() or not path.is_file():
@@ -145,7 +218,8 @@ def files(bundle, platform, board_dtbs, *, busybox, hardware=None):
                 raise ValueError(f'System defaults belong under /usr/lib or /usr/share/alsa/ucm2: {name}')
             result[name] = (path.read_bytes(), 0o755 if path.stat().st_mode & 0o111 else 0o644)
     description = {'schema': SCHEMA, 'platform': platform, 'kernel_release': release,
-                   'boards': dict(sorted(board_dtbs.items()))}
+                   'boards': dict(sorted(board_dtbs.items())), 'architecture': described['arch'],
+                   'image': described['image']}
     result['usr/lib/orchard/platform.json'] = ((json.dumps(description, indent=2) + '\n').encode(), 0o644)
     result['usr/lib/orchard/platform.SHA256SUMS'] = (checksums(result), 0o644)
     return release, result
@@ -166,21 +240,53 @@ def write(layer, output):
     return expanded, len(layer)
 
 
-def build(platform, output_directory, *, hardware=None, cache=None, bundle=None, busybox=None):
+def build(platform, output_directory, *, hardware=None, cache=None, bundle=None, busybox=None,
+          root_architecture=None, device=None, lwvm=None, rescue_tools=None):
     """PLATFORM's layer as OUTPUT_DIRECTORY/platform-PLATFORM.tar.gz, plus its receipt.
 
     BUNDLE is a staged kernel bundle and BUSYBOX orchard's static BusyBox;
     without them they are built or reused from the cache.
     """
     board_dtbs = boards(platform, hardware)
+    if device is not None:
+        if device not in board_dtbs:
+            raise ValueError(f'Device {device} does not belong to platform {platform}')
+        board_dtbs = {device: board_dtbs[device]}
+    if root_architecture is not None:
+        from ..kernel import descriptor
+        architecture = descriptor(hardware or ROOT, sorted(board_dtbs)[0])['arch']
+        if architecture != root_architecture:
+            raise ValueError(f'Platform {platform} architecture {architecture} differs from root {root_architecture}')
+    root_formats = {root_format(hardware or ROOT, platform, device=board) for board in board_dtbs}
+    if len(root_formats) != 1:
+        raise ValueError('Different installed-root backends require --device')
+    selected_root_format = next(iter(root_formats))
     bundle = Path(bundle) if bundle is not None else kernel(platform, hardware=hardware, cache=cache)
     busybox = Path(busybox) if busybox is not None else tools(hardware, cache, platform)
-    release, layer = files(bundle, platform, board_dtbs, busybox=busybox, hardware=hardware)
+    if root_architecture is not None:
+        from .elf import architecture as elf_architecture
+        if elf_architecture(busybox.read_bytes()) != root_architecture:
+            raise ValueError('Platform initrd BusyBox differs from the root architecture')
+    if selected_root_format == 'lwvm':
+        from ..build import prepare_lwvm, prepare_tools
+        from ..kernel import descriptor
+        board = device or sorted(board_dtbs)[0]
+        lwvm = Path(lwvm) if lwvm is not None else prepare_lwvm(hardware, cache, device=board)
+        rescue_tools = Path(rescue_tools) if rescue_tools is not None else prepare_tools(hardware, cache, device=board)
+        from .elf import architecture as elf_architecture
+        expected = descriptor(hardware or ROOT, board)['arch']
+        for binary in (busybox, lwvm, rescue_tools / 'dropbear', rescue_tools / 'dropbearkey'):
+            if elf_architecture(binary.read_bytes()) != expected:
+                raise ValueError('Installed root helper differs from platform architecture')
+            require_static(binary.read_bytes())
+    release, layer = files(bundle, platform, board_dtbs, busybox=busybox, hardware=hardware,
+                           lwvm=lwvm, rescue_tools=rescue_tools)
     output = Path(output_directory) / f'platform-{platform}.tar.gz'
     expanded, members = write(layer, output)
     return {'file': output.name, 'bytes': output.stat().st_size, 'sha256': sha(output),
             'compression': 'gzip', 'expanded_bytes': expanded, 'members': members,
-            'kernel_release': release, 'boards': sorted(board_dtbs)}
+            'kernel_release': release, 'boards': sorted(board_dtbs),
+            'architecture': json.loads(layer['usr/lib/orchard/platform.json'][0])['architecture']}
 
 
 def main():
@@ -189,10 +295,17 @@ def main():
     parser.add_argument('--output', type=Path, required=True, help='directory for the layer')
     parser.add_argument('--kernel-dir', type=Path, help='a staged kernel bundle (default: build or reuse it)')
     parser.add_argument('--busybox', type=Path, help="orchard's static BusyBox (default: build or reuse it)")
+    parser.add_argument('--lwvm', type=Path, help='static orchard-lwvm mapper for an LwVM platform')
+    parser.add_argument('--rescue-tools', type=Path, help='directory containing static Dropbear tools for early rescue')
     parser.add_argument('--receipt', type=Path, help="also write the layer's receipt (JSON) here")
+    parser.add_argument('--device', help='restrict the platform layer to this board')
+    parser.add_argument('--root-architecture', choices=('arm', 'arm64'),
+                        help='require the platform to match this root architecture')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
-    receipt = build(args.platform, args.output, bundle=args.kernel_dir, busybox=args.busybox)
+    receipt = build(args.platform, args.output, bundle=args.kernel_dir, busybox=args.busybox,
+                    root_architecture=args.root_architecture, device=args.device,
+                    lwvm=args.lwvm, rescue_tools=args.rescue_tools)
     if args.receipt:
         args.receipt.write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
     print(json.dumps(receipt, indent=2))

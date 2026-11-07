@@ -19,10 +19,41 @@ def main():
     parser.add_argument('--dtb', type=Path, action='append', required=True,
                         help='the DTB of each device this recovery boots; repeat')
     parser.add_argument('--logo', type=Path, help="the distribution's m1n1 logo payload (see assemble.py)")
+    parser.add_argument('--platform', default='apple-16k', help='kernel platform and payload format')
+    parser.add_argument('--device', help='the board whose Cascadia handoff profile to use')
+    parser.add_argument('--lwvm', type=Path, help='static orchard-lwvm mapper for LwVM installation')
     diagnostics = parser.add_mutually_exclusive_group()
     diagnostics.add_argument('--verbose', action='store_true',
                              help='enable visible Linux framebuffer console and kernel diagnostics')
     args = parser.parse_args()
+    from ..kernel import descriptor
+    from .platform import boards
+    described = descriptor(ROOT, args.platform)
+    profile = None
+    selected = args.device
+    if selected:
+        from ..hardware import device as described_device
+        if described_device(selected)['kernel']['platform'] != described['platform']:
+            parser.error('Recovery board does not belong to the selected platform')
+    if described['loader'] == 'cascadia':
+        if len(args.dtb) != 1 or args.logo is not None:
+            parser.error('Cascadia recovery takes one board DTB and no m1n1 logo')
+        available = boards(described['platform'])
+        selected = args.device
+        if selected is None:
+            candidates = [board for board, dtb in available.items() if args.dtb[0].stem == dtb]
+            if len(candidates) != 1:
+                parser.error('Select the Cascadia board with --device')
+            selected = candidates[0]
+        if selected not in available or args.dtb[0].stem != available[selected]:
+            parser.error('The Cascadia board and supplied DTB differ')
+        from ..hardware import payload_profile, device as described_device
+        from .cascadia import check_compatible
+        try:
+            profile = payload_profile(selected, 'cascadia', ROOT)
+            check_compatible(args.dtb[0].read_bytes(), described_device(selected, ROOT)['device']['dt_compatible'])
+        except ValueError as error:
+            parser.error(str(error))
     manifest = 'boot-verbose.json' if args.verbose else 'boot.json'
     if args.output.exists():
         parser.error('choose a new output path')
@@ -37,13 +68,20 @@ def main():
                         '--dropbearkey', str(args.dropbearkey),
                         '--wpa-supplicant', str(args.wpa_supplicant),
                         '--wpa-cli', str(args.wpa_cli), '--iw', str(args.iw),
+                        *(['--lwvm', str(args.lwvm)] if args.lwvm else []),
                         '--base', str(args.base), '--base-receipt', str(args.base_receipt),
                         '--modules-dir', str(args.modules_dir), '--root-receipt', str(args.root_receipt),
+                        '--architecture', described['arch'],
+                        *(['--device', selected] if selected else []),
                         '--output', str(stage / 'root')], check=True)
         subprocess.run([sys.executable, '-m', 'orchard.image.initramfs',
                         '--root', str(stage / 'root'),
                         '--output', str(initramfs)], check=True)
-        subprocess.run([sys.executable, '-m', 'orchard.image.assemble',
+        assembly = 'orchard.image.cascadia' if profile is not None else 'orchard.image.assemble'
+        subprocess.run([sys.executable, '-m', assembly,
+                        *(['--profile', str(profile)] if profile is not None else []),
+                        *(['--identity-policy', str(stage / 'root/etc/orchard/recovery-identity.json')]
+                          if (stage / 'root/etc/orchard/recovery-identity.json').is_file() else []),
                         '--manifest', str(HERE / manifest),
                         '--loader', str(args.loader), *(f'--dtb={dtb}' for dtb in args.dtb),
                         *(['--logo', str(args.logo)] if args.logo else []),

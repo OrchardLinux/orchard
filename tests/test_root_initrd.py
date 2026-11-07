@@ -1,8 +1,10 @@
 """orchard's initrd finds the root by reading the GPT: the kernel's uevent has no PARTUUID."""
 from pathlib import Path
+import os
 import re
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 import uuid
@@ -47,6 +49,121 @@ class RootLookup(unittest.TestCase):
             image = Path(directory) / 'apfs'
             image.write_bytes(b'\0' * 4096 * 4)
             self.assertIsNone(self.lookup(image, 4096, 1))
+
+
+class InstallHook(unittest.TestCase):
+    def run_init(self, *, install, lwvm):
+        """Run the init's setup and handoff with filesystem/command fixtures."""
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            binary, runtime = work / 'bin', work / 'run'
+            binary.mkdir()
+            runtime.mkdir()
+            (work / 'dev').mkdir()
+            trace = work / 'trace'
+            state = work / 'mounts.json'
+            for name in ('ip', 'udhcpd', 'orchard-load-storage'):
+                path = binary / name
+                path.write_text('#!/bin/sh\nprintf "%s\\n" "' + name + ' $*" >> "$TRACE"\n')
+                path.chmod(0o755)
+            # Model mount ownership, including descendants carried by --move.
+            # These commands only update a JSON fixture, never host mounts.
+            for name in ('mount', 'umount', 'switch_root'):
+                path = binary / name
+                path.write_text('#!' + sys.executable + '\n' + '''
+import json, os, pathlib, sys
+name, args = pathlib.Path(sys.argv[0]).name, sys.argv[1:]
+for source, target in (('/dev', os.environ['FIXTURE_DEV']), ('/run', os.environ['FIXTURE_RUN'])):
+    args = [target + arg[len(source):] if arg == source or arg.startswith(source + '/') else arg for arg in args]
+state = pathlib.Path(os.environ['MOUNTS'])
+mounts = json.loads(state.read_text()) if state.exists() else []
+with open(os.environ['TRACE'], 'a') as trace:
+    trace.write(name + ' ' + ' '.join(args) + '\\n')
+if name == 'switch_root':
+    expected = [args[0] + '/' + part for part in ('dev', 'dev/pts', 'proc', 'sys', 'run')]
+    assert all(path in mounts for path in expected), (expected, mounts)
+elif name == 'umount':
+    mounts.remove(args[-1])
+elif args[0] == '--move':
+    source, target = args[1:]
+    assert source in mounts, (source, mounts)
+    mounts = [target + path[len(source):] if path == source or path.startswith(source + '/')
+              else path for path in mounts]
+else:
+    assert args[-1] not in mounts, ('duplicate mount', args[-1])
+    mounts.append(args[-1])
+state.write_text(json.dumps(mounts))
+''')
+                path.chmod(0o755)
+            busybox = binary / 'busybox'
+            busybox.write_text('#!/bin/sh\n[ "$1" != sh ] || { shift; exec sh "$@"; }\n')
+            busybox.chmod(0o755)
+            for name in ('orchard-acm-rescue', 'dropbear', 'dropbearkey',
+                         'recovery-authorize-key', 'recovery-start-ssh'):
+                (binary / name).write_text('#!/bin/sh\necho serial-rescue >> "$TRACE"\n')
+            if lwvm:
+                (binary / 'orchard-lwvm').touch(mode=0o755)
+            (work / 'modules').write_text('test-storage\n')
+            (work / 'cmdline').write_text('' if install else 'root=PARTUUID=11111111-1111-4111-8111-111111111111\n')
+            hook = work / 'install/run'
+            if install:
+                hook.parent.mkdir()
+                hook.write_text('echo install-hook >> "$TRACE"\n'
+                                f'mount -t tmpfs tmpfs {runtime}\n'
+                                f'mount -t devpts devpts {work}/dev/pts\n'
+                                'root=11111111-1111-4111-8111-111111111111\n'
+                                'echo install-cleanup >> "$TRACE"\n'
+                                f'umount {work}/dev/pts\n'
+                                f'umount {runtime}\n')
+            text = INIT.read_text()
+            setup = text.split('# gpt_partuuid ')[0]
+            setup = re.sub(r'^usb_gadget\(\) \{.*?^\}',
+                           'usb_gadget() { echo installed-gadget >> "$TRACE"; }', setup, flags=re.M | re.S)
+            setup = re.sub(r'^exec </dev/console.*$', '', setup, flags=re.M)
+            setup = re.sub(r'^stop\(\) \{.*?^\}', 'stop() { echo "$*" >&2; exit 1; }',
+                           setup, flags=re.M | re.S)
+            handoff = text[text.index('moved=\n'):]
+            # Rescue fixture children exit immediately; no real process is signalled.
+            handoff = re.sub(r'^\[ -z .*?\|\| true$', ':', handoff, flags=re.M)
+            script = setup + '\nwait\n' + handoff
+            script = script.replace('export PATH=/bin', 'export PATH="$FIXTURE_BIN:$PATH"')
+            paths = dict((
+                    ('/etc/orchard/modules', str(work / 'modules')),
+                    ('/proc/cmdline', str(work / 'cmdline')),
+                    ('/install/run', str(hook)), ('/bin/', str(binary) + '/'),
+                    ('/newroot', str(work / 'newroot')), ('/run', str(runtime)),
+                    ('/dev', str(work / 'dev'))))
+            script = re.sub('|'.join(re.escape(path) for path in paths),
+                            lambda match: paths[match[0]], script)
+            result = subprocess.run(['sh', '-c', script], stdin=subprocess.DEVNULL,
+                                    capture_output=True, text=True, timeout=5,
+                                    env={**os.environ, 'TRACE': str(trace), 'FIXTURE_BIN': str(binary),
+                                         'MOUNTS': str(state), 'FIXTURE_DEV': str(work / 'dev'),
+                                         'FIXTURE_RUN': str(runtime)})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return trace.read_text().splitlines()
+
+    def test_install_hook_sets_root_after_modules_and_owns_ram_and_usb(self):
+        for lwvm in (False, True):
+            with self.subTest(lwvm=lwvm):
+                events = self.run_init(install=True, lwvm=lwvm)
+                self.assertLess(events.index('orchard-load-storage test-storage'), events.index('install-hook'))
+                self.assertEqual(sum(line.startswith('mount -t tmpfs') for line in events), 2)
+                self.assertEqual(sum(line.startswith('mount -t devpts') for line in events), 2)
+                cleanup = events.index('install-cleanup')
+                self.assertTrue(any(line.startswith('mount -t tmpfs') for line in events[cleanup + 1:]))
+                self.assertTrue(any(line.startswith('mount -t devpts') for line in events[cleanup + 1:]))
+                self.assertNotIn('installed-gadget', events)
+                self.assertNotIn('serial-rescue', events)
+                self.assertEqual(sum('mount --move' in line and '/run ' in line for line in events), 1)
+                self.assertTrue(events[-1].startswith('switch_root '))
+
+    def test_ordinary_lwvm_root_keeps_early_rescue_and_moves_its_ram_state(self):
+        events = self.run_init(install=False, lwvm=True)
+        self.assertEqual(events.count('installed-gadget'), 1)
+        self.assertEqual(events.count('serial-rescue'), 1)
+        self.assertLess(events.index('installed-gadget'), events.index('orchard-load-storage test-storage'))
+        self.assertEqual(sum('mount --move' in line and '/run ' in line for line in events), 1)
 
 
 if __name__ == '__main__':

@@ -2,6 +2,8 @@
 import hashlib
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -15,7 +17,7 @@ class StorageFence(unittest.TestCase):
         self.addCleanup(work.cleanup)
         self.root = Path(work.name)
         for name, path in (('STORAGE_FENCE', 'storage-fence'), ('STORAGE_READY', 'storage-ready'),
-                           ('STORAGE_FAILED', 'storage-failed')):
+                           ('STORAGE_FAILED', 'storage-failed'), ('STORAGE_MANUAL', 'storage-manual')):
             patcher = patch.object(D, name, self.root / path)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -27,6 +29,57 @@ class StorageFence(unittest.TestCase):
         (self.root / 'storage-fence').touch()
         (self.root / 'storage-ready').touch()
         D.wait_for_storage(seconds=0)
+
+    def test_manual_request_runs_the_fence_before_inspect_and_install_wait(self):
+        fence = self.root / 'storage-fence'
+        fence.write_text('#!' + sys.executable + '\nfrom pathlib import Path\nPath(' +
+                         repr(str(self.root / 'storage-ready')) + ').write_text("ready\\n")\n')
+        fence.chmod(0o755)
+        plan = self.root / 'plan.json'
+        plan.write_text('{}')
+        for args in (['inspect'], ['run', str(plan)]):
+            with self.subTest(args=args):
+                (self.root / 'storage-ready').unlink(missing_ok=True)
+                (self.root / 'storage-manual').write_text('manual\n')
+                wait = D.wait_for_storage
+                def ready_before_wait():
+                    self.assertTrue((self.root / 'storage-ready').exists())
+                    wait(seconds=0)
+                with patch.object(D, 'run', wraps=D.run) as command, \
+                     patch.object(D, 'wait_for_storage', side_effect=ready_before_wait), \
+                     patch.object(D, 'inspect'), patch.object(D, 'discover_disk', return_value='/dev/fixture'), \
+                     patch.object(D, 'install'):
+                    self.assertEqual(D.main(['install_device.py', *args]), 0)
+                command.assert_called_once_with(str(fence), timeout=60)
+                self.assertFalse((self.root / 'storage-manual').exists())
+
+    def test_manual_failure_stops_reactivation_and_preserves_its_marker(self):
+        (self.root / 'storage-fence').touch()
+        (self.root / 'storage-manual').write_text('manual\n')
+        with patch.object(D, 'run', side_effect=subprocess.TimeoutExpired('fixture-fence', 60)) as command:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                D.start_storage()
+            D.start_storage()
+        self.assertEqual(command.call_count, 1)
+        with self.assertRaisesRegex(D.InstallError, 'requires inspection'):
+            D.wait_for_storage(seconds=0)
+
+    def test_existing_ready_or_failed_state_does_not_restart_the_fence(self):
+        (self.root / 'storage-fence').touch()
+        for marker in ('storage-ready', 'storage-failed'):
+            with self.subTest(marker=marker), patch.object(D, 'run') as command:
+                (self.root / marker).touch()
+                (self.root / 'storage-manual').touch()
+                D.start_storage()
+                command.assert_not_called()
+                (self.root / marker).unlink()
+
+    def test_failure_marker_stops_even_when_ready_was_already_published(self):
+        (self.root / 'storage-fence').touch()
+        (self.root / 'storage-ready').touch()
+        (self.root / 'storage-failed').write_text('manual activation requires inspection\n')
+        with self.assertRaisesRegex(D.InstallError, 'requires inspection'):
+            D.wait_for_storage(seconds=0)
 
     def test_failure_or_timeout_is_storage_unavailable(self):
         (self.root / 'storage-fence').touch()

@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 import uuid
 
+from . import lwvm
+
 XBOOTLDR = 'bc13c2ff-59e6-4262-a352-b275fd6f7172'
 ROOT_ARM64 = 'b921b045-1df0-41c3-af44-4c6f280d3fae'
 LINUX_DATA = '0fc63daf-8483-4772-8e79-3d69d8477de4'
@@ -60,6 +62,8 @@ def boot_partition(layout) -> Optional[dict]:
 
 def options(layout) -> List[Option]:
     """Every allowed target, in disk order."""
+    if layout['disk'].get('table') == 'lwvm':
+        return lwvm_options(layout)
     block = layout['disk']['sector']
     boot = boot_partition(layout)
     needed = MIN_ROOT_BYTES + (0 if boot else BOOT_BYTES)
@@ -93,6 +97,8 @@ def plan(layout, option: Option, image: Dict, entry: Dict, layer: Dict, firmware
     IMAGE is the distro's root image, LAYER orchard's platform layer (kernel,
     DTBs, modules) that goes into the root after it.
     """
+    if layout['disk'].get('table') == 'lwvm':
+        return lwvm_plan(layout, option, image, entry, layer, firmware, account)
     block = layout['disk']['sector']
     align = MIB // block
     boot = boot_partition(layout)
@@ -132,3 +138,46 @@ def plan(layout, option: Option, image: Dict, entry: Dict, layer: Dict, firmware
         'firmware': firmware,
         'account': account,     # the release's install.account; secrets travel separately
     }
+
+
+def lwvm_options(layout):
+    """An already checked Data tail, or an explicitly selected Linux replacement."""
+    primary, backup = (lwvm.unb64(layout['lwvm'][name]) for name in ('primary', 'backup'))
+    snapshot = lwvm.parse(primary, backup, layout['disk']['bytes'])
+    result = []
+    linux = [p for p in snapshot['partitions'] if p['type'] == lwvm.LINUX_TYPE]
+    for part in linux:
+        if not part['attributes'] and part['bytes'] >= MIN_ROOT_BYTES:
+            result.append(Option('replace', part['begin'] // 512, part['bytes'] // 512,
+                                 f'replace Linux partition {part["number"]}, {part["bytes"] / GIB:.1f} GiB - erases it',
+                                 partition=lwvm.public_partition(part)))
+    if not linux and layout.get('shrink_proof'):
+        data, retained = lwvm.check_proof(snapshot, layout['shrink_proof'])
+        available = data['bytes'] - retained
+        if available >= MIN_ROOT_BYTES:
+            result.append(Option('allocate', (data['begin'] + retained) // 512, available // 512,
+                                 f'allocate the checked Data tail, {available / GIB:.1f} GiB'))
+    return result
+
+
+def lwvm_plan(layout, option, image, entry, layer, firmware, account):
+    if option not in lwvm_options(layout):
+        raise LayoutError('LwVM target differs from the checked layout')
+    primary, backup = (lwvm.unb64(layout['lwvm'][name]) for name in ('primary', 'backup'))
+    snapshot = lwvm.parse(primary, backup, layout['disk']['bytes'])
+    if option.kind == 'allocate':
+        allocation = lwvm.allocation_plan(primary, backup, layout['shrink_proof'], str(uuid.uuid4()))
+    else:
+        root = lwvm.partition(snapshot, option.partition['partuuid'])
+        allocation = {'action': 'replace', 'before': lwvm.b64(primary), 'after': lwvm.b64(primary),
+                      'before_sha256': snapshot['header_sha256'], 'after_sha256': snapshot['header_sha256'],
+                      'root': lwvm.public_partition(root)}
+    root = allocation['root']
+    if root['bytes'] < (image['expanded_bytes'] + layer['expanded_bytes']) * 1.25:
+        raise LayoutError('Target is too small for this system image')
+    return {'version': 3, 'kind': 'lwvm', 'disk': layout['disk'], 'lwvm': allocation,
+            'io_policy': lwvm.install_io_policy(root['bytes']),
+            'root': {'partuuid': root['partuuid'], 'blocks': root['bytes'] // 512, 'fs_uuid': str(uuid.uuid4()),
+                     'fs': 'ext4', 'label': entry['id'][:16]},
+            'boot': {'method': 'ios-local-file'}, 'image': image, 'layer': layer, 'entry': entry,
+            'firmware': firmware, 'account': account}

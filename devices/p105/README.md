@@ -26,3 +26,22 @@ the IPSW members `058-24036-023.dmg`, `kernelcache.release.p105`, `Firmware/dfu/
 The touch calibration is per unit and private: `lib/firmware/mtcal.bin`, the
 unit's syscfg `MtCl`, captured from its jailbroken iOS. It is never part of a
 public recipe or release.
+
+## ARMv7 recovery assembly
+
+The platform's `cascadia` payload producer builds the staging loader from
+source with `cascadia.toml`. Select this board explicitly when resolving a
+release's inputs: `python -m orchard.inputs --device p105 --output inputs.json`.
+The profile identifies the memory window and handoff registers for this board.
+The generated loader checks its configuration before copying the recovery
+initramfs into the reserved high-memory range. The DTB names that initramfs.
+This extension needs a hardware boot of the final producer revision; the
+earlier installed P105 boot used an initramfs compiled into its kernel.
+
+## Internal installation
+
+The [LwVM install path](../../docs/bring-up/lwvm-install.md) plans a Linux
+descriptor from a checked native HFS shrink and confines root writes to
+its verified chunk mapping. P105's public installation remains gated by
+the complete writable backend and hardware qualification. Native iOS
+prepares the launcher and System boot assets after the root is populated.
