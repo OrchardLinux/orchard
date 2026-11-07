@@ -37,6 +37,6 @@ still determine the logical medium, with LwVM describing its partitions.
 The dependent kernel translation reader follows those native maps.
 Encrypted iOS volume contents retain their encryption at this layer.
 
-P105 storage capability states await qualification of the logical provider.
+P105 `storage_read` is `untested` until a device test.
 The read topic also changes the imported reference profile's shared
 controller code; that profile needs a regression check before merge.

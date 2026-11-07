@@ -1,9 +1,8 @@
 # P105 complete-page PPN programming
 
-The proposed H2FMI program primitive accepts one complete physical page: 16 KiB
-of data and 64 metadata bytes. `CONFIG_MTD_APPLE_H2FMI_WRITE` defaults to `n`.
-Enabling it publishes raw MTD programming through the measured PPN command
-path. Read-only qualification builds leave the option disabled.
+The H2FMI program path accepts one complete physical page: 16 KiB of data and
+64 metadata bytes, programmed through the measured PPN command path. It is
+part of the driver (kernel/patches/armv7/mtd); there is no build option for it.
 
 The caller supplies every data and metadata byte. The driver serializes the
 transaction with the bus lock, checks the destination's erased status and
@@ -44,5 +43,4 @@ Earlier bounded device programming supplied protocol evidence. This exact
 revision still needs an approved physical test, including the failure and
 recovery paths. It has no new physical-programming result. Raw page readback
 does not establish logical-map persistence after restart or recovery after
-interrupted writes. P105 `storage_write` remains `missing` until the logical
-backend earns that capability through device qualification.
+interrupted writes. P105 `storage_write` is `untested` until a device test.
