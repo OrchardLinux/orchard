@@ -1451,6 +1451,7 @@ CONFIG_MTD_OF_PARTS=y
 # CONFIG_MTD_OOPS is not set
 # CONFIG_MTD_SWAP is not set
 # CONFIG_MTD_PARTITIONED_MASTER is not set
+CONFIG_MTD_APPLE_SFTL=y
 
 #
 # RAM/ROM/Flash chip drivers
