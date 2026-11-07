@@ -533,11 +533,19 @@ def write_entry(boot_root, root, version, entry, partuuid):
     options = f'root=PARTUUID={partuuid} rw {entry.get("options", "")}'.strip()
     text = (f'title {entry["title"]}\nversion {version}\nsort-key {entry["id"]}\n'
             f'linux /{token}/{version}/linux\ninitrd /{token}/{version}/initrd\n'
-            f'devicetree /{token}/{version}/{entry["devicetree"]}\noptions {options}\narchitecture aa64\n')
+            f'devicetree /{token}/{version}/{entry["devicetree"]}\noptions {options}\n'
+            f'architecture {architecture(files["linux"])}\n')
     entries = boot_root / 'loader/entries'
     entries.mkdir(parents=True, exist_ok=True)
     write_text(entries / f'{token}-{version}.conf', text)
     return token
+
+
+def architecture(kernel):
+    """The entry's BLS architecture: arm for a 32-bit ARM zImage, aa64 for everything else."""
+    with kernel.open('rb') as data:
+        head = data.read(0x28)
+    return 'arm' if len(head) == 0x28 and struct.unpack_from('<I', head, 0x24)[0] == 0x016f2818 else 'aa64'
 
 
 def check_entry(boot_root, partuuid, devicetree):
@@ -763,13 +771,20 @@ def finish(plan, target, present, secrets):
             files = install_firmware(bundle, target, size=firmware['bytes'], sha256=firmware['sha256'])
         Path(firmware['path']).unlink()
         emit('step', step='firmware', state='done', files=files)
+    # Without a boot partition (LwVM disks) /boot is a directory of the root: the entry and its
+    # files wait there for whatever starts the system (docs/boot-contract.md).
+    boot = plan['boot']
     boot_mount = target / 'boot'
-    gone = remove_old_entries(boot_mount, present | {plan['root']['partuuid'], plan['boot']['partuuid']})
+    gone = remove_old_entries(boot_mount, present | {plan['root']['partuuid']} | ({boot['partuuid']} if boot else set()))
     emit('step', step='remove-old-entries', state='done', entries=gone)
     entry = plan['entry']
-    write_text(target / 'etc/fstab',
-               f'PARTUUID={plan["root"]["partuuid"]} / ext4 rw,relatime 0 1\n'
-               f'PARTUUID={plan["boot"]["partuuid"]} /boot vfat rw,relatime,fmask=0077,dmask=0077 0 2\n')
+    if boot:
+        write_text(target / 'etc/fstab',
+                   f'PARTUUID={plan["root"]["partuuid"]} / ext4 rw,relatime 0 1\n'
+                   f'PARTUUID={boot["partuuid"]} /boot vfat rw,relatime,fmask=0077,dmask=0077 0 2\n')
+    else:
+        # blkid reads no LwVM, so the root is named by its filesystem.
+        write_text(target / 'etc/fstab', f'UUID={plan["root"]["fs_uuid"]} / ext4 rw,relatime 0 1\n')
     account = plan.get('account')
     if account:
         emit('step', step='account', state='done', user=set_account(target, account, *(secrets or (None, None))))
@@ -854,7 +869,7 @@ def main(argv):
             account = plan.get('account')
             secrets = read_secrets(SECRETS, account) if account and (account['password'] or account['pin']) else None
             finish(plan, Path('/'), set(plan['present']), secrets)
-            emit('finished', root=plan['root']['partuuid'], boot=plan['boot']['partuuid'])
+            emit('finished', root=plan['root']['partuuid'], boot=(plan['boot'] or {}).get('partuuid'))
         elif len(argv) == 3 and argv[1] == 'run':
             wait_for_storage()
             install(json.loads(Path(argv[2]).read_text()), sys.stdin.buffer)

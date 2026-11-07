@@ -14,7 +14,7 @@ from orchard.progress import Progress
 from orchard.apple import entries, usb, boot as apple_boot, adt_capture
 from orchard.apple.adt_tree import parse
 from orchard.transports import ssh
-from orchard import firmware, hardware
+from orchard import firmware, hardware, launcher
 from .adt import validate as validate_adt
 
 
@@ -40,6 +40,12 @@ class Device:
         self.INSTALL = not self.INSTALL_BLOCKERS
         self.STATUS = support.get('status', 'experimental')
         self.FEATURES = dict(descriptor.get('features', {}))
+        # Facts about the internal storage that the installer tells the person (service.caveats).
+        self.STORAGE = dict(descriptor.get('storage', {}))
+        # The boot method orchard-launcher starts this board with, when no method of orchard's own fits.
+        listed = descriptor.get('boot', {}).get('methods', [])
+        self.LAUNCHER_CHAIN = None if any(name in hardware.IMPLEMENTED_METHODS for name in listed) else \
+            next((name for name in listed if launcher.delivers(name)), None)
         self.REBOOT_MESSAGE = ('A fresh recovery boot is required.\n'
                                f'Put the {self.NAME} in DFU mode, then run: orchard install')
         self.firmware_inputs = partial(firmware.ensure, self.PROFILE)
@@ -83,6 +89,8 @@ class Device:
         return cast(SelectedDevice, {**device, 'resumed': False})
 
     def boot_inputs(self) -> List[Any]:
+        if self.LAUNCHER_CHAIN:
+            return []   # the launcher brings what its chain needs
         return entries.inputs(entries.select(self._descriptor))
 
     def boot(self, device: SelectedDevice, assets: BootAssets,

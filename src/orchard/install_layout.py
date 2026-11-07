@@ -8,6 +8,10 @@ follow hardware docs/boot-contract.md:
 - A target is either a free range or one existing Linux partition to replace.
 - The disk has at most one XBOOTLDR boot partition; it is created inside the
   target when missing, and an existing one is reused.
+- On an LwVM disk (32-bit boards) the target is an existing Linux partition,
+  which is replaced in place, and there is no boot partition: the boot entry
+  stays in the root's /boot. The installer never changes the LwVM map; making
+  room for Linux is iOS's resize step.
 """
 from dataclasses import dataclass
 from typing import Dict, List, Optional
@@ -58,9 +62,16 @@ def boot_partition(layout) -> Optional[dict]:
     return boots[0] if boots else None
 
 
+def lwvm(layout) -> bool:
+    """Whether the disk is partitioned with LwVM (32-bit boards): no boot partition, no new partitions."""
+    return layout['disk'].get('table') == 'lwvm'
+
+
 def options(layout) -> List[Option]:
     """Every allowed target, in disk order."""
     block = layout['disk']['sector']
+    if lwvm(layout):
+        return lwvm_options(layout)
     boot = boot_partition(layout)
     needed = MIN_ROOT_BYTES + (0 if boot else BOOT_BYTES)
     align = MIB // block
@@ -86,6 +97,21 @@ def options(layout) -> List[Option]:
     return sorted(result, key=lambda o: o.start)
 
 
+def lwvm_options(layout) -> List[Option]:
+    """The Linux partitions of an LwVM disk that a root fits in; LwVM attributes (encryption) rule one out."""
+    block = layout['disk']['sector']
+    result = []
+    for part in layout['partitions']:
+        if part['type'] != LINUX_DATA or part.get('attributes') or part['blocks'] * block < MIN_ROOT_BYTES:
+            continue
+        label = part.get('label') or part.get('name') or ''
+        fs = part.get('fs') or 'no filesystem'
+        result.append(Option('replace', part['start'], part['blocks'],
+                             f'replace Linux partition {part["number"]} ({fs}{", " + label if label else ""}, '
+                             f'{part["blocks"] * block / GIB:.1f} GiB) - erases it', partition=part))
+    return sorted(result, key=lambda o: o.start)
+
+
 def plan(layout, option: Option, image: Dict, entry: Dict, layer: Dict, firmware: Optional[Dict] = None,
          account: Optional[Dict] = None) -> Dict:
     """The plan `install_device.py run` executes for one chosen option.
@@ -93,6 +119,8 @@ def plan(layout, option: Option, image: Dict, entry: Dict, layer: Dict, firmware
     IMAGE is the distro's root image, LAYER orchard's platform layer (kernel,
     DTBs, modules) that goes into the root after it.
     """
+    if lwvm(layout):
+        return lwvm_plan(layout, option, image, entry, layer, firmware, account)
     block = layout['disk']['sector']
     align = MIB // block
     boot = boot_partition(layout)
@@ -131,4 +159,33 @@ def plan(layout, option: Option, image: Dict, entry: Dict, layer: Dict, firmware
         'entry': entry,
         'firmware': firmware,
         'account': account,     # the release's install.account; secrets travel separately
+    }
+
+
+def lwvm_plan(layout, option, image, entry, layer, firmware, account):
+    """The plan for an LwVM disk: the root fills the chosen Linux partition, which keeps its place and identity.
+
+    No partition is created or removed and there is no boot partition: `boot`
+    is None, and the boot entry goes to the root's own /boot.
+    """
+    block = layout['disk']['sector']
+    part = option.partition
+    if option.kind != 'replace' or part is None or part['type'] != LINUX_DATA or part.get('attributes'):
+        raise LayoutError('On an LwVM disk only an existing, unencrypted Linux partition can be replaced')
+    if part['blocks'] * block < (image['expanded_bytes'] + layer['expanded_bytes']) * 1.25:
+        raise LayoutError('Target is too small for this system image')
+    return {
+        'version': PLAN_VERSION,
+        'disk': {'path': layout['disk']['path'], 'sector': block, 'table': 'lwvm',
+                 'table_sha256': layout['disk']['table_sha256']},
+        'remove': None,
+        'boot': None,
+        'root': {'number': part['number'], 'start': part['start'], 'blocks': part['blocks'],
+                 'partuuid': part['partuuid'], 'fs_uuid': str(uuid.uuid4()), 'fs': 'ext4',
+                 'label': entry['id'][:16]},
+        'image': image,
+        'layer': layer,
+        'entry': entry,
+        'firmware': firmware,
+        'account': account,
     }

@@ -24,6 +24,13 @@ dtb = "s5l8942x-p105"       # arch/arm/boot/dts/apple/<dtb>.dtb
 [firmware]
 recipe = "firmware.json"
 
+# The iOS disk's translation layer writes append-only: until reclamation lands
+# (OrchardLinux/orchard#93), freed space is never reused and writes fail once
+# the blank flash runs out. Drop this table when it lands; the installer
+# warns from it and allows the install either way.
+[storage]
+reclaims = false
+
 [support]
 status = "experimental"
 

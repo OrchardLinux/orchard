@@ -135,6 +135,15 @@
       ],
       "additionalProperties": false
     },
+    "storage": {
+      "type": "object",
+      "properties": {
+        "reclaims": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
     "support": {
       "type": "object",
       "properties": {

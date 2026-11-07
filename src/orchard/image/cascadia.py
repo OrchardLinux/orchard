@@ -6,13 +6,17 @@ The loader occupies the first 32 KiB. Its checked configuration tells it
 where the initramfs is; it copies it to the profile's initrd address before
 it turns off the MMU and enters the unchanged zImage, as Project Cascadia's
 linux_boot does. The DTB's /chosen linux,initrd-start/-end, placeholders in
-the board's tree, are set in place to that copy.
+the board's tree, are set in place to that copy. The host may also give the
+device's serial number, which goes to the tree's root as serial-number (what
+m1n1 copies from Apple's tree on 64-bit boards), and boot arguments for an
+installed system, which replace /chosen bootargs.
 This module uses only the standard library and also runs by file path.
 """
 import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import struct
 import tomllib
 import zlib
@@ -284,6 +288,37 @@ def set_initrd(data, start, size):
     return bytes(result)
 
 
+SERIAL = re.compile(r'[A-Za-z0-9]{1,32}')
+
+
+def set_properties(data, *, serial=None, bootargs=None):
+    """DATA with the root's serial-number and /chosen bootargs set; unchanged when neither is given."""
+    if serial is None and bootargs is None:
+        return data
+    root, reservations, cpu = read_fdt(data)
+    if serial is not None:
+        if not SERIAL.fullmatch(serial):
+            raise ValueError('Expected a serial number of letters and digits')
+        root['properties']['serial-number'] = serial.encode() + b'\0'
+    if bootargs is not None:
+        if any(ord(c) < 0x20 or ord(c) > 0x7e for c in bootargs):
+            raise ValueError('Boot arguments must be printable ASCII on one line')
+        chosen = [child for child in root['children'] if child['name'] == 'chosen']
+        if not chosen:
+            raise ValueError('The DTB has no /chosen for boot arguments')
+        chosen[0]['properties']['bootargs'] = bootargs.encode() + b'\0'
+    return write_fdt(root, reservations, cpu)
+
+
+def board_bootargs(data):
+    """The board tree's own /chosen bootargs, or ''."""
+    root, _, _ = read_fdt(data)
+    for child in root['children']:
+        if child['name'] == 'chosen':
+            return child['properties'].get('bootargs', b'').rstrip(b'\0').decode('ascii', 'replace')
+    return ''
+
+
 def decompression_bound(kernel, dtb_size, described):
     """Conservatively bound the v6.12 ARM decompressor's relocated workspace.
 
@@ -318,12 +353,14 @@ def decompression_bound(kernel, dtb_size, described):
     return bound
 
 
-def assemble(loader, kernel, dtb, initramfs, described, *, elf=None):
+def assemble(loader, kernel, dtb, initramfs, described, *, elf=None, serial=None, bootargs=None):
     """(image, receipt): LOADER, the unchanged zImage KERNEL with DTB appended, then INITRAMFS.
 
     The loader copies INITRAMFS to the profile's initrd address before it
-    turns off the MMU, and the DTB's /chosen says where it is."""
+    turns off the MMU, and the DTB's /chosen says where it is. SERIAL and
+    BOOTARGS: see set_properties."""
     validate_profile(described)
+    source_dtb, dtb = dtb, set_properties(dtb, serial=serial, bootargs=bootargs)
     verify_loader(loader, described, elf)
     if (len(kernel) < 0x30 or struct.unpack_from('<I', kernel, 0x24)[0] != 0x016f2818):
         raise ValueError('Expected an ARM zImage')
@@ -366,7 +403,27 @@ def assemble(loader, kernel, dtb, initramfs, described, *, elf=None):
                          'dtb_address': described['load_address'] + dtb_at,
                          'kernel_decompression_bound': expanded_end,
                          'initramfs_address': described['initrd_address'],
-                         'input_loader_sha256': digest(loader), 'input_dtb_sha256': digest(dtb)}
+                         'input_loader_sha256': digest(loader), 'input_dtb_sha256': digest(source_dtb)}
+
+
+def with_serial(image, serial):
+    """IMAGE, an assembled payload, with its tree's serial-number set: reassembled from its own parts.
+
+    A RAM payload is built before the device is known; the host adds the
+    serial number of the device it boots just before handing it over.
+    """
+    config = configuration(image)
+    described = {'schema': 1, **{field: config[field] for field in PROFILE_FIELDS - {'schema'}}}
+    loader = bytearray(image[:config['kernel_offset']])
+    pristine = {**config, **{field: 0 for field in ('dtb_offset', 'dtb_size', 'initrd_offset', 'initrd_size',
+                                                     'image_size', 'crc32')}}
+    loader[CONFIG_OFFSET:CONFIG_OFFSET + CONFIG.size] = CONFIG.pack(*(pristine[field] for field in CONFIG_FIELDS))
+    at = config['kernel_offset']
+    start, end = struct.unpack_from('<II', image, at + 0x28)
+    kernel = image[at:at + end - start]
+    tree = image[config['dtb_offset']:config['dtb_offset'] + config['dtb_size']]
+    initramfs = image[config['initrd_offset']:config['initrd_offset'] + config['initrd_size']]
+    return assemble(bytes(loader), kernel, tree, initramfs, described, serial=serial)[0]
 
 
 def main():
@@ -374,6 +431,7 @@ def main():
     for name in ('loader', 'kernel', 'dtb', 'initramfs', 'profile', 'output'):
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--loader-elf', type=Path)
+    parser.add_argument('--serial', help="the device's serial number, for the tree's serial-number")
     args = parser.parse_args()
     receipt = args.output.with_suffix(args.output.suffix + '.json')
     if args.output.exists() or receipt.exists():
@@ -381,7 +439,8 @@ def main():
     try:
         data, document = assemble(args.loader.read_bytes(), args.kernel.read_bytes(), args.dtb.read_bytes(),
                                   args.initramfs.read_bytes(), profile(args.profile),
-                                  elf=args.loader_elf.read_bytes() if args.loader_elf else None)
+                                  elf=args.loader_elf.read_bytes() if args.loader_elf else None,
+                                  serial=args.serial)
     except (ValueError, KeyError) as error:
         parser.error(str(error))
     document['profile_sha256'] = digest(args.profile.read_bytes())
