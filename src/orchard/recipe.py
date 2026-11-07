@@ -8,7 +8,7 @@ import hashlib
 import json
 import plistlib
 
-from orchard.apple import bluetool, d5500, smartio, z2fw, z2packet
+from orchard.apple import agx_g5p, bluetool, d5500, smartio, z2fw, z2packet
 from orchard.apple.osserialize import apple_xml, binary
 
 
@@ -28,6 +28,10 @@ def _smartio_kext(step, data, expected):
     if step['kext'] not in smartio.BUNDLES:
         raise ValueError('Unknown SmartIO kext: ' + step['kext'])
     return smartio.extract(data, step['kext'])[0]
+
+
+def _agx_g5p(step, data, expected):
+    return agx_g5p.extract(data)
 
 
 def _vxd(step, data, expected):
@@ -87,6 +91,7 @@ def _z2fw_mtfw(step, data, expected):
 
 # step@version -> (implementation, {parameter besides 'step' and 'input': type})
 STEPS = {
+    'agx-g5p-ldr-from-kernelcache@1': (_agx_g5p, {}),
     'copy@1': (_copy, {}),
     'bluetool-hcd@1': (_bluetool_hcd, {}),
     # T8010 SmartIO kext (iPad 6/7, iPhone 7).

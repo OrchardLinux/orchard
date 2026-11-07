@@ -279,6 +279,16 @@
           "calibration_size": 1024
         }
       ]
+    },
+    {
+      "destination": "lib/firmware/apple/agx-g5p-c0.ldr",
+      "sha256": "33ae20cbbe2498e4f119ba4e9a55467e4e0192d4c86d5bf1903adce63ffa5dca",
+      "steps": [
+        {
+          "step": "agx-g5p-ldr-from-kernelcache@1",
+          "input": "kernelcache"
+        }
+      ]
     }
   ]
 }
