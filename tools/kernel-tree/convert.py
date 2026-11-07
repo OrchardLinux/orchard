@@ -22,7 +22,6 @@ refs/topics/<NAME>/ (default: the layers' last path component).
 import argparse
 import atexit
 import os
-import runpy
 import shutil
 import subprocess
 import sys
@@ -37,7 +36,6 @@ parser.add_argument('--layers', required=True, help='kernel or boot/m1n1')
 parser.add_argument('--target', required=True, type=Path, help='linux or m1n1 repository')
 parser.add_argument('--base', required=True, help='upstream base in the target repository')
 parser.add_argument('--series', help='series file relative to --layers, e.g. series/apple-16k')
-parser.add_argument('--platform', help='kernel platform for patch selection (default: series file name)')
 parser.add_argument('--refs', help='topic refs go to refs/topics/<REFS>/')
 parser.add_argument('--map', type=Path, help='write "patch path<TAB>commit" lines here')
 args = parser.parse_args()
@@ -51,13 +49,12 @@ def run(*cmd, env=None, input=None, cwd=None):
 
 
 commit = run('git', '-C', args.orchard, 'rev-parse', '--short', args.commit)
-work = Path(tempfile.mkdtemp(prefix='kernel-tree-')).resolve()
+work = Path(tempfile.mkdtemp(prefix='kernel-tree-'))
 atexit.register(shutil.rmtree, work, ignore_errors=True)
 index = work / 'index'
 source = work / 'src'
 source.mkdir()
-archive_paths = [args.layers, 'platforms'] if args.layers == 'kernel' else [args.layers]
-archive = subprocess.run(['git', '-C', args.orchard, 'archive', commit, *archive_paths],
+archive = subprocess.run(['git', '-C', args.orchard, 'archive', commit, args.layers],
                          capture_output=True, check=True).stdout
 run('tar', '-x', '-C', source, input=archive)
 layers = source / args.layers
@@ -72,45 +69,30 @@ def orchard_log(fmt, *rest):
     return run('git', '-C', args.orchard, 'log', f'--format={fmt}', commit, *rest)
 
 
-def last_change(*paths):
-    """Committer of the latest change to the patch or its selection metadata."""
-    name, email, date = orchard_log('%cn\t%ce\t%cD', '-1', '--', *paths).split('\t')
+def last_change(path):
+    """Committer of the orchard commit that last changed path."""
+    name, email, date = orchard_log('%cn\t%ce\t%cD', '-1', '--', path).split('\t')
     return {'GIT_COMMITTER_NAME': name, 'GIT_COMMITTER_EMAIL': email, 'GIT_COMMITTER_DATE': date}
 
 
-# Kernel builds and regeneration use the selector from the same snapshot.
-# m1n1 retains its existing series contract.
-if args.layers == 'kernel':
-    if not args.series:
-        sys.exit('kernel has one series per platform; name one with --series')
-    series_api = runpy.run_path(str(layers / 'series.py'))
-    selected_platform = args.platform or Path(args.series).name
-    described = series_api['platform'](selected_platform)
-    if (source / described['series']).resolve() != (layers / args.series).resolve():
-        sys.exit(f'{args.series} is not {selected_platform}\'s patch series')
-    patches = series_api['patches'](selected_platform)
+# Patch order exactly as the build applies it: series layers in order; the
+# kernel's series.py takes every patch below a layer (rglob), m1n1's build
+# only the layer's own files.
+if args.series:
+    series_file, find = layers / args.series, 'rglob'
+elif (layers / 'series').is_file():
+    series_file, find = layers / 'series', 'glob'
 else:
-    if args.platform:
-        sys.exit('--platform applies only to kernel patch layers')
-    series_file = layers / (args.series or 'series')
-    if not series_file.is_file():
-        sys.exit(f'No series {args.series} in {args.layers} at {commit}')
-    patches = []
-    find = 'rglob' if args.series else 'glob'
-    for line in series_file.read_text().splitlines():
-        line = line.split('#', 1)[0].strip()
-        if line:
-            patches += sorted(getattr(layers / line, find)('*.patch'))
+    sys.exit(f'{args.layers} has one series per platform; name one with --series')
+if not series_file.is_file():
+    sys.exit(f'No series {args.series} in {args.layers} at {commit}')
+series = series_file.read_text()
 refs = args.refs or Path(args.layers).name
-
-
-def patch_inputs(path):
-    inputs = [str(path.relative_to(source))]
-    # Include the potential path even when absent so removing a scope keeps
-    # the deletion's provenance. Git ignores paths with no history.
-    if args.layers == 'kernel':
-        inputs.append(str(path.relative_to(source)) + '.toml')
-    return inputs
+patches = []
+for line in series.splitlines():
+    line = line.split('#', 1)[0].strip()
+    if line:
+        patches += sorted(getattr(layers / line, find)('*.patch'))
 
 topics = []
 for p in patches:
@@ -152,7 +134,7 @@ for topic, files in topics:
         message = run('git', 'stripspace',
                       input=(fields['Subject'] + ('\n\n' + body if body.strip() else '\n')).encode())
         git('apply', '--cached', str(p))
-        committer = last_change(*patch_inputs(p))
+        committer = last_change(rel)
         tip = git('commit-tree', git('write-tree'), '-p', tip, input=(message + '\n').encode(), env={
             'GIT_AUTHOR_NAME': fields['Author'], 'GIT_AUTHOR_EMAIL': fields['Email'],
             'GIT_AUTHOR_DATE': fields['Date'], **committer})
@@ -160,7 +142,7 @@ for topic, files in topics:
     git('update-ref', f'refs/topics/{refs}/{topic}', tip)
     # The merge is authored and committed as the topic's most recent change.
     newest = orchard_log('%h\t%an\t%ae\t%cn\t%ce\t%cD', '-1', '--',
-                         *(path for p in files for path in patch_inputs(p)))
+                         *(str(p.relative_to(source)) for p in files))
     changed, an, ae, cn, ce, date = newest.split('\t')
     count = len(files)
     message = (f'Merge {topic} ({count} patch{"es" if count != 1 else ""})\n\n'

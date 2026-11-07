@@ -80,91 +80,17 @@ def platform(name):
             ('arch', 'image', 'dtbs', 'upstream', 'series', 'config', 'defconfig', 'branch', 'loader')}}
 
 
-def _kernel_path(path, what):
-    resolved = path.resolve()
-    if ROOT.resolve() not in resolved.parents:
-        raise ValueError(f'{what} leaves the kernel directory: {path}')
-    return resolved
-
-
-def series_layers(name):
-    """Ordered (directory, scoped-only) entries, with one occurrence per layer."""
-    described = platform(name)
-    series = REPO / described['series']
-    result, seen = [], set()
-    for number, raw in enumerate(series.read_text().splitlines(), 1):
-        line = raw.split('#', 1)[0].strip()
+def patches(name):
+    series = REPO / platform(name)['series']
+    result = []
+    for line in series.read_text().splitlines():
+        line = line.split('#', 1)[0].strip()
         if not line:
             continue
-        words = line.split()
-        scoped = words[0] == 'scoped'
-        if len(words) != (2 if scoped else 1):
-            raise ValueError(f'Invalid patch layer in {series}:{number}: {line}')
-        relative = words[-1]
-        if Path(relative).is_absolute() or '..' in Path(relative).parts:
-            raise ValueError(f'Invalid patch layer in {series}:{number}: {line}')
-        layer = _kernel_path(ROOT / relative, 'Patch layer')
-        if not layer.is_dir():
-            raise ValueError(f'Invalid patch layer in {series}:{number}: {line}')
-        if layer in seen:
-            raise ValueError(f'Duplicate patch layer in {series}:{number}: {line}')
-        seen.add(layer)
-        result.append((layer, scoped))
-    return result
-
-
-def patch_platforms(patch):
-    """An adjacent PATCH.patch.toml restricts that patch to named platforms."""
-    _kernel_path(patch, 'Patch')
-    if not patch.is_file():
-        raise ValueError(f'Missing patch: {patch}')
-    sidecar = Path(str(patch) + '.toml')
-    if not sidecar.exists() and not sidecar.is_symlink():
-        return None
-    _kernel_path(sidecar, 'Patch scope')
-    if not sidecar.is_file() or sidecar.is_symlink():
-        raise ValueError(f'Patch scope must be a regular file: {sidecar}')
-    try:
-        value = tomllib.loads(sidecar.read_text())
-    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
-        raise ValueError(f'Invalid patch scope {sidecar}: {error}') from error
-    names = value.get('platforms')
-    if (set(value) != {'schema', 'platforms'} or type(value.get('schema')) is not int or
-            value['schema'] != 1 or not isinstance(names, list) or not names or
-            any(not isinstance(name, str) or not NAME.fullmatch(name) for name in names) or
-            len(set(names)) != len(names)):
-        raise ValueError(f'Invalid patch scope {sidecar}: expected schema 1 and distinct platform names')
-    for name in names:
-        if not (PLATFORMS / f'{name}.toml').is_file():
-            raise ValueError(f'Unknown platform {name} in patch scope {sidecar}')
-        platform(name)
-    return frozenset(names)
-
-
-def layer_patches(layer):
-    """Patches and validated scopes, also used to preflight new export layers."""
-    _kernel_path(layer, 'Patch layer')
-    for sidecar in sorted(layer.rglob('*.patch.toml')):
-        _kernel_path(sidecar, 'Patch scope')
-        patch = Path(str(sidecar).removesuffix('.toml'))
-        if not patch.is_file():
-            raise ValueError(f'Orphan patch scope: {sidecar}')
-    return [(patch, patch_platforms(patch)) for patch in sorted(layer.rglob('*.patch'))]
-
-
-def patches(name):
-    """Select each patch once, preserving layer order and filename order."""
-    selected = platform(name)['platform']
-    result, seen = [], set()
-    for layer, scoped in series_layers(name):
-        for patch, scope in layer_patches(layer):
-            if (scope is None and scoped) or (scope is not None and selected not in scope):
-                continue
-            identity = patch.resolve()
-            if identity in seen:
-                raise ValueError(f'Patch selected by multiple layers: {patch}')
-            seen.add(identity)
-            result.append(patch)
+        layer = (ROOT / line).resolve()
+        if ROOT not in layer.parents or not layer.is_dir():
+            raise ValueError(f'Invalid patch layer in {series}: {line}')
+        result += sorted(layer.rglob('*.patch'))
     return result
 
 

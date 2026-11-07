@@ -42,12 +42,9 @@ if [[ -n $tree ]]; then
 fi
 config="$here/../$(field config)" lock="$here/../$(field upstream)"
 patches=()
-selected_patches=$("$python" "$here/series.py" "$device")
-if [[ -n $selected_patches ]]; then
-  while IFS= read -r patch; do
-    patches+=("$patch")
-  done <<< "$selected_patches"
-fi
+while IFS= read -r patch; do
+  patches+=("$patch")
+done < <("$python" "$here/series.py" "$device")
 [[ -f "$config" ]] || { echo "Missing kernel config for platform $platform" >&2; exit 1; }
 command -v git >/dev/null || { echo 'Git is required' >&2; exit 1; }
 if [[ ${ORCHARD_BUILD_NATIVE:-0} != 1 ]]; then
