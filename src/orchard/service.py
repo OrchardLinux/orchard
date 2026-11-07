@@ -113,8 +113,9 @@ def choose_target(layout, clock, *, name='Linux', input_fn=input, output=print):
     """Pick one install target from the device's layout; replacing a partition is typed out."""
     options = install_layout.options(layout)
     if not options and install_layout.lwvm(layout):
-        raise ValueError(f'No unencrypted Linux partition of at least {install_layout.MIN_ROOT_BYTES / 1024**3:.0f} GiB. '
-                         'The installer never resizes iOS; a Linux partition has to exist already.')
+        raise ValueError(f'No free LwVM space or unencrypted Linux partition of at least '
+                         f'{install_layout.MIN_ROOT_BYTES / 1024**3:.0f} GiB. '
+                         'The installer never resizes iOS; the space has to exist already.')
     if not options:
         needed = (install_layout.MIN_ROOT_BYTES + install_layout.BOOT_BYTES) / 1024**3
         raise ValueError(f'No free space or Linux partition of at least {needed:.0f} GiB. '
@@ -127,6 +128,11 @@ def choose_target(layout, clock, *, name='Linux', input_fn=input, output=print):
     if not answer.isdecimal() or not 1 <= int(answer) <= len(options):
         raise ValueError('No valid target was chosen; nothing was changed')
     option = options[int(answer) - 1]
+    if option.kind == 'free' and install_layout.lwvm(layout):
+        output('This writes a new Linux entry into the iOS partition table (LwVM). Whether iOS accepts '
+               'an entry it did not create has not been tested yet.')
+        if ask(clock, 'Type "create partition" to confirm: ', input_fn) != 'create partition':
+            raise ValueError('Not confirmed; nothing was changed')
     if option.kind == 'replace':
         phrase = f'erase {option.partition["number"]}'
         if option.partition['type'] == install_layout.LINUX_DATA and not install_layout.lwvm(layout):

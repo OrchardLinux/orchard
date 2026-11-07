@@ -323,14 +323,9 @@ def inspect_lwvm(connection, disk):
     partitions, which the kernel skips, are not offered, and a partition whose place
     differs between the kernel and the header stops the install.
     """
-    name = Path(disk).name
-    sector = int(shell(connection, f'cat /sys/class/block/{name}/queue/logical_block_size'))
-    media = int(shell(connection, f'cat /sys/class/block/{name}/size')) * lwvm.SECTOR
-    chunk = lwvm.chunk_size(media)
+    sector, media, chunk, primary, backup = lwvm_headers(connection, disk)
     try:
-        snapshot = lwvm.parse(read_disk(connection, disk, 0, lwvm.HEADER_BYTES, lwvm.HEADER_BYTES),
-                              read_disk(connection, disk, chunk - lwvm.HEADER_BYTES, lwvm.HEADER_BYTES,
-                                        lwvm.HEADER_BYTES), media)
+        snapshot = lwvm.parse(primary, backup, media)
     except lwvm.Error as error:
         raise D.InstallError('lwvm', f'{disk}: {error}') from error
     found = kernel_partitions(connection, disk)
@@ -349,8 +344,22 @@ def inspect_lwvm(connection, disk):
         row.update(probe(shell(connection, f'dd if={D.node(disk, part["number"])} bs=4096 count=1 2>/dev/null || true')))
         partitions.append(row)
     info = {'path': disk, 'sector': sector, 'table': 'lwvm', 'table_sha256': snapshot['header_sha256'],
-            'media_bytes': media, 'chunk_bytes': chunk}
-    return {'disk': info, 'partitions': sorted(partitions, key=lambda p: p['start']), 'free': []}
+            'media_bytes': media, 'chunk_bytes': chunk, 'entries': len(snapshot['partitions'])}
+    # Unallocated chunks back to back, where a new Linux entry can go (lwvm.free_space).
+    free = [{'start': first * chunk // sector, 'blocks': count * chunk // sector}
+            for first, count in lwvm.free_space(primary, snapshot)]
+    return {'disk': info, 'partitions': sorted(partitions, key=lambda p: p['start']),
+            'free': sorted(free, key=lambda f: f['start'])}
+
+
+def lwvm_headers(connection, disk):
+    """(sector, media bytes, chunk bytes, primary, backup): both copies of the LwVM header as the disk has them."""
+    name = Path(disk).name
+    sector = int(shell(connection, f'cat /sys/class/block/{name}/queue/logical_block_size'))
+    media = int(shell(connection, f'cat /sys/class/block/{name}/size')) * lwvm.SECTOR
+    chunk = lwvm.chunk_size(media)
+    return (sector, media, chunk, read_disk(connection, disk, 0, lwvm.HEADER_BYTES, lwvm.HEADER_BYTES),
+            read_disk(connection, disk, chunk - lwvm.HEADER_BYTES, lwvm.HEADER_BYTES, lwvm.HEADER_BYTES))
 
 
 def lwvm_target(connection, plan, disk):
@@ -362,12 +371,59 @@ def lwvm_target(connection, plan, disk):
     if layout['disk']['table_sha256'] != plan['disk']['table_sha256'] or layout['disk']['sector'] != plan['disk']['sector']:
         raise D.InstallError('layout-changed', 'The LwVM table changed since it was inspected; inspect again')
     root = plan['root']
+    if root.get('create'):
+        return lwvm_create(connection, plan, disk)
     match = [p for p in layout['partitions'] if p['number'] == root['number']]
     if (not match or (match[0]['partuuid'], match[0]['start'], match[0]['blocks']) !=
             (root['partuuid'], root['start'], root['blocks']) or
             match[0]['type'] != lwvm.LINUX_TYPE or match[0]['attributes']):
         raise D.InstallError('plan-mismatch', 'The partition to replace is not the inspected Linux partition')
     return D.node(disk, root['number']), layout['partitions']
+
+
+def lwvm_create(connection, plan, disk):
+    """Write the plan's new Linux entry into both LwVM header copies; its node once the kernel has it.
+
+    The host computes the header (lwvm.allocate_free). The copy at the end of the first
+    chunk is written first, then the primary, each read back; then both are parsed again
+    and the kernel re-reads the table, which must add the partition where the plan has it.
+    Interrupted between the two writes, the copies disagree: the kernel keeps reading the
+    old primary, and the installer refuses the disk until someone looks (both are logged).
+    No hardware has run this yet (docs/bring-up/p105-lwvm-write.md).
+    """
+    root = plan['root']
+    sector, media, chunk, primary, backup = lwvm_headers(connection, disk)
+    if lwvm.digest(primary) != plan['disk']['table_sha256']:
+        raise D.InstallError('layout-changed', 'The LwVM table changed since it was inspected; inspect again')
+    if (root['start'] * sector) % chunk or (root['blocks'] * sector) % chunk:
+        raise D.InstallError('plan-mismatch', 'The new partition does not start and end on LwVM chunks')
+    first, chunks = root['start'] * sector // chunk, root['blocks'] * sector // chunk
+    try:
+        header, entry = lwvm.allocate_free(primary, backup, root['partuuid'], first, chunks)
+    except lwvm.Error as error:
+        raise D.InstallError('lwvm', f'{disk}: {error}') from error
+    if entry['number'] != root['number'] or entry['extents'] != [{'logical': 0, 'physical': first * chunk,
+                                                                  'bytes': chunks * chunk}]:
+        raise D.InstallError('plan-mismatch', 'The new LwVM entry is not as planned')
+    for name, offset in (('copy', chunk - lwvm.HEADER_BYTES), ('primary', 0)):
+        write_at(connection, disk, lwvm.SECTOR, offset // lwvm.SECTOR, header)
+        if read_disk(connection, disk, offset, lwvm.HEADER_BYTES, lwvm.HEADER_BYTES) != header:
+            raise D.InstallError('lwvm-write', f'The LwVM header {name} reads back differently; '
+                                               'the table is in an uncertain state, stop and inspect it')
+    _, _, _, primary, backup = lwvm_headers(connection, disk)
+    try:
+        if lwvm.parse(primary, backup, media)['header_sha256'] != lwvm.digest(header):
+            raise lwvm.Error('the headers on disk are not the ones written')
+    except lwvm.Error as error:
+        raise D.InstallError('lwvm-write', f'{disk}: {error}') from error
+    node = D.node(disk, root['number'])
+    # A re-read right after the write can be refused while the disk settles, so keep asking.
+    shell(connection, f'for n in $(seq 150); do blockdev --rereadpt {disk} 2>/dev/null; [ -e {node} ] && exit 0; '
+                      'sleep 0.1; done; echo "The new partition did not appear" >&2; exit 1', timeout=30)
+    if kernel_partitions(connection, disk).get(root['number']) != (root['start'] * sector // lwvm.SECTOR,
+                                                                     root['blocks'] * sector // lwvm.SECTOR):
+        raise D.InstallError('table-verify', 'The kernel does not see the new partition where it was planned')
+    return node, inspect_lwvm(connection, disk)['partitions']
 
 
 def entry_bytes(kind, partuuid, start, blocks, name):
