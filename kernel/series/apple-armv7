@@ -3,4 +3,6 @@
 # below each directory is applied in path order. patches/armv7 holds the
 # patches only these 32-bit SoCs take.
 patches/import/cascadia
+patches/armv7/mtd
+patches/armv7/block
 patches/armv7/usb

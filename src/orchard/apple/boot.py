@@ -20,12 +20,15 @@ def wait_mode(device, mode, *, chip, board, product, seconds=30):
     while True:
         try:
             observed = usb.devices()
-            active = [d for d in observed if d['mode'] in ('dfu', 'pongo', 'linux')]
+            active = [d for d in observed if d['mode'] in ('dfu', 'pongo', 'linux', 'install')]
             if len(active) > 1:
                 raise ValueError('Connect exactly one target; no boot retry was performed')
             if mode == 'linux':
                 matches = [d for d in observed if d['mode'] == 'linux' and
                            d.get('product') == product and d.get('serial_port')]
+            elif mode == 'install':
+                matches = [d for d in observed if d['mode'] == 'install' and d.get('ecid') == device['ecid']
+                           and d.get('boot_id')]
             else:
                 matches = [d for d in observed if d['location'] == device['location']]
             if len(matches) == 1 and matches[0]['mode'] == mode:
@@ -136,6 +139,17 @@ def boot(device, assets, manifest, progress, *, profile, chip, board, product, e
     pongo.upload(assets['recovery'], device['location'], manifest['assets']['recovery']['sha256'], progress.transfer)
     progress.step('Waiting for the device on USB')
     wait_mode(device, 'linux', chip=chip, board=board, product=product, seconds=120)
+
+
+def boot_payload(device, payload, pongo_image, progress, *, profile, chip, board, product, entry=entries.DEFAULT):
+    """Pongo, then one payload file; returns the device as Linux shows it in install mode."""
+    pongo_from_dfu(device, pongo_image, progress, profile=profile, chip=chip, board=board, product=product,
+                   entry=entry)
+    usb.selected(device['location'], device['ecid'], chip=chip, board=board)
+    progress.reset_transfer()
+    pongo.upload(payload, device['location'], digest(payload), progress.transfer)
+    progress.step('Waiting for the device on USB')
+    return wait_mode(device, 'install', chip=chip, board=board, product=None, seconds=120)
 
 
 def start_loader(device, loader, progress, *, profile, chip, board, product, seconds=30, quiet=False,

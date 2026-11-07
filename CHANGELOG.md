@@ -87,9 +87,12 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
   button, touch included. A battery-gauge
   poll that rebooted every HDQ-gauge iPad in sleep is fixed; the other A10
   boards carry the same support, untested.
-- Installed systems allow suspend only on boards whose device data says it
-  works (`orchard-sleep` in the platform layer); distributions decide when to
-  suspend. How to bring it up on another board: docs/bring-up/suspend.md.
+- A plug or unplug now wakes the tablet, and a wall charger keeps its full rate
+  during sleep. Seen on the iPad 6; the iPad 7 and iPad 5 use the same path,
+  untested.
+- Every board can now suspend. Untested boards may reboot or fail to wake
+  instead; please report what you see. Distributions decide when to suspend.
+  How to bring it up on another board: docs/bring-up/suspend.md.
 - Older 32-bit devices (apple-armv7): the kernel is now Project Cascadia at
   091d441 (it was c20b85e), with Cascadia's iPad 3 driver changes and charger
   fixes. The importer follows Cascadia's A5 tree into its new `devices/a5/`

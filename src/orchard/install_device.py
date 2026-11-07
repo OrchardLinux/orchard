@@ -123,11 +123,17 @@ def read_gpt(disk):
         header = dev.read(block)
         if header[:8] != b'EFI PART':
             raise InstallError('no-gpt', f'{disk} has no GPT')
-        size = struct.unpack_from('<I', header, 12)[0]
-        first, last = struct.unpack_from('<QQ', header, 40)
         entries_lba, count, entry_size = struct.unpack_from('<QII', header, 72)
         dev.seek(entries_lba * block)
         table = dev.read(count * entry_size)
+    return parse_gpt(disk, block, header, table)
+
+
+def parse_gpt(disk, block, header, table):
+    """(info, partitions, free) of a GPT's header and entries as read from DISK."""
+    size = struct.unpack_from('<I', header, 12)[0]
+    first, last = struct.unpack_from('<QQ', header, 40)
+    _, count, entry_size = struct.unpack_from('<QII', header, 72)
     partitions = []
     for index in range(count):
         raw = table[index * entry_size:(index + 1) * entry_size]
@@ -200,8 +206,8 @@ def inspect(disk):
 
 # --- FAT32 -------------------------------------------------------------------
 
-def make_fat32(path, blocks, sector, volume_id, label=b'BOOT       '):
-    """An empty FAT32 filesystem: boot sector, FSInfo, backup, FATs, root cluster."""
+def fat32_regions(blocks, sector, volume_id, label=b'BOOT       '):
+    """An empty FAT32 filesystem as (offset, bytes): boot sector, FSInfo, backup, FATs, root cluster."""
     reserved, fats = 8, 2
     total = blocks
     fat_sectors = 1
@@ -228,13 +234,16 @@ def make_fat32(path, blocks, sector, volume_id, label=b'BOOT       '):
     struct.pack_into('<I', fsinfo, 508, 0xaa550000)
     fat = bytearray(fat_sectors * sector)
     struct.pack_into('<III', fat, 0, 0x0ffffff8, 0x0fffffff, 0x0fffffff)
+    return [(0, boot), (sector, fsinfo), (6 * sector, boot), (7 * sector, fsinfo),
+            *(((reserved + index * fat_sectors) * sector, fat) for index in range(fats)),
+            ((reserved + fats * fat_sectors) * sector, bytes(sector))]    # root cluster
+
+
+def make_fat32(path, blocks, sector, volume_id, label=b'BOOT       '):
     fd = os.open(path, os.O_WRONLY)
     try:
-        for offset, data in ((0, boot), (sector, fsinfo), (6 * sector, boot), (7 * sector, fsinfo)):
+        for offset, data in fat32_regions(blocks, sector, volume_id, label):
             os.pwrite(fd, data, offset)
-        for index in range(fats):
-            os.pwrite(fd, fat, (reserved + index * fat_sectors) * sector)
-        os.pwrite(fd, bytes(sector), (reserved + fats * fat_sectors) * sector)   # root cluster
         os.fsync(fd)
     finally:
         os.close(fd)
@@ -737,6 +746,39 @@ def kernel_version(root):
     return versions[0]
 
 
+def finish(plan, target, present, secrets):
+    """Everything after the root's files: platform layer, firmware, account, boot entry.
+
+    TARGET has /boot, /proc, /sys and /dev mounted; it is / when this runs inside the new root.
+    PRESENT holds the PARTUUIDs of the partitions that stay.
+    """
+    layer = plan['layer']
+    files = install_layer(layer['path'], target, size=layer['bytes'], sha256=layer['sha256'],
+                          expanded_limit=layer['expanded_bytes'])
+    Path(layer['path']).unlink()
+    emit('step', step='platform-layer', state='done', files=files)
+    firmware = plan.get('firmware')
+    if firmware:
+        with open(firmware['path'], 'rb') as bundle:
+            files = install_firmware(bundle, target, size=firmware['bytes'], sha256=firmware['sha256'])
+        Path(firmware['path']).unlink()
+        emit('step', step='firmware', state='done', files=files)
+    boot_mount = target / 'boot'
+    gone = remove_old_entries(boot_mount, present | {plan['root']['partuuid'], plan['boot']['partuuid']})
+    emit('step', step='remove-old-entries', state='done', entries=gone)
+    entry = plan['entry']
+    write_text(target / 'etc/fstab',
+               f'PARTUUID={plan["root"]["partuuid"]} / ext4 rw,relatime 0 1\n'
+               f'PARTUUID={plan["boot"]["partuuid"]} /boot vfat rw,relatime,fmask=0077,dmask=0077 0 2\n')
+    account = plan.get('account')
+    if account:
+        emit('step', step='account', state='done', user=set_account(target, account, *(secrets or (None, None))))
+    version = kernel_version(target)
+    write_entry(boot_mount, target, version, entry, plan['root']['partuuid'])
+    name = check_entry(boot_mount, plan['root']['partuuid'], entry['devicetree'])
+    emit('step', step='boot-entry', state='done', entry=name)
+
+
 def install(plan, stream):
     disk = plan['disk']['path']
     if os.geteuid() != 0:
@@ -774,42 +816,19 @@ def install(plan, stream):
                          expanded_limit=plan['root']['blocks'] * info['sector'],
                          compression=plan['image'].get('compression', 'zstd'))
         emit('step', step='extract-root', state='done', **result)
-        layer = plan['layer']
-        files = install_layer(layer['path'], TARGET, size=layer['bytes'], sha256=layer['sha256'],
-                              expanded_limit=layer['expanded_bytes'])
-        Path(layer['path']).unlink()
-        emit('step', step='platform-layer', state='done', files=files)
-        firmware = plan.get('firmware')
-        if firmware:
-            with open(firmware['path'], 'rb') as bundle:
-                files = install_firmware(bundle, TARGET, size=firmware['bytes'], sha256=firmware['sha256'])
-            Path(firmware['path']).unlink()
-            emit('step', step='firmware', state='done', files=files)
         boot_mount = TARGET / 'boot'
         boot_mount.mkdir(exist_ok=True)
         run('mount', '-t', 'vfat', boot_node, str(boot_mount))
         mounts.append(boot_mount)
-        replaced = (plan.get('remove') or {}).get('partuuid')
-        present = {p['partuuid'] for p in partitions if p['partuuid'] != replaced}
-        present |= {plan['root']['partuuid'], plan['boot']['partuuid']}
-        gone = remove_old_entries(boot_mount, present)
-        emit('step', step='remove-old-entries', state='done', entries=gone)
-        entry = plan['entry']
-        write_text(TARGET / 'etc/fstab',
-                   f'PARTUUID={plan["root"]["partuuid"]} / ext4 rw,relatime 0 1\n'
-                   f'PARTUUID={plan["boot"]["partuuid"]} /boot vfat rw,relatime,fmask=0077,dmask=0077 0 2\n')
         for name, fs in (('proc', 'proc'), ('sys', 'sysfs'), ('dev', 'devtmpfs')):
             point = TARGET / name
             point.mkdir(exist_ok=True)
             run('mount', '-t', fs, name, str(point))
             mounts.append(point)
-        if account:
-            emit('step', step='account', state='done', user=set_account(TARGET, account, *(secrets or (None, None))))
-            secrets = None
-        version = kernel_version(TARGET)
-        write_entry(boot_mount, TARGET, version, entry, plan['root']['partuuid'])
-        name = check_entry(boot_mount, plan['root']['partuuid'], entry['devicetree'])
-        emit('step', step='boot-entry', state='done', entry=name)
+        replaced = (plan.get('remove') or {}).get('partuuid')
+        present = {p['partuuid'] for p in partitions if p['partuuid'] != replaced}
+        finish(plan, TARGET, present, secrets)
+        secrets = None
     finally:
         for point in reversed(mounts):
             subprocess.run(['umount', str(point)], capture_output=True, timeout=60)
@@ -829,11 +848,18 @@ def main(argv):
         if argv[1:] == ['inspect']:
             wait_for_storage()
             inspect(disk)
+        elif len(argv) == 3 and argv[1] == 'finish':
+            # Inside the new root, which the host has written and mounted (install_direct.py).
+            plan = json.loads(Path(argv[2]).read_text())
+            account = plan.get('account')
+            secrets = read_secrets(SECRETS, account) if account and (account['password'] or account['pin']) else None
+            finish(plan, Path('/'), set(plan['present']), secrets)
+            emit('finished', root=plan['root']['partuuid'], boot=plan['boot']['partuuid'])
         elif len(argv) == 3 and argv[1] == 'run':
             wait_for_storage()
             install(json.loads(Path(argv[2]).read_text()), sys.stdin.buffer)
         else:
-            raise InstallError('usage', 'usage: install_device.py inspect | run PLAN.json < ROOT')
+            raise InstallError('usage', 'usage: install_device.py inspect | run PLAN.json < ROOT | finish PLAN.json')
     except InstallError as error:
         emit('error', code=error.code, detail=str(error))
         return 1

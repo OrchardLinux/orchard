@@ -628,7 +628,7 @@ CONFIG_CPU_IDLE_GOV_MENU=y
 #
 # ARM CPU Idle Drivers
 #
-# CONFIG_ARM_APPLE_CPUIDLE is not set
+CONFIG_ARM_APPLE_CPUIDLE=y
 # CONFIG_ARM_PSCI_CPUIDLE is not set
 # end of ARM CPU Idle Drivers
 # end of CPU Idle

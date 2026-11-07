@@ -43,6 +43,7 @@ class Device:
         self.REBOOT_MESSAGE = ('A fresh recovery boot is required.\n'
                                f'Put the {self.NAME} in DFU mode, then run: orchard install')
         self.firmware_inputs = partial(firmware.ensure, self.PROFILE)
+        self.firmware_cached = partial(firmware.cached, self.PROFILE)
         self.prepare_mixin = partial(firmware.mixin, self.PROFILE)
 
     def matches_dfu(self, device: Dict[str, Any]) -> bool:
@@ -81,11 +82,18 @@ class Device:
         DeviceState(self.PROFILE, device['ecid'])
         return cast(SelectedDevice, {**device, 'resumed': False})
 
+    def boot_inputs(self) -> List[Any]:
+        return entries.inputs(entries.select(self._descriptor))
+
     def boot(self, device: SelectedDevice, assets: BootAssets,
              manifest: BootRequest, progress: Progress) -> None:
         return apple_boot.boot(device, assets, manifest, progress,
                                profile=self.PROFILE, chip=self.CHIP, board=self.BOARD, product=self.PRODUCT,
                                entry=entries.select(self._descriptor))
+
+    def boot_payload(self, device: SelectedDevice, payload: Path, pongo_image: Path, progress: Progress) -> Dict[str, Any]:
+        return apple_boot.boot_payload(device, payload, pongo_image, progress, profile=self.PROFILE, chip=self.CHIP,
+                                       board=self.BOARD, product=self.PRODUCT, entry=entries.select(self._descriptor))
 
     def start_loader(self, device: SelectedDevice, loader: Dict[str, Path], progress: Progress,
                      quiet: bool = False) -> str:

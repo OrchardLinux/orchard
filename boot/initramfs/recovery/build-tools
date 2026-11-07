@@ -20,7 +20,9 @@ for component, filename in (('busybox', 'busybox.deb'),
                             ('dropbear', 'dropbear.tar.bz2'),
                             ('libnl', 'libnl.tar.gz'),
                             ('wpa_supplicant', 'wpa_supplicant.tar.gz'),
-                            ('iw', 'iw.tar.xz')):
+                            ('iw', 'iw.tar.xz'),
+                            ('zstd', 'zstd.tar.gz'),
+                            ('e2fsprogs', 'e2fsprogs.tar.gz')):
     item = lock[component]
     target = work / filename
     if target.exists():

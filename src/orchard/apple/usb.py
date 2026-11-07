@@ -9,8 +9,9 @@ from .linux_usb import devices as linux_devices, m1n1_ports as linux_m1n1_ports
 from orchard.state import EndpointUnavailable
 
 # 0x4144: a RAM payload's USB session (orchard/usb-session).
-# 0x4142: Orchard Recovery; 0x4145: an installed system (orchard's initrd).
-MODES = {0x1227: 'dfu', 0x4141: 'pongo', 0x4142: 'linux', 0x4144: 'ram', 0x4145: 'system'}
+# 0x4142: Orchard Recovery; 0x4145: an installed system (orchard's initrd);
+# 0x4146: orchard's initrd with the install add-on (install_direct.py).
+MODES = {0x1227: 'dfu', 0x4141: 'pongo', 0x4142: 'linux', 0x4144: 'ram', 0x4145: 'system', 0x4146: 'install'}
 
 
 class DeviceError(ValueError):

@@ -362,10 +362,7 @@ tester, the iOS values, and the class trace.
   - What does the attached host do (USB suspend)?
   - USB 2.0 suspend current is far below 500 mA. PR #6 granted 500 mA to a
     suspended host and the review rejected it.
-- **Prerequisite**: suspend and resume work on the device without charging
-  code. On J71b they did not work reliably, so this is blocked there. The
-  event mask must be writable ([CH-15](#ch-15)): only wake events may pull
-  the PMU line while asleep.
+- **Prerequisite**: suspend and resume work on the device; done on J71b.
 - **Equipment**: the device, a Mac, an Apple brick.
 - **Time**: 2 h. **Risk**: low at the default limit.
 
@@ -648,31 +645,11 @@ Send back: code → meter mA, meter V, gauge mA, pack temperature.
 <a id="ch-15"></a>
 ## CH-15: Writing the D2365 event mask
 
-- **Devices**: J71b; every D2365 board.
-- **Why**: The PMU event controller masks every event at probe and
-  unmasks only those with a consumer, as iPadOS does, and suspend must
-  leave only wake events unmasked. On J71b a plain I²C write to `0x1c0`
-  reads back unchanged (`0x33` before and after), so none of that takes
-  effect: Linux runs with the mask iBoot left, which happens to unmask
-  the charger's events. Unknowns:
-  - Is `0x1c0` the mask at all on J71b, or only a readable copy?
-  - Does the PMIC need an unlock or a different access (a bulk write of
-    the whole block, a write-enable register, SPMI-style framing)?
-  - What iPadOS's D2365 driver writes, in which order (firmware: the
-    vtable used for the event table in [pmu-events](pmu-events.md)).
-- **Equipment**: the device, a RAM boot with `i2c-dev` and `i2ctransfer`.
-- **Time**: A 2 h offline, B 1 h. **Risk**: low; masking events only
-  silences the PMU line.
-
-Steps:
-
-A. Offline: find the mask writes in the D2365 driver of the 21H461
-   kernelcache (address, width, any unlock sequence before them).
-B. Live: replay that sequence for one unused event byte, read back,
-   restore. Then mask an event the charger uses (72) and check that an
-   unplug no longer pulls GPIO38 low.
-
-Send back: the write sequence and the readbacks.
+Closed, 2026-11-07. The mask at `0x1c0` is written directly, with no unlock, in
+bytes or in bulk (iPadOS: `…6b80478`, 30 bytes through the plain register write
+`…6b7b890`). Bits with no event behind them read 0, which the first test took
+for a write that did nothing: on J71b `0xff` to `0x1c0` reads `0x33`, `0x32` reads
+`0x32`, and the value holds. The driver's masks therefore always took effect.
 
 ---
 
@@ -714,7 +691,7 @@ Send back: requests per gadget, and the ten classifications with timings.
 - Then [CH-10](#ch-10), [CH-12](#ch-12), [CH-11](#ch-11), [CH-09](#ch-09),
   [CH-14](#ch-14), [CH-04](#ch-04), [CH-07](#ch-07), [CH-16](#ch-16).
 - With a jailbroken iOS: [CH-13](#ch-13), [CH-05](#ch-05).
-- [CH-15](#ch-15) before suspend, then [CH-06](#ch-06) once suspend works.
+- [CH-06](#ch-06).
 
 <a id="menu-j72b"></a>
 **iPad 6 cellular (J72b).** *Inferred*: same charging hardware as J71b.

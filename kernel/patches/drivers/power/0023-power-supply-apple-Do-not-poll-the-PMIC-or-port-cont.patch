@@ -1,0 +1,96 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sat, 7 Nov 2026 00:17:02 +0800
+Subject: [PATCH] power: supply: apple: Do not poll the PMIC or port controller
+ in suspend
+
+The D2365 charger policy and the Bellatrix status poll requeue themselves
+on workqueues the freezer does not stop, so they keep reading the PMIC, the
+port controller and the battery gauge between device suspend and resume. On
+the iPad 6 a battery gauge poll doing that reset the SoC within seconds.
+
+Queue both on freezable workqueues, as the Tristar charger and bq27xxx do.
+
+Assisted-by: LLM
+---
+ drivers/power/supply/apple_bellatrix_power.c | 8 ++++----
+ drivers/power/supply/apple_d2365_charger.c   | 8 ++++----
+ 2 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/power/supply/apple_bellatrix_power.c b/drivers/power/supply/apple_bellatrix_power.c
+index 0537cf8f91cd..8e3fae7180c0 100644
+--- a/drivers/power/supply/apple_bellatrix_power.c
++++ b/drivers/power/supply/apple_bellatrix_power.c
+@@ -185,13 +185,13 @@ static void apple_bellatrix_init_work(struct work_struct *work)
+ 
+ 	if (!ret) {
+ 		bellatrix->initialized = true;
+-		schedule_delayed_work(&bellatrix->init_work,
++		queue_delayed_work(system_freezable_wq, &bellatrix->init_work,
+ 				      msecs_to_jiffies(BELLATRIX_POLL_INTERVAL_MS));
+ 		return;
+ 	}
+ 
+ 	if (bellatrix->initialized) {
+-		schedule_delayed_work(&bellatrix->init_work,
++		queue_delayed_work(system_freezable_wq, &bellatrix->init_work,
+ 				      msecs_to_jiffies(BELLATRIX_POLL_INTERVAL_MS));
+ 		return;
+ 	}
+@@ -200,7 +200,7 @@ static void apple_bellatrix_init_work(struct work_struct *work)
+ 
+ 	if ((ret == -ENXIO || ret == -EIO) &&
+ 	    bellatrix->init_attempts < BELLATRIX_INIT_ATTEMPTS) {
+-		schedule_delayed_work(&bellatrix->init_work,
++		queue_delayed_work(system_freezable_wq, &bellatrix->init_work,
+ 				      msecs_to_jiffies(BELLATRIX_INIT_RETRY_DELAY_MS));
+ 		return;
+ 	}
+@@ -247,7 +247,7 @@ static int apple_bellatrix_probe(struct i2c_client *client)
+ 	if (ret)
+ 		return ret;
+ 
+-	schedule_delayed_work(&bellatrix->init_work,
++	queue_delayed_work(system_freezable_wq, &bellatrix->init_work,
+ 			      msecs_to_jiffies(BELLATRIX_INIT_DELAY_MS));
+ 
+ 	return 0;
+diff --git a/drivers/power/supply/apple_d2365_charger.c b/drivers/power/supply/apple_d2365_charger.c
+index 8175d4fedb86..69f158a97b28 100644
+--- a/drivers/power/supply/apple_d2365_charger.c
++++ b/drivers/power/supply/apple_d2365_charger.c
+@@ -427,14 +427,14 @@ static void apple_d2365_charge_policy_work(struct work_struct *work)
+ 	power_supply_changed(charger->psy);
+ 	/* Look again soon, in case the attach default follows the write. */
+ 	if (!charger->shutting_down)
+-		mod_delayed_work(system_power_efficient_wq,
++		mod_delayed_work(system_freezable_power_efficient_wq,
+ 				 &charger->charge_policy_work,
+ 				 msecs_to_jiffies(D2365_ATTACH_CHECK_MS));
+ 	goto out_unlock;
+ 
+ out_reschedule:
+ 	if (!charger->shutting_down)
+-		mod_delayed_work(system_power_efficient_wq,
++		mod_delayed_work(system_freezable_power_efficient_wq,
+ 				 &charger->charge_policy_work,
+ 				 msecs_to_jiffies(D2365_POLICY_INTERVAL_MS));
+ 	goto out_unlock;
+@@ -591,7 +591,7 @@ apple_d2365_charger_external_power_changed(struct power_supply *psy)
+ 	struct apple_d2365_charger *charger = power_supply_get_drvdata(psy);
+ 
+ 	if (charger->config && !READ_ONCE(charger->shutting_down))
+-		mod_delayed_work(system_power_efficient_wq,
++		mod_delayed_work(system_freezable_power_efficient_wq,
+ 				 &charger->charge_policy_work, 0);
+ 
+ 	power_supply_changed(psy);
+@@ -693,7 +693,7 @@ static int apple_d2365_charger_probe(struct platform_device *pdev)
+ 				     "failed to read input-current limit\n");
+ 
+ 	if (charger->config) {
+-		mod_delayed_work(system_power_efficient_wq,
++		mod_delayed_work(system_freezable_power_efficient_wq,
+ 				 &charger->charge_policy_work, 0);
+ 	}
+ 

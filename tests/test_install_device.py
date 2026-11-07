@@ -70,15 +70,15 @@ class PlatformLayer(unittest.TestCase):
 
     def test_executables_keep_their_exec_bit_and_nothing_more(self):
         path = self.work / 'layer.tar.gz'
-        expanded, _ = platform.write({'usr/lib/orchard/orchard-sleep': (b'#!/bin/sh\n', 0o755),
-                                      'usr/lib/systemd/system/orchard-sleep.service': (b'[Unit]\n', 0o644),
+        expanded, _ = platform.write({'usr/lib/orchard/a-script': (b'#!/bin/sh\n', 0o755),
+                                      'usr/lib/systemd/system/a-service.service': (b'[Unit]\n', 0o644),
                                       'usr/lib/orchard/setuid': (b'x', 0o4755)}, path)
         data = path.read_bytes()
         D.install_layer(path, self.root, size=len(data), sha256=hashlib.sha256(data).hexdigest(),
                         expanded_limit=expanded)
         mode = lambda name: (self.root / name).stat().st_mode & 0o7777
-        self.assertEqual(mode('usr/lib/orchard/orchard-sleep'), 0o755)
-        self.assertEqual(mode('usr/lib/systemd/system/orchard-sleep.service'), 0o644)
+        self.assertEqual(mode('usr/lib/orchard/a-script'), 0o755)
+        self.assertEqual(mode('usr/lib/systemd/system/a-service.service'), 0o644)
         self.assertEqual(mode('usr/lib/orchard/setuid'), 0o755)
 
     def test_a_file_the_root_image_already_has_is_refused(self):

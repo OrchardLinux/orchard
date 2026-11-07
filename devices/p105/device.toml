@@ -38,8 +38,10 @@ accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "missing"
 touch_id = "missing"
-storage_read = "missing"
-storage_write = "missing"
+# The H2FMI driver reads the NAND and programs verified pages; this revision is
+# untested on hardware (docs/bring-up/p105-nand-reads.md, p105-nand-program.md).
+storage_read = "untested"
+storage_write = "untested"
 wifi = "untested"
 bluetooth_input = "untested"
 bluetooth_audio = "untested"

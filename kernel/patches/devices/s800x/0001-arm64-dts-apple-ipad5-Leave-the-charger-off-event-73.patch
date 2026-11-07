@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sat, 7 Nov 2026 00:17:27 +0800
+Subject: [PATCH] arm64: dts: apple: ipad5: Leave the charger off event 73
+
+Event 73 latches every few seconds while the input current approaches 2 A,
+with the same source attached, and each one restarted the identification.
+It is not a source event: iPadOS does not subscribe to it and the iPad 6
+left it out on 2026-10-29. Measured on the iPad 6; same PMIC and charger.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/s800x-ipad5.dtsi | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi b/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
+index 09f52de072c3..2ce40b469476 100644
+--- a/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
++++ b/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
+@@ -201,7 +201,6 @@ tristar_charger: charger@180 {
+ 				     <42 IRQ_TYPE_EDGE_RISING>,
+ 				     <43 IRQ_TYPE_EDGE_RISING>,
+ 				     <72 IRQ_TYPE_EDGE_RISING>,
+-				     <73 IRQ_TYPE_EDGE_RISING>,
+ 				     <77 IRQ_TYPE_EDGE_RISING>;
+ 			apple,tristar = <&tristar>;
+ 			input-current-limit-microamp = <2400000>;

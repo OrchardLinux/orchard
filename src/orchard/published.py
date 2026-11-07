@@ -30,7 +30,7 @@ KEYS = 'component-keys.json'
 SUMS = 'SHA256SUMS'
 TAG = 'nightly'
 LIMIT = 2 * 1024 * 1024 * 1024
-TOOLS = ('busybox', 'dropbear', 'dropbearkey', 'wpa_supplicant', 'wpa_cli', 'iw')
+TOOLS = ('busybox', 'dropbear', 'dropbearkey', 'wpa_supplicant', 'wpa_cli', 'iw', 'orchard-write', 'resize2fs', 'tune2fs')
 
 
 def source_inputs(hardware, platform):

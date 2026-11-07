@@ -29,13 +29,22 @@ public recipe or release.
 
 ## Open work
 
-The USB cold-handoff topic has a compiled candidate and recorded hardware
-observations. Its exact revision awaits a device boot; see
-[USB handoff](../../docs/bring-up/p105-usb-handoff.md).
+- Storage: the NAND driver (OrchardLinux/orchard#86, #87) is in
+  `kernel/patches/armv7/mtd`. The iOS disk translation layer and its append
+  writes (#89, #91) follow on top of it. Reclamation (#93) is unfinished:
+  until it lands, writes stop once the blank flash blocks are used up.
+- A Linux root on LwVM: the kernel reads LwVM partitions
+  (`kernel/patches/armv7/block`), but the shared initrd finds its root by
+  reading a GPT itself and needs to learn LwVM partitions.
+- USB: the cold-handoff topic (#90) awaits a device boot of its exact
+  revision, and the iPad 3 (J1) a regression boot of the shared PHY code;
+  see [USB handoff](../../docs/bring-up/p105-usb-handoff.md).
 
 ## Unmerged code
 
-- #85's per-patch platform scopes (007a95b, also carried by #90): reverted;
-  32-bit patches live in `kernel/patches/armv7`.
+- #85's per-patch platform scopes (007a95b, also carried by #86/#87):
+  reverted; 32-bit patches live in `kernel/patches/armv7`.
+- #87's `MTD_APPLE_H2FMI_WRITE` build option (fa59001): removed, programming
+  is part of the driver.
 - #90's gadget config change (39b60b1, built-in CDC gadget off): not taken
   yet; it waits until 32-bit boots bind their own configfs gadget.

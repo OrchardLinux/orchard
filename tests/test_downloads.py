@@ -60,4 +60,34 @@ class Downloads(unittest.TestCase):
         response.close.assert_called_once()
 
 
+
+class SameFileTwice(unittest.TestCase):
+    def test_a_second_request_waits_for_the_download_instead_of_repeating_it(self):
+        import hashlib
+        import threading
+        import time
+        from orchard import releases
+        data = b'system image' * 1000
+        receipt = {'url': 'https://example.invalid/file', 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+        downloads_seen = []
+
+        def download(url, size, destination, progress=None):
+            downloads_seen.append(url)
+            time.sleep(0.3)
+            Path(destination).write_bytes(data)
+        with tempfile.TemporaryDirectory() as work, patch.object(releases, 'cache_root', return_value=Path(work).resolve()), \
+                patch.object(releases, 'download', side_effect=download), patch.object(releases, 'check_source'):
+            results = []
+            threads = [threading.Thread(target=lambda: results.append(releases.materialize(receipt, None))) for _ in range(4)]
+            started = time.monotonic()
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(10)
+            self.assertEqual(len(downloads_seen), 1)
+            self.assertEqual(len(results), 4)
+            self.assertEqual({path.read_bytes() for path in results}, {data})
+            self.assertGreaterEqual(time.monotonic() - started, 0.3)
+
+
 if __name__ == '__main__':unittest.main()
