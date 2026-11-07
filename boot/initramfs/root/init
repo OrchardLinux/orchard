@@ -25,11 +25,15 @@ for argument in $(cat /proc/cmdline); do
     init=*) init=${argument#init=} ;;
     esac
 done
-[ -n "$root" ] || stop 'the boot entry names no root=PARTUUID='
 
 for module in $(cat /etc/orchard/modules); do
     modprobe "$module" || stop "could not load $module"
 done
+
+# An install boot: orchard's add-on, appended to this initrd by the CLI, writes the
+# system with the host, then sets root to what it wrote. Normal boots don't have it.
+[ ! -e /install/run ] || . /install/run
+[ -n "$root" ] || stop 'the boot entry names no root=PARTUUID='
 
 # gpt_partuuid DISK SECTOR_SIZE NUMBER: the unique GUID of GPT entry NUMBER,
 # read from the disk itself: the kernel's uevent does not report PARTUUID.

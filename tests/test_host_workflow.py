@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import Mock, patch
 
@@ -31,24 +32,56 @@ class HostWorkflow(unittest.TestCase):
         self.addCleanup(self.state_patch.stop)
     def test_cancel_before_asset_access_download_or_mutation(self):
         from unittest.mock import Mock
-        adapter = Mock(NAME='Supported tablet', PROFILE='device', INSTALL=True, STATUS='supported', CAVEATS=[], FEATURES={})
-        with patch('orchard.service.choose', return_value=(adapter, {'mode': 'dfu'})), \
+        adapter = Mock(boot_inputs=Mock(return_value=[]), NAME='Supported tablet', PROFILE='device', INSTALL=True, STATUS='supported', CAVEATS=[], FEATURES={})
+        with patch('orchard.service.choose', return_value=(adapter, {'mode': 'dfu', 'resumed': False})), \
              patch('orchard.service.select_manifest', return_value=({'name': 'Omarchy'}, None)), \
-             patch('orchard.service.resolve') as assets:
+             patch('orchard.service.resolve', return_value=({}, {})):
             result = install(input_fn=lambda _: 'n', progress=Progress(io.StringIO()))
             self.assertTrue(result['cancelled'])
-            assets.assert_not_called()
-            adapter.firmware_inputs.assert_not_called()
+            # Downloads start right after device selection; saying no leaves the device alone.
             adapter.boot.assert_not_called()
+            adapter.connect.assert_not_called()
+
+    def run_declined(self, *, mode='dfu', firmware_here=True, tool_cached=True, needs=False):
+        from unittest.mock import Mock
+        fetched = threading.Event()
+        tool = Mock(cached=Mock(return_value=tool_cached), fetch=Mock(side_effect=lambda *_: fetched.set()))
+        adapter = Mock(NAME='Tablet', PROFILE='device', INSTALL=True, STATUS='supported', CAVEATS=[], FEATURES={},
+                       firmware_cached=Mock(return_value=firmware_here))
+        adapter.boot_inputs.return_value = [tool]
+        output = io.StringIO()
+        with patch('orchard.service.choose', return_value=(adapter, {'mode': mode, 'resumed': mode == 'linux'})), \
+             patch('orchard.service.select_manifest', return_value=({'name': 'Omarchy'}, None)), \
+             patch('orchard.service.needs_download', return_value=needs), \
+             patch('orchard.service.resolve', return_value=({}, {})):
+            install(input_fn=lambda _: 'n', progress=Progress(output))
+        return output.getvalue(), tool, fetched
+
+    def test_a_cache_hit_says_nothing_about_downloading(self):
+        self.assertNotIn('Starting download', self.run_declined()[0])
+
+    def test_any_cache_miss_says_it_starts_downloading_before_the_first_question(self):
+        for miss in ({'needs': True}, {'firmware_here': False}, {'tool_cached': False}):
+            text = self.run_declined(**miss)[0]
+            self.assertLess(text.index('Starting download in parallel...'), text.index('Installing Omarchy'), miss)
+
+    def test_the_entry_tool_is_fetched_before_any_question_is_answered(self):
+        _, tool, fetched = self.run_declined(tool_cached=False)
+        self.assertTrue(fetched.wait(5))
+
+    def test_a_running_recovery_needs_no_entry_tool(self):
+        text, tool, _ = self.run_declined(mode='linux')
+        tool.fetch.assert_not_called()
+        tool.cached.assert_not_called()
 
     def test_experimental_device_shows_caveats_and_still_defaults_to_yes(self):
         from unittest.mock import Mock
-        adapter = Mock(NAME='Untested tablet', PROFILE='device', INSTALL=True, STATUS='experimental',
+        adapter = Mock(boot_inputs=Mock(return_value=[]), NAME='Untested tablet', PROFILE='device', INSTALL=True, STATUS='experimental',
                        FEATURES={'touch': 'missing', 'wifi': 'untested', 'display': 'working', 'cellular': 'none'})
         prompts = []
-        with patch('orchard.service.choose', return_value=(adapter, {'mode': 'dfu'})), \
+        with patch('orchard.service.choose', return_value=(adapter, {'mode': 'dfu', 'resumed': False})), \
              patch('orchard.service.select_manifest', return_value=({'name': 'Omarchy'}, None)), \
-             patch('orchard.service.resolve') as assets:
+             patch('orchard.service.resolve', return_value=({}, {})):
             output = io.StringIO()
             result = install(input_fn=lambda text: prompts.append(text) or 'n', progress=Progress(output))
         self.assertTrue(result['cancelled'])
@@ -60,7 +93,7 @@ class HostWorkflow(unittest.TestCase):
         self.assertNotIn('Display', text)
         self.assertNotIn('Cellular', text)
         self.assertIn('not been tested yet, proceed at your own risk', text)
-        assets.assert_not_called()
+        adapter.boot.assert_not_called()
 
     def test_clock_excludes_input_and_download_once(self):
         with patch('orchard.progress.time.monotonic', side_effect=[0, 1, 4, 5, 7, 12]):

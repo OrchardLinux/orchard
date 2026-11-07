@@ -192,8 +192,9 @@ Each correction is logged. Paul's D2365 driver got the same fix as 0010.
 
 - **Probe:** a limit above the fallback is lowered, not adopted ("never adopt
   a limit we cannot explain").
-- **Suspend:** parks at the handoff and forgets the source, because sleep
-  can hide a swap. Resume identifies again.
+- **Suspend:** a plug or unplug wakes, so a charger keeps its limit; a USB host parks at the handoff, because sleep
+  may be asleep as well. Resume identifies it again. An identification in
+  progress finishes first.
 - **Shutdown and remove:** restore the handoff.
 - **Reporting:** `lightning` supply with `online`, `usb_type`
   (BrickID/C/CDP/DCP/SDP/unknown), `input_current_limit` (verified code) and
@@ -264,7 +265,7 @@ exports `online`, `status`, `charge_type` and `input_current_limit`.
 | Swap without a VBUS gap | Event epoch catches it | Not seen (Bellatrix stays online) |
 | Host grant | `usb-psy-name` → `set_property` | Not wired (`usb-psy-name` deleted on iPad 7) |
 | Unexplained limit at start | Lowered to the fallback | Policy refuses; limit left as found |
-| Suspend | Parks at the handoff | No PM ops |
+| Suspend | Wakes on plug; keeps a charger, parks a USB host | Wakes on plug; keeps its limit |
 
 Paul's guards, readback and verified restore are a good base. What is
 missing is everything that makes the grant depend on the source.
@@ -304,7 +305,7 @@ missing is everything that makes the grant depend on the source.
 | 5 | **Host grant.** Name the D2365 charger supply in `usb-psy-name` on iPad 7 and add `set_property(INPUT_CURRENT_LIMIT)` with `tristar_set_property()` semantics: only while online, valid only until the next source event, ≤ 500 mA changes nothing, lower withdraws, higher ramps | 0008, `devices/t8010/0005` | No driver code needed in dwc2 or composite. To check: that the J171 gadget enumerates and gets the request (`devices/j171/device.toml` says `usb_serial = false`). The grant needs step 4's epoch. Without it, an allowance can outlive a swap |
 | 6 | **Source identification** (CH-01). Find where the iPad 7 learns the source current, from the iOS IORegistry, the Bellatrix kext in the kernelcache, then read-only Linux prints. Expose results from the Bellatrix supply (`usb_type`, `current_max`) and consume them in the charger through the supplier link | BrickID / CC / BC1.2 in 0003, 0009 | Unknown. That Bellatrix replaces Tristar is *inferred* (CH-01). No register meanings are known beyond `0x16`, `0x17`, `0x73` |
 | 7 | **Ramp and guards.** 500 mA steps, pack window including \|I\| ≤ 3 A before each step and every second; FAULT on write or readback failure | `tristar_ramp_step()`, `tristar_guard()` | Status bytes that should block a grant: like `0x62` on J71b, unknown |
-| 8 | **Lifecycle.** Park at the handoff on suspend and forget the source; handoff on shutdown and remove | `tristar_suspend()`, `tristar_stop()` | Suspend on iPad 7 untested (CH-06) |
+| 8 | **Lifecycle.** Wake on plug; keep a charger over suspend, park a USB host and forget it; handoff on shutdown and remove | `tristar_suspend()`, `tristar_stop()` | Suspend on iPad 7 untested (CH-06) |
 
 **Driver shape** is the maintainer's call. Do not restructure without
 agreeing it first. Paul's split (a port-controller supply reporting the
@@ -354,7 +355,7 @@ current is net of system load.
 | 7 | Does the J171 gadget receive the Apple host request? Does macOS send it to this gadget? | Unknown (CH-16: macOS sent 100 mA to the J71b gadget) |
 | 8 | J71b status `0x62` (bit 5): what it means, and whether J171 shows it | Unresolved (PR #51) |
 | 9 | Real input current per code; iPadOS uses a per-unit `usb-input-limit-calibration` | Unmeasured; never publish calibration bytes |
-| 10 | Suspend and wake with charging; the event mask `0x1c0` cannot be written yet on J71b | Blocked (CH-06, CH-15) |
+| 10 | Suspend and wake with charging | CH-06 |
 
 **Where notes and code disagree, the code on main wins:**
 

@@ -3,9 +3,8 @@
 `usr/lib/modules/RELEASE/` holds the kernel (`vmlinuz`), orchard's initrd
 (`initrd`, see boot/initramfs/root), the DTB of every board of the platform
 (`dtb/`) and the modules. The regulatory database and the hardware defaults
-of `system/defaults` (vendor configuration, the sound cards' UCM profiles and
-orchard-sleep, which allows suspend only on boards listed in
-`usr/lib/orchard/suspend-boards`) complete it, and
+of `system/defaults` (vendor configuration, the sound cards' UCM profiles)
+complete it, and
 `usr/lib/orchard/platform.json` says what it is. The installer writes the
 layer into a root after the distro's root image, then writes the boot entry
 from it (docs/boot-contract.md). Root images carry no kernel, so one serves
@@ -122,21 +121,6 @@ def initrd(modules, release, busybox, *, hardware=None):
         return output.read_bytes()
 
 
-def suspend_boards(board_dtbs, hardware):
-    """The device-tree compatibles of the boards whose suspend works ([features] suspend = "working").
-
-    orchard-sleep (system/defaults) allows suspend at boot only on these;
-    see docs/bring-up/suspend.md.
-    """
-    from ..hardware import device
-    names = set()
-    for board in board_dtbs:
-        descriptor = device(board, hardware)
-        if descriptor.get('features', {}).get('suspend') == 'working':
-            names.update(descriptor['device']['dt_compatible'])
-    return ''.join(name + '\n' for name in sorted(names)).encode()
-
-
 def files(bundle, platform, board_dtbs, *, busybox, hardware=None):
     """(kernel release, {path: (data, mode)}) of PLATFORM's layer from a staged kernel BUNDLE."""
     hardware = Path(hardware or ROOT)
@@ -160,7 +144,6 @@ def files(bundle, platform, board_dtbs, *, busybox, hardware=None):
             if not name.startswith(DEFAULTS_UNDER):
                 raise ValueError(f'System defaults belong under /usr/lib or /usr/share/alsa/ucm2: {name}')
             result[name] = (path.read_bytes(), 0o755 if path.stat().st_mode & 0o111 else 0o644)
-    result['usr/lib/orchard/suspend-boards'] = (suspend_boards(board_dtbs, hardware), 0o644)
     description = {'schema': SCHEMA, 'platform': platform, 'kernel_release': release,
                    'boards': dict(sorted(board_dtbs.items()))}
     result['usr/lib/orchard/platform.json'] = ((json.dumps(description, indent=2) + '\n').encode(), 0o644)

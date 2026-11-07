@@ -1,0 +1,113 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sat, 7 Nov 2026 00:17:28 +0800
+Subject: [PATCH] arm64: dts: apple: Keep the GPIO domain powered for wake on
+ every SoC
+
+Buttons and the PMU line wake the system through the AP GPIO controller.
+If PMGR powers its domain off in suspend-to-idle no wake interrupt arrives.
+T8010 keeps it on; do the same on S5L8960X, T7000, T7001, S8000/S8003, S8001,
+T8011 and T8015. Tested only on T8010.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/s5l8960x-pmgr.dtsi | 2 ++
+ arch/arm64/boot/dts/apple/s800-0-3-pmgr.dtsi | 2 ++
+ arch/arm64/boot/dts/apple/s8001-pmgr.dtsi    | 2 ++
+ arch/arm64/boot/dts/apple/t7000-pmgr.dtsi    | 2 ++
+ arch/arm64/boot/dts/apple/t7001-pmgr.dtsi    | 2 ++
+ arch/arm64/boot/dts/apple/t8011-pmgr.dtsi    | 2 ++
+ arch/arm64/boot/dts/apple/t8015-pmgr.dtsi    | 2 ++
+ 7 files changed, 14 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/s5l8960x-pmgr.dtsi b/arch/arm64/boot/dts/apple/s5l8960x-pmgr.dtsi
+index da265f484307..39b408b0983f 100644
+--- a/arch/arm64/boot/dts/apple/s5l8960x-pmgr.dtsi
++++ b/arch/arm64/boot/dts/apple/s5l8960x-pmgr.dtsi
+@@ -100,6 +100,8 @@ ps_gpio: power-controller@20040 {
+ 		#power-domain-cells = <0>;
+ 		#reset-cells = <0>;
+ 		label = "gpio";
++		apple,always-on; /* Button and PMU wake IRQs over s2idle */
++		apple,manual-pm;
+ 	};
+ 
+ 	ps_mca0: power-controller@20048 {
+diff --git a/arch/arm64/boot/dts/apple/s800-0-3-pmgr.dtsi b/arch/arm64/boot/dts/apple/s800-0-3-pmgr.dtsi
+index 196b8e745a95..3af0a7093358 100644
+--- a/arch/arm64/boot/dts/apple/s800-0-3-pmgr.dtsi
++++ b/arch/arm64/boot/dts/apple/s800-0-3-pmgr.dtsi
+@@ -82,6 +82,8 @@ ps_gpio: power-controller@80118 {
+ 		#power-domain-cells = <0>;
+ 		#reset-cells = <0>;
+ 		label = "gpio";
++		apple,always-on; /* Button and PMU wake IRQs over s2idle */
++		apple,manual-pm;
+ 	};
+ 
+ 	ps_pms: power-controller@80120 {
+diff --git a/arch/arm64/boot/dts/apple/s8001-pmgr.dtsi b/arch/arm64/boot/dts/apple/s8001-pmgr.dtsi
+index 859ab77ae92b..97f2ce59df49 100644
+--- a/arch/arm64/boot/dts/apple/s8001-pmgr.dtsi
++++ b/arch/arm64/boot/dts/apple/s8001-pmgr.dtsi
+@@ -82,6 +82,8 @@ ps_gpio: power-controller@80118 {
+ 		#power-domain-cells = <0>;
+ 		#reset-cells = <0>;
+ 		label = "gpio";
++		apple,always-on; /* Button and PMU wake IRQs over s2idle */
++		apple,manual-pm;
+ 	};
+ 
+ 	ps_pcie_ref: power-controller@80140 {
+diff --git a/arch/arm64/boot/dts/apple/t7000-pmgr.dtsi b/arch/arm64/boot/dts/apple/t7000-pmgr.dtsi
+index 1370ed6bc301..824019c9d306 100644
+--- a/arch/arm64/boot/dts/apple/t7000-pmgr.dtsi
++++ b/arch/arm64/boot/dts/apple/t7000-pmgr.dtsi
+@@ -99,6 +99,8 @@ ps_gpio: power-controller@20128 {
+ 		#power-domain-cells = <0>;
+ 		#reset-cells = <0>;
+ 		label = "gpio";
++		apple,always-on; /* Button and PMU wake IRQs over s2idle */
++		apple,manual-pm;
+ 	};
+ 
+ 	ps_mca0: power-controller@20130 {
+diff --git a/arch/arm64/boot/dts/apple/t7001-pmgr.dtsi b/arch/arm64/boot/dts/apple/t7001-pmgr.dtsi
+index d61f8653e909..431ed5ff4d2e 100644
+--- a/arch/arm64/boot/dts/apple/t7001-pmgr.dtsi
++++ b/arch/arm64/boot/dts/apple/t7001-pmgr.dtsi
+@@ -109,6 +109,8 @@ ps_gpio: power-controller@20128 {
+ 		#power-domain-cells = <0>;
+ 		#reset-cells = <0>;
+ 		label = "gpio";
++		apple,always-on; /* Button and PMU wake IRQs over s2idle */
++		apple,manual-pm;
+ 	};
+ 
+ 	ps_mca0: power-controller@20130 {
+diff --git a/arch/arm64/boot/dts/apple/t8011-pmgr.dtsi b/arch/arm64/boot/dts/apple/t8011-pmgr.dtsi
+index c44e3f9d7087..773b3fe7aaad 100644
+--- a/arch/arm64/boot/dts/apple/t8011-pmgr.dtsi
++++ b/arch/arm64/boot/dts/apple/t8011-pmgr.dtsi
+@@ -91,6 +91,8 @@ ps_gpio: power-controller@80118 {
+ 		#power-domain-cells = <0>;
+ 		#reset-cells = <0>;
+ 		label = "gpio";
++		apple,always-on; /* Button and PMU wake IRQs over s2idle */
++		apple,manual-pm;
+ 	};
+ 
+ 	ps_pms: power-controller@80120 {
+diff --git a/arch/arm64/boot/dts/apple/t8015-pmgr.dtsi b/arch/arm64/boot/dts/apple/t8015-pmgr.dtsi
+index 6fa987b5e03b..ebff420818ef 100644
+--- a/arch/arm64/boot/dts/apple/t8015-pmgr.dtsi
++++ b/arch/arm64/boot/dts/apple/t8015-pmgr.dtsi
+@@ -127,6 +127,8 @@ ps_gpio: power-controller@80118 {
+ 		#power-domain-cells = <0>;
+ 		#reset-cells = <0>;
+ 		label = "gpio";
++		apple,always-on; /* Button and PMU wake IRQs over s2idle */
++		apple,manual-pm;
+ 	};
+ 
+ 	ps_pms: power-controller@80120 {

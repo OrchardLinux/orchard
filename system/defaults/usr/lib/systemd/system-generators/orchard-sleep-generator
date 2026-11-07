@@ -1,7 +1,0 @@
-#!/bin/sh
-# Pull orchard-sleep.service into every boot. The platform layer carries only
-# regular files, so it cannot ship the enable link itself.
-set -eu
-[ -n "${1:-}" ] || exit 0
-mkdir -p "$1/sysinit.target.wants"
-ln -sf /usr/lib/systemd/system/orchard-sleep.service "$1/sysinit.target.wants/orchard-sleep.service"

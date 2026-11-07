@@ -68,6 +68,14 @@ def recipe_for(profile, hardware=None):
     return recipes.check(json.loads(firmware_path(profile, hardware).read_text()))
 
 
+def cached(profile, hardware=None):
+    """Whether every firmware output of the device's recipe is here; downloads nothing."""
+    recipe = recipe_for(profile, hardware)
+    outputs = cache_root() / 'firmware' / profile / 'outputs'
+    expected = {o['sha256']: o['sha256'] for o in recipe['outputs']}
+    return not missing_inputs({sha: outputs / sha for sha in expected}, expected)
+
+
 def ensure(profile, clock, progress, *, allow_download=True, hardware=None):
     """Every firmware output of the device's recipe, verified and cached by hash.
 

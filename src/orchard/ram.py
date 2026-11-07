@@ -113,6 +113,7 @@ def assemble(bootargs, loader, dtbs, kernel, initramfs, output):
 
 
 # Where the hardware's static tools go in a RAM image; others land in usr/bin.
+TOOL_FILES = ('dropbear', 'dropbearkey', 'wpa_supplicant', 'wpa_cli', 'iw')
 TOOL_DESTINATIONS = {'dropbear': 'usr/sbin', 'wpa_supplicant': 'usr/sbin', 'iw': 'usr/sbin'}
 
 
@@ -235,10 +236,9 @@ def _build_directory(directory, *, hardware, cache, kernel, busybox, loader, pon
             raise ValueError(f'Symlinks in rootfs are not supported yet: {path}')
         if path.is_file():
             files[str(path.relative_to(overlay))] = path
-    from .published import TOOLS
     tools = build.prepare_tools(hardware, cache, device=representative)
     for tool in sorted(tools.iterdir()):
-        if tool.name in TOOLS and tool.name != 'busybox' and tool.is_file():
+        if tool.name in TOOL_FILES and tool.is_file():
             files.setdefault(TOOL_DESTINATIONS.get(tool.name, 'usr/bin') + '/' + tool.name, tool)
     if settings['transport']:
         from . import ram_session

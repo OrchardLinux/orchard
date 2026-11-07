@@ -99,6 +99,9 @@ class Zipapp(Store):
         self.assertEqual([path.name for path in cores], [f'{receipt["version"]}-{receipt["sha256"][:12]}'])
         self.assertEqual((cores[0] / 'loaders/m1n1.bin').read_bytes(), b'm1n1')
         self.assertFalse((cores[0] / 'devices').exists())  # device data comes from the catalog
+        # What the install adds to a kernel's initrd, found where install_direct looks from the core.
+        for name in ('run', 'udhcpd.conf'):
+            self.assertTrue((cores[0] / 'boot/initramfs/install' / name).is_file(), name)
         self.assertFalse((cores[0] / 'src/orchard/build.py').exists())
         self.assertEqual(json.loads((self.home / 'store/state.json').read_text()), {'version': STATE_VERSION})
         # Every module imports without site-packages (no jsonschema); install_device runs on the recovery.
