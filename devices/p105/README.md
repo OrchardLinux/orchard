@@ -51,8 +51,6 @@ each iPad its own at boot ([Wi-Fi address](../../docs/bring-up/p105-firmware.md#
   reverted; 32-bit patches live in `kernel/patches/armv7`.
 - #87's `MTD_APPLE_H2FMI_WRITE` build option (fa59001): removed, programming
   is part of the driver.
-- #90's gadget config change (39b60b1, built-in CDC gadget off): not taken
-  yet; it waits until 32-bit boots bind their own configfs gadget.
 - #89's read budget and lifetime module parameters (ffa74e8, source
   e7d118292) and its module build (a607325): dropped; the reader is built in.
 - #91's `MTD_APPLE_SFTL_WRITE` option and `write_enable` parameter (e049bb4):
