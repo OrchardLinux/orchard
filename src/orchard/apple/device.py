@@ -40,8 +40,12 @@ class Device:
         self.INSTALL = not self.INSTALL_BLOCKERS
         self.STATUS = support.get('status', 'experimental')
         self.FEATURES = dict(descriptor.get('features', {}))
-        self.REBOOT_MESSAGE = ('A fresh recovery boot is required.\n'
-                               f'Put the {self.NAME} in DFU mode, then run: orchard install')
+        if 'recovery-autogo' in descriptor.get('boot', {}).get('methods', []):
+            self.REBOOT_MESSAGE = ('A fresh ARM32 recovery boot is required.\n'
+                                   f'Enter a pwned iBSS or iBEC Recovery on the {self.NAME}, then run: orchard install')
+        else:
+            self.REBOOT_MESSAGE = ('A fresh recovery boot is required.\n'
+                                   f'Put the {self.NAME} in DFU mode, then run: orchard install')
         self.firmware_inputs = partial(firmware.ensure, self.PROFILE)
         self.firmware_cached = partial(firmware.cached, self.PROFILE)
         self.prepare_mixin = partial(firmware.mixin, self.PROFILE)
@@ -55,8 +59,10 @@ class Device:
         return usb.recovery(self.PRODUCT, self.PROFILE)
 
     def connect(self, device: SelectedDevice) -> AbstractContextManager[Connection]:
+        from .cascadia import recovery_handoff
+        handoff = recovery_handoff(self.PROFILE, {**device, 'profile': self.PROFILE})
         return ssh.session(DeviceState(self.PROFILE, device['ecid']), self.recovery_endpoint,
-                           expected_boot=device.get('boot_id'))
+                           expected_boot=device.get('boot_id'), handoff=handoff)
 
     def capture_adt(self, device: Optional[SelectedDevice] = None) -> bytes:
         # Bring-up and diagnostics only; installs do not need the ADT.
@@ -76,6 +82,8 @@ class Device:
         if device['mode'] == 'linux':
             endpoint = self.recovery_endpoint()
             BootState(DeviceState(self.PROFILE, endpoint['ecid']), endpoint['boot_id'])
+            from .cascadia import recovery_handoff
+            recovery_handoff(self.PROFILE, endpoint)
             return cast(SelectedDevice, {**endpoint, 'resumed': True})
         if not self.matches_dfu(device) or not device['ecid']:
             raise ValueError(f'The connected device is not a {self.NAME}')
@@ -87,6 +95,16 @@ class Device:
 
     def boot(self, device: SelectedDevice, assets: BootAssets,
              manifest: BootRequest, progress: Progress) -> None:
+        declared = self._descriptor.get('boot', {}).get('methods', [])
+        method = manifest.get('boot_method')
+        if method is None:
+            method = next((name for name in declared if name in hardware.IMPLEMENTED_METHODS), None)
+        if method not in declared or method not in hardware.IMPLEMENTED_METHODS:
+            raise ValueError('The requested boot method is unavailable for this board')
+        if method == 'recovery-autogo':
+            from . import cascadia
+            return cascadia.boot(device, assets, manifest, progress, profile=self.PROFILE,
+                                 chip=self.CHIP, board=self.BOARD, product=self.PRODUCT)
         return apple_boot.boot(device, assets, manifest, progress,
                                profile=self.PROFILE, chip=self.CHIP, board=self.BOARD, product=self.PRODUCT,
                                entry=entries.select(self._descriptor))
@@ -97,6 +115,8 @@ class Device:
 
     def start_loader(self, device: SelectedDevice, loader: Dict[str, Path], progress: Progress,
                      quiet: bool = False) -> str:
+        if not any(name == 'checkm8-pongo' for name in self._descriptor.get('boot', {}).get('methods', [])):
+            raise ValueError('This platform starts an ARM32 staging bundle; a standalone m1n1 storage reader is unavailable')
         return apple_boot.start_loader(device, loader, progress, profile=self.PROFILE,
                                        chip=self.CHIP, board=self.BOARD, product=self.PRODUCT, quiet=quiet,
                                        entry=entries.select(self._descriptor))

@@ -15,7 +15,7 @@ import tomllib
 # The repository root: devices/, kernel/, boot/ and schemas/ sit beside src/.
 ROOT = Path(__file__).resolve().parents[2]
 # What this version of the code can do; data can name methods newer than this code.
-IMPLEMENTED_METHODS = frozenset({'checkm8-pongo'})
+IMPLEMENTED_METHODS = frozenset({'checkm8-pongo', 'recovery-autogo'})
 
 
 def published():
@@ -59,6 +59,16 @@ def device_path(profile, root=None):
     return path
 
 
+def payload_profile(profile, kind, root=None):
+    """The board-owned profile for a source-built payload loader."""
+    if kind not in ('cascadia',):
+        raise ValueError('Unsupported payload profile: ' + str(kind))
+    path = device_path(profile, root).with_name(kind + '.toml')
+    if not path.is_file() or path.is_symlink():
+        raise ValueError(f'{profile} has no {kind} handoff profile')
+    return path
+
+
 def profiles(root=None):
     """Every device this hardware data describes."""
     devices = Path(root or data_root()) / 'devices'
@@ -78,6 +88,19 @@ def methods():
 
 def device(profile, root=None):
     return tomllib.loads(device_path(profile, root).read_text())
+
+
+def boot_recipe(profile, root=None):
+    """Return a board's boot recipe through the hardware data boundary."""
+    described = device(profile, root)
+    path = device_path(profile, root).parent / 'boot.json'
+    if path.is_symlink() or not path.is_file():
+        raise ValueError('The board has no regular boot recipe')
+    recipe = json.loads(path.read_text())
+    if (recipe.get('schema') != 1 or recipe.get('device') not in described['device']['apple_products']
+            or not isinstance(recipe.get('methods'), dict)):
+        raise ValueError('Boot recipe identity differs from the board')
+    return recipe
 
 
 def install_blockers(profile, described=None):
@@ -102,8 +125,8 @@ def install_blockers(profile, described=None):
 def has_recovery(described, root=None):
     """Whether Orchard's recovery runs on a board: it follows from the board's kernel.
 
-    Recovery is built per platform with every board's device tree, on the arm64 root
-    distributions build, so 32-bit boards have none until a root of their own exists.
+    Recovery is built per platform with every board's device tree. The
+    platform producers support ARM64 and ARMv7 roots independently.
     """
     if 'kernel' not in described:
         return False
@@ -111,7 +134,18 @@ def has_recovery(described, root=None):
     for path in (chips / 'chips').glob('*.toml'):
         chip = tomllib.loads(path.read_text())
         if chip['cpid'] == described['match']['dfu']['chip']:
-            return chip['architecture'] == 'arm64'
+            if chip['architecture'] == 'arm64':
+                return True
+            profile = described['device']['profile']
+            if (chip['architecture'] != 'arm' or 'recovery-autogo' not in IMPLEMENTED_METHODS
+                    or 'recovery-autogo' not in described.get('boot', {}).get('methods', ())):
+                return False
+            try:
+                payload_profile(profile, 'cascadia', root=chips)
+                recipe = boot_recipe(profile, root=chips)
+                return isinstance(recipe['methods'].get('recovery-autogo'), dict)
+            except (ValueError, OSError):
+                return False
     return False
 
 

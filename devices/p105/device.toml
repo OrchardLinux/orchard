@@ -13,9 +13,12 @@ chip = 0x8942
 board = 0x0a
 
 [boot]
-methods = ["jailbreak-kdfu", "recovery-autogo"]
+# Public recovery uses a host-bound USB identity handoff; hardware qualification is pending.
+# Source-built Cascadia payload profile: cascadia.toml. External-initramfs handoff awaits testing.
+methods = ["jailbreak-kdfu", "recovery-autogo", "ios-local-file"]
 entries = ["pico-checkm8", "kdfu"]
-# The CLI consumes an owner-private boot manifest. Public launch assets await release integration.
+# ios-local-file prepares an on-device launcher from the exact boot.json input.
+# Installation eligibility still follows the supported recovery/storage methods.
 
 [kernel]
 platform = "apple-armv7"  # kernel/series/apple-armv7, kernel/configs/apple-armv7

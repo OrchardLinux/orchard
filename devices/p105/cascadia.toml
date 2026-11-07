@@ -1,0 +1,12 @@
+# P105 handoff addresses from the Cascadia-derived staging loader used for the
+# owner's successful iBEC boot. The external-initramfs placement is new and
+# requires a fresh hardware test with this producer.
+schema = 1
+load_address = 0x80000000
+kernel_offset = 0x8000
+watchdog_address = 0x0f103020
+l2_address = 0x3e000000
+ram_start = 0x80000000
+ram_end = 0xa0000000
+initrd_address = 0x98000000
+initrd_limit = 0x9e000000

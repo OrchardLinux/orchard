@@ -45,13 +45,13 @@ def choose() -> Tuple[Adapter, SelectedDevice]:
 
 
 def attached_board() -> Optional[str]:
-    """The board of the one device attached in DFU or Pongo, if described; None otherwise.
+    """The board of the one device attached in DFU, Recovery or Pongo, if described; None otherwise.
 
     Only lists USB devices: nothing is opened, reset or booted.
     """
     from .apple import usb
     try:
-        found = [device for device in usb.devices() if device.get('mode') in ('dfu', 'pongo')]
+        found = [device for device in usb.devices() if device.get('mode') in ('dfu', 'recovery', 'pongo')]
     except Exception:  # no libusb or USB access: no attached board to go by
         return None
     if len(found) != 1:

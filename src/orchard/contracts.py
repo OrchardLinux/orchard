@@ -7,6 +7,7 @@ Runtime artifact/identity verification remains in the existing implementations.
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Protocol, Tuple, TypedDict, Union, runtime_checkable
 
 from .progress import Clock, Progress
@@ -22,32 +23,40 @@ class _SelectionDetails(TypedDict, total=False):
     serial_port: Optional[str]
     pwned: bool
     boot_id: Optional[str]
+    handoff_id: Optional[str]
+    identity_source: Optional[str]
 
 
 class SelectedDevice(_SelectionDetails):
     """Validated discovery result; resumed is explicit, never inferred by the host."""
     location: USBLocation
-    mode: Literal['dfu', 'pongo', 'linux']
+    mode: Literal['dfu', 'recovery', 'pongo', 'linux']
     ecid: int
     resumed: bool
 
 
 class BootAssets(TypedDict, total=False):
-    """Verified local artifacts; Pongo is required only when starting from DFU.
+    """Verified local artifacts; Pongo is used by the checkm8-pongo chain.
 
     A running recovery needs no upload; otherwise recovery must be supplied.
+    prepared_boot names private checked iBEC inputs for recovery-autogo.
     root is used by installation, not by the adapter's boot transport.
     """
     pongo: Path
     recovery: Path
     root: Path
+    prepared_boot: Path
 
 
 class BootReceipt(TypedDict):
     sha256: str
 
 
-class BootRequest(TypedDict):
+class _BootRequestDetails(TypedDict, total=False):
+    boot_method: str
+
+
+class BootRequest(_BootRequestDetails):
     """Minimum adapter boot input, shared by resolved and explicit-file requests."""
     assets: Mapping[str, BootReceipt]
 
@@ -60,10 +69,41 @@ class MixinReceipt(TypedDict):
 
 
 @dataclass(frozen=True)
+class RecoveryHandoff:
+    """Expected provenance for one checked ARM32 recovery handoff."""
+    handoff_id: str
+    template_sha256: str
+    chip: int
+    board: int
+    identity_source: str = 'host-usb'
+
+    def __post_init__(self) -> None:
+        if (not isinstance(self.handoff_id, str) or
+                not re.fullmatch('[0-9a-f]{32}', self.handoff_id) or
+                not int(self.handoff_id, 16) or
+                not isinstance(self.template_sha256, str) or
+                not re.fullmatch('[0-9a-f]{64}', self.template_sha256) or
+                self.identity_source not in ('host-usb', 'ios-device') or
+                type(self.chip) is not int or not 0 < self.chip < 2**32 or
+                type(self.board) is not int or not 0 <= self.board < 2**32):
+            raise ValueError('Invalid host-bound recovery identity')
+
+    def fields(self) -> Dict[str, Any]:
+        return {'identity_source': self.identity_source, 'handoff_id': self.handoff_id,
+                'template_sha256': self.template_sha256, 'chip': self.chip, 'board': self.board}
+
+    def matches(self, observation: Any) -> bool:
+        return (isinstance(observation, dict) and
+                type(observation.get('chip')) is int and type(observation.get('board')) is int and
+                all(observation.get(key) == value for key, value in self.fields().items()))
+
+
+@dataclass(frozen=True)
 class Connection:
     argv: List[str]
     scope: BootState
     check: Callable[[], None]
+    handoff: Optional[RecoveryHandoff] = None
 
 
 @runtime_checkable

@@ -1,0 +1,461 @@
+--- a/kloader.c
++++ b/kloader.c
+@@ -585,7 +585,7 @@
+ // Given an instruction, search backwards until an instruction is found matching the specified criterion.
+ static uint16_t *find_last_insn_matching(uint32_t region, uint8_t * kdata, size_t ksize, uint16_t * current_instruction, int (*match_func) (uint16_t *))
+ {
+-    while ((uintptr_t) current_instruction > (uintptr_t) kdata) {
++    while ((uintptr_t) current_instruction >= (uintptr_t) kdata + 6) {
+         if (insn_is_32bit(current_instruction - 2) && !insn_is_32bit(current_instruction - 3)) {
+             current_instruction -= 2;
+         } else {
+@@ -606,7 +606,7 @@
+     // Find the last instruction that completely wiped out this register
+     int found = 0;
+     uint16_t *current_instruction = insn;
+-    while ((uintptr_t) current_instruction > (uintptr_t) kdata) {
++    while ((uintptr_t) current_instruction >= (uintptr_t) kdata + 6) {
+         if (insn_is_32bit(current_instruction - 2)) {
+             current_instruction -= 2;
+         } else {
+@@ -629,11 +629,17 @@
+ 
+     // Step through instructions, executing them as a virtual machine, only caring about instructions that affect the target register and are commonly used for PC-relative addressing.
+     uint32_t value = 0;
+-    while ((uintptr_t) current_instruction < (uintptr_t) insn) {
++    while ((uintptr_t) current_instruction < (uintptr_t) insn &&
++           (uintptr_t) current_instruction + 4 <= (uintptr_t) (kdata + ksize)) {
+         if (insn_is_mov_imm(current_instruction) && insn_mov_imm_rd(current_instruction) == reg) {
+             value = insn_mov_imm_imm(current_instruction);
+         } else if (insn_is_ldr_literal(current_instruction) && insn_ldr_literal_rt(current_instruction) == reg) {
+-            value = *(uint32_t *) (kdata + (((((uintptr_t) current_instruction - (uintptr_t) kdata) + 4) & 0xFFFFFFFC) + insn_ldr_literal_imm(current_instruction)));
++            uintptr_t literal = (uintptr_t)kdata +
++                (((((uintptr_t)current_instruction - (uintptr_t)kdata) + 4) & 0xFFFFFFFC) +
++                 insn_ldr_literal_imm(current_instruction));
++            if (literal < (uintptr_t)kdata || literal + 4 > (uintptr_t)kdata + ksize)
++                return 0;
++            value = *(const uint32_t *)literal;
+         } else if (insn_is_movt(current_instruction) && insn_movt_rd(current_instruction) == reg) {
+             value |= insn_movt_imm(current_instruction) << 16;
+         } else if (insn_is_add_reg(current_instruction) && insn_add_reg_rd(current_instruction) == reg) {
+@@ -658,7 +664,7 @@
+     uint32_t value[16];
+     memset(value, 0, sizeof(value));
+ 
+-    while ((uintptr_t) current_instruction < (uintptr_t) (kdata + ksize)) {
++    while ((uintptr_t) current_instruction + 4 <= (uintptr_t) (kdata + ksize)) {
+         if (insn_is_mov_imm(current_instruction)) {
+             value[insn_mov_imm_rd(current_instruction)] = insn_mov_imm_imm(current_instruction);
+         } else if (insn_is_ldr_literal(current_instruction)) {
+@@ -718,7 +724,7 @@
+     // Find the last LDR R2, [R*] before it that's before any branches. If there are branches, then we have a version of the function that assumes kernel_pmap instead of being passed it.
+     uint16_t *ldr_r2 = NULL;
+     uint16_t *current_instruction = bl;
+-    while ((uintptr_t) current_instruction > (uintptr_t) kdata) {
++    while ((uintptr_t) current_instruction >= (uintptr_t) kdata + 6) {
+         if (insn_is_32bit(current_instruction - 2) && !insn_is_32bit(current_instruction - 3)) {
+             current_instruction -= 2;
+         } else {
+@@ -740,7 +746,7 @@
+     // The function has no third argument, Follow the BL.
+     uint32_t imm32 = insn_bl_imm32(bl);
+     uint32_t target = ((uintptr_t) bl - (uintptr_t) kdata) + 4 + imm32;
+-    if (target > ksize)
++    if (target > ksize || ksize - target < 4)
+         return 0;
+ 
+     // Find the first PC-relative reference in this function.
+@@ -748,7 +754,7 @@
+ 
+     int rd;
+     current_instruction = (uint16_t *) (kdata + target);
+-    while ((uintptr_t) current_instruction < (uintptr_t) (kdata + ksize)) {
++    while ((uintptr_t) current_instruction + 4 <= (uintptr_t) (kdata + ksize)) {
+         if (insn_is_add_reg(current_instruction) && insn_add_reg_rm(current_instruction) == 15) {
+             found = 1;
+             rd = insn_add_reg_rd(current_instruction);
+@@ -804,46 +810,111 @@
+ 
+ uint32_t phys_addr_remap = 0x5fe00000;
+ 
++/* Orchard: bounded I/O and one sleep request. */
++#define ORCHARD_MAX_KERNEL_REGIONS 65536u
++#define ORCHARD_HANDOFF_WAIT_SECONDS 90u
++#define ORCHARD_KERNEL_DUMP_BYTES 0xd00000u
++#define ORCHARD_KERNEL_HEADER_BYTES 0x1000u
++#define ORCHARD_KERNEL_READ_BYTES 2048u
++
++static kern_return_t orchard_read_exact(task_t task, vm_address_t address,
++                                       vm_size_t length, pointer_t *buffer,
++                                       mach_msg_type_number_t *size)
++{
++    *buffer = 0;
++    *size = 0;
++    kern_return_t result = vm_read(task, address, length, buffer, size);
++    if (result != KERN_SUCCESS || !*buffer || *size != length) {
++        if (*buffer && *size)
++            vm_deallocate(mach_task_self(), *buffer, *size);
++        *buffer = 0;
++        *size = 0;
++        return KERN_FAILURE;
++    }
++    return KERN_SUCCESS;
++}
++
++static kern_return_t orchard_dump_kernel(task_t task, vm_address_t base,
++                                        uint8_t *destination)
++{
++    if (base > UINT32_MAX - ORCHARD_KERNEL_DUMP_BYTES)
++        return KERN_FAILURE;
++    for (uint32_t offset = ORCHARD_KERNEL_HEADER_BYTES;
++         offset < ORCHARD_KERNEL_DUMP_BYTES; offset += ORCHARD_KERNEL_READ_BYTES) {
++        pointer_t buffer = 0;
++        mach_msg_type_number_t size = 0;
++        if (orchard_read_exact(task, base + offset, ORCHARD_KERNEL_READ_BYTES,
++                               &buffer, &size) != KERN_SUCCESS)
++            return KERN_FAILURE;
++        bcopy((const void *)buffer,
++              destination + offset - ORCHARD_KERNEL_HEADER_BYTES, size);
++        vm_deallocate(mach_task_self(), buffer, size);
++    }
++    return KERN_SUCCESS;
++}
++
++static kern_return_t orchard_sleep_once(void)
++{
++    mach_port_t port = IOPMFindPowerManagement(MACH_PORT_NULL);
++    if (port == MACH_PORT_NULL)
++        return KERN_FAILURE;
++    kern_return_t result = IOPMSleepSystem(port);
++    mach_port_deallocate(mach_task_self(), port);
++    return result;
++}
++static kern_return_t orchard_handoff_once(void)
++{
++    kern_return_t result = orchard_sleep_once();
++    if (result != KERN_SUCCESS)
++        return result;
++    /* Keep the parent's owned wake event alive while iOS enters sleep. */
++    sleep(ORCHARD_HANDOFF_WAIT_SECONDS);
++    return KERN_FAILURE;
++}
++/* End Orchard bounded I/O. */
++
+ vm_address_t get_kernel_base()
+ {
+-    kern_return_t ret;
+-    task_t kernel_task;
++    task_t task;
+     vm_region_submap_info_data_64_t info;
+-    vm_size_t size;
+-    mach_msg_type_number_t info_count = VM_REGION_SUBMAP_INFO_COUNT_64;
+     unsigned int depth = 0;
+-    vm_address_t addr = 0x81200000; /* arm64: addr = 0xffffff8000000000 */
+-
+-    ret = task_for_pid(mach_task_self(), 0, &kernel_task);
+-    if (ret != KERN_SUCCESS)
+-        return -1;
+-
+-    while (1) {
+-        ret = vm_region_recurse_64(kernel_task, &addr, &size, &depth, (vm_region_info_t) & info, &info_count);
+-        if (ret != KERN_SUCCESS)
++    vm_address_t address = 0x81200000;
++    if (task_for_pid(mach_task_self(), 0, &task) != KERN_SUCCESS)
++        return (vm_address_t)-1;
++    for (unsigned int region = 0; region < ORCHARD_MAX_KERNEL_REGIONS; region++) {
++        vm_size_t size = 0;
++        mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_COUNT_64;
++        vm_address_t previous = address;
++        if (vm_region_recurse_64(task, &address, &size, &depth,
++                                (vm_region_info_t)&info, &count) != KERN_SUCCESS)
+             break;
+-        if (size > 1024 * 1024 * 1024) {
+-            /*
+-             * https://code.google.com/p/iphone-dataprotection/
+-             * hax, sometimes on iOS7 kernel starts at +0x200000 in the 1Gb region
+-             */
+-            pointer_t buf;
+-            mach_msg_type_number_t sz = 0;
+-            addr += 0x200000;
+-            vm_read(kernel_task, addr + 0x1000, 512, &buf, &sz);
+-            if (*((uint32_t *)buf) != 0xfeedface) {
+-                addr -= 0x200000;
+-                vm_read(kernel_task, addr + 0x1000, 512, &buf, &sz);
+-                if (*((uint32_t*)buf) != 0xfeedface) {
++        if (!size || size > UINT32_MAX || address < previous || address > UINT32_MAX - size)
++            break;
++        if (size > 1024u * 1024u * 1024u) {
++            /* Preserve upstream's two candidate offsets, with checked reads. */
++            const uint32_t offsets[] = { 0x200000, 0 };
++            for (unsigned int i = 0; i < sizeof(offsets)/sizeof(offsets[0]); i++) {
++                pointer_t buffer = 0;
++                mach_msg_type_number_t bytes = 0;
++                vm_address_t candidate = address + offsets[i];
++                if (candidate > UINT32_MAX - ORCHARD_KERNEL_DUMP_BYTES)
++                    continue;
++                if (orchard_read_exact(task, candidate + 0x1000, 512,
++                                       &buffer, &bytes) != KERN_SUCCESS)
+                     break;
++                uint32_t magic = *(const uint32_t *)buffer;
++                vm_deallocate(mach_task_self(), buffer, bytes);
++                if (magic == 0xfeedface) {
++                    mach_port_deallocate(mach_task_self(), task);
++                    return candidate;
+                 }
+             }
+-            return addr;
++            break;
+         }
+-        addr += size;
+-    }
+-
+-    return -1;
++        address += size;
++    }
++    mach_port_deallocate(mach_task_self(), task);
++    return (vm_address_t)-1;
+ }
+ 
+ static void generate_ttb_entries(void)
+@@ -884,7 +955,6 @@
+ 
+ int main(int argc, char *argv[])
+ {
+-    uint32_t chunksize = 2048;
+     struct stat st;
+ 
+     if (argc != 2) {
+@@ -892,8 +962,25 @@
+         return -1;
+     }
+ 
+-    if (stat(argv[1], &st) == -1) {
+-        printf("Failed to open %s.\n", argv[1]);
++    if (stat(argv[1], &st) == -1 || !S_ISREG(st.st_mode) ||
++        st.st_size < 0x2c0 || st.st_size > SHADOWMAP_GRANULARITY) {
++        printf("Boot image must fit the single mapped L1 section.\n");
++        return -1;
++    }
++    FILE *f = fopen(argv[1], "rb");
++    if (!f)
++        return -1;
++    int length = (int)st.st_size;
++    void *vp = malloc((size_t)length);
++    if (!vp) {
++        fclose(f);
++        return -1;
++    }
++    size_t received = fread(vp, 1, (size_t)length, f);
++    int closed = fclose(f);
++    if (received != (size_t)length || closed || *(uint32_t *)vp != 0xea00000e) {
++        printf("Boot image read or ARM header verification failed.\n");
++        free(vp);
+         return -1;
+     }
+ 
+@@ -930,12 +1017,10 @@
+         PHYS_OFF = S5L8940_PHYS_OFF;
+         phys_addr_remap = 0xbfe00000;
+     } else {
+-        printf("Bravely assuming you're on an 8940-class device (unrecognized). You are on your own.\n");
+-        /*
+-         * All others have the high ram base. 
+-         */
+-        PHYS_OFF = S5L8940_PHYS_OFF;
+-        phys_addr_remap = 0x9fe00000;
++        printf("Unsupported chip; no kernel state changed.\n");
++        free(osversion);
++        free(vp);
++        return -1;
+     }
+ 
+     /*
+@@ -970,35 +1055,43 @@
+     /*
+      * kill 
+      */
+-    vm_address_t addr = kernel_base + 0x1000, e = 0, sz = 0;
++    mach_msg_type_number_t sz = 0;
+     uint8_t *p = malloc(DMPSIZE + 0x1000);
+-    pointer_t buf;
+-
+-    if (!p) {
+-        printf("failed to malloc memory for kernel dump...\n");
+-        return -1;
+-    }
+-    while (addr < (kernel_base + DMPSIZE)) {
+-        vm_read(kernel_task, addr, chunksize, &buf, &sz);
+-        if (!buf || sz == 0)
+-            continue;
+-        uint8_t *z = (uint8_t *) buf;
+-        addr += chunksize;
+-        bcopy(z, p + e, chunksize);
+-        e += chunksize;
++    pointer_t buf = 0;
++    if (!p)
++        return -1;
++    memset(p, 0, DMPSIZE + 0x1000);
++    if (orchard_dump_kernel(kernel_task, kernel_base, p) != KERN_SUCCESS) {
++        printf("Kernel dump failed; no handoff was attempted.\n");
++        free(p);
++        free(vp);
++        return -1;
+     }
+ 
+     /*
+      * kernel dumped, now find pmap. 
+      */
+-    uint32_t kernel_pmap = kernel_base + 0x1000 + find_pmap_location(kernel_base, (uint8_t *) p, DMPSIZE);
++    uint32_t pmap_offset = find_pmap_location(kernel_base, p, DMPSIZE);
++    uint32_t tramp_offset = find_larm_init_tramp(kernel_base, p, DMPSIZE);
++    if (!pmap_offset || pmap_offset >= DMPSIZE ||
++        !tramp_offset || tramp_offset > DMPSIZE - 8) {
++        printf("Kernel map or wake trampoline was not found.\n");
++        free(p);
++        free(vp);
++        return -1;
++    }
++    uint32_t kernel_pmap = kernel_base + 0x1000 + pmap_offset;
+     printf("kernel pmap is at 0x%08x.\n", kernel_pmap);
+ 
+     /*
+      * Read for kernel_pmap, dereference it for pmap_store. 
+      */
+-    vm_read(kernel_task, kernel_pmap, 2048, &buf, &sz);
+-    vm_read(kernel_task, *(vm_address_t *) (buf), 2048, &buf, &sz);
++    if (orchard_read_exact(kernel_task, kernel_pmap, 2048, &buf, &sz) != KERN_SUCCESS)
++        return -1;
++    vm_address_t pmap_store = *(const vm_address_t *)buf;
++    vm_deallocate(mach_task_self(), buf, sz);
++    if (orchard_read_exact(kernel_task, pmap_store, 2048, &buf, &sz) != KERN_SUCCESS)
++        return -1;
+ 
+     /*
+      * We now have the struct. Let's copy it out to get the TTE base (we don't really need to do this
+@@ -1007,6 +1100,7 @@
+     pmap_partial_t *part = (pmap_partial_t *) buf;
+     uint32_t tte_virt = part->tte_virt;
+     uint32_t tte_phys = part->tte_phys;
++    vm_deallocate(mach_task_self(), buf, sz);
+ 
+     printf("kernel pmap details: tte_virt: 0x%08x tte_phys: 0x%08x\n", tte_virt, tte_phys);
+     if (PHYS_OFF != (tte_phys & ~0xFFFFFFF)) {
+@@ -1023,9 +1117,16 @@
+      * Now, we can start reading at the TTE base and start writing in the descriptors. 
+      */
+     uint32_t tte_off = SHADOWMAP_BEGIN_OFF;
+-    vm_read(kernel_task, tte_virt + tte_off, 2048, &buf, &sz);
+-    bcopy((char *) ttb_template_ptr + tte_off, (void *) buf, SHADOWMAP_SIZE);
+-    vm_write(kernel_task, tte_virt + tte_off, buf, sz);
++    if (tte_virt > UINT32_MAX - tte_off - 2048 ||
++        orchard_read_exact(kernel_task, tte_virt + tte_off, 2048, &buf, &sz) != KERN_SUCCESS)
++        return -1;
++    bcopy((char *) ttb_template_ptr + tte_off, (void *)buf, SHADOWMAP_SIZE);
++    kern_return_t write_result = vm_write(kernel_task, tte_virt + tte_off, buf, sz);
++    vm_deallocate(mach_task_self(), buf, sz);
++    if (write_result != KERN_SUCCESS) {
++        printf("Kernel map write failed; restart iOS before another attempt.\n");
++        return -1;
++    }
+ 
+     printf("======================================================================================\n");
+     printf("!!!! Kernel TTE entries written. System stability is no longer guaranteed.\n");
+@@ -1038,59 +1139,20 @@
+     /*
+      * remap_address = 0x7ff00000 
+      */
+-    FILE *f = fopen(argv[1], "rb");
+-    if (!f) {
+-        printf("Failed to open iBEC. Rebooting momentarily...\n");
+-        sleep(3);
+-        reboot(0);
+-    }
+-
+-    fseek(f, 0, SEEK_END);
+-    int length = ftell(f);
+-    fseek(f, 0, SEEK_SET);
+-    void *vp = malloc(length);
+-    fread(vp, length, 1, f);
+-    fclose(f);
+-    printf("Read bootloader into buffer %p, length %d\n", vp, length);
+-
+-    bcopy((void *) vp, (void *) 0x7fe00000, length);
+-
+-    /*
+-     * Verify ARM header. 
+-     */
+-    if (*(uint32_t *) 0x7fe00000 != 0xea00000e) {
+-        printf("This doesn't seem like an ARM image, perhaps it failed to copy? Continuing though.\n");
+-    }
+-
+-    printf("Image information: %s\n", (char *) 0x7fe00000 + 0x200);
+-    printf("Image information: %s\n", (char *) 0x7fe00000 + 0x240);
+-    printf("Image information: %s\n", (char *) 0x7fe00000 + 0x280);
+-
++    bcopy(vp, (void *)0x7fe00000, (size_t)length);
++    if (*(uint32_t *)0x7fe00000 != 0xea00000e) {
++        printf("Copied ARM header differs; restart iOS before another attempt.\n");
++        return -1;
++    }
++    printf("Image information: %.*s\n", 64, (char *)0x7fe00000 + 0x200);
++    printf("Image information: %.*s\n", 64, (char *)0x7fe00000 + 0x240);
++    printf("Image information: %.*s\n", 64, (char *)0x7fe00000 + 0x280);
+     free(vp);
+ 
+     /*
+      * iBEC copied, we need to copy over the shellcode now. 
+      */
+-    uint32_t sysent_common = 0x1000 + find_syscall0(kernel_base + 0x1000, (uint8_t *) p, DMPSIZE) + SHADOWMAP_BEGIN;
+-    printf("sysent_common_base: 0x%08x\n", sysent_common);
+-
+-    /*
+-     * fuck evasi0n7 
+-     */
+-    if (*(uint32_t *) (sysent_common) == 0) {
+-        printf("iOS 7 detected, adjusting base to 0x%08x = 0x%08x\n", sysent_common, *(uint32_t *) (sysent_common));
+-        sysent_common += 4;
+-        if (*(uint32_t *) (sysent_common) == 0) {
+-            printf("Something is severely wrong (blaming iOS 7 anyhow). Rebooting momentarily.\n");
+-            sleep(3);
+-            reboot(0);
+-        }
+-    }
+-
+-    /*
+-     * Set offsets. 
+-     */
+-    larm_init_tramp = 0x1000 + find_larm_init_tramp(kernel_base + 0x1000, (uint8_t *) p, DMPSIZE) + SHADOWMAP_BEGIN;
++    larm_init_tramp = 0x1000 + tramp_offset + SHADOWMAP_BEGIN;
+ 
+     kern_base = kernel_base;
+     kern_tramp_phys = phys_addr_remap;
+@@ -1124,21 +1186,14 @@
+         sync();
+     sleep(1);
+ 
+-    while (1) {
+-        printf("Magic happening now. (attempted!)\n");
+-        mach_port_t fb = IOPMFindPowerManagement(MACH_PORT_NULL);
+-        if (fb != MACH_PORT_NULL) {
+-            kern_return_t kr = IOPMSleepSystem(fb);
+-            if (kr) {
+-                err(1, "IOPMSleepSystem returned %x\n", kr);
+-            }
+-        } else {
+-            err(1, "failed to get PM root port\n");
+-        }
+-        sleep(3);
+-    }
+-
+-    return 0;
++    printf("Requesting one sleep handoff.\n");
++    kern_return_t sleep_result = orchard_handoff_once();
++    if (sleep_result != KERN_SUCCESS) {
++        printf("Sleep handoff failed (%x); restart iOS before another attempt.\n", sleep_result);
++        return -1;
++    }
++
++    return -1;
+ }
+ 
+ /* how evil can you get???? */

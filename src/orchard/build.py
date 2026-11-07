@@ -491,7 +491,7 @@ def has_loader_patches(hardware):
 M1N1_INPUTS = ['boot/m1n1', 'boot/quiet/m1n1.patch', 'src/orchard/buildenv.py']
 TOOL_INPUTS = ['boot/initramfs/recovery/' + name for name in
                ('build-tools', 'build-tools-in-container', 'Containerfile',
-                'install-toolchain', 'upstream.lock', 'orchard-write.c')] + ['src/orchard/buildenv.py']
+                'install-toolchain', 'upstream.lock', 'check-tools.py', 'orchard-write.c')] + ['src/orchard/buildenv.py']
 
 
 def recipe_work(components, recipe, key):
@@ -508,30 +508,63 @@ def recipe_work(components, recipe, key):
     return work
 
 
-def _prepare_tools(hardware, components):
+def _prepare_tools(hardware, components, architecture='arm64'):
     """The hardware's static recovery tools (BusyBox, Dropbear, Wi-Fi tools). Caller holds the lock."""
+    if architecture not in ('arm', 'arm64'):
+        raise ValueError('Unsupported recovery architecture: ' + architecture)
+    name = 'recovery-tools' if architecture == 'arm64' else 'recovery-tools-' + architecture
+    key = recipe_key(hardware, TOOL_INPUTS)
+    if architecture != 'arm64':
+        key = hashlib.sha256((key + ':' + architecture).encode()).hexdigest()
     def produce_tools(stage):
-        work = recipe_work(components, 'recovery-tools', recipe_key(hardware, TOOL_INPUTS))
+        work = recipe_work(components, name, key)
         if not (work / 'bin/busybox').exists():
-            command(hardware / 'boot/initramfs/recovery/build-tools',
+            command(hardware / 'boot/initramfs/recovery/build-tools', '--arch', architecture,
                     env={**os.environ, 'OMA_RECOVERY_TOOLS_WORK': str(work)})
+        command(sys.executable, hardware / 'boot/initramfs/recovery/check-tools.py',
+                '--arch', architecture, *(work / 'bin' / name for name in
+                                         ('busybox', 'dropbear', 'dropbearkey', 'wpa_supplicant', 'wpa_cli', 'iw',
+                                          'orchard-write', 'resize2fs', 'tune2fs')))
         for tool in (work / 'bin').iterdir():
             if tool.is_file() and not tool.is_symlink():
                 shutil.copyfile(tool, stage / tool.name)
                 (stage / tool.name).chmod(0o755)
-    return cached_component(components, 'recovery-tools',
-        lambda: recipe_key(hardware, TOOL_INPUTS), produce_tools)
+    return cached_component(components, name, lambda: key, produce_tools)
 
 
 def prepare_tools(hardware=None, cache=None, *, device):
     """The directory of static recovery tools for RAM images, built or reused."""
     from . import published
     hardware, cache = _build_context(hardware, cache, device)
-    tools = published.tools(hardware, cache)
+    architecture = kernels.descriptor(hardware, device)['arch']
+    tools = published.tools(hardware, cache) if architecture == 'arm64' else None
     if tools is not None:
         return tools
     with component_lock(cache):
-        return _prepare_tools(hardware, cache / 'components-v2')
+        if architecture == 'arm64':
+            return _prepare_tools(hardware, cache / 'components-v2')
+        return _prepare_tools(hardware, cache / 'components-v2', architecture)
+
+
+def prepare_payload_loader(hardware=None, cache=None, *, device):
+    """Build the loader format named by the device's platform descriptor."""
+    hardware, cache = _build_context(hardware, cache, device)
+    kind = kernels.descriptor(hardware, device)['loader']
+    components = cache / 'components-v2'
+    with component_lock(cache):
+        if kind == 'm1n1':
+            return _prepare_m1n1(hardware, components, 'apple')
+        if kind != 'cascadia':
+            raise ValueError('Unsupported payload loader: ' + kind)
+        from .hardware import payload_profile
+        profile = payload_profile(device, 'cascadia', hardware)
+        inputs = ['boot/cascadia', 'src/orchard/image/cascadia.py', 'src/orchard/cascadia_payload.py',
+                  'src/orchard/recovery_identity.py', str(profile.relative_to(hardware)),
+                  'src/orchard/buildenv.py']
+        def produce(stage):
+            command(hardware / 'boot/cascadia/build', '--profile', profile, '--output', stage)
+        return cached_component(components, 'loader-cascadia-' + device,
+                                lambda: recipe_key(hardware, inputs), produce) / 'loader.bin'
 
 
 RELEASES = 'https://github.com/OrchardLinux/orchard/releases/download'
@@ -630,19 +663,24 @@ def prepare_components(hardware=None, cache=None, *, device, kernel=None,
     if kernel is not None and kernel_tree is not None:
         raise ValueError('Give a staged kernel (--kernel-dir) or a kernel tree (--kernel-tree), not both')
     tree = kernels.check_tree(hardware, device, kernel_tree) if kernel_tree is not None else None
+    described = kernels.descriptor(hardware, device)
+    if pongo is not None and described['loader'] == 'cascadia':
+        raise ValueError('Cascadia payloads use recovery-autogo firmware stages')
+    if loader is None and described['loader'] == 'cascadia':
+        loader = prepare_payload_loader(hardware, cache, device=device)
     if loader is None and not has_loader_patches(hardware):
         raise ValueError(f'Missing loader patches for {device}; add a loader recipe or supply --loader FILE')
     with component_lock(cache):
-        if pongo is None:
+        if pongo is None and described['loader'] == 'm1n1':
             pongo = _prepare_pongo(hardware, components)
         if kernel is None:
             kernel = _prepare_kernel(hardware, cache, device, tree)
         if busybox is None:
-            busybox = _prepare_tools(hardware, components) / 'busybox'
+            busybox = _prepare_tools(hardware, components, described['arch']) / 'busybox'
         if loader is None:
             # One m1n1 starts every Apple device; the board only picks its DTB.
             loader = _prepare_m1n1(hardware, components, 'apple')
-    return {name: Path(path).resolve() for name, path in
+    return {name: Path(path).resolve() if path is not None else None for name, path in
             dict(kernel=kernel, busybox=busybox, loader=loader, pongo=pongo).items()}
 
 

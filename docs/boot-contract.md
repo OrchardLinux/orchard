@@ -199,3 +199,80 @@ the same m1n1 code, splash included.
 - Every change must be tested on both ways into m1n1: Pongo, and iBoot (`launcher-kit`, `./launch boot --bare`, then the client over the proxy). Device time goes through the user.
 
 Which SoCs have an m1n1 storage backend is in [bring-up/bootloader/experiments.md](bring-up/bootloader/experiments.md#per-device-menu).
+
+## ARMv7 recovery identity origins
+
+Cascadia recovery templates carry a descriptor-selected identity policy in the
+standard `/chosen/bootargs` string. The parameters pass observed boot identity
+to userland. `orchard.recovery-policy=VALUE` and
+`orchard.recovery-handoff=VALUE` encode bounded JSON objects as canonical,
+unpadded base64url. Each token is bounded; the entire ARM command line remains
+at most 1,023 ASCII bytes. Duplicate JSON keys, repeated parameters, unknown
+fields, invalid types and incomplete records fail before recovery USB binds.
+
+The policy names the canonical `profile`, accepted live FDT `compatibles`, and
+integer `chip` and `board` identifiers. Schema 1 permits `source = "host-usb"`.
+Schema 2 carries an explicit `sources` allowlist containing `host-usb`,
+`ios-device`, or both. A board receives the on-device origin only when its
+descriptor declares `ios-local-file` and the matching boot recipe names
+`identity_source = "ios-device"`; an incomplete declaration is rejected. The
+public runtime contains this same policy from the selected hardware data.
+
+The handoff remains schema 1. Its `source` names the observed origin and must
+appear in the staged policy's allowlist. It contains a nonzero random 128-bit
+`handoff_id`, exact `template_sha256`, `profile`, `ecid`, `chip` and `board`.
+
+A host RAM-boot template contains the policy alone. The guarded transport
+verifies its original digest and freshly queries the selected iRecovery endpoint
+for its ECID, CPID, BDID and product. It binds one nonzero random 128-bit
+`handoff_id` to that observation with `source = "host-usb"`. The transport
+rebuilds the checked CB32 configuration and FDT while retaining the kernel and
+initramfs bytes, then rechecks the selected endpoint immediately before sending
+the bound bundle. After that upload completes, it records a durable settle
+phase, waits at least one monotonic second for iBEC to rearm its Recovery
+endpoint, and rechecks the exact ECID, chip, board, product and mode. A second
+Recovery upload carries the checked loader prefix through the complete bound
+configuration, ending at offset `0x7f44`. This transfer starts the complete bundle
+already in RAM. Resume requires the current trigger length; earlier `0x6001`
+receipts remain as evidence and are refused for resume. The transport rejects
+Recovery upload lengths on a 512-byte packet boundary because the supported
+irecovery command cannot prove the required trailing packet. Its private attempt
+receipt records the template, bound bundle and loader-prefix hashes, loader
+prefix byte count, completed settle check and nonce.
+
+For an on-device start, preparation reserves a bounded whitespace slot in a
+deterministic launch template. Its private provision receipt retains the public
+input hash and exact installed template hash. The root iOS helper checks the
+installed assets and live iOS machine/build guards, then reads the IODeviceTree
+identity using the recipe's exact property formats. It creates a fresh
+`ios-device` handoff and fills the slot in an attempt copy. The corresponding
+iBEC copy carries the checked CRC of that attempt. Both copies pass their bounds
+and integrity checks before wake or kloader starts; the pinned installed assets
+stay intact.
+
+The runtime requires the live compatible, policy token and staged policy to
+agree. It publishes the actual `identity_source`, nonce and template digest with
+the kernel's fresh boot ID. The ECID provenance remains the stated boot origin.
+USB serial includes `HND:` followed by the nonce and a compact origin: `ORG:h`
+means `host-usb`, while `ORG:i` means `ios-device`. P105's serial is 117 ASCII
+characters with these fields, within the runtime's 126-character limit. The host
+pins the origin and nonce before accepting this boot, then checks every
+provenance field again through serial SSH bootstrap and authenticated status.
+
+A later host command resumes a host-uploaded recovery through its private
+completed attempt receipt, including the same profile, ECID, nonce, boot ID and
+template digest. An on-device recovery instead needs an explicitly selected
+release or private provision receipt that pins its exact installed template.
+Offline startup works independently of a host upload record. An unknown or
+changed handoff stops before a storage operation.
+
+The existing ARM64 path requires its live ADT MTD identity source. Absence of a
+boot identity policy preserves that path; an invalid policy or missing required
+handoff stops the ARMv7 path.
+
+The platform recovery policy also selects USB function dependencies and early
+storage activation. ARMv7 loads its declared ECM/ACM modules, keeps serial
+available through network setup, and leaves SFTL unloaded until a manual
+request after serial and authenticated SSH are ready. The module's finite
+read policy bounds that later request. Hardware feature states change only
+after the exact submitted stack passes its physical checks.

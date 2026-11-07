@@ -47,6 +47,9 @@ def bootstrap(request):
     if type(request.get('ecid')) is not int or any(request.get(key) != record[key]
                                                    for key in ('profile', 'ecid', 'boot_id')):
         raise ValueError('SSH bootstrap identity differs from this recovery boot')
+    if record.get('identity_source') in ('host-usb', 'ios-device') and any(type(request.get(key)) is not type(record[key]) or request.get(key) != record[key] for key in
+            ('identity_source', 'handoff_id', 'template_sha256', 'chip', 'board')):
+        raise ValueError('SSH bootstrap handoff differs from this recovery attempt')
     public = request.get('public_key', '')
     if not isinstance(public, str) or not re.fullmatch(KEY, public):
         raise ValueError('Expected one Ed25519 public key')

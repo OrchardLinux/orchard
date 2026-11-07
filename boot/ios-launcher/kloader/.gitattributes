@@ -1,0 +1,3 @@
+# Preserve the exact upstream input and unified-patch context bytes.
+kloader.c whitespace=-blank-at-eol
+hardening.patch whitespace=-blank-at-eol

@@ -25,7 +25,7 @@ def host_key(text):
     return matches[0]
 
 
-def bootstrap_reply(code, text, scope):
+def bootstrap_reply(code, text, scope, handoff=None):
     records = [json.loads(line) for line in text.splitlines() if line.strip()]
     if not records or any(not isinstance(row, dict) or row.get('protocol') != PROTOCOL for row in records):
         raise ValueError('Incompatible recovery SSH bootstrap protocol')
@@ -42,6 +42,8 @@ def bootstrap_reply(code, text, scope):
         raise ValueError('Invalid recovery SSH bootstrap result')
     if not scope.matches(result) or result.get('profile') != scope.device.profile:
         raise ValueError('Serial SSH bootstrap identity differs from the selected device/boot')
+    if handoff is not None and not handoff.matches(result):
+        raise ValueError('Serial SSH bootstrap differs from the host-bound handoff')
     host = str(ipaddress.IPv4Address(result['host']))
     port = result['port']
     if type(port) is not int or not 0 < port < 65536:
@@ -86,13 +88,15 @@ def wait_authenticated(argv, check, seconds=30):
             time.sleep(min(0.25, remaining))
 
 
-def endpoint_check(scope, endpoint, select_endpoint):
+def endpoint_check(scope, endpoint, select_endpoint, handoff=None):
     address = (endpoint['location'], endpoint['serial_port'])
 
     def check():
         current = select_endpoint()
         if (not scope.matches(current) or
-                (current['location'], current['serial_port']) != address):
+                (current['location'], current['serial_port']) != address or
+                (handoff is not None and (current.get('handoff_id') != handoff.handoff_id or
+                    (current.get('identity_source') or 'host-usb') != handoff.identity_source))):
             raise ValueError('Selected device/boot or USB endpoint changed')
     return check
 
@@ -101,6 +105,8 @@ def verify_peer(connection):
     status = Client(connection, Progress()).call('status', timeout=8)
     if not connection.scope.matches(status) or status.get('profile') != connection.scope.device.profile:
         raise ValueError('Pinned SSH peer differs from the selected device/boot')
+    if connection.handoff is not None and not connection.handoff.matches(status):
+        raise ValueError('Pinned SSH peer differs from the host-bound handoff')
     connection.check()
 
 
@@ -134,12 +140,18 @@ def one_connection(identity, hosts, host, port, *, alias=None):
 
 
 @contextmanager
-def session(device: DeviceState, select_endpoint, *, expected_boot=None):
+def session(device: DeviceState, select_endpoint, *, expected_boot=None, handoff=None):
     endpoint = select_endpoint()
     scope = BootState(device, endpoint['boot_id'])
     if not scope.matches(endpoint) or (expected_boot is not None and scope.boot_id != expected_boot):
         raise ValueError('Recovery identity differs from the selected device/boot')
-    check = endpoint_check(scope, endpoint, select_endpoint)
+    if handoff is not None and endpoint.get('handoff_id') != handoff.handoff_id:
+        raise ValueError('Recovery differs from the selected host-bound handoff')
+    if handoff is not None and (endpoint.get('identity_source') or 'host-usb') != handoff.identity_source:
+        raise ValueError('Recovery differs from the selected identity origin')
+    if handoff is None and endpoint.get('handoff_id') is not None:
+        raise ValueError('Recovery requires its completed host handoff receipt')
+    check = endpoint_check(scope, endpoint, select_endpoint, handoff)
     port = endpoint['serial_port']
     work = private_directory(scope.root / 'sessions')
     with tempfile.TemporaryDirectory(prefix='ssh-', dir=work) as directory:
@@ -153,10 +165,11 @@ def session(device: DeviceState, select_endpoint, *, expected_boot=None):
         identity.chmod(0o600)
         payload = base64.urlsafe_b64encode(json.dumps({
             'protocol': PROTOCOL, 'profile': device.profile, 'ecid': device.ecid,
-            'boot_id': scope.boot_id, 'public_key': ' '.join(public[:2])}).encode()).decode()
+            'boot_id': scope.boot_id, 'public_key': ' '.join(public[:2]),
+            **(handoff.fields() if handoff is not None else {})}).encode()).decode()
         with SerialPort(port, check) as serial:
             code, text = serial.run('/usr/bin/orchard-device bootstrap ' + payload, timeout=20)
-            host, ssh_port, pinned_key = bootstrap_reply(code, text, scope)
+            host, ssh_port, pinned_key = bootstrap_reply(code, text, scope, handoff)
             check()
         hosts = folder / 'known_hosts'
         name = host if ssh_port == 22 else f'[{host}]:{ssh_port}'
@@ -164,7 +177,6 @@ def session(device: DeviceState, select_endpoint, *, expected_boot=None):
         hosts.chmod(0o600)
         wait_authenticated(ssh_argv(identity, hosts, host, ssh_port), check)
         with one_connection(identity, hosts, host, ssh_port) as argv:
-            connection = Connection(argv, scope, check)
+            connection = Connection(argv, scope, check, handoff)
             verify_peer(connection)
             yield connection
-

@@ -6,12 +6,13 @@ import sys
 import uuid
 
 from .linux_usb import devices as linux_devices, m1n1_ports as linux_m1n1_ports
+from .usb_identity import handoff_id, identity_source
 from orchard.state import EndpointUnavailable
 
 # 0x4144: a RAM payload's USB session (orchard/usb-session).
 # 0x4142: Orchard Recovery; 0x4145: an installed system (orchard's initrd);
 # 0x4146: orchard's initrd with the install add-on (install_direct.py).
-MODES = {0x1227: 'dfu', 0x4141: 'pongo', 0x4142: 'linux', 0x4144: 'ram', 0x4145: 'system', 0x4146: 'install'}
+MODES = {0x1280: 'recovery', 0x1281: 'recovery', 0x1282: 'recovery', 0x1283: 'recovery', 0x1227: 'dfu', 0x4141: 'pongo', 0x4142: 'linux', 0x4144: 'ram', 0x4145: 'system', 0x4146: 'install'}
 
 
 class DeviceError(ValueError):
@@ -54,10 +55,13 @@ def devices():
         found.append({'location': location, 'mode': MODES.get(node.get('idProduct'), 'other'),
                       'ecid': int(fields[0].group(1), 16) if fields[0] else None,
                       'boot_id': str(uuid.UUID(boot.group(1))) if boot else None,
+                      'handoff_id': handoff_id(serial),
+                      'identity_source': identity_source(serial),
                       'chip': int(fields[1].group(1), 16) if fields[1] else None,
                       'board': int(fields[2].group(1), 16) if fields[2] else None,
                       'profile': profile.group(1) if profile else None,
                       'product': node.get('USB Product Name'),
+                      'pwned': bool(re.search(r'\bPWND:\[(?:checkm8|ipwnder|iPwnder32)\]', serial)),
                       'serial_port': ports[0] if ports else None})
     return found
 
@@ -94,13 +98,13 @@ def m1n1_ports():
 
 def sole_target():
     found = devices()
-    targets = [item for item in found if item['mode'] in ('dfu', 'pongo', 'linux')]
+    targets = [item for item in found if item['mode'] in ('dfu', 'recovery', 'pongo', 'linux')]
     if not targets:
         if any(item['mode'] == 'system' for item in found):
             raise EndpointUnavailable('The device is running its installed system; put it in DFU mode first')
         raise EndpointUnavailable('Selected USB target is not connected')
     if len(targets) != 1:
-        raise ValueError('Connect exactly one target in DFU, Pongo or Linux; device selection is not supported')
+        raise ValueError('Connect exactly one target in DFU, Recovery, Pongo or Linux; device selection is not supported')
     return targets[0]
 
 
@@ -124,6 +128,6 @@ def selected(location, ecid, *, chip, board, mode='pongo'):
             hint = ('. Another palera1n/checkra1n may have exploited it; stop any running, '
                     'force-restart the device and enter DFU again')
         raise DeviceError(f'Expected {mode} at the selected port; found {device["mode"]}{hint}')
-    if mode in ('dfu', 'pongo') and (device['ecid'], device['chip'], device['board']) != (ecid, chip, board):
+    if mode in ('dfu', 'recovery', 'pongo') and (device['ecid'], device['chip'], device['board']) != (ecid, chip, board):
         raise DeviceError('Wrong device identity at the selected port')
     return device

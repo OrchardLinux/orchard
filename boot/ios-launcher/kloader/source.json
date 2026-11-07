@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "repository": "https://github.com/axi0mX/ios-kexec-utils",
+  "commit": "a1bbca8a8f2847d9c53070e76e0b5d093bda5993",
+  "author": "winocm",
+  "license": "GPL-2.0-or-later",
+  "files": {
+    "kloader.c": "c64f3252118d65b0ab52f10c8eaadc1dd1d7a989352a6e497075f15fb174296a",
+    "tfp0.plist": "517f29407243b3f9d7252519282e47701a76b810c58000f1d60eb16106ed4d5d"
+  }
+}

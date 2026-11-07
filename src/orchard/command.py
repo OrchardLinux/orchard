@@ -103,6 +103,14 @@ def main():
     for command in (run, guided, launcher, boot):
         command.add_argument('--via', choices=sorted(ENTRIES), help='how to enter the device from DFU '
                              "(default: the board's preference, else palera1n)")
+    ios = commands.add_parser('prepare-ios-launcher', help='prepare an on-device iOS launcher as private host files; no device access')
+    from orchard.apple import ios_launcher
+    ios_launcher.add_arguments(ios)
+    autogo = commands.add_parser('prepare-recovery-autogo', help='prepare a private pinned ARM32 recovery stage; no device access')
+    autogo.add_argument('--device', required=True)
+    autogo.add_argument('--template', type=Path, required=True)
+    autogo.add_argument('--ibec-raw', type=Path, required=True)
+    autogo.add_argument('--output', type=Path)
     args = parser.parse_args()
     if getattr(args, 'via', None):
         os.environ['ORCHARD_VIA'] = args.via
@@ -115,6 +123,14 @@ def main():
         if args.action == 'build' or (args.action == 'run' and not args.no_build):
             from orchard.cache import check_free
             check_free(build_cache(), args.directory)
+        if args.action == 'prepare-ios-launcher':
+            print(json.dumps(ios_launcher.from_arguments(args), indent=2))
+            return
+        if args.action == 'prepare-recovery-autogo':
+            from orchard.apple import iboot32
+            output = args.output if args.output is not None else iboot32.directory(args.device)
+            print(json.dumps(iboot32.prepare(args.device, args.template, args.ibec_raw, output), indent=2))
+            return
         if args.action in ('build', 'run'):
             from orchard import distro
             root = distro.find(args.directory)
@@ -138,8 +154,14 @@ def main():
                                          '--platform or --device; update the distribution '
                                          '(orchard.toml [release] selects-platform = true)')
                     from orchard.build import resolve_kernel_tree
+                    selected = {}
+                    if distro.settings(root)['selects_device']:
+                        from orchard.build import resolve_device
+                        selected_device = resolve_device(root, args.device)
+                        if selected_device is not None:
+                            selected['device'] = selected_device
                     index = distro.build(root, version=args.version, platforms=platforms,
-                                         kernel_tree=resolve_kernel_tree(root, args.kernel_tree))
+                                         kernel_tree=resolve_kernel_tree(root, args.kernel_tree), **selected)
                     commands = index.parent.parent / f'{index.parent.name}.commands.sh'
                     if args.explain:
                         print(commands.read_text(), end='')
@@ -246,10 +268,16 @@ def main():
                     expected = receipt.get('image_sha256', receipt.get('sha256'))
                     if args.image.is_symlink() or digest(args.image) != expected:
                         raise ValueError('Explicit recovery image differs from receipt')
-                    if device['mode'] == 'dfu' and not args.pongo_image:
+                    from orchard import hardware
+                    described = hardware.device(adapter.PROFILE)
+                    method = next((name for name in described.get('boot', {}).get('methods', [])
+                                   if name in hardware.IMPLEMENTED_METHODS), None)
+                    if method is None:
+                        raise ValueError('The selected board has no implemented recovery boot method')
+                    if device['mode'] == 'dfu' and method == 'checkm8-pongo' and not args.pongo_image:
                         raise ValueError('DFU boot with explicit files requires --pongo-image')
                     assets = {'recovery': args.image, 'pongo': args.pongo_image}
-                    record = {'assets': {'recovery': {'sha256': expected}}}
+                    record = {'boot_method': method, 'assets': {'recovery': {'sha256': expected}}}
                 else:
                     source = args.manifest or args.source
                     if not source:

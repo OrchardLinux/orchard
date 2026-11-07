@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
+set -euo pipefail
+"$ORCHARD_CLANG" --target=arm-none-eabi -march=armv7-a -mthumb -mfloat-abi=soft \
+  -ffreestanding -fno-builtin -fno-stack-protector -fno-unwind-tables \
+  -fno-asynchronous-unwind-tables -Oz -Wall -Wextra -Werror \
+  -I "$ORCHARD_OUTPUT" -c "$ORCHARD_SOURCE/ibec-local.c" -o "$ORCHARD_OUTPUT/local.o"
+"$ORCHARD_LINKER" --build-id=none -T "$ORCHARD_OUTPUT/local.ld" \
+  "$ORCHARD_OUTPUT/local.o" -o "$ORCHARD_OUTPUT/local.elf"
+"$ORCHARD_OBJCOPY" -O binary "$ORCHARD_OUTPUT/local.elf" "$ORCHARD_OUTPUT/local.bin"
