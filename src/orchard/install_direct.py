@@ -146,6 +146,43 @@ def payload(m1n1, logo, layer, devicetree, extra):
                      INITRAMFS_MAGIC, struct.pack('<I', len(initramfs)), initramfs))
 
 
+def cascadia_payload(loader, profile, layer, devicetree, extra):
+    """The Cascadia loader's payload (image/cascadia.py): one file for a patched iBEC to start, on 32-bit boards.
+
+    The same kernel, initrd and add-on as m1n1's payload. The loader copies the initrd and the
+    add-on, one archive, to the board's initrd address before it turns off the MMU (the form
+    Project Cascadia booted P105 with); the DTB's own boot arguments stay as they are. A kernel
+    that also has orchard's initrd built in unpacks this copy over it.
+    """
+    from .image import cascadia
+    files = layer_boot_files(layer, devicetree)
+    initramfs = files['initrd'] + bytes(-len(files['initrd']) % 4) + extra
+    image, _ = cascadia.assemble(Path(loader).read_bytes(), files['kernel'], files['tree'], initramfs,
+                                 cascadia.profile(profile))
+    return image
+
+
+def boot_image(adapter, assets, extra):
+    """The one file the board's loader is given: m1n1's payload, or the Cascadia loader's on 32-bit boards.
+
+    The Cascadia loader is built for its board's addresses, which come from orchard's device data
+    (hardware.payload_profile): the host assembles it, so a release needs to know no board.
+    """
+    if 'cascadia' in assets:
+        from .hardware import payload_profile
+        return cascadia_payload(assets['cascadia'], payload_profile(adapter.PROFILE, 'cascadia'),
+                                assets['layer'], adapter.DEVICETREE, extra)
+    return payload(assets['m1n1'], assets.get('logo'), assets['layer'], adapter.DEVICETREE, extra)
+
+
+def start(adapter, device, image, assets, progress):
+    """Hand IMAGE to the device: Pongo starts m1n1's payload. Starting the Cascadia loader's
+    (a patched iBEC) is not part of orchard yet."""
+    if 'cascadia' in assets:
+        raise ValueError(f'Starting Linux on the {adapter.NAME} needs a patched iBEC, which orchard does not deliver yet')
+    return adapter.boot_payload(device, image, assets['pongo'], progress)
+
+
 def start_for_inspection(adapter, device, assets, ecid, progress):
     """The installer's system from RAM, with nothing written: reachable over SSH with this computer's keys."""
     from . import computer_key
@@ -153,8 +190,8 @@ def start_for_inspection(adapter, device, assets, ecid, progress):
         _, _, _, host_key = make_keys(directory)
         extra = add_on(assets['install_tools'], ecid, '\n'.join(computer_key.public_keys()) + '\n', host_key)
         image = Path(directory) / 'payload.bin'
-        image.write_bytes(payload(assets['m1n1'], assets.get('logo'), assets['layer'], adapter.DEVICETREE, extra))
-        return adapter.boot_payload(device, image, assets['pongo'], progress)
+        image.write_bytes(boot_image(adapter, assets, extra))
+        return start(adapter, device, image, assets, progress)
 
 
 def shell(connection, command, *, input=b'', timeout=60):

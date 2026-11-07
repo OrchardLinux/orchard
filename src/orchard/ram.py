@@ -20,8 +20,13 @@ from .build import command, digest, recipe_key
 IMAGE = Path(__file__).resolve().parent / 'image'  # standalone scripts, run by path
 
 
-def check_busybox(path):
+def check_busybox(path, architecture='arm64'):
     data = path.read_bytes()
+    if architecture == 'arm':
+        from .image.elf import architecture as elf_architecture, _parts
+        if elf_architecture(data) != architecture or any(kind in (2, 3) for kind, *_ in _parts(data)[2]):
+            raise ValueError('BusyBox must be static ARM EABI5 hard-float ELF32')
+        return
     if len(data) < 64 or data[:6] != b'\x7fELF\x02\x01' or data[18:20] != b'\xb7\x00':
         raise ValueError('BusyBox must be little-endian AArch64 ELF64')
     offset = struct.unpack_from('<Q', data, 32)[0]
@@ -44,14 +49,35 @@ def assemble_ram(hardware, output, *, kernel, busybox, loader, pongo, init,
     hardware, output = Path(hardware).resolve(), Path(output).resolve()
     output.mkdir(parents=True, exist_ok=True)
     (output / 'build.json').unlink(missing_ok=True)
-    kernel, busybox, loader, pongo, init = map(Path, (kernel, busybox, loader, pongo, init))
-    check_busybox(busybox)
+    from .kernel import descriptor
+    described = descriptor(hardware, platform)
+    profile = None
+    if described['loader'] == 'cascadia':
+        if len(boards) != 1:
+            raise ValueError('Cascadia RAM payload requires one selected board')
+        from .hardware import payload_profile
+        profile = payload_profile(next(iter(boards)), 'cascadia', hardware)
+    kernel, busybox, loader, init = map(Path, (kernel, busybox, loader, init))
+    pongo = Path(pongo) if pongo is not None else None
+    if profile is not None and pongo is not None:
+        raise ValueError('Cascadia payloads use recovery-autogo firmware stages')
+    if described['loader'] == 'm1n1' and pongo is None:
+        raise ValueError('m1n1 RAM payload requires Pongo')
+    check_busybox(busybox, described['arch'])
     if '\n' in bootargs or '\r' in bootargs or not hostname or not all(c.isalnum() or c in '-_' for c in hostname):
         raise ValueError('Invalid boot arguments or hostname')
     release = (kernel / 'kernel.release').read_text().strip()
     if not release or '/' in release or len(release.split()) != 1:
         raise ValueError('Invalid kernel.release')
-    inputs = [init, *map(Path, (files or {}).values()), *map(Path, sources)]
+    dtbs = [kernel / 'dtbs' / (dtb + '.dtb') for dtb in boards.values()]
+    if profile is not None:
+        from .hardware import device as described_device
+        from .image.cascadia import check_compatible
+        check_compatible(dtbs[0].read_bytes(),
+                         described_device(next(iter(boards)), hardware)['device']['dt_compatible'])
+    inputs = [init, busybox, loader, kernel / described['image'], *dtbs,
+              *([profile] if profile is not None else []),
+              *map(Path, (files or {}).values()), *map(Path, sources)]
     with tempfile.TemporaryDirectory(prefix='build-', dir=output) as temporary:
         work = Path(temporary)
         root = work / 'root'
@@ -88,25 +114,41 @@ def assemble_ram(hardware, output, *, kernel, busybox, loader, pongo, init,
         for path in dtbs:
             if not path.is_file():
                 raise ValueError(f'Kernel bundle lacks {path.name}')
-        assemble(bootargs, loader, dtbs, kernel / 'Image.gz', work / 'initramfs.cpio.gz', work / 'linux.bin')
+        assemble(bootargs, loader, dtbs, kernel / described['image'], work / 'initramfs.cpio.gz',
+                 work / 'linux.bin', profile=profile)
         if (work / 'linux.bin').stat().st_size > 128 * 1024 * 1024:
             raise ValueError('Payload exceeds the Pongo uploader limit (128 MiB)')
-        shutil.copyfile(pongo, work / 'pongo.bin')
+        if pongo is not None:
+            shutil.copyfile(pongo, work / 'pongo.bin')
         receipt = {'kind': 'orchard.ram-build', 'platform': platform, 'boards': sorted(boards),
                    'kernel_release': release, 'hardware_tested': False,
                    # What `orchard run` needs to add a board's firmware layer.
-                   'assembly': {'loader': str(loader), 'kernel': str(kernel / 'Image.gz'),
+                   'assembly': {'loader': str(loader), 'kernel': str(kernel / described['image']),
                                 'dtbs': [str(path) for path in dtbs], 'bootargs': bootargs},
-                   'files': {name: digest(work / name) for name in ('linux.bin', 'pongo.bin')},
+                   'files': {name: digest(work / name) for name in
+                             (('linux.bin', 'pongo.bin') if pongo is not None else ('linux.bin',))},
                    'sources': {str(p.resolve()): digest(p) for p in inputs}}
-        for name in ('linux.bin', 'linux.bin.json', 'pongo.bin', 'initramfs.cpio.gz'):
+        if profile is not None:
+            receipt['loader_format'] = 'cascadia'
+            receipt['boot_method'] = 'recovery-autogo'
+            receipt['assembly']['profile'] = str(profile)
+        for name in ('linux.bin', 'linux.bin.json', 'initramfs.cpio.gz',
+                     *(('pongo.bin',) if pongo is not None else ())):
             os.replace(work / name, output / name)
         (output / 'build.json').write_text(json.dumps(receipt, indent=2) + '\n')
     print(f'Built {output / "linux.bin"}. No device was accessed.')
     return output
 
 
-def assemble(bootargs, loader, dtbs, kernel, initramfs, output):
+def assemble(bootargs, loader, dtbs, kernel, initramfs, output, *, profile=None):
+    if profile is not None:
+        # Cascadia keeps the board DTB's own boot arguments (image/cascadia.py).
+        (dtb,) = dtbs
+        elf = Path(loader).with_suffix('.elf')
+        command(sys.executable, IMAGE / 'cascadia.py', '--profile', profile, '--loader', loader,
+                *(['--loader-elf', elf] if elf.is_file() else []), '--dtb', dtb, '--kernel', kernel,
+                '--initramfs', initramfs, '--output', output)
+        return
     command(sys.executable, IMAGE / 'assemble.py', '--bootargs', bootargs, '--loader', loader,
             *(argument for dtb in dtbs for argument in ('--dtb', dtb)), '--kernel', kernel,
             '--initramfs', initramfs, '--output', output)
@@ -218,7 +260,12 @@ def _build_directory(directory, *, hardware, cache, kernel, busybox, loader, pon
         hardware = Path(hardware).expanduser().resolve()
     platform = resolve_platform(directory, hardware, platform=platform, device=device)
     boards = boards_by_platform(hardware)[platform]
-    # Components are per platform; any of its boards selects them.
+    from .kernel import descriptor
+    if descriptor(hardware, platform)['loader'] == 'cascadia':
+        selected = build.resolve_device(directory, device)
+        if selected is None or selected not in boards:
+            raise ValueError('Select the Cascadia board with --device BOARD')
+        boards = {selected: boards[selected]}
     representative = sorted(boards)[0]
     cache = Path(cache).expanduser().resolve() if cache is not None else build.cache_root()
     output = directory / 'out' / platform
@@ -302,10 +349,12 @@ def with_firmware(output, board, *, hardware=None, cache=None):
         image = work / 'image'
         image.mkdir()
         assemble(assembly['bootargs'], Path(assembly['loader']), [Path(path) for path in assembly['dtbs']],
-                 Path(assembly['kernel']), combined, image / 'linux.bin')
-        shutil.copyfile(output / 'pongo.bin', image / 'pongo.bin')
+                 Path(assembly['kernel']), combined, image / 'linux.bin',
+                 profile=Path(assembly['profile']) if 'profile' in assembly else None)
+        if 'pongo.bin' in receipt['files']:
+            shutil.copyfile(output / 'pongo.bin', image / 'pongo.bin')
         layered = {**receipt, 'boards': [board], 'firmware': True,
-                   'files': {name: digest(image / name) for name in ('linux.bin', 'pongo.bin')}}
+                   'files': {name: digest(image / name) for name in receipt['files']}}
         layered.pop('overlay', None)
         layered['sources'] = {}
         (image / 'build.json').write_text(json.dumps(layered, indent=2) + '\n')
@@ -318,7 +367,8 @@ def verify_ram(output):
     if 'device' in receipt and 'boards' not in receipt:  # built before payloads were per platform
         receipt['boards'], receipt['platform'] = [receipt['device']], None
     if (receipt.get('kind') not in (None, 'orchard.ram-build') or not receipt.get('boards') or
-            set(receipt['files']) != {'linux.bin', 'pongo.bin'}):
+            set(receipt['files']) != ({'linux.bin'} if receipt.get('loader_format') == 'cascadia' else
+                                      {'linux.bin', 'pongo.bin'})):
         raise ValueError('Not a RAM-boot build')
     for name, expected in receipt['files'].items():
         path = output / name

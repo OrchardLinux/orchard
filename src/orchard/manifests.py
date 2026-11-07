@@ -44,6 +44,8 @@ def sources(document):
                 yield name, document[name]
         if 'map' in document.get('root', {}):
             yield 'root.map', document['root']['map']
+        for board, receipt in document.get('cascadia', {}).items():
+            yield f'cascadia.{board}', receipt
         for platform, row in document.get('platforms', {}).items():
             for name in ('boot', 'layer'):
                 if name in row:     # a release that installs from a block image has no recovery
