@@ -26,3 +26,20 @@ the IPSW members `058-24036-023.dmg`, `kernelcache.release.p105`, `Firmware/dfu/
 The touch calibration is per unit and private: `lib/firmware/mtcal.bin`, the
 unit's syscfg `MtCl`, captured from its jailbroken iOS. It is never part of a
 public recipe or release.
+
+## Open work
+
+- Storage: the NAND driver (OrchardLinux/orchard#86, #87) is in
+  `kernel/patches/armv7/mtd`. The iOS disk translation layer and its append
+  writes (#89, #91) follow on top of it. Reclamation (#93) is unfinished:
+  until it lands, writes stop once the blank flash blocks are used up.
+- A Linux root on LwVM: the kernel reads LwVM partitions
+  (`kernel/patches/armv7/block`), but the shared initrd finds its root by
+  reading a GPT itself and needs to learn LwVM partitions.
+
+## Unmerged code
+
+- #85's per-patch platform scopes (007a95b, also carried by #86/#87):
+  reverted; 32-bit patches live in `kernel/patches/armv7`.
+- #87's `MTD_APPLE_H2FMI_WRITE` build option (fa59001): removed, programming
+  is part of the driver.

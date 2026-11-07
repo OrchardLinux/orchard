@@ -14,3 +14,5 @@ stages = ["iBSS", "iBEC"]
 platform = "P105 on a Cascadia-based build"
 stages = "Project Cascadia P105 boot chain"
 reference_version = "Project Cascadia builds its A5 boot chain from 8.4.1 / 12H321"
+nand_reads = "Measured P105 64 GB PPN geometry has eight CAUs per bus, 2088 blocks per CAU and 128 normal pages per block; exact ARMv7 read-topic qualification is pending (docs/bring-up/p105-nand-reads.md)."
+nand_program = "The H2FMI driver programs complete PPN pages only into erased destinations, verifies full readback and has no erase operation; hardware qualification of this revision is pending (docs/bring-up/p105-nand-program.md)."

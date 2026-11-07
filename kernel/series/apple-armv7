@@ -1,4 +1,7 @@
 # Ordered patch layers for the apple-armv7 platform (Apple 32-bit SoCs), relative
 # to kernel/, on torvalds v6.12 (kernel/upstream-v6.12.lock). Every *.patch
-# below each directory is applied in path order.
+# below each directory is applied in path order. patches/armv7 holds the
+# patches only these 32-bit SoCs take.
 patches/import/cascadia
+patches/armv7/mtd
+patches/armv7/block
