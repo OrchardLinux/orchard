@@ -8,8 +8,10 @@ Select the S5L8942X PHY and DWC2 behavior while retaining their existing
 fallback compatibles. Supply the measured 24 MHz PHY reference clock so
 Linux can initialize the common block after a cold firmware handoff.
 
-The resulting DT compiles and both USB nodes pass their binding checks.
-The exact kernel revision still awaits qualification on P105.
+[Orchard: from shaynelegault/orchard#90 25379c1 (source range
+ 97d6283e22e8..55132508cfd5);
+ moved to patches/armv7/usb; dropped the test notes from the commit
+ message]
 
 Assisted-by: LLM
 ---
@@ -17,7 +19,7 @@ Assisted-by: LLM
  1 file changed, 5 insertions(+), 2 deletions(-)
 
 diff --git a/arch/arm/boot/dts/apple/s5l8942x-p105.dts b/arch/arm/boot/dts/apple/s5l8942x-p105.dts
-index f4fe413c6..c2de0dfea 100644
+index f4fe413c61be..c2de0dfea268 100644
 --- a/arch/arm/boot/dts/apple/s5l8942x-p105.dts
 +++ b/arch/arm/boot/dts/apple/s5l8942x-p105.dts
 @@ -615,10 +615,12 @@ panel@0 {

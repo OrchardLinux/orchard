@@ -8,8 +8,10 @@ PHY has powered up. Select this behavior through a compatible match and
 clear only those bits before the first GSNPSID read. Check their readback
 and unwind the enabled hardware if they remain set.
 
-Other compatibles retain their existing initialization path. Physical
-qualification of this exact revision is pending.
+[Orchard: from shaynelegault/orchard#90 25379c1 (source range
+ 97d6283e22e8..55132508cfd5);
+ moved to patches/armv7/usb; dropped the test notes from the commit
+ message]
 
 Assisted-by: LLM
 ---
@@ -17,7 +19,7 @@ Assisted-by: LLM
  1 file changed, 43 insertions(+)
 
 diff --git a/drivers/usb/dwc2/platform.c b/drivers/usb/dwc2/platform.c
-index c1b7209b9..8d90ca4b2 100644
+index c1b7209b9483..8d90ca4b282e 100644
 --- a/drivers/usb/dwc2/platform.c
 +++ b/drivers/usb/dwc2/platform.c
 @@ -421,6 +421,45 @@ int dwc2_check_core_version(struct dwc2_hsotg *hsotg)

@@ -12,8 +12,10 @@ OTG power callbacks so connecting or disconnecting the gadget leaves HSIC
 independent. Propagate parent-gate failures and preserve firmware tuning
 for the legacy compatibles.
 
-The source compiles for ARMv7 and its callback bodies pass a fake-MMIO
-ASan/UBSan harness. Physical qualification of this exact revision is pending.
+[Orchard: from shaynelegault/orchard#90 25379c1 (source range
+ 97d6283e22e8..55132508cfd5);
+ moved to patches/armv7/usb; dropped the test notes from the commit
+ message]
 
 Assisted-by: LLM
 ---
@@ -21,7 +23,7 @@ Assisted-by: LLM
  1 file changed, 226 insertions(+), 101 deletions(-)
 
 diff --git a/drivers/phy/phy-apple-s5l-usb.c b/drivers/phy/phy-apple-s5l-usb.c
-index 378ac6beb..04beb3b7b 100644
+index 378ac6beb7ae..04beb3b7b381 100644
 --- a/drivers/phy/phy-apple-s5l-usb.c
 +++ b/drivers/phy/phy-apple-s5l-usb.c
 @@ -1,37 +1,40 @@

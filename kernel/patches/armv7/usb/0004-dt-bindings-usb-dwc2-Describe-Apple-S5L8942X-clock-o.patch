@@ -9,13 +9,18 @@ controllers take their parent power and clocks from the PHY, so require the
 PHY reference for Apple compatibles while keeping the existing clock
 requirements for other controllers.
 
+[Orchard: from shaynelegault/orchard#90 25379c1 (source range
+ 97d6283e22e8..55132508cfd5);
+ moved to patches/armv7/usb; dropped the test notes from the commit
+ message]
+
 Assisted-by: LLM
 ---
  .../devicetree/bindings/usb/dwc2.yaml         | 25 +++++++++++++++++--
  1 file changed, 23 insertions(+), 2 deletions(-)
 
 diff --git a/Documentation/devicetree/bindings/usb/dwc2.yaml b/Documentation/devicetree/bindings/usb/dwc2.yaml
-index a5f2e3442..759eb83a3 100644
+index a5f2e3442a0e..759eb83a36fb 100644
 --- a/Documentation/devicetree/bindings/usb/dwc2.yaml
 +++ b/Documentation/devicetree/bindings/usb/dwc2.yaml
 @@ -13,9 +13,32 @@ allOf:

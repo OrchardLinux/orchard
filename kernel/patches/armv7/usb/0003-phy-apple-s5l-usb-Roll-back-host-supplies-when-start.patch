@@ -13,9 +13,9 @@ Unwind references acquired by the failed call in reverse order and clear
 the matching state flags. Preserve references that were already enabled
 before the call so a later retry or power_off balances their ownership.
 
-The actual callback fixture covers each failure stage, successful retries
-and pre-existing supply references under ASan/UBSan. Physical qualification
-and a full image build of this follow-up remain pending.
+[Orchard: from shaynelegault/orchard#90 96a4f74 (source 2f23b4e39917);
+ moved to patches/armv7/usb; dropped the test notes from the commit
+ message]
 
 Assisted-by: LLM
 ---
@@ -23,7 +23,7 @@ Assisted-by: LLM
  1 file changed, 22 insertions(+), 5 deletions(-)
 
 diff --git a/drivers/phy/phy-apple-s5l-usb.c b/drivers/phy/phy-apple-s5l-usb.c
-index 04beb3b7b..4182d8bfe 100644
+index 04beb3b7b381..4182d8bfeffb 100644
 --- a/drivers/phy/phy-apple-s5l-usb.c
 +++ b/drivers/phy/phy-apple-s5l-usb.c
 @@ -342,6 +342,7 @@ static const struct phy_ops s5l_usbphy_ops = {

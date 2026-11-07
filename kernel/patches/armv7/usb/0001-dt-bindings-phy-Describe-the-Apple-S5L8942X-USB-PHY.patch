@@ -8,6 +8,11 @@ optional supplies for the HSIC peripheral. Give S5L8942X its own compatible
 so its measured cold-handoff sequence can be selected without changing the
 older S5L8940X-compatible PHY consumers.
 
+[Orchard: from shaynelegault/orchard#90 25379c1 (source range
+ 97d6283e22e8..55132508cfd5);
+ moved to patches/armv7/usb; dropped the test notes from the commit
+ message]
+
 Assisted-by: LLM
 ---
  .../bindings/phy/apple,s5l8942x-usb-phy.yaml  | 69 +++++++++++++++++++
@@ -16,7 +21,7 @@ Assisted-by: LLM
 
 diff --git a/Documentation/devicetree/bindings/phy/apple,s5l8942x-usb-phy.yaml b/Documentation/devicetree/bindings/phy/apple,s5l8942x-usb-phy.yaml
 new file mode 100644
-index 000000000..b9cf8b7d2
+index 000000000000..b9cf8b7d2a9a
 --- /dev/null
 +++ b/Documentation/devicetree/bindings/phy/apple,s5l8942x-usb-phy.yaml
 @@ -0,0 +1,69 @@

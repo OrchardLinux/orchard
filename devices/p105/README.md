@@ -32,3 +32,10 @@ public recipe or release.
 The USB cold-handoff topic has a compiled candidate and recorded hardware
 observations. Its exact revision awaits a device boot; see
 [USB handoff](../../docs/bring-up/p105-usb-handoff.md).
+
+## Unmerged code
+
+- #85's per-patch platform scopes (007a95b, also carried by #90): reverted;
+  32-bit patches live in `kernel/patches/armv7`.
+- #90's gadget config change (39b60b1, built-in CDC gadget off): not taken
+  yet; it waits until 32-bit boots bind their own configfs gadget.
