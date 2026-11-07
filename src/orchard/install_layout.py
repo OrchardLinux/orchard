@@ -9,9 +9,9 @@ follow hardware docs/boot-contract.md:
 - The disk has at most one XBOOTLDR boot partition; it is created inside the
   target when missing, and an existing one is reused.
 - On an LwVM disk (32-bit boards) the target is an existing Linux partition,
-  which is replaced in place, and there is no boot partition: the boot entry
-  stays in the root's /boot. The installer never changes the LwVM map; making
-  room for Linux is iOS's resize step.
+  replaced in place, or unallocated LwVM space, where a new Linux entry is
+  written into both header copies. There is no boot partition: the boot entry
+  stays in the root's /boot. Making unallocated space is iOS's resize step.
 """
 from dataclasses import dataclass
 from typing import Dict, List, Optional
@@ -98,9 +98,15 @@ def options(layout) -> List[Option]:
 
 
 def lwvm_options(layout) -> List[Option]:
-    """The Linux partitions of an LwVM disk that a root fits in; LwVM attributes (encryption) rule one out."""
+    """Free LwVM space and the Linux partitions of an LwVM disk that a root fits in; LwVM attributes
+    (encryption) rule a partition out."""
     block = layout['disk']['sector']
     result = []
+    if layout['disk'].get('entries', 8) < 8:
+        for free in layout['free']:
+            if free['blocks'] * block >= MIN_ROOT_BYTES:
+                result.append(Option('free', free['start'], free['blocks'],
+                                     f'create a Linux partition in free space, {free["blocks"] * block / GIB:.1f} GiB'))
     for part in layout['partitions']:
         if part['type'] != LINUX_DATA or part.get('attributes') or part['blocks'] * block < MIN_ROOT_BYTES:
             continue
@@ -163,15 +169,22 @@ def plan(layout, option: Option, image: Dict, entry: Dict, layer: Dict, firmware
 
 
 def lwvm_plan(layout, option, image, entry, layer, firmware, account):
-    """The plan for an LwVM disk: the root fills the chosen Linux partition, which keeps its place and identity.
+    """The plan for an LwVM disk: the root fills the chosen Linux partition, which keeps its place and
+    identity, or a new Linux entry over a free run (root.create).
 
-    No partition is created or removed and there is no boot partition: `boot`
-    is None, and the boot entry goes to the root's own /boot.
+    No partition is removed and there is no boot partition: `boot` is None,
+    and the boot entry goes to the root's own /boot.
     """
     block = layout['disk']['sector']
     part = option.partition
-    if option.kind != 'replace' or part is None or part['type'] != LINUX_DATA or part.get('attributes'):
+    if option.kind == 'free':
+        # A new entry over the free run as it is: chunks are its unit, so no alignment changes it.
+        part = {'number': layout['disk']['entries'] + 1, 'start': option.start, 'blocks': option.blocks,
+                'partuuid': str(uuid.uuid4()), 'create': True}
+    elif option.kind != 'replace' or part is None or part['type'] != LINUX_DATA or part.get('attributes'):
         raise LayoutError('On an LwVM disk only an existing, unencrypted Linux partition can be replaced')
+    if part['blocks'] * block < MIN_ROOT_BYTES:
+        raise LayoutError('Target is too small for a root partition')
     if part['blocks'] * block < (image['expanded_bytes'] + layer['expanded_bytes']) * 1.25:
         raise LayoutError('Target is too small for this system image')
     return {
@@ -181,8 +194,8 @@ def lwvm_plan(layout, option, image, entry, layer, firmware, account):
         'remove': None,
         'boot': None,
         'root': {'number': part['number'], 'start': part['start'], 'blocks': part['blocks'],
-                 'partuuid': part['partuuid'], 'fs_uuid': str(uuid.uuid4()), 'fs': 'ext4',
-                 'label': entry['id'][:16]},
+                 'partuuid': part['partuuid'], 'create': bool(part.get('create')), 'fs_uuid': str(uuid.uuid4()),
+                 'fs': 'ext4', 'label': entry['id'][:16]},
         'image': image,
         'layer': layer,
         'entry': entry,

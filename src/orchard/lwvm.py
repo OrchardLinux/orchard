@@ -106,3 +106,73 @@ def partition(snapshot, identity):
     if len(found) != 1:
         raise Error('LwVM partition identity was not found')
     return found[0]
+
+
+FREE_CHUNK = 0xf111
+
+
+def free_runs(header, snapshot):
+    """[(first physical chunk, chunks)] of unallocated chunks stored back to back, longest first.
+
+    Only a run can hold a Linux partition the kernel's LwVM reader adds: it
+    takes a partition whose chunks are in order and contiguous.
+    """
+    words = struct.unpack_from('<1024H', header, 0x800)
+    runs, start = [], None
+    for physical in range(1, snapshot['media_bytes'] // snapshot['chunk_bytes'] + 1):
+        free = physical < snapshot['media_bytes'] // snapshot['chunk_bytes'] and words[physical] == FREE_CHUNK
+        if free and start is None:
+            start = physical
+        elif not free and start is not None:
+            runs.append((start, physical - start))
+            start = None
+    return sorted(runs, key=lambda run: (-run[1], run[0]))
+
+
+def virtual_room(snapshot):
+    """(first byte, bytes) of the LwVM virtual space after every partition, where a new entry's range goes."""
+    begin = max([HEADER_BYTES, *(p['end'] for p in snapshot['partitions'])])
+    begin = -(-begin // HEADER_BYTES) * HEADER_BYTES
+    return begin, snapshot['media_bytes'] - begin
+
+
+def free_space(header, snapshot):
+    """[(first chunk, chunks)] a new Linux entry could take: free runs, cut to the virtual room left."""
+    if len(snapshot['partitions']) >= 8:
+        return []
+    _, room = virtual_room(snapshot)
+    most = room // snapshot['chunk_bytes']
+    return [(first, min(count, most)) for first, count in free_runs(header, snapshot) if min(count, most) > 0]
+
+
+def allocate_free(primary, backup, linux_uuid, first, chunks):
+    """A new header with a Linux entry over the free chunks FIRST..FIRST+CHUNKS-1, and that entry.
+
+    Nothing else changes: the entry is appended, its virtual range follows
+    every other partition's, and the chunks are mapped to it in order. The
+    result is parsed again before it is returned.
+    """
+    before = parse(primary, backup)
+    count = len(before['partitions'])
+    if count == 8 or any(primary[0x200 + count * 128:0x280 + count * 128]):
+        raise Error('No empty LwVM descriptor is available')
+    if not any(start <= first and first + chunks <= start + length for start, length in free_space(primary, before)):
+        raise Error('The chosen chunks are not free LwVM space')
+    identity = uuid.UUID(linux_uuid)
+    if not identity.int or str(identity) in {p['partuuid'] for p in before['partitions']}:
+        raise Error('Linux partition identity is zero or repeated')
+    begin, _ = virtual_room(before)
+    end = begin + chunks * before['chunk_bytes']
+    header = bytearray(primary)
+    struct.pack_into('<I', header, 0x28, count + 1)
+    descriptor = bytearray(128)
+    descriptor[:16] = uuid.UUID(LINUX_TYPE).bytes
+    descriptor[16:32] = identity.bytes
+    struct.pack_into('<QQQ', descriptor, 32, begin, end, 0)
+    descriptor[56:66] = 'Linux'.encode('utf-16-le')
+    header[0x200 + count * 128:0x280 + count * 128] = descriptor
+    for logical in range(chunks):
+        struct.pack_into('<H', header, 0x800 + (first + logical) * 2, count << 12 | logical)
+    struct.pack_into('<I', header, 0x2c, checksum(header))
+    after = parse(bytes(header), bytes(header), before['media_bytes'])
+    return bytes(header), partition(after, str(identity))
