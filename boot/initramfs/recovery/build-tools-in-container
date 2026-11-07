@@ -13,15 +13,30 @@ export CC=musl-gcc
 # musl-gcc searches no glibc headers; give it the kernel UAPI headers only.
 kernel_headers="$build/kernel-headers"
 mkdir "$kernel_headers"
-ln -s /usr/include/linux /usr/include/asm-generic "$kernel_headers/"
-ln -s "/usr/include/$(gcc -dumpmachine)/asm" "$kernel_headers/asm"
+host=()
+if [[ $arch == arm && $(uname -m) != armv7* ]]; then
+  # ARMv7 on any other machine is cross-compiled (install-toolchain --cross arm):
+  # Apple and most ARM64 hosts cannot run 32-bit ARM code at all.
+  cat > "$build/arm-musl-gcc" <<'CC'
+#!/bin/sh
+exec arm-linux-gnueabihf-gcc "$@" -specs /usr/lib/arm-linux-musleabihf/musl-gcc.specs
+CC
+  chmod 755 "$build/arm-musl-gcc"
+  export CC="$build/arm-musl-gcc" AR=arm-linux-gnueabihf-ar RANLIB=arm-linux-gnueabihf-ranlib
+  host=(--host=arm-linux-musleabihf)
+  ln -s /usr/arm-linux-gnueabihf/include/linux /usr/arm-linux-gnueabihf/include/asm-generic \
+    /usr/arm-linux-gnueabihf/include/asm "$kernel_headers/"
+else
+  ln -s /usr/include/linux /usr/include/asm-generic "$kernel_headers/"
+  ln -s "/usr/include/$(gcc -dumpmachine)/asm" "$kernel_headers/asm"
+fi
 export CFLAGS="-Os -isystem $kernel_headers"
 
 tar -xjf "$work/dropbear.tar.bz2" -C "$build"
 (
   cd "$build/dropbear-2026.94"
   printf '%s\n' '#define DROPBEAR_SVR_PASSWORD_AUTH 0' '#define DROPBEAR_SVR_PAM_AUTH 0' > localoptions.h
-  ./configure --enable-static --disable-zlib
+  ./configure ${host[@]+"${host[@]}"} --enable-static --disable-zlib
   make -j2 PROGRAMS='dropbear dropbearkey'
   cp dropbear dropbearkey "$build/bin/"
 )
@@ -32,7 +47,7 @@ libnl="$build/libnl"
 tar -xzf "$work/libnl.tar.gz" -C "$build"
 (
   cd "$build/libnl-3.11.0"
-  ./configure --prefix="$libnl" --enable-static --disable-shared --disable-cli --disable-debug
+  ./configure ${host[@]+"${host[@]}"} --prefix="$libnl" --enable-static --disable-shared --disable-cli --disable-debug
   make -j2
   make install
 )
@@ -68,13 +83,13 @@ tar -xJf "$work/iw.tar.xz" -C "$build"
 
 # The installer's writer and the tools that finish a restored root, on any system.
 tar -xzf "$work/zstd.tar.gz" -C "$build"
-make -C "$build/zstd-1.5.7/lib" -j2 libzstd.a CC=musl-gcc ZSTD_LEGACY_SUPPORT=0
+make -C "$build/zstd-1.5.7/lib" -j2 libzstd.a CC="$CC" ZSTD_LEGACY_SUPPORT=0
 $CC $CFLAGS -static -Wall -Wextra -pthread -I"$build/zstd-1.5.7/lib" -o "$build/bin/orchard-write" \
   "$recipe/orchard-write.c" "$build/zstd-1.5.7/lib/libzstd.a"
 tar -xzf "$work/e2fsprogs.tar.gz" -C "$build"
 (
   cd "$build/e2fsprogs-1.47.4"
-  ./configure -q LDFLAGS=-static --disable-nls --disable-fuse2fs --disable-e2initrd-helper --disable-uuidd
+  ./configure -q ${host[@]+"${host[@]}"} LDFLAGS=-static --disable-nls --disable-fuse2fs --disable-e2initrd-helper --disable-uuidd
   make -j2 libs
   make -j2 -C resize resize2fs
   make -j2 -C misc tune2fs

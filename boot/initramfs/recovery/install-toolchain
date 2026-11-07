@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 packages=(bison build-essential bzip2 ca-certificates dpkg file flex linux-libc-dev musl-tools pkg-config python3 xz-utils)
-if [[ ${1:-} == --packages ]]; then printf '%s\n' "${packages[@]}"; exit 0; fi
+# --cross arm: also what cross-compiles the ARMv7 tools on another machine (build-tools-in-container).
+cross=()
+if [[ ${1:-} == --cross ]]; then
+  [[ ${2:-} == arm ]] || { echo '--cross takes arm' >&2; exit 2; }
+  cross=(gcc-arm-linux-gnueabihf linux-libc-dev-armhf-cross musl-dev:armhf)
+  shift 2
+fi
+if [[ ${1:-} == --packages ]]; then printf '%s\n' "${packages[@]}" ${cross[@]+"${cross[@]}"}; exit 0; fi
+[[ ${#cross[@]} == 0 ]] || dpkg --add-architecture armhf
 apt-get update
-apt-get install -y --no-install-recommends "${packages[@]}"
+apt-get install -y --no-install-recommends "${packages[@]}" ${cross[@]+"${cross[@]}"}

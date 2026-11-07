@@ -58,11 +58,15 @@ for component, filename in (('busybox', 'busybox.deb'),
         pathlib.Path(temporary.name).rename(target)
     print(f'Verified {component}: {target}')
 PY
-image=localhost/orchard-hardware-recovery-tools:bookworm
-[[ "$arch" == arm64 ]] || image=localhost/orchard-hardware-recovery-tools-arm:bookworm
-"$python" "$here/../../../src/orchard/buildenv.py" build --arch "$arch" --file "$here/Containerfile" \
-  --image "$image" --context "$here"
-"$python" "$here/../../../src/orchard/buildenv.py" run --arch "$arch" \
+if [[ "$arch" == arm64 ]]; then
+  image=localhost/orchard-hardware-recovery-tools:bookworm containerfile=Containerfile build_arch=(--arch arm64)
+else
+  # Cross-compiled on this machine's own architecture: Apple and most ARM64 hosts cannot run ARMv7.
+  image=localhost/orchard-hardware-recovery-tools-arm:bookworm containerfile=Containerfile.arm build_arch=()
+fi
+"$python" "$here/../../../src/orchard/buildenv.py" build ${build_arch[@]+"${build_arch[@]}"} \
+  --file "$here/$containerfile" --image "$image" --context "$here"
+"$python" "$here/../../../src/orchard/buildenv.py" run ${build_arch[@]+"${build_arch[@]}"} \
   --bind "$work:/work:rw" --bind "$here:/recipe:ro" --env "ORCHARD_RECOVERY_ARCH=$arch" \
   --image "$image" -- bash /recipe/build-tools-in-container
 echo "Recovery tools: $work/bin"
