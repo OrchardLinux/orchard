@@ -74,22 +74,18 @@ try:
     def lock(path):
         return dict(l.split('=', 1) for l in (snapshot / path).read_text().splitlines() if '=' in l)
 
-    def selected(name):
-        """What the snapshot's kernel build applies, including patch scopes."""
-        return run(sys.executable, snapshot / 'kernel/series.py', name).splitlines()
+    def layers(path):
+        """The series' layer lines, without comments: what is applied."""
+        return [l.split('#', 1)[0].strip() for l in (snapshot / path).read_text().splitlines()
+                if l.split('#', 1)[0].strip()]
 
-    selections = {name: selected(name) for name in platforms}
-    # Validate every branch before fetching, creating refs or running a toolchain.
     for branch, names in sorted(branches.items()):
         first = described[names[0]]
         for name in names[1:]:
             if lock(described[name]['upstream']) != lock(first['upstream']):
                 sys.exit(f'{name} and {names[0]} share branch {branch} but not their upstream base')
-            if selections[name] != selections[names[0]]:
-                sys.exit(f'{name} and {names[0]} share branch {branch} but select different patches')
-
-    for branch, names in sorted(branches.items()):
-        first = described[names[0]]
+            if layers(described[name]['series']) != layers(first['series']):
+                sys.exit(f'{name} and {names[0]} share branch {branch} but not their patch layers')
         git(args.linux, 'check-ref-format', '--branch', branch)
         base = lock(first['upstream'])
         if subprocess.run(['git', '-C', args.linux, 'cat-file', '-e', base['commit'] + '^{commit}'],
@@ -110,7 +106,7 @@ try:
         subprocess.run([sys.executable, '-I', HERE / 'convert.py', '--orchard', ORCHARD,
                         '--commit', commit, '--layers', 'kernel',
                         '--series', Path(first['series']).relative_to('kernel'),
-                        '--platform', names[0], '--refs', branch, '--target', args.linux, '--base', base['commit'],
+                        '--refs', branch, '--target', args.linux, '--base', base['commit'],
                         '--map', args.linux / '.git' / f'orchard-patch-map-{branch.replace("/", "-")}'],
                        check=True)
         converted = git(args.linux, 'rev-parse', 'refs/orchard/converted')
