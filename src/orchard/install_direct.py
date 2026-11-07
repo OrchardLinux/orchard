@@ -185,8 +185,12 @@ def boot_image(adapter, assets, extra, device=None):
 
 
 def installed_bootargs(board, partuuid, options):
-    """A 32-bit installed system's boot arguments: the board tree's own, with its root replaced by the entry's."""
-    kept = [word for word in board.split() if not word.startswith(('root=', 'rdinit=')) and word not in ('rw', 'ro')]
+    """A 32-bit installed system's boot arguments: the board tree's own, with its root replaced by the entry's.
+
+    The old built-in CDC gadget's arguments go too: the kernel has it off, and orchard's initrd
+    binds its own configfs gadget (USB serial and network).
+    """
+    kept = [word for word in board.split() if not word.startswith(('root=', 'rdinit=', 'g_cdc.')) and word not in ('rw', 'ro')]
     return ' '.join([*kept, f'root=PARTUUID={partuuid}', 'rw', *options.split()])
 
 

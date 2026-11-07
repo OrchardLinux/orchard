@@ -297,7 +297,8 @@ class Finish(unittest.TestCase):
 
 class InstalledBundle(unittest.TestCase):
     def test_the_installed_system_starts_from_its_root_with_the_boards_own_arguments(self):
-        board = 'earlycon=s3c6400,0x32500000 lpj=5000000 root=/dev/ram0 rw rootwait panic=10'
+        board = ('earlycon=s3c6400,0x32500000 lpj=5000000 root=/dev/ram0 rw rootwait panic=10 '
+                 'g_cdc.host_addr=02:10:5a:05:00:01 g_cdc.dev_addr=02:10:5a:05:00:02')
         self.assertEqual(direct.installed_bootargs(board, LINUX_ID, 'rootwait fbcon=map:9'),
                          f'earlycon=s3c6400,0x32500000 lpj=5000000 rootwait panic=10 root=PARTUUID={LINUX_ID} rw rootwait fbcon=map:9')
 
