@@ -48,12 +48,15 @@ class PlatformLayer(unittest.TestCase):
             names = {member.name for member in members}
             description = json.load(archive.extractfile('usr/lib/orchard/platform.json'))
         self.assertTrue(all(member.isfile() and member.name.startswith('usr/') for member in members))
+        self.assertEqual(next(m for m in members if m.name == 'usr/lib/orchard/wifi-address').mode, 0o755)
         self.assertEqual(receipt['members'], len(members))
         base = f'usr/lib/modules/{RELEASE}/'
         self.assertLessEqual({base + 'vmlinuz', base + 'initrd', base + 'modules.dep', base + 'kernel/drivers/x.ko',
                               base + 'dtb/t8010-j71b.dtb', 'usr/lib/firmware/regulatory.db',
                               'usr/lib/firmware/regulatory.db.p7s',
                               'usr/lib/NetworkManager/conf.d/30-orchard-usb.conf',
+                              'usr/lib/udev/rules.d/70-orchard-wifi-address.rules',
+                              'usr/lib/orchard/wifi-address',
                               'usr/lib/orchard/platform.SHA256SUMS'}, names)
         self.assertEqual(len([name for name in names if '/dtb/' in name]), len(set(self.boards.values())))
         self.assertEqual(description, {'schema': 1, 'platform': 'apple-16k', 'kernel_release': RELEASE,

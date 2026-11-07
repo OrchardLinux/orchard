@@ -171,7 +171,6 @@
       "type": "object",
       "required": [
         "destination",
-        "sha256",
         "steps"
       ],
       "additionalProperties": false,
@@ -182,6 +181,11 @@
         },
         "sha256": {
           "$ref": "#/$defs/sha256"
+        },
+        "pending": {
+          "type": "string",
+          "minLength": 1,
+          "description": "In place of sha256 while the output has not been checked against real inputs: why. Builds do not install it; every input it reads must be pinned."
         },
         "steps": {
           "description": "The first step reads a recipe input; each later step, the previous result.",
@@ -204,7 +208,19 @@
             }
           }
         }
-      }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "sha256"
+          ]
+        },
+        {
+          "required": [
+            "pending"
+          ]
+        }
+      ]
     }
   }
 }

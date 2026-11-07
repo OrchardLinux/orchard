@@ -1,0 +1,5 @@
+# Public Wi-Fi firmware that has to carry an address carries Orchard's
+# placeholder (02:00:00:00:00:00, see firmware recipes). Give such an
+# interface this unit's own address before anything brings it up: udev
+# finishes this before NetworkManager or iwd take the device.
+ACTION=="add", SUBSYSTEM=="net", ATTR{address}=="02:00:00:00:00:00", RUN+="/usr/lib/orchard/wifi-address $attr{ifindex}"

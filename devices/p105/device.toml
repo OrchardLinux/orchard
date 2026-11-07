@@ -22,6 +22,7 @@ platform = "apple-armv7"  # kernel/series/apple-armv7, kernel/configs/apple-armv
 dtb = "s5l8942x-p105"       # arch/arm/boot/dts/apple/<dtb>.dtb
 
 [firmware]
+# Encrypted IPSW: keys from the launcher's cache (docs/bring-up/p105-firmware.md).
 recipe = "firmware.json"
 
 # The iOS disk's translation layer writes append-only: until reclamation lands
