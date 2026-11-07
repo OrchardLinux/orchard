@@ -36,6 +36,9 @@ public recipe or release.
 - A Linux root on LwVM: the kernel reads LwVM partitions
   (`kernel/patches/armv7/block`), but the shared initrd finds its root by
   reading a GPT itself and needs to learn LwVM partitions.
+- USB: the cold-handoff topic (#90) awaits a device boot of its exact
+  revision, and the iPad 3 (J1) a regression boot of the shared PHY code;
+  see [USB handoff](../../docs/bring-up/p105-usb-handoff.md).
 
 ## Unmerged code
 
@@ -43,3 +46,5 @@ public recipe or release.
   reverted; 32-bit patches live in `kernel/patches/armv7`.
 - #87's `MTD_APPLE_H2FMI_WRITE` build option (fa59001): removed, programming
   is part of the driver.
+- #90's gadget config change (39b60b1, built-in CDC gadget off): not taken
+  yet; it waits until 32-bit boots bind their own configfs gadget.

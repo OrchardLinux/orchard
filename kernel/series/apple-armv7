@@ -5,3 +5,4 @@
 patches/import/cascadia
 patches/armv7/mtd
 patches/armv7/block
+patches/armv7/usb

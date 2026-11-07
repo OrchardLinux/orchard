@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 12:08:59 -0600
+Subject: [PATCH] dt-bindings: usb: dwc2: Describe Apple S5L8942X clock
+ ownership
+
+Document the existing S5L8940X fallback and the S5L8942X compatible. These
+controllers take their parent power and clocks from the PHY, so require the
+PHY reference for Apple compatibles while keeping the existing clock
+requirements for other controllers.
+
+[Orchard: from shaynelegault/orchard#90 25379c1 (source range
+ 97d6283e22e8..55132508cfd5);
+ moved to patches/armv7/usb; dropped the test notes from the commit
+ message]
+
+Assisted-by: LLM
+---
+ .../devicetree/bindings/usb/dwc2.yaml         | 25 +++++++++++++++++--
+ 1 file changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/usb/dwc2.yaml b/Documentation/devicetree/bindings/usb/dwc2.yaml
+index a5f2e3442a0e..759eb83a36fb 100644
+--- a/Documentation/devicetree/bindings/usb/dwc2.yaml
++++ b/Documentation/devicetree/bindings/usb/dwc2.yaml
+@@ -13,9 +13,32 @@ allOf:
+   - $ref: usb-drd.yaml#
+   - $ref: usb-hcd.yaml#
+ 
++  - if:
++      properties:
++        compatible:
++          contains:
++            enum:
++              - apple,s5l8940x-dwc2
++              - apple,s5l8942x-dwc2
++    then:
++      required:
++        - phys
++        - phy-names
++    else:
++      required:
++        - clocks
++        - clock-names
++
+ properties:
+   compatible:
+     oneOf:
++      - items:
++          - const: apple,s5l8942x-dwc2
++          - const: apple,s5l8940x-dwc2
++          - const: snps,dwc2
++      - items:
++          - const: apple,s5l8940x-dwc2
++          - const: snps,dwc2
+       - const: brcm,bcm2835-usb
+       - const: hisilicon,hi6220-usb
+       - const: ingenic,jz4775-otg
+@@ -185,8 +208,6 @@ required:
+   - compatible
+   - reg
+   - interrupts
+-  - clocks
+-  - clock-names
+ 
+ unevaluatedProperties: false
+ 
