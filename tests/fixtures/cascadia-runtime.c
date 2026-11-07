@@ -62,16 +62,41 @@ static void rejects(void)
 int main(void)
 {
 	CHECK(sizeof(u32) == 4 && sizeof(struct config) == 68);
-	memory(LOAD_ADDRESS, 0x20000);
-	memory(INITRD_ADDRESS, 0x10000);
+	memory(LOAD_ADDRESS, 0x2000000);
+	memory(INITRD_ADDRESS, 0x2000000);
 	memory(WATCHDOG_ADDRESS & ~4095u, 4096);
 	prepare();
+	/* Validation must work even when high RAM has no inherited mapping. */
+	CHECK(mprotect((void *)(uintptr_t)INITRD_ADDRESS, 0x2000000, PROT_NONE) == 0);
 	CHECK(cascadia_main() == LOAD_ADDRESS + 0x9000);
+	CHECK(mprotect((void *)(uintptr_t)INITRD_ADDRESS, 0x2000000,
+		       PROT_READ | PROT_WRITE) == 0);
+	for (unsigned int i = 0; i < 33; i++)
+		CHECK(((unsigned char *)(uintptr_t)INITRD_ADDRESS)[i] == 0x77);
+	cascadia_relocate_initrd(LOAD_ADDRESS + 0xa000, INITRD_ADDRESS, 33);
 	for (unsigned int i = 0; i < 33; i++)
 		CHECK(((unsigned char *)(uintptr_t)INITRD_ADDRESS)[i] == (i ^ 0x5a));
 	for (unsigned int i = 0; i < 16; i++)
 		CHECK(((unsigned char *)(uintptr_t)WATCHDOG_ADDRESS)[i] == 0);
 	CHECK(((unsigned char *)(uintptr_t)INITRD_ADDRESS)[33] == 0x77);
+
+	/* Exercise exact word/tail sizes and the real attempt-3 initramfs length. */
+	const unsigned int sizes[] = { 0, 1, 2, 3, 4, 7, 8, 33, 4096, 4097, 19124158 };
+	unsigned char *source = (void *)(uintptr_t)(LOAD_ADDRESS + 0xa000);
+	unsigned char *target = (void *)(uintptr_t)(INITRD_ADDRESS + 16);
+	unsigned char *guard = (void *)(uintptr_t)(INITRD_ADDRESS + 12);
+	for (unsigned int test = 0; test < sizeof(sizes) / sizeof(sizes[0]); test++) {
+		unsigned int size = sizes[test];
+		for (unsigned int i = 0; i < size + 4; i++)
+			source[i] = (unsigned char)(i ^ (i >> 8) ^ 0x5a);
+		memset(target - 4, 0x77, size + 8);
+		cascadia_relocate_initrd(LOAD_ADDRESS + 0xa000, INITRD_ADDRESS + 16, size);
+		CHECK(memcmp(source, target, size) == 0);
+		for (unsigned int i = 0; i < 4; i++) {
+			CHECK(guard[i] == 0x77);
+			CHECK(target[size + i] == 0x77);
+		}
+	}
 
 	/* Every field is either profile-fixed or has a checked dynamic bound. */
 	volatile u32 *fields = (volatile u32 *)&cascadia_config;
@@ -88,6 +113,11 @@ int main(void)
 	rejects();
 	prepare();
 	cascadia_config.initrd_offset = 0x9000;
+	cascadia_config.crc32 = checksum();
+	rejects();
+	prepare();
+	cascadia_config.initrd_offset++;
+	cascadia_config.image_size++;
 	cascadia_config.crc32 = checksum();
 	rejects();
 	prepare();

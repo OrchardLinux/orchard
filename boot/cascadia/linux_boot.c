@@ -47,8 +47,7 @@ static u32 big_endian(volatile const u8 *p)
 u32 cascadia_main(void)
 {
 	volatile const struct config *c = &cascadia_config;
-	volatile const u8 *dtb, *from;
-	volatile u8 *to;
+	volatile const u8 *dtb;
 	u32 i;
 
 	if (WATCHDOG_ADDRESS) {
@@ -70,6 +69,7 @@ u32 cascadia_main(void)
 	    c->dtb_offset >= c->image_size ||
 	    c->dtb_size > c->image_size - c->dtb_offset ||
 	    c->initrd_offset < c->dtb_offset + c->dtb_size ||
+	    (c->initrd_offset & 3) ||
 	    c->initrd_offset >= c->image_size ||
 	    c->initrd_size > c->image_size - c->initrd_offset ||
 	    c->initrd_address != INITRD_ADDRESS ||
@@ -79,9 +79,23 @@ u32 cascadia_main(void)
 	dtb = (volatile const u8 *)(LOAD_ADDRESS + c->dtb_offset);
 	if (big_endian(dtb) != 0xd00dfeedu || big_endian(dtb + 4) != c->dtb_size)
 		return 0;
-	from = (volatile const u8 *)(LOAD_ADDRESS + c->initrd_offset);
-	to = (volatile u8 *)INITRD_ADDRESS;
-	for (i = 0; i < c->initrd_size; i++)
-		to[i] = from[i];
 	return LOAD_ADDRESS + c->dtb_offset;
+}
+
+/* Called only after validation and MMU/cache teardown, using physical RAM. */
+void cascadia_relocate_initrd(u32 source, u32 target, u32 size)
+{
+	volatile const u32 *from = (volatile const u32 *)source;
+	volatile u32 *to = (volatile u32 *)target;
+	volatile const u8 *tail_from;
+	volatile u8 *tail_to;
+
+	while (size >= sizeof(u32)) {
+		*to++ = *from++;
+		size -= sizeof(u32);
+	}
+	tail_from = (volatile const u8 *)from;
+	tail_to = (volatile u8 *)to;
+	while (size--)
+		*tail_to++ = *tail_from++;
 }

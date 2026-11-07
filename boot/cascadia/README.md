@@ -16,11 +16,15 @@ boot arguments and its initrd addresses, then reserves that destination.
 
 The layout is a checked loader followed by padding to 32 KiB, the zImage,
 the edited DTB and the supplied initramfs, with each data address aligned to
-eight bytes. The loader disables the profile's watchdog before it validates
-the configuration, so a rejected image remains stopped for inspection. It
-checks the configuration checksum and bounds before copying the initramfs to
-the profile's reserved high-memory range.
-It then performs the Cascadia cache/MMU handoff with the DTB in `r2`.
+eight bytes. The assembly entry disables the profile's watchdog before stack
+setup; the C entry also clears it before validation. A rejected image remains
+stopped for inspection. Validation checks the configuration checksum, bounds
+and relocation alignment while touching only the uploaded low-memory image.
+The loader then flushes caches and disables the inherited MMU/cache state
+before copying the initramfs to reserved high RAM. Word copies handle the
+aligned body and byte copies preserve the exact final tail. A barrier precedes
+the Linux handoff with the DTB in `r2`. High RAM therefore needs no inherited
+iBEC virtual mapping.
 The fixed loader stack uses the gap below offset `0x7000`; code must finish
 below `0x6000`, and the configuration starts at `0x7f00`.
 

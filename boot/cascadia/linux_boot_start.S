@@ -16,6 +16,15 @@ _start:
 	cpsid	if
 	msr	cpsr_c, #0xd3
 
+	/* Stop the profile's watchdog before depending on a stack or C entry. */
+	ldr	r0, =WATCHDOG_ADDRESS
+	cmp	r0, #0
+	movne	r1, #0
+	strne	r1, [r0]
+	strne	r1, [r0, #4]
+	strne	r1, [r0, #8]
+	strne	r1, [r0, #12]
+	dsb
 	ldr	sp, =LOAD_ADDRESS + 0x7000
 	bl	cascadia_main
 	/* main validates the image and returns DTB physical address. */
@@ -32,6 +41,13 @@ _start:
  */
 linux_boot_jump:
 	mov	r4, r0			/* save DTB */
+	/* Capture the validated relocation before flushing inherited mappings. */
+	ldr	r3, =cascadia_config
+	ldr	r5, [r3, #28]		/* initrd_offset */
+	ldr	r6, [r3, #36]		/* initrd_address */
+	ldr	r7, [r3, #32]		/* initrd_size */
+	ldr	r0, =LOAD_ADDRESS
+	add	r5, r5, r0
 
 	bl	v7_flush_dcache_all
 	bl	l2x0_flush_all
@@ -50,6 +66,13 @@ linux_boot_jump:
 	mcr	p15, 0, r0, c8, c7, 0
 	dsb
 	isb
+
+	/* iBEC need not identity-map the reserved high-RAM destination. */
+	mov	r0, r5
+	mov	r1, r6
+	mov	r2, r7
+	bl	cascadia_relocate_initrd
+	dsb
 
 	mov	r0, #0
 	mvn	r1, #0
