@@ -199,10 +199,9 @@ def install_direct(adapter, device, name, files, firmware_files, boot_files, cha
         client, host_key, authorized, dropbear_host_key = direct.make_keys(directory)
         extra = direct.add_on(boot_assets['install_tools'], device['ecid'], authorized, dropbear_host_key)
         image_file = Path(directory) / 'payload.bin'
-        image_file.write_bytes(direct.payload(boot_assets['m1n1'], boot_assets.get('logo'), boot_assets['layer'],
-                                              adapter.DEVICETREE, extra))
+        image_file.write_bytes(direct.boot_image(adapter, boot_assets, extra))
         with progress.alongside('Device'):
-            found = adapter.boot_payload(device, image_file, boot_assets['pongo'], progress)
+            found = direct.start(adapter, device, image_file, boot_assets, progress)
         progress.mark('Install mode on USB')
         progress.pause()
         progress.step('Connecting over SSH')

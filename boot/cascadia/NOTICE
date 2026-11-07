@@ -1,0 +1,16 @@
+The ARMv7 cache-maintenance and Linux handoff sequence is derived from the
+Project Cascadia A5 staging loader:
+
+  https://github.com/rzxvx/Project-Cascadia
+  reference revision: 091d441f19e101699f7e1835a80ccb48d6e54eec
+  license: GPL-2.0
+
+The local P105 work fixed the executable entry by discarding ARM unwind
+metadata and asserting the upload address in the linker script.
+
+This producer keeps those entry safeguards. Hardware addresses come from
+the device's profile. Orchard's configuration record replaces the loader's
+compiled-in DTB address and Cascadia's overlay header; the initramfs is
+copied before the MMU is turned off and the DTB's initrd placeholders are set
+in place, as Cascadia's linux_boot.c and assemble.py do. Not yet booted on
+hardware in this form.

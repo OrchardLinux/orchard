@@ -186,6 +186,15 @@ def receipts_for(document, profile, purpose):
     """(platform, {role: receipt}) of what an install or a boot of this manifest needs."""
     platform = platform_for(document, profile)
     files = document['platforms'][platform]
+    if direct(document) and 'cascadia' in document:
+        # A 32-bit release: the board's Cascadia loader instead of Pongo and m1n1.
+        if profile not in document['cascadia']:
+            raise ValueError(f'This release has no Cascadia loader for {profile}')
+        receipts = {'layer': files['layer'], 'cascadia': document['cascadia'][profile],
+                    'install_tools': document['install_tools']}
+        if purpose == 'install':
+            receipts.update(root=document['root'], map=document['root']['map'])
+        return platform, receipts
     receipts = {'pongo': document['pongo'], 'layer': files['layer']}
     if direct(document):
         receipts.update(m1n1=document['m1n1'], install_tools=document['install_tools'])
@@ -225,7 +234,7 @@ def resolve(manifest, profile, progress=None, clock=None, purpose='install'):
         receipts = {'pongo': document['pongo'], 'recovery': document['boot']}
     labels = {'pongo': 'Pongo', 'recovery': 'Recovery', 'root': document.get('name', 'Linux'),
               'layer': 'Kernel and modules', 'map': 'Image map', 'logo': 'Logo',
-              'm1n1': 'm1n1', 'install_tools': 'Install tools'}
+              'm1n1': 'm1n1', 'install_tools': 'Install tools', 'cascadia': 'Cascadia loader'}
     paths = {}
     with ThreadPoolExecutor(max_workers=len(receipts)) as pool:
         futures = {role: pool.submit(materialize, receipt, bundle, progress, clock, label=labels[role])

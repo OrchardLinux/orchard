@@ -1,0 +1,3 @@
+FROM docker.io/library/debian:bookworm
+COPY install-toolchain /tmp/install-toolchain
+RUN bash /tmp/install-toolchain --cross arm && rm /tmp/install-toolchain && rm -rf /var/lib/apt/lists/*

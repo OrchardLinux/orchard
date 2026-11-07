@@ -168,7 +168,7 @@ jobs:
       - name: Install the combined toolchain once
         if: inputs.reuse_run_id == ''
         run: |
-          bash ci/install-toolchains recovery m1n1
+          bash ci/install-toolchains recovery recovery-arm m1n1
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - name: Build static recovery tools
         if: inputs.reuse_run_id == ''
@@ -176,6 +176,16 @@ jobs:
           OMA_RECOVERY_TOOLS_WORK="$PWD/out/recovery-tools" bash boot/initramfs/recovery/build-tools
           mkdir -p out/components/boot
           cp out/recovery-tools/bin/* out/components/boot/
+      - name: Build the ARMv7 tools and the boards' Cascadia loaders
+        if: inputs.reuse_run_id == ''
+        run: |
+          OMA_RECOVERY_TOOLS_WORK="$PWD/out/recovery-tools-arm" bash boot/initramfs/recovery/build-tools --arch arm
+          mkdir -p out/components/boot-arm
+          cp out/recovery-tools-arm/bin/* out/components/boot-arm/
+          for profile in devices/*/cascadia.toml; do
+            board=$(basename "$(dirname "$profile")")
+            python3 boot/cascadia/build --profile "$profile" --output "$PWD/out/components/cascadia/$board"
+          done
       - name: Build quiet loader
         if: inputs.reuse_run_id == ''
         run: |
@@ -353,13 +363,20 @@ jobs:
           # distribution builds its release from, so it stops copying any of them.
           python -m orchard.image.platforms_index out/publication --kernels out/platforms \
             --tools out/components/boot --commit "$GITHUB_SHA"
+          # The same for 32-bit roots, next to it: platforms-armv7.toml.
+          loaders=()
+          for loader in out/components/cascadia/*/loader.bin; do
+            loaders+=(--loader "$(basename "$(dirname "$loader")")=$loader")
+          done
+          python -m orchard.image.platforms_index out/publication --architecture arm --kernels out/platforms \
+            --tools out/components/boot-arm --commit "$GITHUB_SHA" "${loaders[@]}"
           # tool-components.tar.gz stays: a distribution build takes its tools from it.
           rm out/publication/kernel-components-*.tar.gz out/publication/quiet-pongo.tar.gz
           # Source keys of each platform's kernel, m1n1 and the tools: a distribution build
           # with the same state uses these instead of building them (orchard.published).
           python -m orchard.published keys --output out/publication/component-keys.json apple-16k apple-4k apple-armv7
           git archive --format=tar.gz -o out/publication/orchard-source.tar.gz HEAD
-          (cd out/publication && sha256sum ./*.tar.gz ./*.bin ./*.pyz ./component-keys.json ./platforms.toml > SHA256SUMS)
+          (cd out/publication && sha256sum ./*.tar.gz ./*.bin ./*.pyz ./component-keys.json ./platforms.toml ./platforms-armv7.toml > SHA256SUMS)
       - name: Attest public build
         if: toJSON(github.event.repository.private) == 'false'
         id: attest

@@ -5,6 +5,11 @@ A distribution names an orchard version and takes its kernels, loaders and
 install tools from these files, so it publishes only its root. Files are named
 relative to wherever platforms.toml was fetched from, because a nightly's tag
 isn't known while it is built.
+
+One index per root architecture: platforms.toml for arm64 roots, and next to
+it platforms-armv7.toml for 32-bit ones (architecture = "arm": its layers, its
+own install tools, and a Cascadia loader per board in place of Pongo and m1n1).
+An arm64 distribution reads only platforms.toml and sees nothing new.
 """
 import argparse
 import gzip
@@ -23,6 +28,8 @@ from .publish import toml
 INSTALL_TOOLS = ('orchard-write', 'dropbear', 'resize2fs', 'tune2fs')
 LOADERS = ('pongo.bin', 'm1n1.bin')
 REPOSITORY = 'OrchardLinux/orchard'
+# The index of each root architecture (orchard's kernel ARCH names).
+INDEX = {'arm64': 'platforms.toml', 'arm': 'platforms-armv7.toml'}
 
 
 def receipt(path):
@@ -42,8 +49,10 @@ def write_install_tools(tools, output):
 
 
 def receipts(document):
-    """Every file platforms.toml names."""
-    return [*document['loaders'].values(), document['install_tools'], *document['platforms'].values()]
+    """Every file an index names. The 32-bit index keeps its loaders by kind and board."""
+    loaders = [entry for value in document['loaders'].values()
+               for entry in ([value] if 'sha256' in value else value.values())]
+    return [*loaders, document['install_tools'], *document['platforms'].values()]
 
 
 def build(directory, *, kernels, tools, commit, loaders=None):
@@ -65,12 +74,39 @@ def build(directory, *, kernels, tools, commit, loaders=None):
     return document
 
 
+def build_armv7(directory, *, kernels, tools, commit, loaders):
+    """Write the ARMv7 layers of KERNELS ({platform: bundle}), their install tools and platforms-armv7.toml.
+
+    TOOLS is the directory of ARMv7 static tools; LOADERS ({board: loader.bin}) the boards'
+    Cascadia loaders, built for each board's addresses (devices/BOARD/cascadia.toml).
+    """
+    cascadia = {}
+    for board, path in sorted(loaders.items()):
+        target = directory / f'cascadia-{board}.bin'
+        shutil.copyfile(path, target)
+        cascadia[board] = receipt(target)
+    layers = {name: platform.build(name, directory, bundle=bundle, busybox=tools / 'busybox', root_architecture='arm')
+              for name, bundle in kernels.items()}
+    write_install_tools(tools, directory / 'install-tools-armv7.tar.gz')
+    document = {'schema': 1, 'kind': 'orchard.platforms', 'architecture': 'arm', 'commit': commit,
+                'loaders': {'cascadia': cascadia},
+                'install_tools': receipt(directory / 'install-tools-armv7.tar.gz'),
+                'platforms': layers}
+    (directory / INDEX['arm']).write_text(toml(document))
+    return document
+
+
 def from_inputs(directory, inputs):
     """platforms.toml and its files, from a document of orchard.inputs: this build's own kernels."""
     with tempfile.TemporaryDirectory() as temporary:
         tools = Path(temporary)
         for name, path in inputs['shared']['tools'].items():
             shutil.copyfile(path, tools / name)
+        if inputs.get('architecture') == 'arm':
+            return build_armv7(directory, kernels={name: Path(row['kernel']) for name, row in inputs['platforms'].items()},
+                               tools=tools, commit=(inputs.get('orchard') or {}).get('commit') or 'unknown',
+                               loaders={board: Path(path) for row in inputs['platforms'].values()
+                                        for board, path in row['loaders'].items()})
         return build(directory, kernels={name: Path(row['kernel']) for name, row in inputs['platforms'].items()},
                      tools=tools, commit=(inputs.get('orchard') or {}).get('commit') or 'unknown',
                      loaders={name: inputs['shared'][name] for name in ('pongo', 'm1n1')})
@@ -85,19 +121,21 @@ def fetch(url, path, entry=None):
         raise ValueError(f'{url} differs from its receipt')
 
 
-def from_release(directory, tag, platforms=None, *, repository=REPOSITORY):
-    """platforms.toml and its files from a published orchard build, by its immutable tag.
+def from_release(directory, tag, platforms=None, *, repository=REPOSITORY, architecture='arm64'):
+    """An index and its files from a published orchard build, by its immutable tag.
 
     PLATFORMS keeps only those; the index then records base_url, so orchard.image.publish links
-    these files instead of hosting copies.
+    these files instead of hosting copies. ARCHITECTURE picks the index (INDEX).
     """
+    name = INDEX[architecture]
     base = f'https://github.com/{repository}/releases/download/{tag}'
     with tempfile.TemporaryDirectory() as temporary:
-        index = Path(temporary) / 'platforms.toml'
-        fetch(base + '/platforms.toml', index)
+        index = Path(temporary) / name
+        fetch(base + '/' + name, index)
         document = tomllib.loads(index.read_text())
-    if document.get('schema') != 1 or document.get('kind') != 'orchard.platforms':
-        raise ValueError(f'{tag} has no platforms.toml this orchard reads')
+    if (document.get('schema') != 1 or document.get('kind') != 'orchard.platforms' or
+            document.get('architecture', 'arm64') != architecture):
+        raise ValueError(f'{tag} has no {name} this orchard reads')
     if platforms:
         missing = sorted(set(platforms) - set(document['platforms']))
         if missing:
@@ -106,7 +144,7 @@ def from_release(directory, tag, platforms=None, *, repository=REPOSITORY):
     for entry in receipts(document):
         fetch(base + '/' + entry['file'], directory / entry['file'], entry)
     document['base_url'] = base
-    (directory / 'platforms.toml').write_text(toml(document))
+    (directory / name).write_text(toml(document))
     return document
 
 
@@ -120,17 +158,31 @@ def main():
     parser.add_argument('--tools', type=Path, help="with --kernels: orchard's static tools")
     parser.add_argument('--commit', help='with --kernels: the commit they were built from')
     parser.add_argument('--platform', action='append', help='with --release: only this platform; repeat')
+    parser.add_argument('--architecture', choices=sorted(INDEX), default='arm64',
+                        help='with --release or --kernels: the root architecture whose index to write (default arm64)')
+    parser.add_argument('--loader', action='append', default=[], metavar='BOARD=FILE',
+                        help="with --kernels --architecture arm: a board's Cascadia loader; repeat")
     args = parser.parse_args()
     args.directory.mkdir(parents=True, exist_ok=True)
     if args.release:
-        from_release(args.directory, args.release, args.platform)
+        from_release(args.directory, args.release, args.platform, architecture=args.architecture)
     elif args.inputs:
         from_inputs(args.directory, json.loads(args.inputs.read_text()))
     else:
         if not (args.tools and args.commit):
             parser.error('--kernels needs --tools and --commit')
-        build(args.directory, kernels={name: args.kernels / name / 'components/kernel' for name in platform.platforms()},
-              tools=args.tools, commit=args.commit)
+        kernels = {name: args.kernels / name / 'components/kernel'
+                   for name in platform.platforms(architecture=args.architecture)}
+        if args.architecture == 'arm64':
+            if args.loader:
+                parser.error('--loader is for --architecture arm')
+            build(args.directory, kernels=kernels, tools=args.tools, commit=args.commit)
+        else:
+            loaders = dict(value.split('=', 1) for value in args.loader if '=' in value)
+            if len(loaders) != len(args.loader) or not loaders:
+                parser.error('--architecture arm needs --loader BOARD=FILE for each board with a Cascadia loader')
+            build_armv7(args.directory, kernels=kernels, tools=args.tools, commit=args.commit,
+                        loaders={board: Path(path) for board, path in loaders.items()})
 
 
 if __name__ == '__main__':
