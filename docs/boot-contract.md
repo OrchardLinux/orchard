@@ -199,3 +199,50 @@ the same m1n1 code, splash included.
 - Every change must be tested on both ways into m1n1: Pongo, and iBoot (`launcher-kit`, `./launch boot --bare`, then the client over the proxy). Device time goes through the user.
 
 Which SoCs have an m1n1 storage backend is in [bring-up/bootloader/experiments.md](bring-up/bootloader/experiments.md#per-device-menu).
+
+## Host-bound ARMv7 recovery identity
+
+Cascadia recovery templates carry a descriptor-selected identity policy in the
+standard `/chosen/bootargs` string. These are userland parameters, not hardware
+register descriptions. `orchard.recovery-policy=VALUE` and
+`orchard.recovery-handoff=VALUE` encode schema-1 JSON objects as canonical,
+unpadded base64url. Each token is bounded; the entire ARM command line remains
+at most 1,023 ASCII bytes. Duplicate JSON keys, repeated parameters, unknown
+fields, invalid types and incomplete records fail before recovery USB binds.
+
+The policy names `source = "host-usb"`, canonical `profile`, accepted live FDT
+`compatibles`, and integer `chip` and `board` identifiers. The public runtime
+contains the same policy, generated from the selected hardware descriptor.
+A template contains the policy alone. The guarded transport verifies its
+original digest and freshly queries the selected iRecovery endpoint for its
+ECID, CPID, BDID and product. It then binds one nonzero random 128-bit
+`handoff_id` to that observation and the original `template_sha256`. The handoff
+also contains `schema`, `source`, `profile`, `ecid`, `chip` and `board`. The
+transport rebuilds the checked CB32 configuration and FDT while retaining the
+kernel and initramfs bytes, then rechecks the selected endpoint immediately
+before its single upload. Its private attempt receipt records both image
+hashes and the nonce.
+
+The runtime requires the live compatible, policy token and staged policy to
+agree. It publishes `identity_source = "host-usb"`, the nonce and original
+image digest with the kernel's fresh boot ID. This records a host observation;
+it does not claim that Linux read a SoC ECID register. USB serial includes
+`HND:` followed by the nonce, alongside the canonical board, ECID and boot ID.
+The host requires that nonce before accepting this boot, then checks the full
+provenance again through serial SSH bootstrap and authenticated status. A
+later command may resume only through the matching private completed attempt
+receipt, including the same profile, ECID, nonce, boot ID and template digest.
+An unknown or changed handoff stops before a storage operation.
+
+The existing ARM64 path requires its live ADT MTD identity source. Absence of a
+host-bound policy preserves that path; an invalid host-bound policy or missing
+handoff never falls back to ADT. This handoff currently serves the guarded
+host RAM-boot path. On-device startup needs its own checked identity source
+before it can use this public recovery runtime.
+
+The platform recovery policy also selects USB function dependencies and early
+storage activation. ARMv7 loads its declared ECM/ACM modules, keeps serial
+available through network setup, and leaves SFTL unloaded until a manual
+request after serial and authenticated SSH are ready. The module's finite
+read policy bounds that later request. Hardware feature states change only
+after the exact submitted stack passes its physical checks.

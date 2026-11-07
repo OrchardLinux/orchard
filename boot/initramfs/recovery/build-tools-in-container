@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 work=${ORCHARD_WORK:-/work}
+recipe=${ORCHARD_RECIPE:-/recipe}
+arch=${ORCHARD_RECOVERY_ARCH:-arm64}
+case "$arch" in arm) deb_arch=armhf ;; arm64) deb_arch=arm64 ;; *) echo 'Unsupported recovery architecture' >&2; exit 1 ;; esac
 [[ ! -e "$work/bin" ]] || { echo 'Tool output exists; choose a fresh work directory' >&2; exit 1; }
 build=$(mktemp -d "$work/build.XXXXXX")
 mkdir "$build/bin"
@@ -67,7 +70,7 @@ tar -xJf "$work/iw.tar.xz" -C "$build"
 tar -xzf "$work/zstd.tar.gz" -C "$build"
 make -C "$build/zstd-1.5.7/lib" -j2 libzstd.a CC=musl-gcc ZSTD_LEGACY_SUPPORT=0
 $CC $CFLAGS -static -Wall -Wextra -pthread -I"$build/zstd-1.5.7/lib" -o "$build/bin/orchard-write" \
-  "${ORCHARD_RECIPE:-/recipe}/orchard-write.c" "$build/zstd-1.5.7/lib/libzstd.a"
+  "$recipe/orchard-write.c" "$build/zstd-1.5.7/lib/libzstd.a"
 tar -xzf "$work/e2fsprogs.tar.gz" -C "$build"
 (
   cd "$build/e2fsprogs-1.47.4"
@@ -78,11 +81,13 @@ tar -xzf "$work/e2fsprogs.tar.gz" -C "$build"
   cp resize/resize2fs misc/tune2fs "$build/bin/"
 )
 
+[[ $(dpkg-deb -f "$work/busybox.deb" Architecture) == "$deb_arch" ]] || {
+  echo 'BusyBox package architecture differs from the target' >&2; exit 1;
+}
+
 dpkg-deb -x "$work/busybox.deb" "$build/package"
 cp "$build/package/bin/busybox" "$build/bin/busybox"
 chmod 755 "$build/bin/"*
-for tool in "$build/bin/"*; do
-  file "$tool" | grep -q 'statically linked' || { echo "$tool is not static" >&2; exit 1; }
-done
+python3 "$recipe/check-tools.py" --arch "$arch" "$build/bin/"*
 mv "$build/bin" "$work/bin"
 echo "Static recovery tools copied to $work/bin"

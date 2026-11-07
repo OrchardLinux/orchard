@@ -26,5 +26,9 @@
   "e2fsprogs": {
     "url": "https://mirrors.edge.kernel.org/pub/linux/kernel/people/tytso/e2fsprogs/v1.47.4/e2fsprogs-1.47.4.tar.gz",
     "sha256": "da274408bebbfd13a5a2fc3cfc66e3ffff17c48534673aa67f88d49b99123b96"
+  },
+  "busybox_arm": {
+    "url": "https://deb.debian.org/debian/pool/main/b/busybox/busybox-static_1.35.0-4+deb12u1+b1_armhf.deb",
+    "sha256": "2f68dbeaebeda49f3cde34ac421d5add85fb1c837ff7c4a4971945340d9d66ff"
   }
 }
