@@ -433,12 +433,9 @@ class LegacyFirmware(unittest.TestCase):
                     hcd, sgx.extract(inputs['kernelcache'], '12H321')]
         for name, data in inputs.items():
             document['inputs'][name]['sha256'] = sha(data)
+        self.assertEqual(recipe.pending(document), [])
         for output, data in zip(document['outputs'], expected):
-            if 'pending' not in output:
-                output['sha256'] = sha(data)
-        # Wi-Fi waits for a measurement with real inputs: made, never installed.
-        self.assertEqual([o['destination'] for o in recipe.pending(document)], ['lib/firmware/brcm/brcmfmac4334.bin'])
-        self.assertEqual(len(recipe.pinned(document)), 3)
+            output['sha256'] = sha(data)
         recipe.check(document)
         seen = []
 
@@ -455,10 +452,16 @@ class LegacyFirmware(unittest.TestCase):
         document['outputs'][0]['sha256'] = '0' * 64
         with self.assertRaisesRegex(ValueError, 'output differs'):
             recipe.run(document, read)
+        # A pending output is made without a hash check, from pinned inputs only.
+        wifi = document['outputs'][1]
+        del wifi['sha256']
+        wifi['pending'] = 'not measured'
+        recipe.check(document)
+        self.assertEqual(recipe.run(document, read, [wifi]), {wifi['destination']: expected[1]})
         del document['inputs']['borg.trx']['sha256']
         with self.assertRaisesRegex(ValueError, 'reads unpinned inputs'):
             recipe.supported(document)
-        document['outputs'][1]['sha256'] = '0' * 64
+        wifi['sha256'] = '0' * 64
         with self.assertRaisesRegex(ValueError, 'either sha256 or pending'):
             recipe.supported(document)
 
