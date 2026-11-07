@@ -29,7 +29,36 @@
       },
       "device": "/usr/share/firmware/wifi/4334b1/borg-t-st.txt",
       "sha256": "78d24471b6fecaf63ebda5d4e055d976905cda8230b2e166c3c2080f05aa6d81"
+    },
+    "BlueTool": {
+      "ipsw": {"rootfs": "usr/sbin/BlueTool"},
+      "device": "/usr/sbin/BlueTool"
+    },
+    "kernelcache": {
+      "ipsw": {"kernelcache": true},
+      "device": {"kernelcache": "active"}
     }
   },
-  "outputs": []
+  "outputs": [
+    {
+      "destination": "lib/firmware/P105.mtprops",
+      "sha256": "516b8db5f6144ad64698867b8f6e6209a49010fcff1cb103539fe5ea4ffb1390",
+      "steps": [{"step": "copy@1", "input": "P105.mtprops"}]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4334.bin",
+      "pending": "placeholder address changed to 02:00:00:00:00:00; measure once the keys are available (docs/bring-up/p105-firmware.md)",
+      "steps": [{"step": "trx-add-nvram@1", "input": "borg.trx", "nvram": "borg-t-st.txt", "placeholder_mac": "02:00:00:00:00:00"}]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM4334B0.hcd",
+      "sha256": "b6791a67141f1a16447e916237180a049b89dfaab9c38451b33864dbb6a50dda",
+      "steps": [{"step": "bluetool-hcd@1", "input": "BlueTool"}]
+    },
+    {
+      "destination": "lib/firmware/apple/sgx543.fw",
+      "sha256": "5f929f351459b169ed91a68dce086dbc682b639c4a31846ef5b12837562e9a77",
+      "steps": [{"step": "sgx543-from-kernelcache@1", "input": "kernelcache", "build": "12H321"}]
+    }
+  ]
 }

@@ -12,6 +12,15 @@ Reference revision: 944541e67b4c603df328c77d30093551de802c17.
 Original copyright notices and per-file licenses remain applicable. This is
 selective reuse and adaptation, not a replacement of the pinned base kernel.
 
+Legacy firmware extraction (src/orchard/apple/hfs.py, legacy_images.py,
+trx.py, sgx.py and ADC decoding in udif.py) adapts rzxvx's Project Cascadia
+rootfs-extract.py, trx-add-nvram.py, img3decrypt.py and extract-sgx-firmware.py:
+https://github.com/rzxvx/Project-Cascadia
+Reference workflow: c20b85ebb951; sources now under devices/a5/scripts.
+GPL version 2 (LICENSE). Adapted 2026-11-07: library interfaces, caller-supplied
+keys, indexed HFS lookup, validation and recipe integration. No Apple firmware
+or decryption keys are included.
+
 m1n1: Asahi Linux Contributors, MIT (LICENSES/m1n1.txt).
 Wireless regulatory database: LICENSES/wireless-regdb.txt.
 Pongo/libusb uploader: checkra1n team, MIT (LICENSES/Pongo.txt).

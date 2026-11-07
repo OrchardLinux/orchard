@@ -7,12 +7,13 @@ download, no extraction tool and no FUSE on Linux. Callers verify every result
 against the recipe's hashes.
 """
 import plistlib
+import re
 import struct
 import urllib.request
 import zlib
 
 from orchard.http import open_url
-from . import apfs, lzfse, lzss, udif
+from . import apfs, hfs, legacy_images, lzfse, lzss, sparse_deflate, udif
 
 ATTEMPTS = 3
 
@@ -57,6 +58,76 @@ class RemoteFile:
             if self.on_bytes:
                 self.on_bytes(self.downloaded)
             return data
+
+    def read_ranges(self, ranges):
+        """One bounded multipart request for sparse DEFLATE header windows.
+
+        Every part's range and exact size must match the request. Never accept
+        a 200/full-file response or allow MIME overhead to hide a large body.
+        """
+        if not ranges or len(ranges) > 128:
+            raise ValueError('Invalid range batch size')
+        expected = {}
+        for offset, length in ranges:
+            if length <= 0 or not 0 <= offset < offset + length <= self.size:
+                raise ValueError('Range outside the IPSW')
+            expected[offset, offset + length - 1] = length
+        if len(expected) != len(ranges):
+            raise ValueError('Duplicate byte ranges')
+        request = urllib.request.Request(self.url, headers={
+            'Range': 'bytes=' + ','.join(f'{a}-{b}' for a, b in expected),
+            'Accept-Encoding': 'identity'})
+        limit = sum(expected.values()) + 1024 * (len(ranges) + 1)
+        for attempt in range(ATTEMPTS):
+            try:
+                with open_url(request) as response:
+                    boundary = response.headers.get_param('boundary') if hasattr(response.headers, 'get_param') else None
+                    if response.status != 206 or not boundary or response.headers.get_content_type() != 'multipart/byteranges':
+                        raise ValueError('Server did not honour multipart byte ranges')
+                    if not re.fullmatch(r'[A-Za-z0-9\x27()+_,./:=? -]{1,70}', boundary):
+                        raise ValueError('Invalid multipart boundary')
+                    raw = response.read(limit + 1)
+                break
+            except OSError:
+                if attempt == ATTEMPTS - 1:
+                    raise
+        if len(raw) > limit:
+            raise ValueError('Multipart range response exceeds bound')
+        marker = b'--' + boundary.encode('ascii')
+        pos = 2 if raw.startswith(b'\r\n') else 0
+        parts, closed = {}, False
+        while raw[pos:pos + len(marker)] == marker:
+            pos += len(marker)
+            if raw[pos:pos + 2] == b'--':
+                pos += 2
+                closed = True
+                break
+            if raw[pos:pos + 2] != b'\r\n':
+                raise ValueError('Invalid multipart separator')
+            pos += 2
+            end = raw.find(b'\r\n\r\n', pos, pos + 1024)
+            if end < 0:
+                raise ValueError('Invalid multipart headers')
+            matches = re.findall(rb'(?im)^Content-Range: bytes (\d+)-(\d+)/(\d+)\r?$', raw[pos:end])
+            if len(matches) != 1:
+                raise ValueError('Missing or ambiguous multipart Content-Range')
+            first, last, total = map(int, matches[0])
+            pair = first, last
+            if total != self.size or pair not in expected or pair in parts:
+                raise ValueError('Unexpected multipart byte range')
+            pos = end + 4
+            length = expected[pair]
+            parts[pair] = raw[pos:pos + length]
+            pos += length
+            if raw[pos:pos + 2] != b'\r\n':
+                raise ValueError('Truncated multipart payload')
+            pos += 2
+        if not closed or len(parts) != len(expected) or raw[pos:].strip(b'\r\n'):
+            raise ValueError('Incomplete multipart byte ranges')
+        self.downloaded += sum(map(len, parts.values()))
+        if self.on_bytes:
+            self.on_bytes(self.downloaded)
+        return [parts[offset, offset + length - 1] for offset, length in ranges]
 
 
 class RemoteZip:
@@ -135,11 +206,32 @@ class Member:
         self.remote, self.base, self.size = archive.remote, archive.data_offset(name), size
 
     def read(self, offset, length):
+        if not 0 <= offset <= offset + length <= self.size:
+            raise ValueError('Read outside ZIP member')
         return self.remote.read(self.base + offset, length)
 
 
+class PackedMember:
+    """The compressed byte range of a member, without inflating it."""
+    def __init__(self, archive, name):
+        self.remote = archive.remote
+        self.base = archive.data_offset(name)
+        self.size = archive.members[name][1]
+
+    def read(self, offset, length):
+        if not 0 <= offset <= offset + length <= self.size:
+            raise ValueError('Read outside compressed ZIP member')
+        return self.remote.read(self.base + offset, length)
+
+    def read_ranges(self, ranges):
+        if any(not 0 <= offset <= offset + length <= self.size for offset, length in ranges):
+            raise ValueError('Range outside compressed ZIP member')
+        return self.remote.read_ranges([(self.base + offset, length) for offset, length in ranges])
+
+
 class Ipsw:
-    def __init__(self, url, size, on_bytes=None):
+    def __init__(self, url, size, on_bytes=None, *, keys=None):
+        self.keys = keys
         self.remote = RemoteFile(url, size, on_bytes)
         self.archive = RemoteZip(self.remote)
         self._volume = None
@@ -148,22 +240,50 @@ class Ipsw:
         return self.archive.read(name)
 
     def volume(self):
-        """The system volume: in the largest DMG, which IPSWs store uncompressed."""
+        """The system volume in the largest DMG (APFS, or legacy encrypted HFS+)."""
         if self._volume is None:
-            name = max(self.archive.members, key=lambda n: self.archive.members[n][1])
-            image = udif.Udif(Member(self.archive, name))
-            partition = [p for p in image.partitions if 'APFS' in p[0]]
-            if len(partition) != 1:
-                raise ValueError('Expected one APFS partition in the system image')
-            self._volume = apfs.Volume(apfs.Container(image, partition[0][1] * udif.SECTOR))
+            images = [n for n in self.archive.members if n.lower().endswith('.dmg')]
+            if not images:
+                raise ValueError('No system DMG in the IPSW')
+            name = max(images, key=lambda n: self.archive.members[n][2])
+            method, _, size, _ = self.archive.members[name]
+            if method == 0:
+                source = Member(self.archive, name)
+            elif method == 8:
+                source = sparse_deflate.StoredDeflate(PackedMember(self.archive, name), size)
+            else:
+                raise ValueError('Unsupported root image ZIP compression')
+            if source.read(0, 8) == b'encrcdsa':
+                source = legacy_images.Encrcdsa(source, self._key(name, 'encrcdsa'))
+            image = udif.Udif(source)
+            partitions = [p for p in image.partitions if 'APFS' in p[0] or 'Apple_HFS' in p[0]]
+            if len(partitions) != 1:
+                raise ValueError('Expected one APFS or HFS partition in the system image')
+            partition = partitions[0]
+            if 'Apple_HFS' in partition[0]:
+                self._volume = hfs.Volume(image, partition[1] * udif.SECTOR)
+            else:
+                self._volume = apfs.Volume(apfs.Container(image, partition[1] * udif.SECTOR))
         return self._volume
 
     def system_file(self, path):
-        return self.volume().read(path)[0]
+        volume = self.volume()
+        result = volume.read(path)
+        return result if isinstance(volume, hfs.Volume) else result[0]
 
     def kernelcache(self, device_class):
         """The decompressed kernelcache Mach-O of a board, e.g. 'j71bap'."""
-        return im4p_macho(self.member(self._manifest_path(device_class, 'KernelCache')))
+        name = self._manifest_path(device_class, 'KernelCache')
+        blob = self.member(name)
+        if blob[:4] == b'3gmI':
+            key, iv = self._key(name, 'img3')
+            return legacy_images.img3_kernelcache(blob, key, iv)
+        return im4p_macho(blob)
+
+    def _key(self, member, kind):
+        if self.keys is None:
+            raise ValueError('Encrypted IPSW needs a host firmware key provider')
+        return self.keys.get(member, kind)
 
     def device_tree(self, device_class):
         """The board's device tree as iBoot receives it: the ADT minus what iBoot fills in."""
@@ -243,18 +363,22 @@ def main(argv=None):
     tree.add_argument('device_class', help='BuildManifest DeviceClass, e.g. j81ap')
     tree.add_argument('words', nargs='+', help='e.g. wlan bluetooth multi-touch')
     args = parser.parse_args(argv)
-    url, size = args.ipsw, None
+    url, size, keys = args.ipsw, None, None
     if not url.startswith('https://'):
         from orchard.firmware import recipe_for
         source = recipe_for(url)['ipsw']
         url, size = source['url'], source['bytes']
-    ipsw = Ipsw(url, size)
+        from .firmware_keys import KeyStore
+        keys = KeyStore(source['sha256'])
+    ipsw = Ipsw(url, size, keys=keys)
     if args.command == 'members':
         for name, (_, packed, unpacked, _) in sorted(ipsw.archive.members.items()):
             print(f'{unpacked:>12}  {name}')
         return
     if args.command == 'ls':
         volume = ipsw.volume()
+        if isinstance(volume, hfs.Volume):
+            raise ValueError('HFS directory listing is not implemented; use get with an exact path')
         oid = volume.lookup(args.path) if args.path.strip('/') else 2
         for name, _, kind in sorted(volume.children(oid)):
             print(name + ('/' if kind == 4 else ''))

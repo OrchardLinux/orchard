@@ -336,7 +336,7 @@ def with_firmware(output, board, *, hardware=None, cache=None):
     with tempfile.TemporaryDirectory(prefix=f'ram-{board}-', dir=private) as temporary:
         work = Path(temporary)
         root = work / 'root'
-        for item in recipe['outputs']:
+        for item in firmwares.recipes.pinned(recipe):
             destination = root / PurePosixPath(item['destination'])
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(outputs / item['sha256'], destination)

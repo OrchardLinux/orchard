@@ -8,7 +8,7 @@ import hashlib
 import json
 import plistlib
 
-from orchard.apple import bluetool, d5500, smartio, z2fw, z2packet
+from orchard.apple import bluetool, d5500, sgx, smartio, trx, z2fw, z2packet
 from orchard.apple.osserialize import apple_xml, binary
 
 
@@ -18,6 +18,15 @@ def _copy(step, data, expected):
 
 def _bluetool_hcd(step, data, expected):
     return bluetool.hcd_from_binary(data, expected)
+
+
+def _trx(step, data, expected):
+    firmware, nvram = data
+    return trx.add_nvram(firmware, nvram, step['placeholder_mac'])
+
+
+def _sgx(step, data, expected):
+    return sgx.extract(data, step['build'])
 
 
 def _smartio(step, data, expected):
@@ -88,6 +97,8 @@ def _z2fw_mtfw(step, data, expected):
 # step@version -> (implementation, {parameter besides 'step' and 'input': type})
 STEPS = {
     'copy@1': (_copy, {}),
+    'trx-add-nvram@1': (_trx, {'nvram': str, 'placeholder_mac': str}),
+    'sgx543-from-kernelcache@1': (_sgx, {'build': str}),
     'bluetool-hcd@1': (_bluetool_hcd, {}),
     # T8010 SmartIO kext (iPad 6/7, iPhone 7).
     'smartio-from-kernelcache@1': (_smartio, {}),
@@ -116,6 +127,10 @@ STEPS = {
 }
 
 
+# Parameters naming additional, independently hash-checked recipe inputs.
+INPUT_PARAMETERS = {'trx-add-nvram@1': ('nvram',)}
+
+
 class UnsupportedRecipe(ValueError):
     """The recipe needs a step this Orchard version does not implement."""
 
@@ -138,6 +153,13 @@ def supported(recipe):
     if recipe.get('schema') != 2:
         raise UnsupportedRecipe('This firmware recipe format needs a newer Orchard')
     for output in recipe['outputs']:
+        # A pinned hash, or a reason it is still pending; never both.
+        if ('sha256' in output) == ('pending' in output):
+            raise ValueError('An output has either sha256 or pending: ' + output['destination'])
+        if 'pending' in output:
+            unpinned = [name for name in needed_inputs(recipe, [output]) if 'sha256' not in recipe['inputs'][name]]
+            if unpinned:
+                raise ValueError(f"Pending output {output['destination']} reads unpinned inputs: {', '.join(unpinned)}")
         # The first step reads a recipe input; each later step, the previous result.
         if not output['steps'] or 'input' not in output['steps'][0] or \
                 any('input' in step for step in output['steps'][1:]):
@@ -153,23 +175,37 @@ def supported(recipe):
                 # bool is an int subclass; neither stands in for the other.
                 if not isinstance(step[name], kind) or isinstance(step[name], bool) != (kind is bool):
                     raise ValueError(f"Parameter {name} of {step['step']} must be {kind.__name__}")
-            if 'input' in step and step['input'] not in recipe['inputs']:
-                raise ValueError('Unknown recipe input: ' + step['input'])
+            for field in ('input',) + INPUT_PARAMETERS.get(step['step'], ()):
+                if field in step and step[field] not in recipe['inputs']:
+                    raise ValueError('Unknown recipe input: ' + step[field])
     destinations = [output['destination'] for output in recipe['outputs']]
     if len(set(destinations)) != len(destinations):
         raise ValueError('Duplicate firmware destination')
     return recipe
 
 
+def pinned(recipe):
+    """The outputs a build installs: those with a pinned hash."""
+    return [output for output in recipe['outputs'] if 'sha256' in output]
+
+
+def pending(recipe):
+    """Outputs whose hash nobody has checked against real inputs yet; never installed."""
+    return [output for output in recipe['outputs'] if 'pending' in output]
+
+
 def needed_inputs(recipe, outputs=None):
     outputs = recipe['outputs'] if outputs is None else outputs
-    return sorted({output['steps'][0]['input'] for output in outputs})
+    return sorted({step[field] for output in outputs for step in output['steps']
+                   for field in ('input',) + INPUT_PARAMETERS.get(step['step'], ()) if field in step})
 
 
 def run(recipe, read_input, outputs=None):
     """Produce outputs as {destination: bytes}; read_input(name) returns bytes.
 
-    Every pinned input and every output is checked against its hash.
+    Every pinned input and every pinned output is checked against its hash. A
+    pending output has no hash yet; it is made only from pinned inputs, so its
+    result is what the recipe's verifier measures and pins.
     """
     cache = {}
 
@@ -187,8 +223,14 @@ def run(recipe, read_input, outputs=None):
         data = source(output['steps'][0]['input'])
         for step in output['steps']:
             implementation, _ = STEPS[step['step']]
-            data = implementation(step, data, output['sha256'])
-        if hashlib.sha256(data).hexdigest() != output['sha256']:
+            auxiliary = INPUT_PARAMETERS.get(step['step'], ())
+            if auxiliary:
+                data = (data,) + tuple(source(step[field]) for field in auxiliary)
+            data = implementation(step, data, output.get('sha256'))
+        if 'pending' in output:
+            if any('sha256' not in recipe['inputs'][name] for name in needed_inputs(recipe, [output])):
+                raise ValueError('Pending output reads unpinned inputs: ' + output['destination'])
+        elif hashlib.sha256(data).hexdigest() != output['sha256']:
             raise ValueError('Firmware output differs from the recipe: ' + output['destination'])
         result[output['destination']] = data
     return result
