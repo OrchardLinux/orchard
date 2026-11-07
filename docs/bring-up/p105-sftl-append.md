@@ -42,23 +42,13 @@ after synchronous readback. Request processing uses a NOIO allocation scope,
 which prevents map or provider allocations from recursing into writeback
 while the request lock is held.
 
-## Explicit operating policy
+## Operating policy
 
-Both `MTD_APPLE_H2FMI_WRITE` and `MTD_APPLE_SFTL_WRITE` default off. Logical
-writes also require `write_enable=1` when loading `apple-sftl`, or
-`apple_sftl.write_enable=1` for a built-in driver. The parameter defaults to
-false and is read-only after load. A supported replay state and a program
-callback are required. The installer must fence its intended logical range;
-this policy controls the logical disk independently of raw MTD permissions.
-
-`max_page_reads` defaults to 32768 explicit canonical read callbacks across
-recovery, candidate scans and runtime reads. Program-internal blank checks
-and readback remain inside the program callback and outside that counter.
-`max_io_time_ms` defaults to 600000 milliseconds from probe. Programs check
-the deadline before and after the synchronous callback. Both limit parameters
-are read-only and accept 1 through 4294967295. Exhaustion or a provider error
-permanently stops the instance. These defaults bound qualification; an
-installed root needs an explicit operating policy and must stay within it.
+Orchard carries the writer in `kernel/patches/armv7/mtd` with writing as part
+of the driver: there is no build option, module parameter or read budget. The
+disk is writable when the provider can program pages and the replayed journal
+ends at the allocation floor; otherwise it is read-only. Raw MTD devices stay
+available beside it.
 
 ## Evidence and qualification
 
@@ -86,4 +76,4 @@ earlier unplugged Omarchy desktop used the local Python backend. A fresh
 approved boot must establish recovery access and bounded reads before any
 approved write work. Native iOS recovery after writes, reboot persistence
 and interruption handling need physical evidence. P105 `storage_write`
-remains `missing`, with installation gated by the current feature states.
+is `untested` until a device test.
