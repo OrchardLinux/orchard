@@ -16,11 +16,15 @@ def add_nvram(firmware, text, placeholder_mac):
     if len(firmware) < 28:
         raise ValueError('Truncated TRX')
     magic, size, crc, flags, code_size, offset1, old_size = struct.unpack_from('<4s6I', firmware)
-    if magic != b'HDR0' or not 28 <= size <= len(firmware) or 28 + code_size + old_size != size:
+    # The header's length covers more than firmware and NVRAM in Apple's
+    # images; like Cascadia, take offsets[0] bytes of firmware and check only
+    # the NVRAM slot offsets[2] describes.
+    if (magic != b'HDR0' or not 28 <= size <= len(firmware) or
+            28 + code_size + old_size > len(firmware)):
         raise ValueError('Invalid TRX header or lengths')
     if zlib.crc32(firmware[12:size]) ^ 0xffffffff != crc:
         raise ValueError('TRX checksum differs')
-    if any(firmware[28 + code_size:size]):
+    if any(firmware[28 + code_size:28 + code_size + old_size]):
         raise ValueError('TRX already contains nonzero NVRAM')
     lines = []
     for raw in text.decode('ascii').splitlines():

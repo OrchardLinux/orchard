@@ -8,14 +8,14 @@ port on Linux 6.12). Device data from Shayne Legault's P105 bring-up
 
 `firmware.json` pins the iOS 8.4.1 (12H321) IPSW and makes four outputs.
 All of them read encrypted images, with keys the launcher caches from the
-device ([key file](../../docs/firmware-recipes.md#legacy-image-keys)). The
-pinned hashes are Cascadia's measurements; no extraction with real keys has
-run yet ([P105 firmware](../../docs/bring-up/p105-firmware.md)).
+device ([key file](../../docs/firmware-recipes.md#legacy-image-keys)). All
+four were made and checked on 2026-11-07
+([P105 firmware](../../docs/bring-up/p105-firmware.md)).
 
 | Destination | Made by | SHA-256 |
 |---|---|---|
 | `lib/firmware/P105.mtprops` | copy of `P105.mtprops` | `516b8db5f6144ad64698867b8f6e6209a49010fcff1cb103539fe5ea4ffb1390` |
-| `lib/firmware/brcm/brcmfmac4334.bin` | `trx-add-nvram@1` (after Cascadia's scripts/trx-add-nvram.py) from `borg.trx`, `borg-t-st.txt`, placeholder address `02:00:00:00:00:00` | pending verification |
+| `lib/firmware/brcm/brcmfmac4334.bin` | `trx-add-nvram@1` (after Cascadia's scripts/trx-add-nvram.py) from `borg.trx`, `borg-t-st.txt`, placeholder address `02:00:00:00:00:00` | `f1fb3a66341adbd4ce7f6e2065c9767575db6457deb79f5a85c398278a3d1d93` |
 | `lib/firmware/brcm/BCM4334B0.hcd` | `bluetool-hcd@1` from `usr/sbin/BlueTool` | `b6791a67141f1a16447e916237180a049b89dfaab9c38451b33864dbb6a50dda` |
 | `lib/firmware/apple/sgx543.fw` | `sgx543-from-kernelcache@1` (Cascadia's container format) from the IPSW member `kernelcache.release.p105` | `5f929f351459b169ed91a68dce086dbc682b639c4a31846ef5b12837562e9a77` |
 

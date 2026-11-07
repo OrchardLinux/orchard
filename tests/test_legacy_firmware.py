@@ -304,6 +304,13 @@ class LegacyFirmware(unittest.TestCase):
                 trx.add_nvram(bad, b'x=1', '02:00:00:00:00:00')
         with self.assertRaises(ValueError):
             trx.add_nvram(fw, b'macaddr=00:00:00:00:00:01', '02:00:00:00:00:00')
+        # Bytes the header length counts past offsets[0] + offsets[2] are dropped, as Cascadia does.
+        tail = bytearray(trx_fixture())
+        tail += b'trailer'
+        struct.pack_into('<I', tail, 4, len(tail))
+        struct.pack_into('<I', tail, 8, zlib.crc32(tail[12:]) ^ 0xffffffff)
+        self.assertEqual(trx.add_nvram(bytes(tail), b'x=1', '02:00:00:00:00:00'),
+                         trx.add_nvram(trx_fixture(), b'x=1', '02:00:00:00:00:00'))
         # Any other bootstrap address would escape the boot-time replacement.
         with self.assertRaisesRegex(ValueError, 'placeholder'):
             trx.add_nvram(fw, b'x=1', '02:10:5a:05:00:03')

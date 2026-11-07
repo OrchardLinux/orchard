@@ -4,30 +4,39 @@
 
 `devices/p105/firmware.json` (iOS 8.4.1, 12H321) has four outputs:
 
-| Output | Reads | Needs keys | State |
-|---|---|---|---|
-| `P105.mtprops` | root image | root image | hash pinned (Cascadia's) |
-| `brcm/brcmfmac4334.bin` | root image | root image | hash pending: the placeholder address changed |
-| `brcm/BCM4334B0.hcd` | root image (`BlueTool`) | root image | hash pinned (Cascadia's) |
-| `apple/sgx543.fw` | IMG3 kernelcache | kernelcache | hash pinned (Cascadia's) |
+| Output | Reads | Fingerprint |
+|---|---|---|
+| `P105.mtprops` | root image | Cascadia's, matched |
+| `brcm/brcmfmac4334.bin` | root image | new (placeholder address), measured |
+| `brcm/BCM4334B0.hcd` | root image (`BlueTool`) | Cascadia's, matched |
+| `apple/sgx543.fw` | IMG3 kernelcache | Cascadia's, matched |
 
 Every output reads an encrypted image, so none can be made before the
 launcher has written the keys ([key file](../firmware-recipes.md#legacy-image-keys)).
-With the keys, `bin/orchard build` for P105 verifies the three pinned hashes;
-`firmware.measure('p105', …)` gives the Wi-Fi hash to pin
-([pending outputs](../firmware-recipes.md#structure)). Touch calibration
-(`mtcal.bin`) is per unit and travels through `orchard mixin`.
+Touch calibration (`mtcal.bin`) is per unit and travels through
+`orchard mixin`.
+
+## Verification (2026-11-07)
+
+One extraction of all four outputs by byte range from Apple's server, with
+a stand-in key file in the launcher's place (filled from Project Cascadia's
+published keys, kept only on the host):
+
+- touch, Bluetooth and GPU firmware matched Cascadia's fingerprints;
+- the Wi-Fi firmware made with Cascadia's old address reproduced
+  Cascadia's fingerprint exactly, so the step is right; with the placeholder
+  `02:00:00:00:00:00` it is the pinned `f1fb3a66…`;
+- traffic: 35.8 MB of the 1.5 GB IPSW, in 384 s (one cold run, no cache).
+
+That run found one step bug: Apple's `borg.trx` header length counts 4,012
+bytes past firmware and NVRAM slot; the step now takes `offsets[0]` bytes of
+firmware, as Cascadia does.
 
 The reader handles the IPSW's compressed ZIP prefix followed by stored
 DEFLATE blocks, encrcdsa v2, UDIF, HFS+ and IMG3 (AES, LZSS), with no new
 dependency. Code adapted from rzxvx's Project Cascadia is credited in the
-modules and `NOTICE`. Generated fixtures cover each layer; no real keys or
-Apple files are in the repository.
-
-A bounded live read of the pinned IPSW (2026-11-07) reached byte 4,000,000
-of the root image after fetching 198,284 bytes. A cold index walks about
-89,000 stored-block headers; the full extraction's time and traffic are not
-measured yet.
+modules and `NOTICE`. Generated fixtures cover each layer; no keys or Apple
+files are in the repository.
 
 ## Wi-Fi address
 
