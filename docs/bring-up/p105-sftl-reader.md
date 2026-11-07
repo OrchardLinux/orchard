@@ -31,14 +31,9 @@ It follows the canonical H2FMI provider and native-map reader commits
 `9b494217444fc61adae2f95bc2ec05e461d45049` and
 `e5960c537455b9c40c57deb53823e80ca9b13bb4`.
 
-`max_page_reads` defaults to 32,768 physical page requests across recovery and
-subsequent block reads. `max_io_time_ms` defaults to 600,000 milliseconds from
-probe. Both read-only module parameters must be positive. The driver checks
-the deadline before and after each provider transaction. One already-bounded
-transaction limits the overrun. Exhausting either policy or receiving a
-provider error permanently stops that reader instance, including later reads
-that require no physical I/O. These limits define a qualification session;
-a mounted root cannot depend on the reader beyond its lifetime.
+Orchard carries this reader in `kernel/patches/armv7/mtd` without the read
+budget and lifetime module parameters of that candidate: a mounted root reads
+for as long as the system runs. A provider error still stops the reader.
 
 ## Software checks and limits
 
@@ -59,18 +54,8 @@ The canonical H2FMI provider shares controller code with the imported
 two-CAU profile. That profile needs a regression check; native-map recovery
 currently accepts only the measured 64 GB geometry.
 
-The lifetime revision adds five boundary tests for page budgets, deadlines,
-provider errors and invalid policies. Its actual core/test fixture passed
-again under ASan/UBSan. The changed frontend and test objects compiled against
-the current ARMv7 generated-header build with `W=1` and warnings-as-errors,
-retaining the existing `vmstat.h` enum-arithmetic warning as a warning. The
-earlier core, frontend, fixture and provider object targets also compiled.
-These checks establish source behavior and compilation; the new lifetime
-tests have no separate kernel KUnit run recorded here.
-
 The exact candidate still needs a complete qualification image and an
 approved P105 boot with working USB recovery, followed by bounded native-map
 reads. Host reconstruction and an ARM64 KUnit kernel do not qualify ARMv7
-controller timing. P105 `storage_read` and `storage_write` remain `missing`
-while this native logical provider awaits device qualification. Sustained
+controller timing. P105 `storage_read` stays `untested` until then. Sustained
 writes and interruption recovery belong to the dependent writer work.
