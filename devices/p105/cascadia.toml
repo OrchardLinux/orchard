@@ -1,6 +1,10 @@
-# P105 handoff addresses from the Cascadia-derived staging loader used for the
-# owner's successful iBEC boot. The external-initramfs placement is new and
-# requires a fresh hardware test with this producer.
+# P105 handoff addresses for the Cascadia loader (boot/cascadia), which iBEC
+# starts at load_address. The initramfs goes where Project Cascadia's own P105
+# boot put its extra archive (assemble.py OVERLAY_PHYS 0x88000000, at most
+# 128 MiB), which is also where the board DTB's /chosen initrd placeholders
+# point: past the decompressed kernel, inside what iBEC maps.
+# Interim home: where boot addresses finally live is part of the device-data
+# and launcher decision; nothing else in orchard repeats them.
 schema = 1
 load_address = 0x80000000
 kernel_offset = 0x8000
@@ -8,5 +12,5 @@ watchdog_address = 0x0f103020
 l2_address = 0x3e000000
 ram_start = 0x80000000
 ram_end = 0xa0000000
-initrd_address = 0x98000000
-initrd_limit = 0x9e000000
+initrd_address = 0x88000000
+initrd_limit = 0x90000000

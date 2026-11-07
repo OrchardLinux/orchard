@@ -9,6 +9,8 @@ The local P105 work fixed the executable entry by discarding ARM unwind
 metadata and asserting the upload address in the linker script.
 
 This producer keeps those entry safeguards. Hardware addresses come from
-the device's profile. Orchard's configuration record and DTB editor add
-bounded external-initramfs placement; that extension requires a fresh
-hardware boot before it is described as working.
+the device's profile. Orchard's configuration record replaces the loader's
+compiled-in DTB address and Cascadia's overlay header; the initramfs is
+copied before the MMU is turned off and the DTB's initrd placeholders are set
+in place, as Cascadia's linux_boot.c and assemble.py do. Not yet booted on
+hardware in this form.

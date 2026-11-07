@@ -17,7 +17,7 @@ from orchard.image import cascadia
 PROFILE = dict(schema=1, load_address=0x80000000, kernel_offset=0x8000,
                watchdog_address=0x0f103020, l2_address=0x3e000000,
                ram_start=0x80000000, ram_end=0xa0000000,
-               initrd_address=0x98000000, initrd_limit=0x9e000000)
+               initrd_address=0x88000000, initrd_limit=0x90000000)
 
 
 def loader(described=PROFILE):
@@ -57,7 +57,9 @@ def kernel():
 def tree(cells=1):
     return {'name': '', 'properties': {'#address-cells': struct.pack('>I', cells),
                                        'compatible': b'example,test\0'},
-            'children': [{'name': 'chosen', 'properties': {'bootargs': b'old\0', 'stdout-path': b'serial0\0'},
+            'children': [{'name': 'chosen', 'properties': {'bootargs': b'old\0', 'stdout-path': b'serial0\0',
+                                                           'linux,initrd-start': struct.pack('>I', 0x88000000),
+                                                           'linux,initrd-end': struct.pack('>I', 0x88000000)},
                           'children': []},
                          {'name': 'memory@80000000', 'properties': {'device_type': b'memory\0',
                                                                   'reg': b'\x80\0\0\0\x20\0\0\0'},
@@ -113,7 +115,7 @@ class CascadiaLoaderTests(unittest.TestCase):
 
     def assemble(self, **changes):
         arguments = dict(loader=loader(), kernel=kernel(), dtb=cascadia.write_fdt(tree()),
-                         initramfs=b'compressed-cpio', described=PROFILE, bootargs='console=tty0 rdinit=/init',
+                         initramfs=b'compressed-cpio', described=PROFILE,
                          elf=executable(loader()))
         arguments.update(changes)
         return cascadia.assemble(**arguments)
@@ -129,10 +131,14 @@ class CascadiaLoaderTests(unittest.TestCase):
         root, reservations, _ = cascadia.read_fdt(dtb)
         chosen = root['children'][0]['properties']
         self.assertEqual(chosen['stdout-path'], b'serial0\0')
-        self.assertEqual(chosen['bootargs'], b'console=tty0 rdinit=/init\0')
+        self.assertEqual(chosen['bootargs'], b'old\0')
         self.assertEqual(int.from_bytes(chosen['linux,initrd-start'], 'big'), PROFILE['initrd_address'])
         self.assertEqual(int.from_bytes(chosen['linux,initrd-end'], 'big'), PROFILE['initrd_address'] + len(b'compressed-cpio'))
-        self.assertEqual(reservations, [(PROFILE['initrd_address'], len(b'compressed-cpio'))])
+        self.assertEqual(reservations, [])
+        # In place, as Cascadia's assemble.py: only the two initrd cells differ from the input tree.
+        source = cascadia.write_fdt(tree())
+        self.assertEqual(len(dtb), len(source))
+        self.assertLessEqual(sum(a != b for a, b in zip(dtb, source)), 8)
         position = 0
         for component in receipt['components']:
             self.assertEqual(component['offset'], position)
@@ -143,29 +149,6 @@ class CascadiaLoaderTests(unittest.TestCase):
         self.assertEqual(receipt['image_sha256'], cascadia.digest(image))
         self.assertEqual(receipt['architecture'], 'arm')
         self.assertEqual(receipt['initramfs_encoding'], 'cascadia-dtb')
-
-    def test_chosen_creation_and_two_address_cells(self):
-        value = tree(2)
-        value['children'].pop(0)
-        dtb = cascadia.chosen(cascadia.write_fdt(value), 'test=1', PROFILE['initrd_address'], 12)
-        root, _, _ = cascadia.read_fdt(dtb)
-        self.assertEqual(root['children'][0], value['children'][0])
-        chosen = root['children'][-1]['properties']
-        self.assertEqual(len(chosen['linux,initrd-start']), 8)
-        self.assertEqual(int.from_bytes(chosen['linux,initrd-start'], 'big'), PROFILE['initrd_address'])
-
-    def test_previous_initrd_reservation_replaced_and_other_reservations_retained(self):
-        value = tree()
-        value['children'][0]['properties'].update({'linux,initrd-start': struct.pack('>I', 0x98000000),
-                                                  'linux,initrd-end': struct.pack('>I', 0x98000010)})
-        old = cascadia.write_fdt(value, [(0x98000000, 16), (0x9f000000, 4096)])
-        new = cascadia.chosen(old, 'new', 0x98000000, 32)
-        self.assertEqual(cascadia.read_fdt(new)[1], [(0x9f000000, 4096), (0x98000000, 32)])
-
-    def test_reserved_destination_refused(self):
-        old = cascadia.write_fdt(tree(), [(PROFILE['initrd_address'] + 4, 4096)])
-        with self.assertRaisesRegex(ValueError, 'reserved memory'):
-            self.assemble(dtb=old)
 
     def test_fdt_corruption_is_rejected(self):
         original = cascadia.write_fdt(tree())
@@ -188,8 +171,16 @@ class CascadiaLoaderTests(unittest.TestCase):
         smaller = dict(PROFILE, initrd_limit=PROFILE['initrd_address'] + 8)
         with self.assertRaisesRegex(ValueError, 'destination'):
             self.assemble(loader=loader(smaller), described=smaller, elf=None)
-        with self.assertRaisesRegex(ValueError, 'one line'):
-            self.assemble(bootargs='a\nb')
+
+    def test_a_tree_without_initrd_placeholders_is_refused(self):
+        value = tree()
+        del value['children'][0]['properties']['linux,initrd-end']
+        with self.assertRaisesRegex(ValueError, 'placeholders'):
+            self.assemble(dtb=cascadia.write_fdt(value))
+        value = tree(2)
+        value['children'][0]['properties']['linux,initrd-start'] = bytes(8)
+        with self.assertRaisesRegex(ValueError, 'one cell'):
+            self.assemble(dtb=cascadia.write_fdt(value))
 
     def test_decompressor_workspace_cannot_reach_high_initramfs(self):
         large = bytearray(kernel())
@@ -226,7 +217,7 @@ class CascadiaLoaderTests(unittest.TestCase):
             described = directory / 'profile.toml'
             described.write_text(''.join(f'{name} = {value}\n' for name, value in PROFILE.items()))
             out = directory / 'linux.bin'
-            command.extend(['--profile', str(described), '--bootargs', 'rdinit=/init', '--output', str(out)])
+            command.extend(['--profile', str(described), '--output', str(out)])
             first = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(first.returncode, 0, first.stderr)
             self.assertEqual(json.loads((directory / 'linux.bin.json').read_text())['image_sha256'], cascadia.digest(out.read_bytes()))

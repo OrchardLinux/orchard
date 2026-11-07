@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Assemble an ARM32 iBEC payload with an external initramfs described by its DTB.
+"""Assemble an ARM32 iBEC payload: the Cascadia loader, the zImage with its DTB, and an initramfs.
 
-The loader occupies the first 32 KiB. Its checked configuration tells the
-loader where to copy the initramfs before entering the unchanged zImage.
+The loader occupies the first 32 KiB. Its checked configuration tells it
+where the initramfs is; it copies it to the profile's initrd address before
+it turns off the MMU and enters the unchanged zImage, as Project Cascadia's
+linux_boot does. The DTB's /chosen linux,initrd-start/-end, placeholders in
+the board's tree, are set in place to that copy.
 This module uses only the standard library and also runs by file path.
 """
 import argparse
@@ -237,34 +240,48 @@ def write_fdt(root, reservations=(), cpu=0):
                             40, 17, 16, cpu, len(names), len(tree)) + reserve + tree + names)
 
 
-def chosen(data, bootargs, start, size):
-    if not isinstance(bootargs, str) or any(char in bootargs for char in ('\0', '\n', '\r')):
-        raise ValueError('Kernel arguments must be one line')
-    encoded = bootargs.encode('utf-8')
-    if len(encoded) > 2047:
-        raise ValueError('Kernel arguments exceed the ARM command-line bound')
-    root, reservations, cpu = read_fdt(data)
-    cell_bytes = root['properties'].get('#address-cells', struct.pack('>I', 2))
-    if len(cell_bytes) != 4 or (cells := struct.unpack('>I', cell_bytes)[0]) not in (1, 2):
-        raise ValueError('Expected one or two root address cells')
-    selected = next((item for item in root['children'] if item['name'] == 'chosen'), None)
-    if selected is None:
-        selected = {'name': 'chosen', 'properties': {}, 'children': []}
-        root['children'].append(selected)
-    properties = selected['properties']
-    width = cells * 4
-    previous_start = properties.get('linux,initrd-start', b'')
-    previous_end = properties.get('linux,initrd-end', b'')
-    if len(previous_start) == len(previous_end) == width:
-        old_start, old_end = int.from_bytes(previous_start, 'big'), int.from_bytes(previous_end, 'big')
-        reservations = [row for row in reservations if row != (old_start, old_end - old_start)]
-    if any(max(start, address) < min(start + size, address + length) for address, length in reservations):
-        raise ValueError('Initramfs destination overlaps reserved memory')
-    properties['bootargs'] = encoded + b'\0'
-    properties['linux,initrd-start'] = start.to_bytes(width, 'big')
-    properties['linux,initrd-end'] = (start + size).to_bytes(width, 'big')
-    reservations.append((start, size))
-    return write_fdt(root, reservations, cpu)
+def initrd_properties(data):
+    """Offsets of the values of /chosen linux,initrd-start and -end, each one cell, in DATA."""
+    read_fdt(data)  # checked first, so the walk below can trust the structure
+    _, _, tree_at, strings_at, _, _, _, _, strings_size, tree_size = FDT_HEADER.unpack_from(data)
+    names = data[strings_at:strings_at + strings_size]
+    at, path, found = tree_at, [], {}
+    while at < tree_at + tree_size:
+        token = struct.unpack_from('>I', data, at)[0]
+        at += 4
+        if token == 1:
+            name, at = _cstring(data, at, tree_at + tree_size)
+            path.append(name)
+            at = aligned(at, 4)
+        elif token == 2:
+            path.pop()
+        elif token == 3:
+            length, name_at = struct.unpack_from('>II', data, at)
+            at += 8
+            name, _ = _cstring(names, name_at, len(names))
+            if path == ['', 'chosen'] and name in ('linux,initrd-start', 'linux,initrd-end'):
+                if length != 4:
+                    raise ValueError(f'/chosen {name} is {length} bytes, not one cell')
+                found[name] = at
+            at = aligned(at + length, 4)
+        elif token == 9:
+            break
+    if len(found) != 2:
+        raise ValueError('The DTB has no /chosen linux,initrd-start and -end to set; '
+                         'the board\'s device tree must carry both as placeholders')
+    return found['linux,initrd-start'], found['linux,initrd-end']
+
+
+def set_initrd(data, start, size):
+    """DATA with /chosen linux,initrd-start/-end set in place to START and START + SIZE.
+
+    Project Cascadia's assemble.py does the same: nothing else in the tree
+    moves or changes, its boot arguments included."""
+    first, last = initrd_properties(data)
+    result = bytearray(data)
+    struct.pack_into('>I', result, first, start)
+    struct.pack_into('>I', result, last, start + size)
+    return bytes(result)
 
 
 def decompression_bound(kernel, dtb_size, described):
@@ -301,7 +318,11 @@ def decompression_bound(kernel, dtb_size, described):
     return bound
 
 
-def assemble(loader, kernel, dtb, initramfs, described, bootargs, *, elf=None):
+def assemble(loader, kernel, dtb, initramfs, described, *, elf=None):
+    """(image, receipt): LOADER, the unchanged zImage KERNEL with DTB appended, then INITRAMFS.
+
+    The loader copies INITRAMFS to the profile's initrd address before it
+    turns off the MMU, and the DTB's /chosen says where it is."""
     validate_profile(described)
     verify_loader(loader, described, elf)
     if (len(kernel) < 0x30 or struct.unpack_from('<I', kernel, 0x24)[0] != 0x016f2818):
@@ -311,7 +332,7 @@ def assemble(loader, kernel, dtb, initramfs, described, bootargs, *, elf=None):
         raise ValueError('zImage length differs from its header or contains appended bytes')
     if not initramfs or len(initramfs) > described['initrd_limit'] - described['initrd_address']:
         raise ValueError('Initramfs exceeds its reserved destination')
-    tree = chosen(dtb, bootargs, described['initrd_address'], len(initramfs))
+    tree = set_initrd(dtb, described['initrd_address'], len(initramfs))
     expanded_end = decompression_bound(kernel, len(tree), described)
     kernel_at = described['kernel_offset']
     dtb_at = kernel_at + len(kernel)
@@ -350,32 +371,16 @@ def assemble(loader, kernel, dtb, initramfs, described, bootargs, *, elf=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    given = parser.add_mutually_exclusive_group(required=True)
-    given.add_argument('--bootargs')
-    given.add_argument('--manifest', type=Path)
-    for name in ('loader', 'kernel', 'initramfs', 'profile', 'output'):
+    for name in ('loader', 'kernel', 'dtb', 'initramfs', 'profile', 'output'):
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--loader-elf', type=Path)
-    parser.add_argument('--dtb', action='append', type=Path, required=True)
-    parser.add_argument('--logo', type=Path)
     args = parser.parse_args()
-    if len(args.dtb) != 1:
-        parser.error('A Cascadia payload takes exactly one device tree')
-    if args.logo:
-        parser.error('Cascadia payloads do not implement the m1n1 logo format')
     receipt = args.output.with_suffix(args.output.suffix + '.json')
     if args.output.exists() or receipt.exists():
         parser.error('Choose new image and receipt paths')
     try:
-        bootargs = args.bootargs
-        if args.manifest:
-            bootargs = json.loads(args.manifest.read_text())['bootargs']
-            prefix = 'chosen.bootargs='
-            if not bootargs.startswith(prefix) or not bootargs.endswith('\n'):
-                raise ValueError('Invalid boot-argument manifest')
-            bootargs = bootargs[len(prefix):-1]
-        data, document = assemble(args.loader.read_bytes(), args.kernel.read_bytes(), args.dtb[0].read_bytes(),
-                                  args.initramfs.read_bytes(), profile(args.profile), bootargs,
+        data, document = assemble(args.loader.read_bytes(), args.kernel.read_bytes(), args.dtb.read_bytes(),
+                                  args.initramfs.read_bytes(), profile(args.profile),
                                   elf=args.loader_elf.read_bytes() if args.loader_elf else None)
     except (ValueError, KeyError) as error:
         parser.error(str(error))

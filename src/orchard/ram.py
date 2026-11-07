@@ -141,9 +141,15 @@ def assemble_ram(hardware, output, *, kernel, busybox, loader, pongo, init,
 
 
 def assemble(bootargs, loader, dtbs, kernel, initramfs, output, *, profile=None):
-    command(sys.executable, IMAGE / ('cascadia.py' if profile is not None else 'assemble.py'),
-            *(['--profile', profile] if profile is not None else []),
-            '--bootargs', bootargs, '--loader', loader,
+    if profile is not None:
+        # Cascadia keeps the board DTB's own boot arguments (image/cascadia.py).
+        (dtb,) = dtbs
+        elf = Path(loader).with_suffix('.elf')
+        command(sys.executable, IMAGE / 'cascadia.py', '--profile', profile, '--loader', loader,
+                *(['--loader-elf', elf] if elf.is_file() else []), '--dtb', dtb, '--kernel', kernel,
+                '--initramfs', initramfs, '--output', output)
+        return
+    command(sys.executable, IMAGE / 'assemble.py', '--bootargs', bootargs, '--loader', loader,
             *(argument for dtb in dtbs for argument in ('--dtb', dtb)), '--kernel', kernel,
             '--initramfs', initramfs, '--output', output)
 
