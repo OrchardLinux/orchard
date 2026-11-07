@@ -1,6 +1,6 @@
 #!/bin/busybox sh
 # orchard's initrd for installed systems: load storage, mount the root that
-# root=PARTUUID= names, start its init. The same for every distribution and
+# root=PARTUUID= names (on a GPT or LwVM disk), start its init. The same for every distribution and
 # init system; only BusyBox and the platform's storage modules are inside.
 export PATH=/bin
 /bin/busybox --install -s /bin
@@ -53,6 +53,16 @@ gpt_partuuid() {
     echo "$4$3$2$1-$6$5-$8$7-$9${10}-${11}${12}${13}${14}${15}${16}"
 }
 
+# lwvm_partuuid DISK NUMBER: the GUID of LwVM entry NUMBER (32-bit boards' iOS
+# disk), from the header the kernel's LwVM reader reads too; its partition
+# numbers are the entries' numbers.
+lwvm_partuuid() {
+    [ "$(od -An -tx1 -v -N 16 "$1" | tr -d ' \n')" = 6a9088cf8afd630ae351e24887e0b98b ] || return 1
+    set -- $(od -An -tx1 -v -j $((512 + ($2 - 1) * 128 + 16)) -N 16 "$1")
+    [ "$*" != '00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00' ] || return 1
+    echo "$1$2$3$4-$5$6-$7$8-$9${10}-${11}${12}${13}${14}${15}${16}"
+}
+
 device=
 seconds=0
 while [ -z "$device" ]; do
@@ -61,7 +71,10 @@ while [ -z "$device" ]; do
         part=${number%/partition}
         disk=$(basename "$(dirname "$(readlink -f "$part")")")
         sector=$(cat "/sys/class/block/$disk/queue/logical_block_size")
-        if [ "$(gpt_partuuid "/dev/$disk" "$sector" "$(cat "$number")")" = "$root" ]; then
+        # A GPT first, as always; only a disk without one is asked for LwVM.
+        id=$(gpt_partuuid "/dev/$disk" "$sector" "$(cat "$number")") ||
+            id=$(lwvm_partuuid "/dev/$disk" "$(cat "$number")")
+        if [ "$id" = "$root" ]; then
             device=/dev/${part##*/}
             break
         fi

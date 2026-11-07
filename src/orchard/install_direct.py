@@ -4,12 +4,15 @@ The payload is what every later boot uses (the platform layer's kernel, initrd a
 an archive appended to the initrd: a static writer, Dropbear and SSH keys made for this boot
 (boot/initramfs/install). The host computes the partition table and streams the image; once the root
 is on disk, the rest runs inside it (install_device.py finish), and the boot simply continues into it.
+On 32-bit boards the disk is iOS's, partitioned with LwVM: the root goes into an existing Linux
+partition and nothing else on the disk is written (install_layout.py).
 """
 import base64
 from contextlib import contextmanager
 import io
 import json
 from pathlib import Path
+import re
 import shlex
 import stat
 import struct
@@ -22,6 +25,7 @@ import zlib
 
 from . import install_device as D
 from . import install_remote as remote
+from . import lwvm
 from .contracts import Connection
 from .hardware import ROOT
 from .state import BootState, DeviceState, private_directory
@@ -29,7 +33,8 @@ from .transports.ssh import KEY, one_connection, ssh_argv, wait_authenticated
 
 ADD_ON = ROOT / 'boot/initramfs/install'
 HOST = '172.16.42.1'
-DISK = '/dev/nvme0n1'
+# The one internal disk: NVMe on 64-bit boards, the iOS flash translation layer on 32-bit ones.
+INTERNAL_DISK = re.compile(r'nvme[0-9]+n[0-9]+|applesftl[0-9]+')
 BOOT_ARGS = 'fbcon=map:9 vt.global_cursor_default=0'
 INITRAMFS_MAGIC = b'm1n1_initramfs'
 XBOOTLDR, ROOT_ARM64 = D.XBOOTLDR, D.ROOT_ARM64
@@ -146,40 +151,76 @@ def payload(m1n1, logo, layer, devicetree, extra):
                      INITRAMFS_MAGIC, struct.pack('<I', len(initramfs)), initramfs))
 
 
-def cascadia_payload(loader, profile, layer, devicetree, extra):
+def cascadia_payload(loader, profile, layer, devicetree, extra, *, serial=None, bootargs=None):
     """The Cascadia loader's payload (image/cascadia.py): one file for a patched iBEC to start, on 32-bit boards.
 
     The same kernel, initrd and add-on as m1n1's payload. The loader copies the initrd and the
     add-on, one archive, to the board's initrd address before it turns off the MMU (the form
-    Project Cascadia booted P105 with); the DTB's own boot arguments stay as they are. A kernel
-    that also has orchard's initrd built in unpacks this copy over it.
+    Project Cascadia booted P105 with); the DTB's own boot arguments stay as they are unless
+    BOOTARGS replaces them. SERIAL, the device's serial number, becomes the tree's serial-number,
+    as m1n1 copies it on 64-bit boards. A kernel that also has orchard's initrd built in unpacks
+    this copy over it.
     """
     from .image import cascadia
     files = layer_boot_files(layer, devicetree)
     initramfs = files['initrd'] + bytes(-len(files['initrd']) % 4) + extra
     image, _ = cascadia.assemble(Path(loader).read_bytes(), files['kernel'], files['tree'], initramfs,
-                                 cascadia.profile(profile))
+                                 cascadia.profile(profile), serial=serial, bootargs=bootargs)
     return image
 
 
-def boot_image(adapter, assets, extra):
+def boot_image(adapter, assets, extra, device=None):
     """The one file the board's loader is given: m1n1's payload, or the Cascadia loader's on 32-bit boards.
 
     The Cascadia loader is built for its board's addresses, which come from orchard's device data
     (hardware.payload_profile): the host assembles it, so a release needs to know no board.
+    DEVICE: the attached device as USB lists it; its serial number goes into a 32-bit board's tree.
     """
     if 'cascadia' in assets:
         from .hardware import payload_profile
         return cascadia_payload(assets['cascadia'], payload_profile(adapter.PROFILE, 'cascadia'),
-                                assets['layer'], adapter.DEVICETREE, extra)
+                                assets['layer'], adapter.DEVICETREE, extra,
+                                serial=(device or {}).get('serial_number'))
     return payload(assets['m1n1'], assets.get('logo'), assets['layer'], adapter.DEVICETREE, extra)
 
 
+def installed_bootargs(board, partuuid, options):
+    """A 32-bit installed system's boot arguments: the board tree's own, with its root replaced by the entry's.
+
+    The old built-in CDC gadget's arguments go too: the kernel has it off, and orchard's initrd
+    binds its own configfs gadget (USB serial and network).
+    """
+    kept = [word for word in board.split() if not word.startswith(('root=', 'rdinit=', 'g_cdc.')) and word not in ('rw', 'ro')]
+    return ' '.join([*kept, f'root=PARTUUID={partuuid}', 'rw', *options.split()])
+
+
+def installed_bundle(adapter, assets, device, plan):
+    """The Cascadia bundle that starts an installed 32-bit system: kernel, initrd and tree, no add-on.
+
+    The same files as the root's boot entry (/boot/loader/entries), with root=PARTUUID in the
+    tree's boot arguments. Until a boot partition exists, this is what has to be placed where
+    iOS's boot chain finds it.
+    """
+    from .hardware import payload_profile
+    from .image import cascadia
+    tree = layer_boot_files(assets['layer'], adapter.DEVICETREE)['tree']
+    bootargs = installed_bootargs(cascadia.board_bootargs(tree), plan['root']['partuuid'], plan['entry'].get('options', ''))
+    return cascadia_payload(assets['cascadia'], payload_profile(adapter.PROFILE, 'cascadia'), assets['layer'],
+                            adapter.DEVICETREE, b'', serial=(device or {}).get('serial_number'), bootargs=bootargs)
+
+
 def start(adapter, device, image, assets, progress):
-    """Hand IMAGE to the device: Pongo starts m1n1's payload. Starting the Cascadia loader's
-    (a patched iBEC) is not part of orchard yet."""
+    """Hand IMAGE to the device and wait for the add-on's USB: Pongo starts m1n1's payload,
+    orchard-launcher the Cascadia loader's (through a patched iBEC, see launcher.py)."""
     if 'cascadia' in assets:
-        raise ValueError(f'Starting Linux on the {adapter.NAME} needs a patched iBEC, which orchard does not deliver yet')
+        from . import launcher
+        from .apple import boot as apple_boot
+        from .hardware import data_root
+        chain = getattr(adapter, 'LAUNCHER_CHAIN', None)
+        if chain is None:
+            raise ValueError(f'The {adapter.NAME} lists no boot method that orchard-launcher delivers')
+        launcher.load(image, chain=chain, catalog=data_root(), progress=progress)
+        return apple_boot.wait_mode(device, 'install', chip=adapter.CHIP, board=adapter.BOARD, product=None, seconds=120)
     return adapter.boot_payload(device, image, assets['pongo'], progress)
 
 
@@ -190,7 +231,7 @@ def start_for_inspection(adapter, device, assets, ecid, progress):
         _, _, _, host_key = make_keys(directory)
         extra = add_on(assets['install_tools'], ecid, '\n'.join(computer_key.public_keys()) + '\n', host_key)
         image = Path(directory) / 'payload.bin'
-        image.write_bytes(boot_image(adapter, assets, extra))
+        image.write_bytes(boot_image(adapter, assets, extra, device))
         return start(adapter, device, image, assets, progress)
 
 
@@ -200,6 +241,21 @@ def shell(connection, command, *, input=b'', timeout=60):
         raise remote.RemoteError(f'{command.split()[0]} failed on the device: ' +
                                  result.stderr.decode(errors='replace').strip()[-400:])
     return result.stdout
+
+
+def find_disk(connection, seconds=30):
+    """The device's internal disk, once its driver has it: exactly one, or the install stops."""
+    deadline = time.monotonic() + seconds
+    while True:
+        names = shell(connection, 'for d in /sys/class/block/*; do [ -e "$d/partition" ] || echo "${d##*/}"; done; true')
+        found = sorted(name for name in names.decode().split() if INTERNAL_DISK.fullmatch(name))
+        if len(found) > 1:
+            raise D.InstallError('disks', 'More than one internal disk: ' + ', '.join(found))
+        if found:
+            return '/dev/' + found[0]
+        if time.monotonic() > deadline:
+            raise ValueError(f'Storage did not come up within {seconds} s')
+        time.sleep(0.1)
 
 
 def read_disk(connection, disk, offset, size, block):
@@ -242,11 +298,76 @@ def probe(start):
 
 def inspect(connection, disk):
     """The layout install_layout plans from, as install_device.py inspect reports it."""
+    if read_disk(connection, disk, 0, lwvm.HEADER_BYTES, lwvm.HEADER_BYTES)[:16] == lwvm.MAGIC:
+        return inspect_lwvm(connection, disk)
     block, header, entries = read_table(connection, disk)
     info, partitions, free = D.parse_gpt(disk, block, header, entries)
     for part in partitions:
         part.update(probe(shell(connection, f'dd if={D.node(disk, part["number"])} bs=4096 count=1 2>/dev/null || true')))
     return {'disk': info, 'partitions': partitions, 'free': free}
+
+
+def kernel_partitions(connection, disk):
+    """{number: (start, sectors)} of the partitions the kernel found on DISK, in 512-byte sectors."""
+    name = Path(disk).name
+    text = shell(connection, f'for p in /sys/class/block/{name}/{name}*; do [ -e "$p/partition" ] && '
+                             'echo $(cat "$p/partition") $(cat "$p/start") $(cat "$p/size"); done; true').decode()
+    return {int(number): (int(start), int(size)) for number, start, size in (line.split() for line in text.splitlines())}
+
+
+def inspect_lwvm(connection, disk):
+    """An LwVM disk's layout: the partitions the kernel added, with the type and identity of their LwVM entries.
+
+    The kernel's LwVM reader exposes each partition's place (sysfs) but not its type
+    or GUID, so the host reads the header itself; both copies must agree. Scattered
+    partitions, which the kernel skips, are not offered, and a partition whose place
+    differs between the kernel and the header stops the install.
+    """
+    name = Path(disk).name
+    sector = int(shell(connection, f'cat /sys/class/block/{name}/queue/logical_block_size'))
+    media = int(shell(connection, f'cat /sys/class/block/{name}/size')) * lwvm.SECTOR
+    chunk = lwvm.chunk_size(media)
+    try:
+        snapshot = lwvm.parse(read_disk(connection, disk, 0, lwvm.HEADER_BYTES, lwvm.HEADER_BYTES),
+                              read_disk(connection, disk, chunk - lwvm.HEADER_BYTES, lwvm.HEADER_BYTES,
+                                        lwvm.HEADER_BYTES), media)
+    except lwvm.Error as error:
+        raise D.InstallError('lwvm', f'{disk}: {error}') from error
+    found = kernel_partitions(connection, disk)
+    partitions = []
+    for part in snapshot['partitions']:
+        if part['number'] not in found:
+            continue
+        start, size = found[part['number']]
+        extents = part['extents']
+        if (len(extents) != 1 or extents[0]['physical'] != start * lwvm.SECTOR or
+                part['bytes'] != size * lwvm.SECTOR):
+            raise D.InstallError('lwvm', f'{disk}: partition {part["number"]} lies elsewhere than its LwVM entry says')
+        row = {'number': part['number'], 'start': start * lwvm.SECTOR // sector,
+               'blocks': size * lwvm.SECTOR // sector, 'type': part['type'], 'partuuid': part['partuuid'],
+               'name': part['name'], 'attributes': part['attributes']}
+        row.update(probe(shell(connection, f'dd if={D.node(disk, part["number"])} bs=4096 count=1 2>/dev/null || true')))
+        partitions.append(row)
+    info = {'path': disk, 'sector': sector, 'table': 'lwvm', 'table_sha256': snapshot['header_sha256'],
+            'media_bytes': media, 'chunk_bytes': chunk}
+    return {'disk': info, 'partitions': sorted(partitions, key=lambda p: p['start']), 'free': []}
+
+
+def lwvm_target(connection, plan, disk):
+    """The node of the planned LwVM partition, after checking the live disk against the plan.
+
+    Nothing is written to the table: the root replaces the partition's contents only.
+    """
+    layout = inspect_lwvm(connection, disk)
+    if layout['disk']['table_sha256'] != plan['disk']['table_sha256'] or layout['disk']['sector'] != plan['disk']['sector']:
+        raise D.InstallError('layout-changed', 'The LwVM table changed since it was inspected; inspect again')
+    root = plan['root']
+    match = [p for p in layout['partitions'] if p['number'] == root['number']]
+    if (not match or (match[0]['partuuid'], match[0]['start'], match[0]['blocks']) !=
+            (root['partuuid'], root['start'], root['blocks']) or
+            match[0]['type'] != lwvm.LINUX_TYPE or match[0]['attributes']):
+        raise D.InstallError('plan-mismatch', 'The partition to replace is not the inspected Linux partition')
+    return D.node(disk, root['number']), layout['partitions']
 
 
 def entry_bytes(kind, partuuid, start, blocks, name):
@@ -406,17 +527,18 @@ def grow(connection, node, fs_uuid, label):
 
 
 def mount_new_root(connection, node, boot_node):
-    """The root and boot partitions mounted as the root will see them."""
+    """The root and boot partitions mounted as the root will see them; no BOOT_NODE: /boot is the root's own."""
+    boot = f'mount -t vfat {boot_node} /newroot/boot && ' if boot_node else ''
     shell(connection, f'mkdir -p /newroot && mount -t ext4 {node} /newroot && '
                       'mount -t proc proc /newroot/proc && mount -t sysfs sysfs /newroot/sys && '
                       'mount -t devtmpfs dev /newroot/dev && mount -t tmpfs -o mode=0755 tmpfs /newroot/run && '
                       'mkdir -p /newroot/run/orchard /newroot/boot && mount --bind /run/orchard /newroot/run/orchard && '
-                      f'mount -t vfat {boot_node} /newroot/boot && cp /newroot/etc/os-release /run/orchard/os-release',
+                      f'{boot}cp /newroot/etc/os-release /run/orchard/os-release',
           timeout=60)
 
 
-def unmount_new_root(connection, root_partuuid):
+def unmount_new_root(connection, root_partuuid, boot=True):
     """Everything on storage, then the initrd carries on into the new root."""
-    shell(connection, 'sync; for point in /newroot/boot /newroot/run/orchard /newroot/run /newroot/dev /newroot/sys '
-                      '/newroot/proc /newroot; do umount "$point" || exit 1; done; sync', timeout=300)
+    points = ('/newroot/boot ' if boot else '') + '/newroot/run/orchard /newroot/run /newroot/dev /newroot/sys /newroot/proc /newroot'
+    shell(connection, f'sync; for point in {points}; do umount "$point" || exit 1; done; sync', timeout=300)
     shell(connection, f"echo {root_partuuid} > /run/orchard/done.part && mv /run/orchard/done.part /run/orchard/done")

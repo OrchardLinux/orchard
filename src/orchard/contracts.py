@@ -20,7 +20,8 @@ class _SelectionDetails(TypedDict, total=False):
     board: Optional[int]
     product: Optional[str]
     serial_port: Optional[str]
-    pwned: bool
+    pwned: Optional[str]
+    serial_number: Optional[str]
     boot_id: Optional[str]
 
 

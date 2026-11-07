@@ -7,6 +7,19 @@ import uuid
 MODES = {0x1227: 'dfu', 0x4141: 'pongo', 0x4142: 'linux', 0x4144: 'ram', 0x4145: 'system'}
 
 
+def serial_tags(serial):
+    """What an Apple USB serial string says beyond ECID, CPID and BDID.
+
+    serial_number: the device's serial number (DFU's SRNM:[...]); pwned: the
+    exploit that left its PWND:[...] tag (checkm8, ...), or checkra1n for its
+    YOLO:checkra1n tag; None when absent.
+    """
+    number = re.search(r'\bSRNM:\[([A-Za-z0-9]{1,32})\]', serial)
+    pwned = re.search(r'\bPWND:\[([^\]]{1,64})\]', serial)
+    return {'serial_number': number.group(1) if number else None,
+            'pwned': pwned.group(1) if pwned else ('checkra1n' if 'YOLO:checkra1n' in serial else None)}
+
+
 def devices(root=Path('/sys/bus/usb/devices')):
     found = []
     for node in root.iterdir():
@@ -32,8 +45,8 @@ def devices(root=Path('/sys/bus/usb/devices')):
                           boot_id=str(uuid.UUID(boot.group(1))) if boot else None,
                           chip=int(chip.group(1), 16) if chip else None,
                           board=int(board.group(1), 16) if board else None,
-                          pwned='YOLO:checkra1n' in serial, profile=profile.group(1) if profile else None, product=product,
-                          serial_port=next(iter(ports), None)))
+                          profile=profile.group(1) if profile else None, product=product,
+                          serial_port=next(iter(ports), None), **serial_tags(serial)))
     return found
 
 

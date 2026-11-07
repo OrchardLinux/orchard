@@ -5,7 +5,7 @@ import subprocess
 import sys
 import uuid
 
-from .linux_usb import devices as linux_devices, m1n1_ports as linux_m1n1_ports
+from .linux_usb import devices as linux_devices, m1n1_ports as linux_m1n1_ports, serial_tags
 from orchard.state import EndpointUnavailable
 
 # 0x4144: a RAM payload's USB session (orchard/usb-session).
@@ -58,7 +58,7 @@ def devices():
                       'board': int(fields[2].group(1), 16) if fields[2] else None,
                       'profile': profile.group(1) if profile else None,
                       'product': node.get('USB Product Name'),
-                      'serial_port': ports[0] if ports else None})
+                      'serial_port': ports[0] if ports else None, **serial_tags(serial)})
     return found
 
 

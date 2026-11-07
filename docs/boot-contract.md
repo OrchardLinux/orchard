@@ -50,6 +50,19 @@ which one and opens a shell on the console.
 - **Partition identity only.** Roots are named by PARTUUID in their entries, never by partition number or position.
 - **Inside its root partition, a system uses its native layout,** for example upstream Omarchy's btrfs subvolumes.
 
+## Partitions (LwVM, 32-bit boards, interim)
+
+The iOS disk of 32-bit boards is partitioned with LwVM, which the kernel reads
+(`kernel/patches/armv7/block`): partitions keep their LwVM entry number, and the
+entry's GUID is their PARTUUID. Until the iOS resize step creates the Linux
+entry, the installer only replaces an existing, unencrypted Linux entry
+(`0fc63daf-8483-4772-8e79-3d69d8477de4`) in place and never writes the LwVM map.
+There is no boot partition yet: the entry and its files are written to the
+root's own `/boot`, in the layout below, for a later boot partition or loader to
+take over. Meanwhile the host keeps the Cascadia bundle that starts the
+installed system (its tree's `bootargs` carry `root=PARTUUID=`), which has to be
+placed where iOS's boot chain finds it.
+
 ## Entries
 
 The layout follows BLS:
@@ -67,6 +80,8 @@ initrd     /6a1f…/6.18.2-orchard/initrd
 devicetree /6a1f…/6.18.2-orchard/t8010-j71b.dtb
 options    root=PARTUUID=4d6c…-… rw quiet
 ```
+
+`architecture` is `aa64`, or `arm` for a 32-bit zImage.
 
 | Key | Orchard rule |
 |---|---|

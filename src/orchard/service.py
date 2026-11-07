@@ -83,6 +83,9 @@ def caveats(adapter):
         names = [label for name, label in labels.items() if adapter.FEATURES.get(name) == state]
         if names:
             rows.append(f'- {title}: ' + ', '.join(names))
+    if getattr(adapter, 'STORAGE', {}).get('reclaims') is False:
+        rows.append('- Storage: freed space is not reused yet. Everything written, this install included, '
+                    'uses up blank flash for good; once it runs out, nothing more can be written.')
     lines = ['Caveats:', *rows] if rows else []
     if adapter.STATUS != 'supported':
         lines.append('This device has not been tested yet, proceed at your own risk!')
@@ -109,6 +112,9 @@ def ask_account(account, clock, secrets_fn, input_fn, progress):
 def choose_target(layout, clock, *, name='Linux', input_fn=input, output=print):
     """Pick one install target from the device's layout; replacing a partition is typed out."""
     options = install_layout.options(layout)
+    if not options and install_layout.lwvm(layout):
+        raise ValueError(f'No unencrypted Linux partition of at least {install_layout.MIN_ROOT_BYTES / 1024**3:.0f} GiB. '
+                         'The installer never resizes iOS; a Linux partition has to exist already.')
     if not options:
         needed = (install_layout.MIN_ROOT_BYTES + install_layout.BOOT_BYTES) / 1024**3
         raise ValueError(f'No free space or Linux partition of at least {needed:.0f} GiB. '
@@ -123,7 +129,7 @@ def choose_target(layout, clock, *, name='Linux', input_fn=input, output=print):
     option = options[int(answer) - 1]
     if option.kind == 'replace':
         phrase = f'erase {option.partition["number"]}'
-        if option.partition['type'] == install_layout.LINUX_DATA:
+        if option.partition['type'] == install_layout.LINUX_DATA and not install_layout.lwvm(layout):
             # Installs from the previous installer were one Linux-data partition; this
             # installer writes a boot partition and an arm64 root instead.
             output('This looks like an install from the previous Orchard installer. It cannot be '
@@ -188,7 +194,7 @@ def install_direct(adapter, device, name, files, firmware_files, boot_files, cha
     from .state import DeviceState
     if device['resumed']:
         raise ValueError('This release installs without a recovery. Put the device in DFU mode, then run: orchard install')
-    disk = os.environ.get('ORCHARD_INSTALL_DISK', direct.DISK)
+    disk = os.environ.get('ORCHARD_INSTALL_DISK')
     interfaces = direct.link_local_interfaces()
     state = private_directory(DeviceState(adapter.PROFILE, device['ecid']).root)
     progress.section('Getting ready', keep_rows=True)
@@ -199,7 +205,7 @@ def install_direct(adapter, device, name, files, firmware_files, boot_files, cha
         client, host_key, authorized, dropbear_host_key = direct.make_keys(directory)
         extra = direct.add_on(boot_assets['install_tools'], device['ecid'], authorized, dropbear_host_key)
         image_file = Path(directory) / 'payload.bin'
-        image_file.write_bytes(direct.boot_image(adapter, boot_assets, extra))
+        image_file.write_bytes(direct.boot_image(adapter, boot_assets, extra, device))
         with progress.alongside('Device'):
             found = direct.start(adapter, device, image_file, boot_assets, progress)
         progress.mark('Install mode on USB')
@@ -207,7 +213,8 @@ def install_direct(adapter, device, name, files, firmware_files, boot_files, cha
         progress.step('Connecting over SSH')
         with direct.session(adapter.PROFILE, device, found, directory, client, host_key, interfaces) as connection:
             progress.mark('SSH connected')
-            layout = direct.inspect(connection, disk)
+            layout = direct.inspect(connection, disk or direct.find_disk(connection))
+            disk = layout['disk']['path']
             progress.mark('Disk read')
             progress.done()
             option = choose_target(layout, clock, name=name, input_fn=input_fn, output=progress.say)
@@ -234,16 +241,21 @@ def install_direct(adapter, device, name, files, firmware_files, boot_files, cha
                 **{key: layer[key] for key in ('bytes', 'sha256', 'expanded_bytes')}}, firmware={
                 'path': remote.DIRECTORY + '/firmware.tar.gz',
                 'bytes': mixin_record['bytes'], 'sha256': mixin_record['sha256']})
-            nodes, partitions = direct.write_partitions(connection, plan, disk)
-            progress.step('Partitions created')
-            root_node = nodes[plan['root']['partuuid']]
-            if plan['boot']['create']:
-                sector = layout['disk']['sector']
-                for offset, data in direct.D.fat32_regions(plan['boot']['blocks'], sector, int(plan['boot']['fs_uuid'], 16)):
-                    direct.write_at(connection, disk, sector, plan['boot']['start'] + offset // sector, bytes(data))
-                boot_node = nodes[plan['boot']['partuuid']]
+            if plan['boot'] is None:
+                # LwVM: the Linux partition is reused as it is; the table is not written.
+                root_node, partitions = direct.lwvm_target(connection, plan, disk)
+                boot_node = None
             else:
-                boot_node = direct.D.node(disk, plan['boot']['number'])
+                nodes, partitions = direct.write_partitions(connection, plan, disk)
+                progress.step('Partitions created')
+                root_node = nodes[plan['root']['partuuid']]
+                if plan['boot']['create']:
+                    sector = layout['disk']['sector']
+                    for offset, data in direct.D.fat32_regions(plan['boot']['blocks'], sector, int(plan['boot']['fs_uuid'], 16)):
+                        direct.write_at(connection, disk, sector, plan['boot']['start'] + offset // sector, bytes(data))
+                    boot_node = nodes[plan['boot']['partuuid']]
+                else:
+                    boot_node = direct.D.node(disk, plan['boot']['number'])
             ranges = json.loads(assets['map'].read_text())['ranges']
             with assets['root'].open('rb') as source:
                 timings = direct.stream_image(connection, root_node, image, source,
@@ -264,14 +276,20 @@ def install_direct(adapter, device, name, files, firmware_files, boot_files, cha
             events = remote.run(inside, ['finish', remote.DIRECTORY + '/plan.json'], progress=progress)
             timeline = direct.shell(connection, 'cat /run/orchard/timeline').decode()
             progress.mark('Finished inside the root')
-            direct.unmount_new_root(connection, plan['root']['partuuid'])
+            direct.unmount_new_root(connection, plan['root']['partuuid'], boot=boot_node is not None)
             progress.mark('Unmounted, boot continues')
             report = {'device_timeline': timeline, 'profile': connection.scope.device.profile, 'ecid': connection.scope.device.ecid,
                       'boot_id': connection.scope.boot_id, 'installed': True, 'release': record['release'],
-                      'root': plan['root']['partuuid'], 'boot': plan['boot']['partuuid'],
+                      'root': plan['root']['partuuid'], 'boot': (plan['boot'] or {}).get('partuuid'),
                       'written': timings, 'events': events, 'timing': clock.result()}
             path = private_directory(connection.scope.root) / 'last-install.json'
             save_report(path, report)
+            if plan['boot'] is None and 'cascadia' in boot_assets:
+                # No boot partition yet: later starts need this bundle placed where iOS's boot chain finds it.
+                bundle = path.with_name(f'boot-{plan["root"]["partuuid"].split("-")[0]}.bin')
+                bundle.write_bytes(direct.installed_bundle(adapter, boot_assets, device, plan))
+                report['boot_bundle'] = str(bundle)
+                save_report(path, report)
             progress.done('Installed')
             progress.section('Starting ' + name)
             if account and account['ssh_keys']:
@@ -286,8 +304,10 @@ def install_direct(adapter, device, name, files, firmware_files, boot_files, cha
     progress.done()
     login = (f'\nSign in over SSH: ssh {account["user"]}@172.16.42.1'
              if report.get('ready') and account and account['ssh_keys'] else '')
-    progress.say(f'\n{name} is {"ready" if report.get("ready") else "starting"}.{login}\n'
-                 'To start it again later, put the device in DFU mode and run: orchard launch')
+    later = ('To start it again later, put the device in DFU mode and run: orchard launch'
+             if 'boot_bundle' not in report else
+             f'Starting it again later needs its boot bundle in place, which orchard cannot do yet: {report["boot_bundle"]}')
+    progress.say(f'\n{name} is {"ready" if report.get("ready") else "starting"}.{login}\n{later}')
     return report
 
 

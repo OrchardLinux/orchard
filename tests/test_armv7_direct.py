@@ -92,10 +92,28 @@ class Payload(unittest.TestCase):
         direct.start(adapter, {}, self.work / 'image', assets, None)
         adapter.boot_payload.assert_called_once_with({}, self.work / 'image', self.work / 'pongo', None)
 
-    def test_delivering_a_cascadia_bundle_is_not_orchards_yet(self):
-        with self.assertRaisesRegex(ValueError, 'patched iBEC'):
+    def test_a_cascadia_bundle_goes_to_orchard_launcher(self):
+        self.adapter.LAUNCHER_CHAIN = 'recovery-autogo'
+        with mock.patch.dict('os.environ', {'ORCHARD_LAUNCHER': str(self.work / 'absent')}), \
+                self.assertRaisesRegex(RuntimeError, 'needs orchard-launcher, which is not installed'):
             direct.start(self.adapter, {}, self.work / 'image', self.assets, None)
+        with mock.patch('orchard.launcher.load') as load, \
+                mock.patch('orchard.apple.boot.wait_mode', return_value={'boot_id': 'B'}) as wait:
+            self.assertEqual(direct.start(self.adapter, {'ecid': 1}, self.work / 'image', self.assets, None), {'boot_id': 'B'})
+        self.assertEqual((load.call_args.args, load.call_args.kwargs['chain']), ((self.work / 'image',), 'recovery-autogo'))
+        self.assertEqual(wait.call_args.args[:2], ({'ecid': 1}, 'install'))
         self.adapter.boot_payload.assert_not_called()
+
+    def test_the_devices_serial_number_goes_into_the_tree(self):
+        image = direct.boot_image(self.adapter, self.assets, b'ADD-ON', {'serial_number': 'F4KESER1AL00'})
+        config = cascadia.configuration(image)
+        root = cascadia.read_fdt(image[config['dtb_offset']:config['dtb_offset'] + config['dtb_size']])[0]
+        self.assertEqual(root['properties']['serial-number'], b'F4KESER1AL00\0')
+        self.assertEqual(image[config['initrd_offset']:], b'INITRD\0\0ADD-ON')
+        # No serial known: the tree is the board's, byte for byte.
+        plain = direct.boot_image(self.adapter, self.assets, b'ADD-ON', {})
+        self.assertEqual(plain, direct.boot_image(self.adapter, self.assets, b'ADD-ON'))
+        self.assertNotIn(b'serial-number', plain)
 
 
 class Release(unittest.TestCase):

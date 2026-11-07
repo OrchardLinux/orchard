@@ -34,9 +34,12 @@ public recipe or release.
   `kernel/patches/armv7/mtd`; the disk is `applesftlN`, on the 64 GB model
   only. Reclamation (#93) is unfinished: until it lands, writes stop once
   the blank flash blocks are used up.
-- A Linux root on LwVM: the kernel reads LwVM partitions
-  (`kernel/patches/armv7/block`), but the shared initrd finds its root by
-  reading a GPT itself and needs to learn LwVM partitions.
+- Installing: `orchard install` writes a root into an existing Linux LwVM
+  partition (the shared initrd finds it by its LwVM GUID); creating that
+  partition belongs to the iOS resize step, which does not exist yet. There
+  is no boot partition: starting the installed system later needs the
+  Cascadia bundle the install leaves on the host, placed for iOS's boot
+  chain. Starting any payload needs `orchard-launcher` (recovery-autogo).
 - USB: the cold-handoff topic (#90) awaits a device boot of its exact
   revision, and the iPad 3 (J1) a regression boot of the shared PHY code;
   see [USB handoff](../../docs/bring-up/p105-usb-handoff.md).
