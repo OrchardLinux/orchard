@@ -150,7 +150,9 @@ def entry_for(record, devicetree):
     name = record.get('name', 'Linux')
     return {'id': re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-') or 'linux', 'title': name,
             # Quiet as the recovery: no console text over the splash; the system maps its console.
-            'options': record.get('cmdline', 'rootwait') + ' fbcon=map:9 vt.global_cursor_default=0',
+            'options': record.get('cmdline', 'rootwait') + ' fbcon=map:9 vt.global_cursor_default=0' + (
+                ' pcie_apple_h9p.ans_keep_power=1 pcie_apple_h9p.ans_boot_mode=handoff'
+                ' panic=0 apple_wdt.cold_restart=0' if devicetree == 's8003-j71t.dtb' else ''),
             'devicetree': devicetree}
 
 
