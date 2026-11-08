@@ -113,6 +113,12 @@
       },
       "device": "/usr/share/firmware/multitouch/J71t.mtprops",
       "sha256": "69f27fe207cc5810a748dac3dfe640b1c5a755709f49513b4b5125660784f0fc"
+    },
+    "aop.im4p": {
+      "ipsw": {
+        "zip": "Firmware/AOP/aopfw-ipad6faop.im4p"
+      },
+      "sha256": "5a4d8378bb83e175fc589cc1cf978430639d7ffcef07b2d94e9d6a4801124efa"
     }
   },
   "outputs": [
@@ -287,6 +293,34 @@
         {
           "step": "agx-g5p-ldr-from-kernelcache@1",
           "input": "kernelcache"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/aop-ipad6f.bin",
+      "sha256": "af5d51a368ceb89dc5c359e7c84e54cb6082e308956be742c17622eb4a6047c8",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "aop.im4p"
+        },
+        {
+          "step": "aop-image@1",
+          "coprocessor": "AOP"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/aop-ipad6f-ext.bin",
+      "sha256": "2528d2686ed1262de9910c2d60e45b68137e50aa601a0f8d54ea7d1347b9de22",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "aop.im4p"
+        },
+        {
+          "step": "aop-image@1",
+          "coprocessor": "AOP_ext"
         }
       ]
     }

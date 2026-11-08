@@ -34,8 +34,8 @@ screen_off = "untested"
 backlight = "untested"
 touch = "untested"
 buttons = "untested"
-accelerometer = "missing"
-gyroscope = "missing"
+accelerometer = "untested"
+gyroscope = "untested"
 light_sensor = "untested"
 touch_id = "missing"
 storage_read = "untested"
@@ -57,3 +57,6 @@ camera = "missing"
 
 # Local capability delta: g5p.
 # Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/g5p.md.
+
+# Local capability delta: aop.
+# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/aop.md.
