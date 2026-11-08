@@ -5620,6 +5620,7 @@ CONFIG_APPLE_AOP_ACCEL=m
 # CONFIG_ADIS16260 is not set
 # CONFIG_ADXRS290 is not set
 # CONFIG_ADXRS450 is not set
+CONFIG_APPLE_AOP_GYRO=m
 # CONFIG_BMG160 is not set
 # CONFIG_FXAS21002C is not set
 # CONFIG_MPU3050_I2C is not set
@@ -5855,6 +5856,7 @@ CONFIG_TSL2583=m
 # CONFIG_HP206C is not set
 # CONFIG_ZPA2326 is not set
 # CONFIG_ADP810 is not set
+CONFIG_APPLE_AOP_PRESSURE=m
 # end of Pressure sensors
 
 #
