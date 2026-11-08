@@ -1,0 +1,45 @@
+From: brkosebay <brkosebay@users.noreply.github.com>
+Date: Sun, 08 Nov 2026 16:00:00 +0100
+Subject: [PATCH] dt-bindings: drm: G5P render, autoboot, META71C and boot-origin policy
+
+Carry the original-firmware G5P render/compute ABI and extraction recipe into the system kernel, with typed query/compute follow-ups and qualified WC cache handling. Start firmware at probe, install META71C 340 on every firmware image, select dirty-start mode 3 from the incoming kexec DT marker (cold mode 1), and quiet recurring diagnostics.
+
+Integration fixups are folded into the final delta. Device observations apply
+to the integration build; the isolated topic requires qualification.
+
+Assisted-by: LLM
+---
+
+diff --git a/Documentation/devicetree/bindings/gpu/apple,s8003-g5p.yaml b/Documentation/devicetree/bindings/gpu/apple,s8003-g5p.yaml
+new file mode 100644
+index 000000000..699c3492f
+--- /dev/null
++++ b/Documentation/devicetree/bindings/gpu/apple,s8003-g5p.yaml
+@@ -0,0 +1,27 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/gpu/apple,s8003-g5p.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++title: Apple S8003 G5P GPU
++maintainers:
++  - Berkay Kösebay <brkosebay@users.noreply.github.com>
++description: |
++  G5P GPU with META firmware on S8003. The compatible is Apple's inherited
++  ADT spelling used by the qualified driver; no new vendor prefix is implied.
++properties:
++  compatible:
++    const: gpu,s8003
++  reg:
++    maxItems: 2
++  reg-names:
++    items:
++      - const: rgx
++      - const: fender
++  interrupts:
++    minItems: 5
++    maxItems: 5
++  power-domains:
++    maxItems: 1
++required: [compatible, reg, reg-names, interrupts, power-domains]
++additionalProperties: false

@@ -1,0 +1,80 @@
+From: brkosebay <brkosebay@users.noreply.github.com>
+Date: Sun, 08 Nov 2026 16:00:00 +0100
+Subject: [PATCH] drm/apple-g5p: G5P render, autoboot, META71C and boot-origin policy
+
+Carry the original-firmware G5P render/compute ABI and extraction recipe into the system kernel, with typed query/compute follow-ups and qualified WC cache handling. Start firmware at probe, install META71C 340 on every firmware image, select dirty-start mode 3 from the incoming kexec DT marker (cold mode 1), and quiet recurring diagnostics.
+
+Integration fixups are folded into the final delta. Device observations apply
+to the integration build; the isolated topic requires qualification.
+
+Assisted-by: LLM
+---
+
+diff --git a/drivers/gpu/apple-g5p/boot-r73b.inc b/drivers/gpu/apple-g5p/boot-r73b.inc
+index 2407ec142..749aeef25 100644
+--- a/drivers/gpu/apple-g5p/boot-r73b.inc
++++ b/drivers/gpu/apple-g5p/boot-r73b.inc
+@@ -780,7 +780,7 @@ static void g5p_hb116_irq(struct g5p_diag *g, int irq, u32 n, u32 before)
+ 	}
+ 	g5p_hb116_cross(g, n, events);
+ 	if (g5p_hb_report(&r->hb))
+-		dev_info(
++		g5p_job_printk(
+ 			g->dev,
+ 			"HB116 window n=%u t_ns=%llu ms=%llu irqs=%u events=%u acks=%u empty=%u aux=%u "
+ 			"stalled=%u peak_irqs=%u peak_events=%u total_irqs=%u total_events=%u "
+diff --git a/drivers/gpu/apple-g5p/boot.inc b/drivers/gpu/apple-g5p/boot.inc
+index d5bca5a4e..8281f3a68 100644
+--- a/drivers/gpu/apple-g5p/boot.inc
++++ b/drivers/gpu/apple-g5p/boot.inc
+@@ -775,7 +775,7 @@ static int g5p_boot_drain(struct g5p_diag *g)
+ 		n = ++b->event_n[t];
+ 		if (words[0] == 1 && n > 1 && !(0)) {
+ 			if (is_power_of_2(n))
+-				dev_info(
++				g5p_job_printk(
+ 					g->dev,
+ 					"G2 events type=1 n=%u: stamp events counted, dumped once (boot_event_dump 1: each)\n",
+ 					n);
+diff --git a/drivers/gpu/apple-g5p/dirtystart108.inc b/drivers/gpu/apple-g5p/dirtystart108.inc
+index 037e5c56e..be023e7e7 100644
+--- a/drivers/gpu/apple-g5p/dirtystart108.inc
++++ b/drivers/gpu/apple-g5p/dirtystart108.inc
+@@ -18,9 +18,12 @@
+ static struct g5p_ds g5p_ds_state = { .last = G5P_DSE_N };
+ static DEFINE_SPINLOCK(g5p_ds_lock);
+ 
++/* Latched from /chosen at probe, before POWER or the first wrapper wake. */
++static u32 g5p_ds_boot_mode = 1;
++
+ static u32 g5p_ds_mode(void)
+ {
+-	return min_t(u32, (1), G5P_DS_MODE_MAX);
++	return READ_ONCE(g5p_ds_boot_mode);
+ }
+ 
+ /* One event, one DS108 line (dev_emerg: netconsole at any loglevel). */
+@@ -85,6 +88,10 @@ static void g5p_ds_hook_probe(struct g5p_diag *g)
+ 		   of_property_read_bool(chosen, "linux,booted-from-kexec");
+ 	in.cycle_requested = g5p_ds_cycle_requested(chosen);
+ 	of_node_put(chosen);
++	/* Retained warm state needs strict origin checks and the bounded reset. */
++	WRITE_ONCE(g5p_ds_boot_mode, in.kexec ? 3 : 1);
++	dev_info(g->dev, "DS108 boot mode=%u kexec=%u\n",
++		 g5p_ds_mode(), in.kexec);
+ 	g5p_ds_feed(g, G5P_DSE_PROBE, &in);
+ }
+ 
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+index 34fbad607..1d0a0a76d 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+@@ -2476,7 +2476,7 @@ static void g5p_oc_work(struct work_struct *work)
+ 
+ 		if (!g5p_mmio_hold(g, &tk, G5P_MMIO_CENSUS))
+ 			g5p_mmio_release(g, &tk);
+-		dev_info(
++		g5p_job_printk(
+ 			g->dev,
+ 			"GPUPERF oc status mhz=%u temp=%d zone=%s limit=%u r1=%s r1_1000=%08x jobs=%u "
+ 			"end=gpuperf\n",

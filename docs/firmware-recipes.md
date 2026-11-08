@@ -236,3 +236,19 @@ The decompressed N61 kernel's SHA-256 is
 These fields are explicit recipe parameters, including zero-valued overrides.
 Physical qualification of firmware loading and input events remains separate
 from converting this shared firmware file.
+
+## S8003 G5P META firmware
+
+`agx-g5p-ldr-from-kernelcache@1` reads the unique `__TEXT,__const` section
+of `com.apple.AGXFirmwareKextG5P` in the user's own legacy prelinked
+kernelcache. It rejects any size other than 119112 bytes or any digest other
+than `33ae20cbbe2498e4f119ba4e9a55467e4e0192d4c86d5bf1903adce63ffa5dca`.
+The existing J71t kernelcache input names the active device kernelcache and
+the pinned restore-image fallback. The normal recipe installer writes the
+verified output to `/lib/firmware/apple/agx-g5p-c0.ldr`. No payload patch,
+calibration, firmware bytes or captured job is stored in the source tree.
+Other C0 revisions and other boards require separate digest qualification.
+
+The J71t G5P driver brings the GPU up automatically once the extracted
+`apple/agx-g5p-c0.ldr` is readable on the root filesystem (up to 120 seconds).
+No captured render or compute job fixtures are part of this recipe.
