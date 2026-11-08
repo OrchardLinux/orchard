@@ -60,3 +60,6 @@ camera = "missing"
 
 # Local capability delta: aop.
 # Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/aop.md.
+
+# Local capability delta: warm-storage.
+# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/warm-storage.md.
