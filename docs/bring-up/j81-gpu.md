@@ -106,13 +106,22 @@ and the [follow-up perf-table analysis](https://github.com/mattonik/ipad-nixos/b
 
 ## Open work
 
-- Disassemble the one unclassified action on this path. Its call path suggests
-  a PMGR action at `0xfffffff006bd6328` in the 19H422 cache, under the PMGR
-  command gate, from a timing helper for `state-config` records with byte
-  `+0x57` set; the action itself has not been disassembled. Then check whether
-  any J81 `state-config` row names GFX (`0x7c`).
-- Trace the conditional display/MCC busy callback, which runs on a busy 0→1
-  edge when framebuffer caching is enabled.
+- Check whether runtime PMGR configuration supplies a GFX `state-config`
+  record eligible for the optional selector-1 counter read. Offline analysis
+  shows that the `bcc56c` path calls `bd6328` with selector 1, which reads
+  PMGR counter values and performs no register store; `bcc56c` does not use
+  the other selectors. The captured ADT's energy-counter list omits GFX and
+  has no `state-config` property, which suggests but does not prove that no
+  eligible GFX record exists. The runtime object/class at `pmgr+0x160` and
+  the record values remain inferred or unknown. See the [selector-1 and
+  SoC-tuner analysis](https://github.com/mattonik/ipad-nixos/blob/1ed4af067c1be8fc2bce5a37fbf69504add9e32b/research/2026-11-08-j81-ios15-soc-tuner-device-sets.md)
+  and [PMGR timing-call review](https://github.com/mattonik/ipad-nixos/blob/799304d07a26c3b88d0a1b6a02b2e790db77d459/research/2026-11-08-j81-ios15-bcc56c-timing-accounting.md).
+- Determine whether the conditional display-idle/MCC callback is reached
+  before the first RGX ID read. Static iOS 15 analysis places GFX in SoC-tuner
+  device set 0 and recovers conditional tuner policy, but does not establish
+  whether or when the busy notification reaches that policy on the pre-ID
+  path. The G4G clock-enable path itself does not call the tuner, and test4
+  did not reproduce this callback. See the [SoC-tuner analysis](https://github.com/mattonik/ipad-nixos/blob/1ed4af067c1be8fc2bce5a37fbf69504add9e32b/research/2026-11-08-j81-ios15-soc-tuner-device-sets.md).
 - Obtain a read-only perf-table snapshot immediately after the guarded GFX
   power-up, with the required `gpu-pmgr-once` device-tree guard. The current
   pre-power snapshot cannot answer which state is selected after power-up.
