@@ -18,3 +18,6 @@ stages = "remote_boot two-stage CPID list"
 
 # Local capability delta: pmu-rtc.
 # Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/pmu-rtc.md.
+
+# Local capability delta: mac-current.
+# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/mac-current.md.
