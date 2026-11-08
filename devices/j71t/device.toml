@@ -29,58 +29,32 @@ status = "experimental"
 
 # States: working, untested, missing, none (features.toml).
 [features]
-display = "untested"
+display = "working"
 screen_off = "untested"
-backlight = "untested"
-touch = "untested"
-buttons = "untested"
-accelerometer = "untested"
-gyroscope = "untested"
-light_sensor = "untested"
+backlight = "working"
+touch = "working"
+buttons = "working"
+accelerometer = "working"
+gyroscope = "working"
+light_sensor = "working"
 touch_id = "missing"
-storage_read = "untested"
-storage_write = "untested"
-wifi = "untested"
+storage_read = "working"
+storage_write = "working"
+wifi = "working"
 bluetooth_input = "untested"
 bluetooth_audio = "untested"
 cellular = "none"
-battery = "untested"
-charging = "untested"
+battery = "working"
+charging = "working"
 charging_control = "untested"
 suspend = "untested"
 resume = "untested"
-usb_serial = "untested"
-usb_network = "untested"
-audio_output = "untested"
-audio_input = "untested"
+usb_serial = "working"
+usb_network = "working"
+audio_output = "working"
+audio_input = "working"
 camera = "missing"
 
-# Local capability delta: g5p.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/g5p.md.
-
-# Local capability delta: aop.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/aop.md.
-
-# Local capability delta: pmu-rtc.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/pmu-rtc.md.
-
-# Local capability delta: mac-current.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/mac-current.md.
-
-# Local capability delta: ncm-flush.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/ncm-flush.md.
-
-# Local capability delta: usb-stable-serial.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/usb-stable-serial.md.
-
-# Local capability delta: warm-storage.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/warm-storage.md.
-
-# Local capability delta: psci.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/psci.md.
-
-# Local capability delta: warm-peripherals.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/warm-peripherals.md.
-
-# Local capability delta: warm-kernel.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/warm-kernel.md.
+# Integration evidence: linux-a9 docs/release/orchard-prs-20261108-final/evidence.md.
+# Charging cold/rebind: +1.1 to +1.4 A; one AOP-blacklisted warm boot stayed
+# at 500 mA. Suspend, resume, Bluetooth input/audio and charging control untested.
