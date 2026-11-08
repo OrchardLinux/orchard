@@ -36,11 +36,15 @@ def devices(root=Path('/sys/bus/usb/devices')):
         chip = re.search(r'\bCPID:([0-9a-fA-F]+)\b', serial)
         board = re.search(r'\bBDID:([0-9a-fA-F]+)\b', serial)
         profile = re.search(r'\bBOARD:([a-z0-9]+)\b', serial)
+        # A compatibility PID also belongs to real Apple hardware. Only our
+        # existing boot/profile identity makes it an Orchard system.
+        mac_current = (pid == 0x1014 and boot is not None and
+                       profile is not None and profile.group(1) == 'j71t')
         ports = {str(Path('/dev') / p.name) for p in node.glob('**/tty/ttyACM*')}
         if len(ports) > 1:
             raise ValueError('Ambiguous USB serial ports on a device')
         product = (node / 'product').read_text().strip() if (node / 'product').exists() else ''
-        found.append(dict(location=node.name, mode=MODES.get(pid, 'other'),
+        found.append(dict(location=node.name, mode='system' if mac_current else MODES.get(pid, 'other'),
                           ecid=int(ecid.group(1), 16) if ecid else None,
                           boot_id=str(uuid.UUID(boot.group(1))) if boot else None,
                           chip=int(chip.group(1), 16) if chip else None,
