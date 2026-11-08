@@ -28,3 +28,10 @@ gives the same tree as Hoolock's tip before updating `sources.toml`.
 
 Scratch stays in ignored `boot/m1n1/.work/<device>/`. `--resume` reuses it only
 if the recorded patch set is unchanged.
+
+## Optional resident PSCI on A7-A9
+
+Orchard patch 0014 adds the linux-a9 opt-in EL3 PSCI shim. It requires
+`psci=1` as a payload variable and entry at EL3; EL1 keeps the spin table.
+There is no per-board default. See [J71t loader instructions](../../devices/j71t/README.md)
+for `psci-loader`, launch/RAM framing, Pongo evidence and the cold-boot gate.
