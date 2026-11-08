@@ -72,3 +72,6 @@ camera = "missing"
 
 # Local capability delta: usb-stable-serial.
 # Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/usb-stable-serial.md.
+
+# Local capability delta: warm-storage.
+# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/warm-storage.md.
