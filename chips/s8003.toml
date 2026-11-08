@@ -24,3 +24,6 @@ stages = "remote_boot two-stage CPID list"
 
 # Local capability delta: warm-storage.
 # Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/warm-storage.md.
+
+# Local capability delta: psci.
+# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/psci.md.
