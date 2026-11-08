@@ -109,6 +109,7 @@ usb_gadget() {
         # allowing the generic composite driver to deliver the grant.
         device_class=0xef device_subclass=0x02 device_protocol=0x01
     fi
+    serial=$(sh /etc/orchard/usb-identity) || return 1
     mkdir "$g" &&
     echo 0x05ac > "$g/idVendor" &&
     echo "$pid" > "$g/idProduct" &&
@@ -118,7 +119,7 @@ usb_gadget() {
     mkdir -p "$g/strings/0x409" "$g/configs/c.1/strings/0x409" &&
     echo 'Orchard Linux' > "$g/strings/0x409/manufacturer" &&
     echo "${name:-Linux}" > "$g/strings/0x409/product" &&
-    echo "BOOT:$(cat /proc/sys/kernel/random/boot_id) BOARD:${board#apple,}" > "$g/strings/0x409/serialnumber" &&
+    echo "$serial" > "$g/strings/0x409/serialnumber" &&
     echo 'USB network and serial' > "$g/configs/c.1/strings/0x409/configuration" &&
     echo 500 > "$g/configs/c.1/MaxPower" &&
     mkdir "$g/functions/ncm.usb0" "$g/functions/acm.usb0" &&

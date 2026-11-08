@@ -21,3 +21,6 @@ stages = "remote_boot two-stage CPID list"
 
 # Local capability delta: mac-current.
 # Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/mac-current.md.
+
+# Local capability delta: usb-stable-serial.
+# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/usb-stable-serial.md.

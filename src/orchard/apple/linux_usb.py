@@ -20,6 +20,12 @@ def serial_tags(serial):
             'pwned': pwned.group(1) if pwned else ('checkra1n' if 'YOLO:checkra1n' in serial else None)}
 
 
+def stable_id(serial):
+    """Hashed hardware identity of an Orchard gadget, absent on legacy boots."""
+    match = re.search(r'\bID:([0-9a-fA-F]{12})\b', serial)
+    return match.group(1).lower() if match else None
+
+
 def devices(root=Path('/sys/bus/usb/devices')):
     found = []
     for node in root.iterdir():
@@ -36,10 +42,11 @@ def devices(root=Path('/sys/bus/usb/devices')):
         chip = re.search(r'\bCPID:([0-9a-fA-F]+)\b', serial)
         board = re.search(r'\bBDID:([0-9a-fA-F]+)\b', serial)
         profile = re.search(r'\bBOARD:([a-z0-9]+)\b', serial)
-        # A compatibility PID also belongs to real Apple hardware. Only our
-        # existing boot/profile identity makes it an Orchard system.
-        mac_current = (pid == 0x1014 and boot is not None and
-                       profile is not None and profile.group(1) == 'j71t')
+        usb_id = stable_id(serial)
+        # 1014 also belongs to real Apple devices. Require Orchard's board
+        # and stable ID (or the legacy BOOT tag), never the PID alone.
+        mac_current = (pid == 0x1014 and profile is not None and profile.group(1) == 'j71t'
+                       and (boot is not None or usb_id is not None))
         ports = {str(Path('/dev') / p.name) for p in node.glob('**/tty/ttyACM*')}
         if len(ports) > 1:
             raise ValueError('Ambiguous USB serial ports on a device')
@@ -47,6 +54,7 @@ def devices(root=Path('/sys/bus/usb/devices')):
         found.append(dict(location=node.name, mode='system' if mac_current else MODES.get(pid, 'other'),
                           ecid=int(ecid.group(1), 16) if ecid else None,
                           boot_id=str(uuid.UUID(boot.group(1))) if boot else None,
+                          usb_id=usb_id,
                           chip=int(chip.group(1), 16) if chip else None,
                           board=int(board.group(1), 16) if board else None,
                           profile=profile.group(1) if profile else None, product=product,
