@@ -66,3 +66,6 @@ camera = "missing"
 
 # Local capability delta: mac-current.
 # Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/mac-current.md.
+
+# Local capability delta: ncm-flush.
+# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/ncm-flush.md.
