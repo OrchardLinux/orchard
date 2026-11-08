@@ -1,0 +1,41 @@
+From: brkosebay <brkosebay@users.noreply.github.com>
+Date: Sun, 08 Nov 2026 16:00:00 +0100
+Subject: [PATCH] Input: apple-z2: pinctrl/spi/input: quiesce S8000 peripherals for kexec
+
+Retire inherited GPIO IRQ state, stop PIO SPI queues and chip selects, and quiesce Apple Z2 touch before its SPI parent shuts down.
+
+Integration fixups are folded into the final delta. Device observations apply
+to the integration build; the isolated topic requires qualification.
+
+Assisted-by: LLM
+---
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index 161ebb4b8..145d6ffcf 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -4584,6 +4584,16 @@ static struct spi_device_id apple_z2_of_id[] = {
+ };
+ MODULE_DEVICE_TABLE(spi, apple_z2_of_id);
+ 
++/* Children stop before the SPI controller drains its core queue. */
++static void apple_z2_shutdown(struct spi_device *spi)
++{
++	struct apple_z2 *z2 = spi_get_drvdata(spi);
++
++	apple_z2_stop(z2);
++	/* Also wait when the IRQ thread already masked itself. */
++	synchronize_irq(spi->irq);
++}
++
+ static struct spi_driver apple_z2_driver = {
+ 	.driver = {
+ 		.name	= "apple-z2",
+@@ -4594,6 +4604,7 @@ static struct spi_driver apple_z2_driver = {
+ 	.id_table = apple_z2_of_id,
+ 	.probe    = apple_z2_probe,
+ 	.remove   = apple_z2_remove,
++	.shutdown = apple_z2_shutdown,
+ };
+ 
+ module_spi_driver(apple_z2_driver);
