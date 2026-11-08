@@ -30,3 +30,6 @@ stages = "remote_boot two-stage CPID list"
 
 # Local capability delta: ncm-flush.
 # Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/ncm-flush.md.
+
+# Local capability delta: usb-stable-serial.
+# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/usb-stable-serial.md.

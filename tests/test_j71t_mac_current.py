@@ -35,15 +35,17 @@ class MacCurrent(unittest.TestCase):
                 root = Path(tmp)
                 for n in ['sys/kernel/config/usb_gadget', 'sys/class/udc/usbdev',
                           'newroot/etc/orchard', 'newroot/usr/lib', 'proc/device-tree',
-                          'proc/sys/kernel/random']:
+                          'proc/sys/kernel/random', 'etc/orchard']:
                     (root / n).mkdir(parents=True)
                 (root / 'proc/device-tree/compatible').write_bytes(f'apple,{board}\0apple,s8003\0'.encode())
                 (root / 'proc/sys/kernel/random/boot_id').write_text(BOOT)
                 (root / 'newroot/etc/os-release').write_text('NAME="Omarchy"\n')
                 if flag:
                     (root / 'newroot/etc/orchard/mac-usb-current').write_text(flag + '\n')
+                helper = (HW / "src/orchard/usb-identity").read_text().replace("/proc/", str(root) + "/proc/")
+                (root / "etc/orchard/usb-identity").write_text(helper)
                 run = script
-                run = re.sub(r'/(sys|newroot|proc)/', lambda m: str(root) + m.group(), run)
+                run = re.sub(r'/(sys|newroot|proc|etc)/', lambda m: str(root) + m.group(), run)
                 run = run.replace('mkdir \"$g\" &&', 'mkdir -p \"$g/functions\" &&')
                 subprocess.run(['sh', '-ec', 'mount() { :; };\n' + run + '\nusb_gadget'], check=True,
                                capture_output=True)
@@ -164,3 +166,39 @@ int main(void){
 
 if __name__ == '__main__':
     unittest.main()
+
+
+"""A compatibility PID must never classify a real Apple device as Orchard."""
+from pathlib import Path
+import plistlib
+import subprocess
+import tempfile
+import unittest
+from unittest.mock import patch
+
+from orchard.apple import usb, linux_usb
+
+BOOT = '12345678-1234-1234-1234-123456789abc'
+STABLE = 'f09dfe4c604a'
+
+
+class StableMacCurrent(unittest.TestCase):
+    def test_compatibility_pid_requires_orchard_identity_on_both_hosts(self):
+        for serial, mode in [(f'BOOT:{BOOT} BOARD:j71t', 'system'),
+                             (f'BOARD:j71t ID:{STABLE}', 'system'),
+                             ('AppleSerial', 'other'), ('BOARD:j71t', 'other'),
+                             (f'ID:{STABLE}', 'other'), ('BOARD:j71t ID:bad', 'other'),
+                             (f'BOARD:j71b ID:{STABLE}', 'other'),
+                             (f'BOOT:{BOOT} BOARD:j71b', 'other')]:
+            with self.subTest(serial=serial):
+                raw = plistlib.dumps([{'IOObjectClass': 'IOUSBHostDevice', 'idVendor': 0x05ac,
+                                      'idProduct': 0x1014, 'locationID': 123, 'USB Serial Number': serial}])
+                with patch.object(usb.sys, 'platform', 'darwin'), patch.object(usb.subprocess, 'run',
+                        return_value=subprocess.CompletedProcess([], 0, raw, b'')):
+                    self.assertEqual(usb.devices()[0]['mode'], mode)
+                with tempfile.TemporaryDirectory() as tmp:
+                    node = Path(tmp) / '1-2'
+                    node.mkdir()
+                    for key, value in [('idVendor', '05ac'), ('idProduct', '1014'), ('serial', serial)]:
+                        (node / key).write_text(value)
+                    self.assertEqual(linux_usb.devices(Path(tmp))[0]['mode'], mode)

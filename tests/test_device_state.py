@@ -16,6 +16,7 @@ from orchard.apple import usb, linux_usb
 
 BOOT_A = '11111111-1111-4111-8111-111111111111'
 BOOT_B = '22222222-2222-4222-8222-222222222222'
+USB_ID = 'f09dfe4c604a'
 
 
 class DeviceIsolation(unittest.TestCase):
@@ -107,15 +108,28 @@ class DeviceIsolation(unittest.TestCase):
         node = self.root/'1-2'
         node.mkdir()
         for name,value in {'idVendor':'05ac','idProduct':'4144','product':'Orchard charger-test',
-                           'serial':f'BOOT:{BOOT_B}'}.items():
+                           'serial':f'BOARD:j71b ID:{USB_ID}'}.items():
             (node/name).write_text(value)
         (node/'iface/tty/ttyACM0').mkdir(parents=True)
         rows = linux_usb.devices(self.root)
         self.assertEqual(len(rows),1)
         self.assertEqual(rows[0]['mode'],'ram')
-        self.assertEqual(rows[0]['boot_id'],BOOT_B)
+        self.assertIsNone(rows[0]['boot_id'])
+        self.assertEqual(rows[0]['usb_id'],USB_ID)
         self.assertEqual(rows[0]['serial_port'],'/dev/ttyACM0')
         self.assertIsNone(rows[0]['ecid'])
+
+    def test_macos_stable_identity_has_no_descriptor_boot_id(self):
+        for pid, mode in ((0x4144, 'ram'), (0x4145, 'system')):
+            with self.subTest(mode=mode):
+                raw = plistlib.dumps([{'IOObjectClass':'IOUSBHostDevice', 'idVendor':0x05ac,
+                                       'idProduct':pid, 'locationID':123,
+                                       'USB Serial Number':f'BOARD:j71b ID:{USB_ID}'}])
+                with patch.object(usb.sys,'platform','darwin'), patch.object(usb.subprocess,'run',return_value=
+                        subprocess.CompletedProcess([],0,raw,b'')):
+                    row, = usb.devices()
+                self.assertEqual((row['mode'], row['profile'], row['usb_id']), (mode, 'j71b', USB_ID))
+                self.assertIsNone(row['boot_id'])
 
 
 if __name__ == '__main__':
