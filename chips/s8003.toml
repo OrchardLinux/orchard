@@ -39,3 +39,6 @@ stages = "remote_boot two-stage CPID list"
 
 # Local capability delta: psci.
 # Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/psci.md.
+
+# Local capability delta: warm-peripherals.
+# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/warm-peripherals.md.

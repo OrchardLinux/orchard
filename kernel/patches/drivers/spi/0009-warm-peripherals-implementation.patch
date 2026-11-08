@@ -1,0 +1,113 @@
+From: brkosebay <brkosebay@users.noreply.github.com>
+Date: Sun, 08 Nov 2026 16:00:00 +0100
+Subject: [PATCH] spi: pinctrl/spi/input: quiesce S8000 peripherals for kexec
+
+Retire inherited GPIO IRQ state, stop PIO SPI queues and chip selects, and quiesce Apple Z2 touch before its SPI parent shuts down.
+
+Integration fixups are folded into the final delta. Device observations apply
+to the integration build; the isolated topic requires qualification.
+
+Assisted-by: LLM
+---
+
+diff --git a/drivers/spi/spi-apple.c b/drivers/spi/spi-apple.c
+index dc5154e1b..ed9f67a59 100644
+--- a/drivers/spi/spi-apple.c
++++ b/drivers/spi/spi-apple.c
+@@ -15,6 +15,7 @@
+ #include <linux/gpio/consumer.h>
+ #include <linux/interrupt.h>
+ #include <linux/io.h>
++#include <linux/kexec.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/of_device.h>
+@@ -141,6 +142,7 @@ struct apple_spi {
+ 	struct dmaengine_result dma_result;
+ 	const struct apple_spi_hw *hw;
+ 	u32 word_delay;
++	struct spi_controller *ctlr;
+ };
+ 
+ static inline void reg_write(struct apple_spi *spi, int offset, u32 value)
+@@ -231,6 +233,19 @@ static void apple_spi_init(struct apple_spi *spi)
+ 	reg_write(spi, APPLE_SPI_DELAY_POST, 0);
+ }
+ 
++/* Lab 0015: normalize only the S8000 PIO register set, while powered. */
++static int apple_spi_s8000_idle(struct apple_spi *spi)
++{
++	reg_write(spi, APPLE_SPI_CTRL, 0);
++	reg_write(spi, APPLE_SPI_CFG, spi->hw->cfg_base);
++	reg_write(spi, APPLE_SPI_RXCNT, 0);
++	reg_write(spi, APPLE_SPI_TXCNT, 0);
++	reg_write(spi, APPLE_SPI_PIN, APPLE_SPI_PIN_CS);
++	apple_spi_t8010_clear_status(spi);
++	/* Complete posted writes before publishing children or leaving Linux. */
++	return readl(spi->regs + APPLE_SPI_CTRL) ? -EIO : 0;
++}
++
+ static int apple_spi_prepare_message(struct spi_controller *ctlr,
+ 				     struct spi_message *msg)
+ {
+@@ -1120,6 +1135,7 @@ static int apple_spi_probe(struct platform_device *pdev)
+ 
+ 	spi = spi_controller_get_devdata(ctlr);
+ 	platform_set_drvdata(pdev, spi);
++	spi->ctlr = ctlr;
+ 	init_completion(&spi->done);
+ 	init_completion(&spi->dma_done);
+ 	spi->hw = of_device_get_match_data(&pdev->dev);
+@@ -1214,6 +1230,11 @@ static int apple_spi_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	apple_spi_init(spi);
++	if (spi->hw->pio_only) {
++		ret = apple_spi_s8000_idle(spi);
++		if (ret)
++			return ret;
++	}
+ 
+ 	ret = devm_spi_register_controller(&pdev->dev, ctlr);
+ 	if (ret < 0)
+@@ -1223,6 +1244,32 @@ static int apple_spi_probe(struct platform_device *pdev)
+ 	return 0;
+ }
+ 
++static void apple_spi_shutdown(struct platform_device *pdev)
++{
++	struct apple_spi *spi = platform_get_drvdata(pdev);
++	struct spi_controller *ctlr = spi->ctlr;
++	unsigned int cs;
++	int ret;
++
++	/* Other SoCs use different DMA/IRQ registers and keep their policy. */
++	if (!spi->hw->pio_only)
++		return;
++	/* Children have shut down; drain the core queue before MMIO. */
++	ret = spi_controller_suspend(ctlr);
++	if (!ret)
++		ret = pm_runtime_resume_and_get(&pdev->dev);
++	if (ret >= 0) {
++		if (ctlr->cs_gpiods)
++			for (cs = 0; cs < ctlr->num_chipselect; cs++)
++				gpiod_set_value_cansleep(ctlr->cs_gpiods[cs], 0);
++		ret = apple_spi_s8000_idle(spi);
++	}
++	if (ret < 0 && kexec_in_progress)
++		panic("S8000 SPI shutdown failed before kexec: %d", ret);
++	/* Keep runtime power pinned until the jump. */
++	dev_info(&pdev->dev, "S8000 SPI shutdown result %d\n", ret);
++}
++
+ static const struct apple_spi_hw apple_spi_hw_s8000 = {
+ 	.legacy_status = true,
+ 	.pio_only = true,
+@@ -1260,6 +1307,7 @@ MODULE_DEVICE_TABLE(of, apple_spi_of_match);
+ 
+ static struct platform_driver apple_spi_driver = {
+ 	.probe = apple_spi_probe,
++	.shutdown = apple_spi_shutdown,
+ 	.driver = {
+ 		.name = "apple-spi",
+ 		.of_match_table = apple_spi_of_match,
