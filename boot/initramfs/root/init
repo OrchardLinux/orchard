@@ -10,6 +10,7 @@ mount -t devtmpfs -o mode=0755,nosuid dev /dev
 exec </dev/console >/dev/console 2>&1
 
 stop() {
+    echo "<3>orchard initrd: $1; rescue shell" > /dev/kmsg
     echo "orchard initrd: $1"
     echo 'Starting a shell on the console; the system did not start.'
     exec sh
@@ -31,8 +32,11 @@ done
 [ ! -e /etc/orchard/usb-modules ] || for module in $(cat /etc/orchard/usb-modules); do
     modprobe "$module" || echo "orchard initrd: could not load $module; no USB"
 done
+echo '<6>orchard initrd: storage load begin' > /dev/kmsg
 for module in $(cat /etc/orchard/modules); do
+    echo "<6>orchard initrd: modprobe $module begin" > /dev/kmsg
     modprobe "$module" || stop "could not load $module"
+    echo "<6>orchard initrd: modprobe $module complete" > /dev/kmsg
 done
 
 # An install boot: orchard's add-on, appended to this initrd by the CLI, writes the
@@ -87,7 +91,34 @@ done
 
 mkdir -p /newroot
 mount ${fstype:+-t "$fstype"} -o "$mode${flags:+,$flags}" "$device" /newroot || stop "could not mount $device"
+echo '<6>orchard initrd: root mounted' > /dev/kmsg
 [ -x "/newroot$init" ] || [ -L "/newroot$init" ] || stop "the root has no $init"
+
+# Preserve the running boot's *pristine* tree before any package update can
+# replace /boot or same-release module assets. The matching initrd embeds cold
+# DTBs; warm boots name their retained stage instead. Never infer it by uname.
+mkdir -p /run /newroot/run
+mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run
+mkdir -p /run/orchard-kexec
+warm_pristine=
+for argument in $(cat /proc/cmdline); do
+    case "$argument" in orchard_warm.dtb=*) warm_pristine=${argument#orchard_warm.dtb=} ;; esac
+done
+if [ -n "$warm_pristine" ]; then
+    case "$warm_pristine" in
+        /var/tmp/orchard-warm.*/pristine.dtb)
+            case "$warm_pristine" in *..*) stop 'invalid warm DT provenance' ;; esac
+            cp "/newroot$warm_pristine" /run/orchard-kexec/pristine.dtb || stop 'missing warm pristine DT' ;;
+        *) stop 'invalid warm DT provenance' ;;
+    esac
+elif [ -f /etc/orchard/pristine-map ]; then
+    board=$(tr '\000' '\n' < /proc/device-tree/compatible | head -1)
+    while read compatible file; do
+        [ "$compatible" != "$board" ] || cp "/etc/orchard/dtbs/$file" /run/orchard-kexec/pristine.dtb
+done < /etc/orchard/pristine-map
+fi
+cat /proc/sys/kernel/random/boot_id > /run/orchard-kexec/boot-id
+mount --move /run /newroot/run || stop 'cannot retain boot provenance'
 
 # USB for the host: network (usb0) and a serial console (ttyGS0), named after
 # the system, so `orchard devices` sees it. What runs on them is the system's.
@@ -128,6 +159,7 @@ usb_gadget() {
     basename "$(ls -d /sys/class/udc/* | head -1)" > "$g/UDC"
 }
 usb_gadget || echo 'orchard initrd: no USB gadget; continuing without USB'
+echo '<6>orchard initrd: USB setup complete; switching root' > /dev/kmsg
 
 for name in dev proc sys; do
     mount --move "/$name" "/newroot/$name"

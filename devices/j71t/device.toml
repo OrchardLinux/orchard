@@ -81,3 +81,6 @@ camera = "missing"
 
 # Local capability delta: warm-peripherals.
 # Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/warm-peripherals.md.
+
+# Local capability delta: warm-kernel.
+# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/warm-kernel.md.
