@@ -27,6 +27,35 @@ No GPU firmware has run, no job has been submitted and no frame has been
 rendered. A8X has no EL2, so m1n1 hypervisor MMIO tracing of iOS is not
 possible on this SoC.
 
+### GFX perf-state table: snapshot with GFX off
+
+A separate read-only PMGR snapshot on 2026-11-08 was taken after a boot that
+had only run the MCC read-once test. No GFX power-up, bridge write, GPC or RGX
+access happened in that boot. PMGR reported GFX off (`0x20e020320 = 0x300`,
+target and actual state 0); `0x20e01c200` was `0x80000000` (bit 31 only).
+The table entries decoded as:
+
+| Entry | Observed clock | Validity |
+|---|---:|---|
+| 0 | raw word `0` | Invalid; valid bit clear, not a selected state or a 0 MHz clock |
+| 1–4 | 365, 450, 500, 550 MHz | Valid entries |
+| 5–8 | 182.5, 225, 250, 275 MHz | Valid entries |
+| 9–15 | raw words `0` | Invalid; valid bit clear |
+
+The eight valid frequencies match the saved ADT `perf-states`. The snapshot
+confirms the table while GFX was off; it does not show which state is selected
+after power-up. The control word's selection-field layout is unknown, so its
+bit 31 value does not identify a selected state.
+
+An attempt to boot the guarded power-up payload and then read the table did
+not reach power-up: `gpu-pmgr-once.ko` returned `EINVAL` before register
+access because the MCC payload's device tree lacked the guard property the
+module requires. A subsequent read in that same boot still showed GFX off and
+control word `0x80000000`. No power transition occurred in that attempt, and
+no post-power perf-table snapshot is available. The [public snapshot and its
+boundaries](https://github.com/mattonik/ipad-nixos/blob/ae0d176abb73a67a2ef4c5b8cf2b8150a7ab97df/research/2026-11-08-j81-gfx-perf-state-live-read.md)
+records the measurement.
+
 ## Offline comparison with Apple's sequence
 
 These findings come from static analysis of the iPad5,3 iOS 8.1 (12B410) and
@@ -62,6 +91,19 @@ targets were not read back. Other indirect targets or boot-time state may also
 matter. These observations do not establish that every relevant effect was
 reproduced; the core-ID hang remains unexplained.
 
+### What LLB and iBoot do with the perf-state table
+
+Offline analysis of the iPad5,3 iOS 8.1 (12B410) boot stages found that LLB
+programs the 16 table entries at `0x20e01c000 + n*0x10` and their `+4` words;
+iBoot reads the entries to build the ADT `perf-states`. LLB sets bit 31 of
+`0x20e01c200`, matching the pre-power snapshot, and also writes `0x40000001`
+to `0x20e01c300` (meaning unknown). No state-select write was found in LLB or
+iBoot. This narrows the bootloader comparison but does not establish the
+selected state after GFX power-up; the available live snapshot was taken with
+GFX off. See the [public
+LLB/iBoot analysis](https://github.com/mattonik/ipad-nixos/blob/74683abec98fe22b14af0e840531a55a38cfca35/research/2026-11-08-j81-iboot-llb-gfx-perf-state.md)
+and the [follow-up perf-table analysis](https://github.com/mattonik/ipad-nixos/blob/ae0d176abb73a67a2ef4c5b8cf2b8150a7ab97df/research/2026-11-08-j81-gfx-perf-state-live-read.md).
+
 ## Open work
 
 - Disassemble the one unclassified action on this path. Its call path suggests
@@ -71,7 +113,11 @@ reproduced; the core-ID hang remains unexplained.
   any J81 `state-config` row names GFX (`0x7c`).
 - Trace the conditional display/MCC busy callback, which runs on a busy 0→1
   edge when framebuffer caching is enabled.
-- Check what iBoot or iBEC leaves configured for GFX that a checkm8/PongoOS
-  boot does not.
+- Obtain a read-only perf-table snapshot immediately after the guarded GFX
+  power-up, with the required `gpu-pmgr-once` device-tree guard. The current
+  pre-power snapshot cannot answer which state is selected after power-up.
+- Check any remaining iBoot/iBEC state that a checkm8/PongoOS boot does not
+  preserve; the LLB/iBoot analysis confirms that LLB programs the table and
+  iBoot reads it, but it did not identify a software state-select write.
 - Do not repeat the RGX core-ID read, guess clocks or resets, or write MCC
   registers until one of these gives a concrete register difference.
