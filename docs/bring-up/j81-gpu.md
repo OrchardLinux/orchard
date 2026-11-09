@@ -127,7 +127,7 @@ The LLB setup routine is directly reachable from its relocated normal startup
 path, with no boot-type branch around that call in the inspected sequence.
 That establishes static reachability, not execution in the Linux test boot.
 The documented Linux handoff runs from DFU/checkm8 through PongoOS and m1n1
-to Linux ([boot script](https://github.com/OrchardLinux/orchard/blob/j81-gpu-status-clean/boot/run_m1n1_debug.sh));
+to Linux ([boot script](https://github.com/mattonik/ipad-nixos/blob/main/boot/run_m1n1_debug.sh));
 it does not record an LLB or iBoot handoff. A post-boot PMGR snapshot matching
 the LLB table establishes that those values were present in that Linux
 session, not who last wrote them or whether they persisted continuously from
