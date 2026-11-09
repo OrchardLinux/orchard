@@ -73,6 +73,10 @@ class D2365DeviceTree(unittest.TestCase):
         source = resolved_j71b_dts()
         self.assertIn('compatible = "apple,d2365-poweroff";', source)
         self.assertIn('power-supplies = <&tristar_charger>;', source)
+        self.assertIn('simple-audio-card,name = "J71b Speakers";', source)
+
+    def test_ipad6_boards_share_the_tdm_speaker_link(self):
+        source = patched_source('arch/arm64/boot/dts/apple/t8010-ipad6.dtsi')
         self.assertIn('maxim,tdm;', source)
         self.assertIn('simple-audio-card,format = "dsp_a";', source)
 

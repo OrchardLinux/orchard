@@ -1,0 +1,229 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Duke Eagleman <301139544+jerricky26@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 08:46:18 -0500
+Subject: [PATCH] arm64: dts: apple: t8010-ipad6: Describe the speakers for
+ every iPad 6 and 7
+
+The iPad 6 and 7 boards share their speaker hardware, so describe it once
+in t8010-ipad6.dtsi, which the iPad 7 boards include too: MCA2 as clock
+provider in the iOS TDM mode ("dsp_a", eight 16-bit slots), aud2 routed
+to pin2, and the MAX98357A amplifiers modelled as one codec through their
+shared SD_MODE line on AP GPIO 20. Each board only names its card.
+
+The IPSW ADTs of J71b, J72b, J171 and J172 (iPadOS 17.7.11 and 17.7)
+match for everything this uses: MCA2 at 0x20a0a8000 (size 0x4000) with
+its MCLK word at 0x20a002008, IRQ 229, mca-version 5, clock gate
+ps_mca2, the aud2 to pin2 route, SmartIO TX endpoint 0x2c, NCO channel
+2, and audio-control,max98357 with 4 channels enabled by AP GPIO 20.
+/arm-io/mca2/audio-speaker has the same reg on all four boards. Only
+phandle numbers differ.
+
+The NCO reference rate is not in the IPSW ADT (iBoot fills it in), so
+all boards take the 800 MHz a running J71b reports.
+
+Tested on one J171: speaker-test on hw:0,0 at 48 kHz, S16_LE, 4
+channels gives a clean tone on every slot with no kernel messages.
+Slots 1 and 2 drive the bottom-left speaker, slots 3 and 4 the
+bottom-right one. The earlier plain I2S description (format "i2s", no
+maxim,tdm) gave loud static. J71b plays in this mode too. J72b and J172
+are untested.
+
+[Orchard: from jerricky26/hardware 9a0005b (OrchardLinux/orchard#100),
+ which added these nodes to t8010-j171.dts. Reworked: the nodes move
+ from t8010-j71b.dts (t8010/0006 and 0016) into t8010-ipad6.dtsi, so
+ J71b, J72b, J171 and J172 share one description, after comparing the
+ J72b and J172 ADTs as well.]
+Assisted-by: LLM
+Signed-off-by: Duke Eagleman <301139544+jerricky26@users.noreply.github.com>
+---
+ arch/arm64/boot/dts/apple/t8010-ipad6.dtsi | 55 ++++++++++++++++++++++
+ arch/arm64/boot/dts/apple/t8010-j171.dts   |  4 ++
+ arch/arm64/boot/dts/apple/t8010-j172.dts   |  4 ++
+ arch/arm64/boot/dts/apple/t8010-j71b.dts   | 46 ++----------------
+ arch/arm64/boot/dts/apple/t8010-j72b.dts   |  4 ++
+ 5 files changed, 70 insertions(+), 43 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi b/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
+index 2091e0cfd543..1b025dabba43 100644
+--- a/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
++++ b/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
+@@ -18,6 +18,17 @@ aliases {
+ 		wifi0 = &wifi;
+ 	};
+ 
++	/*
++	 * The speaker amplifiers: one logical codec models the MAX98357A bank's
++	 * shared SD_MODE line.
++	 */
++	speaker_amps: amplifier {
++		compatible = "maxim,max98357a";
++		#sound-dai-cells = <0>;
++		maxim,tdm;
++		sdmode-gpios = <&pinctrl_ap 20 GPIO_ACTIVE_HIGH>;
++	};
++
+ 	gpio-keys {
+ 		compatible = "gpio-keys";
+ 
+@@ -67,6 +78,28 @@ wlan_vdd: regulator-wlan-vdd {
+ 		enable-active-high;
+ 		off-on-delay-us = <100000>;
+ 	};
++
++	/*
++	 * The speaker link in the iOS TDM mode: eight 16-bit slots with MCA2 as
++	 * clock provider. Each board names its card.
++	 */
++	speakers: sound {
++		compatible = "simple-audio-card";
++		simple-audio-card,format = "dsp_a";
++		simple-audio-card,bitclock-master = <&speaker_cpu>;
++		simple-audio-card,frame-master = <&speaker_cpu>;
++		simple-audio-card,widgets = "Speaker", "Speakers";
++		simple-audio-card,routing = "Speakers", "Speaker";
++		simple-audio-card,pin-switches = "Speakers";
++
++		speaker_cpu: simple-audio-card,cpu {
++			sound-dai = <&mca2>;
++		};
++
++		simple-audio-card,codec {
++			sound-dai = <&speaker_amps>;
++		};
++	};
+ };
+ 
+ &framebuffer0 {
+@@ -161,6 +194,28 @@ rtc_offset: rtc-offset@4 {
+ 		};
+ 	};
+ };
++
++&i2s_switch {
++	status = "okay";
++};
++
++&mca2 {
++	apple,i2s-switch = <&i2s_switch 2 2>;
++	status = "okay";
++};
++
++&nco {
++	status = "okay";
++};
++
++/*
++ * The NCO reference rate as a running J71b's ADT gives it. The IPSW ADTs leave
++ * it for iBoot to fill in, so the other boards are assumed to share it.
++ */
++&nco_clkref {
++	clock-frequency = <800000000>;
++};
++
+ &pcie0 {
+ 	iommu-map = <0x100 &pcie0_dart0 0 0x0 0x80000000 0x0 0x3c000000 1>,
+ 		    <0x200 &pcie0_dart3 0 0x0 0x80000000 0x0 0x3ffff000 1>;
+diff --git a/arch/arm64/boot/dts/apple/t8010-j171.dts b/arch/arm64/boot/dts/apple/t8010-j171.dts
+index 6751bf3a4afd..332cb895b46a 100644
+--- a/arch/arm64/boot/dts/apple/t8010-j171.dts
++++ b/arch/arm64/boot/dts/apple/t8010-j171.dts
+@@ -12,3 +12,7 @@ / {
+ 	compatible = "apple,j171", "apple,t8010", "apple,arm-platform";
+ 	model = "Apple iPad 7 (Wi-Fi)";
+ };
++
++&speakers {
++	simple-audio-card,name = "J171 Speakers";
++};
+diff --git a/arch/arm64/boot/dts/apple/t8010-j172.dts b/arch/arm64/boot/dts/apple/t8010-j172.dts
+index 51aaa950acd9..6dab2f592305 100644
+--- a/arch/arm64/boot/dts/apple/t8010-j172.dts
++++ b/arch/arm64/boot/dts/apple/t8010-j172.dts
+@@ -12,3 +12,7 @@ / {
+ 	compatible = "apple,j172", "apple,t8010", "apple,arm-platform";
+ 	model = "Apple iPad 7 (Cellular)";
+ };
++
++&speakers {
++	simple-audio-card,name = "J172 Speakers";
++};
+diff --git a/arch/arm64/boot/dts/apple/t8010-j71b.dts b/arch/arm64/boot/dts/apple/t8010-j71b.dts
+index 53f6eb63069a..f667e67a3d46 100644
+--- a/arch/arm64/boot/dts/apple/t8010-j71b.dts
++++ b/arch/arm64/boot/dts/apple/t8010-j71b.dts
+@@ -11,33 +11,10 @@
+ / {
+ 	compatible = "apple,j71b", "apple,t8010", "apple,arm-platform";
+ 	model = "Apple iPad 6 (Wi-Fi)";
++};
+ 
+-	/* One logical codec models the amplifier bank's shared SD_MODE line. */
+-	speaker_amps: amplifier {
+-		compatible = "maxim,max98357a";
+-		#sound-dai-cells = <0>;
+-		maxim,tdm;
+-		sdmode-gpios = <&pinctrl_ap 20 GPIO_ACTIVE_HIGH>;
+-	};
+-
+-	sound {
+-		compatible = "simple-audio-card";
+-		simple-audio-card,name = "J71b Speakers";
+-		simple-audio-card,format = "dsp_a";
+-		simple-audio-card,bitclock-master = <&speaker_cpu>;
+-		simple-audio-card,frame-master = <&speaker_cpu>;
+-		simple-audio-card,widgets = "Speaker", "Speakers";
+-		simple-audio-card,routing = "Speakers", "Speaker";
+-		simple-audio-card,pin-switches = "Speakers";
+-
+-		speaker_cpu: simple-audio-card,cpu {
+-			sound-dai = <&mca2>;
+-		};
+-
+-		simple-audio-card,codec {
+-			sound-dai = <&speaker_amps>;
+-		};
+-	};
++&speakers {
++	simple-audio-card,name = "J71b Speakers";
+ };
+ 
+ &wifi {
+@@ -68,23 +45,6 @@ &touchscreen {
+ 	firmware-name = "apple/j71b-fwstart.z2fw";
+ };
+ 
+-&mca2 {
+-	apple,i2s-switch = <&i2s_switch 2 2>;
+-	status = "okay";
+-};
+-
+-&i2s_switch {
+-	status = "okay";
+-};
+-
+-&nco_clkref {
+-	clock-frequency = <800000000>;
+-};
+-
+-&nco {
+-	status = "okay";
+-};
+-
+ &d2365_pmic {
+ 	poweroff {
+ 		compatible = "apple,d2365-poweroff";
+diff --git a/arch/arm64/boot/dts/apple/t8010-j72b.dts b/arch/arm64/boot/dts/apple/t8010-j72b.dts
+index 20437b4b4c33..41bd1b952f21 100644
+--- a/arch/arm64/boot/dts/apple/t8010-j72b.dts
++++ b/arch/arm64/boot/dts/apple/t8010-j72b.dts
+@@ -13,6 +13,10 @@ / {
+ 	model = "Apple iPad 6 (Cellular)";
+ };
+ 
++&speakers {
++	simple-audio-card,name = "J72b Speakers";
++};
++
+ &wifi {
+ 	brcm,board-type = "apple,j72b";
+ };
