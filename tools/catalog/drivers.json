@@ -335,9 +335,12 @@
     ],
     "j96": [
       "backlight",
+      "battery",
       "buttons",
+      "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "wifi"
     ],
     "j97": [
       "backlight",

@@ -42,6 +42,9 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
   they'll work.
 - iPad mini 4 (J96): RAM-boot bring-up record: desktop, touch, battery and
   native Wi-Fi measured on a local kernel tree. Not a device profile yet. (Tom Ballard)
+- iPad mini 4 (J96): device description for the touchscreen, Wi-Fi (BCM4350 over
+  PCIe) and the battery gauge, with a firmware recipe for the touch and Wi-Fi
+  firmware. Drivers bind; not yet tested on Orchard's build. (Tom Ballard)
 - iPad Air (J85): measured RAM-boot status documented. (Christopher M. Smith)
 - iPad Air 2 (J81): native-root boot, desktop and peripheral status recorded.
   (micro23)
