@@ -178,6 +178,16 @@
       ]
     },
     {
+      "destination": "lib/firmware/apple/vxd-deva.bin",
+      "sha256": "bf5167652e81540471aaca141943fd33d71c3990c137f145471305f5f5ade83b",
+      "steps": [
+        {
+          "step": "vxd-firmware-from-kernelcache@1",
+          "input": "kernelcache"
+        }
+      ]
+    },
+    {
       "destination": "lib/firmware/apple/j71b-fwstart.z2fw",
       "sha256": "ec4349481fbdc1e63989b800419527cd26061e6e419428e416376dff0dddd473",
       "steps": [

@@ -127,6 +127,16 @@
       ]
     },
     {
+      "destination": "lib/firmware/apple/vxd-deva.bin",
+      "sha256": "bf5167652e81540471aaca141943fd33d71c3990c137f145471305f5f5ade83b",
+      "steps": [
+        {
+          "step": "vxd-firmware-from-kernelcache@1",
+          "input": "kernelcache"
+        }
+      ]
+    },
+    {
       "destination": "lib/firmware/brcm/BCM.apple,j171-MUR.hcd",
       "sha256": "d941e18c6501933d2fd1f81a7498fc02755e798caba00f3dd42afd1f255e7188",
       "steps": [
