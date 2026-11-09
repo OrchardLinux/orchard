@@ -104,6 +104,52 @@ GFX off. See the [public
 LLB/iBoot analysis](https://github.com/mattonik/ipad-nixos/blob/74683abec98fe22b14af0e840531a55a38cfca35/research/2026-11-08-j81-iboot-llb-gfx-perf-state.md)
 and the [follow-up perf-table analysis](https://github.com/mattonik/ipad-nixos/blob/ae0d176abb73a67a2ef4c5b8cf2b8150a7ab97df/research/2026-11-08-j81-gfx-perf-state-live-read.md).
 
+### Other LLB PMGR writes and Linux handoff limits
+
+A bounded offline scan of the iPad5,3 iOS 8.1 (12B410) LLB found additional
+PMGR operations in the same setup routine. The sequence at `0x20e020400` is
+at PMGR offset `0x20400`, which the [T7001 PMGR device-tree description][pmgr-dt]
+names `ps_sep`/`sep`. The [Linux PMGR driver][pmgr-driver] defines bits 7:4 as
+the actual state for these described state words. LLB clears selected bits and
+polls until that field is `0xf`. This maps to SEP power-state handling; it is
+not a GFX register or evidence of a GFX dependency.
+
+In that routine, LLB also sets bit 31 at five page bases from `0x20e010000`
+through `0x20e014000`, copies a static 47-word table to `0x20e010000`–
+`0x20e0100b8`, and copies six words to `0x20e00f208`–`0x20e00f21c`. The
+available T7001 DT does not name these offsets or the helper's other indexed
+pages. Their domain and purpose remain unknown; proximity to GFX setup does
+not identify them as GFX or CPU configuration. The [bounded scan][llb-scan]
+describes only static disassembly, not runtime traces; no extracted firmware
+or private artifacts are included here.
+
+The LLB setup routine is directly reachable from its relocated normal startup
+path, with no boot-type branch around that call in the inspected sequence.
+That establishes static reachability, not execution in the Linux test boot.
+The documented Linux handoff runs from DFU/checkm8 through PongoOS and m1n1
+to Linux ([boot script](https://github.com/OrchardLinux/orchard/blob/j81-gpu-status-clean/boot/run_m1n1_debug.sh));
+it does not record an LLB or iBoot handoff. A post-boot PMGR snapshot matching
+the LLB table establishes that those values were present in that Linux
+session, not who last wrote them or whether they persisted continuously from
+LLB. There is no pre-DFU snapshot or write trace to establish their origin or
+continuity across the transition.
+
+Orchard's existing [A7–A11 m1n1 importer][orchard-perf-import] represents
+each ADT `perf-states` row as two `u32` values, frequency in Hz and voltage in
+mV, then maps rows to OPP frequency, microvoltage, and level. J81's reported
+table shape is compatible with that 8-byte pair format; valid entries are
+indices 1–8. This is a static format comparison, not an integration test on
+J81's raw ADT blob. The importer requires an existing FDT `gpu` node with an
+empty `operating-points-v2` table; it does not create a J81 GPU node or prove
+that any performance level is selected. PMGR domain state 15 (`0x3ff`) and a
+GPU performance level are separate state concepts. See the [format comparison][perf-layout].
+
+[pmgr-dt]: https://lkml.iu.edu/hypermail/linux/kernel/2502.0/01346.html
+[pmgr-driver]: https://github.com/torvalds/linux/blob/master/drivers/pmdomain/apple/pmgr-pwrstate.c
+[llb-scan]: https://github.com/mattonik/ipad-nixos/blob/main/research/2026-11-08-j81-llb-pmgr-write-scan.md
+[perf-layout]: https://github.com/mattonik/ipad-nixos/blob/main/research/2026-11-08-j81-orchard-perf-state-layout.md
+[orchard-perf-import]: https://github.com/mattonik/orchard/blob/j81-gpu-status-clean/boot/m1n1/patches/orchard/0011-kboot-Fill-the-A7-A11-GPU-s-performance-states-from-.patch
+
 ## Open work
 
 - Check whether runtime PMGR configuration supplies a GFX `state-config`
