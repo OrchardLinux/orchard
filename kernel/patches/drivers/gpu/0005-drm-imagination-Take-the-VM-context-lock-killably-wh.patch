@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sun, 8 Nov 2026 04:05:30 +0800
+Subject: [PATCH] drm/imagination: Take the VM context lock killably when
+ mapping
+
+A process blocked on the VM context lock behind a stuck holder stayed in
+D state, its GPU memory pinned until a reboot (a Firefox thread in
+__pvr_vm_map, 340 MiB). Take the lock killably so such a process can be
+killed and its memory freed.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_vm.c | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_vm.c b/drivers/gpu/drm/imagination/pvr_vm.c
+index acef3197790a..03254d5d1a0a 100644
+--- a/drivers/gpu/drm/imagination/pvr_vm.c
++++ b/drivers/gpu/drm/imagination/pvr_vm.c
+@@ -765,7 +765,16 @@ __pvr_vm_map(struct pvr_vm_context *vm_ctx, struct pvr_gem_object *pvr_obj,
+ 
+ 	pvr_gem_object_get(pvr_obj);
+ 
+-	mutex_lock(&vm_ctx->lock);
++	/*
++	 * Killable: a process blocked here behind a stuck lock holder can still be
++	 * killed, which closes its files and frees its memory, instead of staying in
++	 * D state with its GPU memory pinned until a reboot.
++	 */
++	err = mutex_lock_killable(&vm_ctx->lock);
++	if (err) {
++		pvr_vm_bind_op_fini(&bind_op);
++		return err;
++	}
+ 	err = drm_gpuvm_exec_lock(&vm_exec);
+ 	if (err)
+ 		goto err_cleanup;

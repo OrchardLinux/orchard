@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Mon, 9 Nov 2026 17:47:42 +0800
+Subject: [PATCH] drm/imagination: pvr_page_destroy: no L0 table, no page
+
+pvr_mmu_map() unwinding a failed map (-ENOMEM from a page-table
+allocation) walked pages whose L0 table was never created, and
+pvr_page_destroy() dereferenced the NULL table: an oops in Firefox's
+VM_MAP ioctl that left a GEM lock held and the system unable to suspend.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_mmu.c | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_mmu.c b/drivers/gpu/drm/imagination/pvr_mmu.c
+index 9d5bce3ebe3e..72fe5831cb1b 100644
+--- a/drivers/gpu/drm/imagination/pvr_mmu.c
++++ b/drivers/gpu/drm/imagination/pvr_mmu.c
+@@ -2277,8 +2277,13 @@ pvr_page_create(struct pvr_mmu_op_context *op_ctx, dma_addr_t dma_addr,
+ static void
+ pvr_page_destroy(struct pvr_mmu_op_context *op_ctx)
+ {
+-	/* Do nothing if the page does not exist. */
+-	if (!pvr_page_table_l0_entry_is_valid(op_ctx->curr_page.l0_table,
++	/*
++	 * Do nothing if the page does not exist, nor if its L0 table does not:
++	 * pvr_mmu_map() unwinding a failed map (-ENOMEM from a page table
++	 * allocation) walks pages whose tables were never created.
++	 */
++	if (!op_ctx->curr_page.l0_table ||
++	    !pvr_page_table_l0_entry_is_valid(op_ctx->curr_page.l0_table,
+ 					      op_ctx->curr_page.l0_idx)) {
+ 		return;
+ 	}
