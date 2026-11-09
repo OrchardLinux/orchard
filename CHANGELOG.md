@@ -77,6 +77,8 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
 - iPad 6 (J71b): speakers through the MCA audio path, with an ALSA UCM
   profile. (Dalton Alexandre)
 - iPad 5: UCM profile for the speakers and internal microphone.
+- iPad 7 Wi-Fi (J171): the speakers play. iPad 6 and 7 Cellular (J72b, J172)
+  get the same speakers, untested. (Duke Eagleman)
 - iPad 6 (J71b): the always-on processor (AOP) runs as an in-kernel driver,
   replacing the userspace DMA owner; its accelerometer is an IIO device with
   the panel's mount matrix, so desktops can rotate the screen. Based on Dalton
