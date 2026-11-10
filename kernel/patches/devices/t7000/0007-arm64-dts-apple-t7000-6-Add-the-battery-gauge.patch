@@ -17,7 +17,7 @@ Assisted-by: LLM
  1 file changed, 19 insertions(+)
 
 diff --git a/arch/arm64/boot/dts/apple/t7000-6.dtsi b/arch/arm64/boot/dts/apple/t7000-6.dtsi
-index 7e1eee073df5..0e46d40721ce 100644
+index d806865ae50d..5cf6cd4593e4 100644
 --- a/arch/arm64/boot/dts/apple/t7000-6.dtsi
 +++ b/arch/arm64/boot/dts/apple/t7000-6.dtsi
 @@ -12,6 +12,10 @@
@@ -31,7 +31,7 @@ index 7e1eee073df5..0e46d40721ce 100644
  	gpio-keys {
  		compatible = "gpio-keys";
  
-@@ -90,6 +94,21 @@ rtc_offset: rtc-offset@4 {
+@@ -49,6 +53,21 @@ switch-mute {
  	};
  };
  
@@ -50,6 +50,6 @@ index 7e1eee073df5..0e46d40721ce 100644
 +	};
 +};
 +
- /* The boot loader set up the display; nothing restores it after power loss. */
- &ps_disp0 {
- 	apple,always-on;
+ &framebuffer0 {
+ 	power-domains = <&ps_disp0 &ps_mipi_dsi>;
+ };
