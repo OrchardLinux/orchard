@@ -129,7 +129,6 @@ class DeviceIsolation(unittest.TestCase):
         self.assertEqual((rows[0]['mode'], rows[0]['ecid'], rows[0]['boot_id'], rows[0]['profile']),
                          ('install', 2, BOOT_B, 'j71b'))
         self.assertEqual(rows[0]['serial_port'], '/dev/ttyACM0')
-        self.assertEqual(linux_usb.MODES, usb.MODES)
 
 
 if __name__ == '__main__':

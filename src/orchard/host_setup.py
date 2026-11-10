@@ -12,6 +12,7 @@ import tempfile
 from typing import Callable, Optional
 
 from . import tools
+from .apple.linux_usb import APPLE, M1N1, MODES, SERIAL_MODES
 from .progress import Progress
 from .transports.pongo import GLU, library_path
 
@@ -21,17 +22,14 @@ USB_RULES = Path('/etc/udev/rules.d/70-orchard.rules')
 def usb_rules(group):
     if not re.fullmatch(r'[a-zA-Z0-9_-]+', group):
         raise ValueError('Unsupported USB access group name')
-    lines = ['# Orchard: DFU, Pongo, bootloader, recovery, RAM, installed system and direct installer.']
-    for pid in ('1227', '4141', '4142', '4144', '4145', '4146'):
-        lines.append(f'SUBSYSTEM=="usb", ATTR{{idVendor}}=="05ac", ATTR{{idProduct}}=="{pid}", '
-                     f'MODE="0660", GROUP="{group}", TAG+="uaccess"')
-    for pid in ('4142', '4144', '4145', '4146'):
-        lines.append(f'SUBSYSTEM=="tty", ATTRS{{idVendor}}=="05ac", ATTRS{{idProduct}}=="{pid}", '
-                     f'MODE="0660", GROUP="{group}", TAG+="uaccess"')
-    lines.append('SUBSYSTEM=="usb", ATTR{idVendor}=="1209", ATTR{idProduct}=="316d", '
-                 f'MODE="0660", GROUP="{group}", TAG+="uaccess"')
-    lines.append('SUBSYSTEM=="tty", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="316d", '
-                 f'MODE="0660", GROUP="{group}", TAG+="uaccess"')
+    lines = ['# Orchard: every stage of the device and m1n1, with their serial consoles.']
+    access = f'MODE="0660", GROUP="{group}", TAG+="uaccess"'
+    devices = [(APPLE, pid, mode in SERIAL_MODES) for pid, mode in MODES.items()] + [(*M1N1, True)]
+    for vendor, product, serial in devices:
+        lines.append(f'SUBSYSTEM=="usb", ATTR{{idVendor}}=="{vendor:04x}", ATTR{{idProduct}}=="{product:04x}", {access}')
+        if serial:
+            lines.append(f'SUBSYSTEM=="tty", ATTRS{{idVendor}}=="{vendor:04x}", '
+                         f'ATTRS{{idProduct}}=="{product:04x}", {access}')
     # Let Orchard reset the port of a device in DFU when it does not re-enumerate after checkm8.
     lines.append('ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="05ac", '
                  'ATTR{idProduct}=="1227", RUN+="/bin/sh -c \'chgrp '
