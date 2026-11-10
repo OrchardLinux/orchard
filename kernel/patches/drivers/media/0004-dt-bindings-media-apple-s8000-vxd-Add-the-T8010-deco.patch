@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Tue, 10 Nov 2026 07:49:21 +0800
+Subject: [PATCH] dt-bindings: media: apple,s8000-vxd: Add the T8010 decoder
+
+The Apple T8010 (A10) has the same Imagination MSVDX decoder family as
+the S8000, reported as vxd-version 10 in the Apple device tree. It has a
+second, 4 KiB register range that AppleD5500 calls the integration
+registers.
+
+Assisted-by: LLM
+---
+ .../bindings/media/apple,s8000-vxd.yaml       | 28 ++++++++++++++++---
+ 1 file changed, 24 insertions(+), 4 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/media/apple,s8000-vxd.yaml b/Documentation/devicetree/bindings/media/apple,s8000-vxd.yaml
+index 6cb5e83f4929..a6c1aebb78ff 100644
+--- a/Documentation/devicetree/bindings/media/apple,s8000-vxd.yaml
++++ b/Documentation/devicetree/bindings/media/apple,s8000-vxd.yaml
+@@ -13,16 +13,21 @@ description:
+   The Apple "VXD" block is a multi-standard hardware video decoder, an
+   Imagination PowerVR MSVDX core whose MTX (META) microcontroller runs the
+   DEVA firmware. Apple has used this IP family since the S5L8940X (A4); the
+-  S8000/S8003 (A9) reports vxd-version 7 in the Apple device tree. The block
+-  has no DART; it translates its own memory accesses through a two-level
++  S8000/S8003 (A9) reports vxd-version 7 in the Apple device tree, the T8010
++  (A10) vxd-version 10. The block has no DART; it translates its own memory accesses through a two-level
+   "GART" that the host programs through the MTX MMU registers.
+ 
+ properties:
+   compatible:
+-    const: apple,s8000-vxd
++    enum:
++      - apple,s8000-vxd
++      - apple,t8010-vxd
+ 
+   reg:
+-    maxItems: 1
++    minItems: 1
++    items:
++      - description: decoder core registers
++      - description: second register range of the T8010 block
+ 
+   interrupts:
+     maxItems: 1
+@@ -36,6 +41,21 @@ required:
+   - interrupts
+   - power-domains
+ 
++allOf:
++  - if:
++      properties:
++        compatible:
++          contains:
++            const: apple,t8010-vxd
++    then:
++      properties:
++        reg:
++          minItems: 2
++    else:
++      properties:
++        reg:
++          maxItems: 1
++
+ additionalProperties: false
+ 
+ examples:
