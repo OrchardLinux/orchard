@@ -28,7 +28,7 @@ class N61Data(unittest.TestCase):
         expected = dict.fromkeys(data.features(), 'missing')
         expected.update(display='working', screen_off='untested', touch='working',
                         backlight='untested', buttons='untested', usb_serial='working', usb_network='untested',
-                        suspend='untested', resume='untested')
+                        suspend='untested', resume='untested', battery='untested')
         self.assertEqual(self.device['features'], expected)
     def test_touch_recipe_selects_the_pinned_n61_gen1_profile(self):
         path = data.firmware_path('n61')
