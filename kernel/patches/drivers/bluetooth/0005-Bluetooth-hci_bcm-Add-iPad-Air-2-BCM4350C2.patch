@@ -3,28 +3,27 @@ From: Henrik Klee <henrik@goat-code.com>
 Date: Fri, 30 Oct 2026 21:02:48 +0800
 Subject: [PATCH] Bluetooth: hci_bcm: Add iPad Air 2 BCM4350C2
 
-Give the iPad Air 2's BCM4350C2 the Apple board sequence of the iPad 5
-and iPad 7: BT_WAKE before BT_REG_ON is cycled, the operational baud
-rate set before the patchram, and the LE quirks. That sequence is
-validated on those boards, not yet on the Air 2.
+Match the iPad Air 2's BCM4350C2 with the plain hci_bcm sequence: the
+patchram loaded at 115,200 baud, with no early baud change. On a J81
+that sequence started the controller (Riesling USI STC patchram, build
+1529) and found classic and LE devices in a scan. The iPad 5 and iPad 7
+Apple board sequence has not been tried on this chip.
 
-Signed-off-by: Henrik Klee <henrik@goat-code.com>
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Assisted-by: LLM
 ---
- drivers/bluetooth/hci_bcm.c | 3 +++
- 1 file changed, 3 insertions(+)
+ drivers/bluetooth/hci_bcm.c | 2 ++
+ 1 file changed, 2 insertions(+)
 
 diff --git a/drivers/bluetooth/hci_bcm.c b/drivers/bluetooth/hci_bcm.c
-index d1634b2..3ce92a8 100644
+index d1634b2bc54a..ecf32c2c7192 100644
 --- a/drivers/bluetooth/hci_bcm.c
 +++ b/drivers/bluetooth/hci_bcm.c
-@@ -1688,6 +1688,9 @@ static const struct of_device_id bcm_bluetooth_of_match[] = {
+@@ -1688,6 +1688,8 @@ static const struct of_device_id bcm_bluetooth_of_match[] = {
  	/* The iPad 5 BCM4355C0 needs the same sequence as the iPad 7 C1. */
  	{ .compatible = "apple,j71t-bcm4355c0-bt",
  	  .data = &bcm4355_j172_device_data },
-+	/* The iPad Air 2 BCM4350C2 takes the same Apple board sequence. */
-+	{ .compatible = "apple,j81-bcm4350c2-bt",
-+	  .data = &bcm4355_j172_device_data },
++	/* The iPad Air 2 BCM4350C2 runs the plain sequence at 115,200 baud. */
++	{ .compatible = "apple,j81-bcm4350c2-bt" },
  	{ .compatible = "apple,j71b-bcm4355c1-bt",
  	  .data = &bcm4355_j71b_device_data },
  	{ .compatible = "apple,j172-bcm4355c1-bt",
