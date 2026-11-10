@@ -344,9 +344,12 @@
     ],
     "j97": [
       "backlight",
+      "battery",
       "buttons",
+      "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "wifi"
     ],
     "j98a": [
       "backlight",
@@ -374,12 +377,14 @@
     ],
     "n56": [
       "backlight",
+      "battery",
       "buttons",
       "usb_network",
       "usb_serial"
     ],
     "n61": [
       "backlight",
+      "battery",
       "buttons",
       "touch",
       "usb_network",

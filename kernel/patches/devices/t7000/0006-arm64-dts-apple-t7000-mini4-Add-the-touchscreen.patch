@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Tom Ballard <tom.ballard08@googlemail.com>
-Date: Thu, 5 Nov 2026 19:33:30 +0000
-Subject: [PATCH] arm64: dts: apple: t7000-j96: Add the touchscreen
+Date: Thu, 5 Nov 2026 19:34:40 +0000
+Subject: [PATCH] arm64: dts: apple: t7000-mini4: Add the touchscreen
 
 Describe the iPad mini 4's N1 touchscreen on SPI1 from the ADT's
 spi1/multi-touch functions: chip select GPIO 15, reset GPIO 56,
@@ -9,21 +9,29 @@ interrupt GPIO 106, LDO enable GPIO 47, the D2207 analog supply
 pmuL(0x20e) and the touch clock (TCLK, the same arguments as on the
 iPad Air 2). m1n1 adds the calibration through the touchscreen0 alias.
 
+The J97's ADT has the same functions and names its controller
+multi-touch,j96, and its J97.mtprops is byte-identical to J96.mtprops,
+so the node goes into the shared t7000-mini4.dtsi with the J96
+compatible and firmware for both models.
+
 On a J96, raw X ran from left to right and raw Y from the bottom of the
 panel to the top, so Y is inverted, as on the iPad 5 and iPad Air 2.
 The bus ran at 1 MHz there; this uses the period iOS selects (83 ns),
-as on the iPad Air 2.
+as on the iPad Air 2. The J97 has not been tried.
+
+[Orchard: from tcballard/orchard#115 (399106a), which described this in
+ t7000-j96.dts only; moved into t7000-mini4.dtsi for the J97.]
 
 Assisted-by: LLM
 ---
- arch/arm64/boot/dts/apple/t7000-j96.dts | 38 +++++++++++++++++++++++++
- 1 file changed, 38 insertions(+)
+ arch/arm64/boot/dts/apple/t7000-mini4.dtsi | 40 ++++++++++++++++++++++
+ 1 file changed, 40 insertions(+)
 
-diff --git a/arch/arm64/boot/dts/apple/t7000-j96.dts b/arch/arm64/boot/dts/apple/t7000-j96.dts
-index b494b89c1..a93754a30 100644
---- a/arch/arm64/boot/dts/apple/t7000-j96.dts
-+++ b/arch/arm64/boot/dts/apple/t7000-j96.dts
-@@ -14,6 +14,7 @@ / {
+diff --git a/arch/arm64/boot/dts/apple/t7000-mini4.dtsi b/arch/arm64/boot/dts/apple/t7000-mini4.dtsi
+index 7f85ea1277ae..442d28b4dd3d 100644
+--- a/arch/arm64/boot/dts/apple/t7000-mini4.dtsi
++++ b/arch/arm64/boot/dts/apple/t7000-mini4.dtsi
+@@ -15,6 +15,7 @@ / {
  
  	aliases {
  		serial5 = &serial5;
@@ -31,10 +39,10 @@ index b494b89c1..a93754a30 100644
  		wifi0 = &wifi0;
  	};
  
-@@ -29,6 +30,11 @@ wlan_vdd: regulator-wlan-vdd {
+@@ -101,6 +102,11 @@ rtc_offset: rtc-offset@4 {
+ 			};
+ 		};
  
- &i2c0 {
- 	pmic@3c {
 +		touch_analog: regulator-touch-analog {
 +			compatible = "apple,d2207-touch-analog-regulator";
 +			regulator-name = "touch-analog";
@@ -43,16 +51,17 @@ index b494b89c1..a93754a30 100644
  		pmu_gpio: gpio {
  			compatible = "apple,d2207-pmic-gpio";
  			gpio-controller;
-@@ -89,3 +95,35 @@ wifi0: wifi@0,0 {
- 		};
+@@ -161,6 +167,40 @@ wifi0: wifi@0,0 {
  	};
  };
-+
+ 
 +/*
 + * The N1 touchscreen, from the ADT spi1/multi-touch functions: chip select
 + * GPIO 15, reset GPIO 56, interrupt GPIO 106, LDO enable GPIO 47, analog
 + * supply pmuL(0x20e) and the PMGR touch clock at 32768 Hz. Its display
-+ * sync (GPIO 78) stays as iBoot left it.
++ * sync (GPIO 78) stays as iBoot left it. The J97's ADT names its
++ * controller multi-touch,j96 too and its J97.mtprops is byte-identical
++ * to J96.mtprops, so both models load the J96 firmware.
 + */
 +&spi1 {
 +	cs-gpios = <&pinctrl 15 GPIO_ACTIVE_LOW>;
@@ -79,3 +88,7 @@ index b494b89c1..a93754a30 100644
 +&touchclk {
 +	status = "okay";
 +};
++
+ /* The boot loader set up the display; nothing restores it after power loss. */
+ &ps_disp0 {
+ 	apple,always-on;
