@@ -21,11 +21,16 @@ USB_RULES = Path('/etc/udev/rules.d/70-orchard.rules')
 def usb_rules(group):
     if not re.fullmatch(r'[a-zA-Z0-9_-]+', group):
         raise ValueError('Unsupported USB access group name')
-    lines = ['# Orchard: DFU, Pongo and Linux recovery only.']
-    for pid in ('1227', '4141', '4142'):
+    lines = ['# Orchard: DFU, Pongo, bootloader, recovery, RAM, installed system and direct installer.']
+    for pid in ('1227', '4141', '4142', '4144', '4145', '4146'):
         lines.append(f'SUBSYSTEM=="usb", ATTR{{idVendor}}=="05ac", ATTR{{idProduct}}=="{pid}", '
                      f'MODE="0660", GROUP="{group}", TAG+="uaccess"')
-    lines.append('SUBSYSTEM=="tty", ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="4142", '
+    for pid in ('4142', '4144', '4145', '4146'):
+        lines.append(f'SUBSYSTEM=="tty", ATTRS{{idVendor}}=="05ac", ATTRS{{idProduct}}=="{pid}", '
+                     f'MODE="0660", GROUP="{group}", TAG+="uaccess"')
+    lines.append('SUBSYSTEM=="usb", ATTR{idVendor}=="1209", ATTR{idProduct}=="316d", '
+                 f'MODE="0660", GROUP="{group}", TAG+="uaccess"')
+    lines.append('SUBSYSTEM=="tty", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="316d", '
                  f'MODE="0660", GROUP="{group}", TAG+="uaccess"')
     # Let Orchard reset the port of a device in DFU when it does not re-enumerate after checkm8.
     lines.append('ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="05ac", '

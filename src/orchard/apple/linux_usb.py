@@ -3,8 +3,8 @@ from pathlib import Path
 import re
 import uuid
 
-# 0x4142: Orchard Recovery; 0x4145: an installed system (orchard's initrd).
-MODES = {0x1227: 'dfu', 0x4141: 'pongo', 0x4142: 'linux', 0x4144: 'ram', 0x4145: 'system'}
+# 0x4142: recovery; 0x4145: installed system; 0x4146: direct-install initrd.
+MODES = {0x1227: 'dfu', 0x4141: 'pongo', 0x4142: 'linux', 0x4144: 'ram', 0x4145: 'system', 0x4146: 'install'}
 
 
 def serial_tags(serial):
