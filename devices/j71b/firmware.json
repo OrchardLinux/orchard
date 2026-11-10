@@ -178,6 +178,16 @@
       ]
     },
     {
+      "destination": "lib/firmware/apple/gfx-t8010.bin",
+      "sha256": "104479454ada7f040e3c503d7ccc64a20ea46a60f2bbf906d3d5a3c6f6523c59",
+      "steps": [
+        {
+          "step": "agx-g9p-firmware-from-kernelcache@1",
+          "input": "kernelcache"
+        }
+      ]
+    },
+    {
       "destination": "lib/firmware/apple/vxd-deva.bin",
       "sha256": "bf5167652e81540471aaca141943fd33d71c3990c137f145471305f5f5ade83b",
       "steps": [
