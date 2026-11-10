@@ -63,6 +63,8 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
   strap, so storage works on that boot path.
 - `orchard shell`, `exec`, `push` and `pull` also reach an installed system,
   not only the recovery.
+- Linux hosts: recognize direct installers and grant USB/serial access throughout
+  boot and installed-system development. (Anders Haas Franzen)
 
 ### Hardware
 
