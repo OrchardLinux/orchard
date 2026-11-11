@@ -573,7 +573,7 @@ def install_layer(path, root, *, size, sha256, expanded_limit):
     """Orchard's platform layer (kernel, DTBs, modules, /usr/lib defaults) into the new root.
 
     Regular files under usr/lib/, usr/share/alsa/ucm2/ (the sound cards' UCM
-    profiles) and usr/share/licenses/ only, and none the
+    profiles), usr/share/wireplumber/ and usr/share/licenses/ only, and none the
     root image already has: the root image carries no kernel, and a
     collision means the image and the layer disagree about who owns a file.
     """
@@ -588,9 +588,11 @@ def install_layer(path, root, *, size, sha256, expanded_limit):
             for member in archive:
                 name = safe_name(member.name)
                 if not (member.isfile() and name.startswith(('usr/lib/', 'usr/share/alsa/ucm2/',
+                                                             'usr/share/wireplumber/',
                                                              'usr/share/licenses/'))):
                     raise InstallError('unsafe-archive', 'Platform layer may contain only files under '
-                                       '/usr/lib, /usr/share/alsa/ucm2 and /usr/share/licenses')
+                                       '/usr/lib, /usr/share/alsa/ucm2, /usr/share/wireplumber '
+                                       'and /usr/share/licenses')
                 expanded += member.size
                 if expanded > expanded_limit:
                     raise InstallError('stream-too-long', 'Platform layer exceeds its expanded size')

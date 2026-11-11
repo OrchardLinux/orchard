@@ -39,8 +39,9 @@ STORAGE_MODULES = ('nvme', 'nvme-apple')
 # initrd carries them and loads them first, and a missing one costs USB only.
 USB_MODULES = ('libcomposite', 'usb_f_ncm', 'usb_f_acm')
 # Where system/defaults may put files: vendor configuration under /usr/lib,
-# and the boards' ALSA UCM profiles where alsa-lib looks for them.
-DEFAULTS_UNDER = ('usr/lib/', 'usr/share/alsa/ucm2/')
+# the boards' ALSA UCM profiles where alsa-lib looks for them, and WirePlumber
+# fragments where WirePlumber looks for them (it reads none under /usr/lib).
+DEFAULTS_UNDER = ('usr/lib/', 'usr/share/alsa/ucm2/', 'usr/share/wireplumber/')
 
 
 def boards(platform, hardware=None):
@@ -168,7 +169,8 @@ def files(bundle, platform, board_dtbs, *, busybox, hardware=None):
         if path.is_file():
             name = path.relative_to(defaults).as_posix()
             if not name.startswith(DEFAULTS_UNDER):
-                raise ValueError(f'System defaults belong under /usr/lib or /usr/share/alsa/ucm2: {name}')
+                raise ValueError(f'System defaults belong under /usr/lib, /usr/share/alsa/ucm2 or '
+                                 f'/usr/share/wireplumber: {name}')
             result[name] = (path.read_bytes(), 0o755 if path.stat().st_mode & 0o111 else 0o644)
     description = {'schema': SCHEMA, 'platform': platform, 'kernel_release': release,
                    'boards': dict(sorted(board_dtbs.items()))}
