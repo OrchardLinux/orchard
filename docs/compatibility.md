@@ -150,10 +150,10 @@ Boards Orchard builds for. States: working, untested, missing, none (no such har
 | `j87m` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing |
 | `n51` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing |
 | `n53` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing |
-| `j96` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing |
-| `j97` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing |
-| `n56` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing |
-| `n61` | working | untested | untested | working | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | working | untested | missing | missing | missing |
+| `j96` | untested | missing | untested | untested | untested | missing | missing | missing | missing | missing | missing | untested | missing | missing | none | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing |
+| `j97` | untested | missing | untested | untested | untested | missing | missing | missing | missing | missing | missing | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing |
+| `n56` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing |
+| `n61` | working | untested | untested | working | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | missing | missing | untested | untested | working | untested | missing | missing | missing |
 | `j81` | working | untested | working | working | working | missing | missing | missing | missing | missing | missing | working | untested | untested | none | working | missing | missing | untested | untested | working | working | missing | missing | missing |
 | `j82` | untested | untested | untested | untested | untested | missing | missing | missing | missing | missing | missing | untested | untested | untested | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing |
 | `j71s` | untested | untested | untested | untested | untested | missing | missing | untested | missing | missing | missing | missing | untested | untested | none | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing |
@@ -174,10 +174,10 @@ Boards Orchard builds for. States: working, untested, missing, none (no such har
 | `d101` | untested | untested | untested | missing | untested | untested | missing | missing | missing | untested | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing |
 | `d11` | untested | untested | untested | untested | untested | untested | missing | untested | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing |
 | `d111` | untested | untested | untested | untested | untested | untested | missing | untested | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing |
-| `j171` | working | untested | working | working | working | untested | missing | untested | missing | working | working | working | missing | missing | none | working | untested | missing | untested | untested | untested | untested | missing | missing | missing |
-| `j172` | untested | untested | untested | untested | untested | untested | missing | untested | missing | untested | untested | untested | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | missing | missing | missing |
-| `j71b` | working | working | working | working | untested | working | missing | missing | missing | working | working | working | working | working | none | working | working | working | working | working | working | working | working | missing | missing |
-| `j72b` | untested | untested | untested | untested | untested | untested | missing | missing | missing | untested | untested | untested | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | missing | missing | missing |
+| `j171` | working | untested | working | working | working | untested | missing | untested | missing | working | working | working | missing | missing | none | working | untested | missing | untested | untested | untested | untested | working | missing | missing |
+| `j172` | untested | untested | untested | untested | untested | untested | missing | untested | missing | untested | untested | untested | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | untested | missing | missing |
+| `j71b` | working | working | working | working | working | working | missing | missing | missing | working | working | working | working | working | none | working | working | working | working | working | working | working | working | missing | missing |
+| `j72b` | untested | untested | untested | untested | untested | untested | missing | missing | missing | untested | untested | untested | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | untested | missing | missing |
 | `j120` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing |
 | `j121` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing |
 | `j207` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing |
@@ -205,10 +205,10 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `j87m` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | yes | yes | – |
 | `n51` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | yes | yes | – |
 | `n53` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | yes | yes | – |
-| `j96` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | yes | yes | – |
-| `j97` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | yes | yes | – |
-| `n56` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | yes | yes | – |
-| `n61` | experimental | yes | yes | yes | – | – | – | – | – | – | – | – | – | yes | yes | – |
+| `j96` | experimental | yes | yes | yes | – | – | – | – | yes | – | – | yes | – | yes | yes | – |
+| `j97` | experimental | yes | yes | yes | – | – | – | – | yes | – | – | yes | – | yes | yes | – |
+| `n56` | experimental | yes | – | yes | – | – | – | – | – | – | – | yes | – | yes | yes | – |
+| `n61` | experimental | yes | yes | yes | – | – | – | – | – | – | – | yes | – | yes | yes | – |
 | `j81` | experimental | yes | yes | yes | – | – | – | – | yes | yes | yes | yes | – | yes | yes | – |
 | `j82` | experimental | yes | yes | yes | – | – | – | – | yes | yes | yes | yes | – | yes | yes | – |
 | `j71s` | experimental | yes | yes | yes | – | yes | – | – | – | yes | yes | yes | yes | yes | yes | yes |
@@ -229,10 +229,10 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `d101` | experimental | yes | – | yes | yes | – | yes | yes | – | yes | yes | – | – | yes | yes | – |
 | `d11` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes | yes | – |
 | `d111` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes | yes | – |
-| `j171` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – |
-| `j172` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – |
+| `j171` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| `j172` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
 | `j71b` | supported | yes | yes | yes | yes | – | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| `j72b` | experimental | yes | yes | yes | yes | – | yes | yes | yes | yes | yes | yes | yes | yes | yes | – |
+| `j72b` | experimental | yes | yes | yes | yes | – | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
 | `j120` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | yes | yes | – |
 | `j121` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | yes | yes | – |
 | `j207` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | yes | yes | – |
@@ -241,8 +241,8 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `d201` | experimental | yes | – | – | – | – | yes | yes | – | – | – | yes | – | yes | yes | – |
 | `d21` | experimental | yes | – | – | – | – | yes | yes | – | – | – | yes | – | yes | yes | – |
 | `d211` | experimental | yes | – | – | – | – | yes | yes | – | – | – | yes | – | yes | yes | – |
-| `d22` | experimental | – | – | – | – | – | yes | yes | – | – | – | yes | – | yes | yes | – |
-| `d221` | experimental | – | – | – | – | – | yes | yes | yes | – | – | yes | – | yes | yes | – |
+| `d22` | experimental | yes | yes | – | – | – | yes | yes | – | – | – | yes | – | yes | yes | – |
+| `d221` | experimental | yes | yes | – | – | – | yes | yes | yes | – | – | yes | – | yes | yes | – |
 
 ### Where feature states and drivers disagree
 
@@ -262,6 +262,6 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `j172` | Bluetooth audio | missing, but a driver binds |
 | `j72b` | Bluetooth input devices | missing, but a driver binds |
 | `j72b` | Bluetooth audio | missing, but a driver binds |
-| `d221` | Touchscreen | working, but no driver binds |
+| `d22` | Touchscreen | missing, but a driver binds |
+| `d22` | Backlight | missing, but a driver binds |
 | `d221` | Buttons | working, but no driver binds |
-| `d221` | Backlight | working, but no driver binds |

@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sun, 8 Nov 2026 04:41:30 +0800
+Subject: [PATCH] drm/imagination: Stop the Apple GPU firmware when probe fails
+
+Reading the GPU ID powers the GPU on, which boots its firmware. A probe
+failing after that, as the support check does without exp_hw_support,
+left the firmware running, and the next probe could not boot it
+(-ETIME) until a reboot.
+
+Stop a booted firmware from a devm action, as pvr_apple_fini() does for
+a bound device, so that the module can be loaded again.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_apple.c | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_apple.c b/drivers/gpu/drm/imagination/pvr_apple.c
+index c30519f699c2..53b7b5791c4a 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple.c
++++ b/drivers/gpu/drm/imagination/pvr_apple.c
+@@ -424,6 +424,21 @@ static void pvr_apple_devfreq_start(struct pvr_apple *apple)
+ 	}
+ }
+ 
++/* devm action: a booted firmware is stopped when the device goes (probe failure) */
++static void pvr_apple_stop_firmware(void *data)
++{
++	struct pvr_apple *apple = data;
++
++	if (!apple->booted)
++		return;
++	pvr_apple_request_power_state(apple, 0);
++	apple_rtkit_shutdown(apple->rtk);
++	cancel_delayed_work_sync(&apple->poll_work);
++	hrtimer_cancel(&apple->poll_timer);
++	writel(readl(apple->fender + FENDER_RUN) & ~FENDER_RUN_ENABLE, apple->fender + FENDER_RUN);
++	apple->booted = false;
++}
++
+ static int pvr_apple_power_init(struct pvr_device *pvr_dev)
+ {
+ 	struct device *dev = from_pvr_device(pvr_dev)->dev;
+@@ -493,6 +508,15 @@ static int pvr_apple_power_init(struct pvr_device *pvr_dev)
+ 	apple->rtk = devm_apple_rtkit_init(dev, apple, NULL, 0, &pvr_apple_rtkit_ops);
+ 	if (IS_ERR(apple->rtk))
+ 		return dev_err_probe(dev, PTR_ERR(apple->rtk), "RTKit init failed\n");
++	/*
++	 * Reading the GPU ID powers the GPU on, which boots the firmware: a probe
++	 * failing after that (the support check without exp_hw_support) left it
++	 * running, and the next probe could not boot it (-ETIME) until a reboot.
++	 * Stop it on the way out, as pvr_apple_fini() does for a bound device.
++	 */
++	err = devm_add_action(dev, pvr_apple_stop_firmware, apple);
++	if (err)
++		return err;
+ 
+ 	/* Before powering on: power_on() requests the fastest state */
+ 	pvr_apple_opp_init(apple);

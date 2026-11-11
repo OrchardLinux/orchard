@@ -42,6 +42,8 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
   they'll work.
 - iPad mini 4 (J96): RAM-boot bring-up record: desktop, touch, battery and
   native Wi-Fi measured on a local kernel tree. Not a device profile yet. (Tom Ballard)
+- iPad mini 4 (J96, J97): touchscreen, Wi-Fi and battery, with a firmware recipe.
+  iPhone 6 and 6 Plus: battery. Not yet tested on Orchard's build. (Tom Ballard)
 - iPad Air (J85): measured RAM-boot status documented. (Christopher M. Smith)
 - iPad Air 2 (J81): native-root boot, desktop and peripheral status recorded.
   (micro23)
@@ -63,6 +65,8 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
   strap, so storage works on that boot path.
 - `orchard shell`, `exec`, `push` and `pull` also reach an installed system,
   not only the recovery.
+- Linux hosts: recognize direct installers and grant USB/serial access throughout
+  boot and installed-system development. (Anders Haas Franzen)
 
 ### Hardware
 
@@ -77,6 +81,8 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
 - iPad 6 (J71b): speakers through the MCA audio path, with an ALSA UCM
   profile. (Dalton Alexandre)
 - iPad 5: UCM profile for the speakers and internal microphone.
+- iPad 7 Wi-Fi (J171): the speakers play. iPad 6 and 7 Cellular (J72b, J172)
+  get the same speakers, untested. (Duke Eagleman)
 - iPad 6 (J71b): the always-on processor (AOP) runs as an in-kernel driver,
   replacing the userspace DMA owner; its accelerometer is an IIO device with
   the panel's mount matrix, so desktops can rotate the screen. Based on Dalton
