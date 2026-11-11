@@ -1,0 +1,162 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Duke Eagleman <301139544+jerricky26@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 12:48:58 -0500
+Subject: [PATCH] arm64: dts: apple: t8010-ipad6: Describe the headphone jack
+
+The iPad 6 and 7 boards have a CS42L83 headphone codec on i2c0 at 0x48,
+fed by MCA4 through i2s-switch pad 4. The IPSW ADTs of J71b, J72b, J171
+and J172 agree on everything this uses: the codec's reset on AP GPIO 25
+and interrupt on AP GPIO 71, MCA4 at 0x20a0b0000 with its MCLK word at
+0x20a002010, IRQ 231, clock gate ps_mca4, NCO channel 4, SmartIO TX
+endpoint 0x30, the aud4 to pin4 route, and the same audio-codec record.
+
+Add MCA4 to t8010.dtsi, and the codec and a second link to the shared
+card: stereo I2S with MCA4 as clock provider. The codec runs its PLL from
+SCLK, so the AOP MCLK the ADT lists (function-aop_mclk, AOP GPIO 36) is
+not used. The codec is also listed as an auxiliary device so that
+simple-audio-card creates its headset jack, and its controls and widgets
+carry the prefix "Jack". The speaker link becomes dai-link 0 unchanged,
+so its PCM stays device 0; the headphones are device 1.
+
+Tip sense is inverted, as on Apple's Macs with this codec; that has not
+been checked with a plug on an iPad.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8010-ipad6.dtsi | 75 ++++++++++++++++++----
+ arch/arm64/boot/dts/apple/t8010.dtsi       | 17 +++++
+ 2 files changed, 79 insertions(+), 13 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi b/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
+index cd4e184..0bff65f 100644
+--- a/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
++++ b/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
+@@ -80,24 +80,51 @@
+ 	};
+ 
+ 	/*
+-	 * The speaker link in the iOS TDM mode: eight 16-bit slots with MCA2 as
+-	 * clock provider. Each board names its card.
++	 * Link 0 is the speaker link in the iOS TDM mode: eight 16-bit slots
++	 * with MCA2 as clock provider. Link 1 is the headphone jack: stereo I2S
++	 * from MCA4 as clock provider to the CS42L83, which runs its PLL from
++	 * SCLK. The codec is also an auxiliary device, so the card creates its
++	 * jack. Each board names its card.
+ 	 */
+ 	speakers: sound {
+ 		compatible = "simple-audio-card";
+-		simple-audio-card,format = "dsp_a";
+-		simple-audio-card,bitclock-master = <&speaker_cpu>;
+-		simple-audio-card,frame-master = <&speaker_cpu>;
+-		simple-audio-card,widgets = "Speaker", "Speakers";
+-		simple-audio-card,routing = "Speakers", "Speaker";
+-		simple-audio-card,pin-switches = "Speakers";
+-
+-		speaker_cpu: simple-audio-card,cpu {
+-			sound-dai = <&mca2>;
++		simple-audio-card,widgets = "Speaker", "Speakers",
++					    "Headphone", "Headphones";
++		simple-audio-card,routing = "Speakers", "Speaker",
++					    "Headphones", "Jack HP";
++		simple-audio-card,pin-switches = "Speakers", "Headphones";
++		simple-audio-card,aux-devs = <&jack_codec>;
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		simple-audio-card,dai-link@0 {
++			reg = <0>;
++			format = "dsp_a";
++			bitclock-master = <&speaker_cpu>;
++			frame-master = <&speaker_cpu>;
++
++			speaker_cpu: cpu {
++				sound-dai = <&mca2>;
++			};
++
++			codec {
++				sound-dai = <&speaker_amps>;
++			};
+ 		};
+ 
+-		simple-audio-card,codec {
+-			sound-dai = <&speaker_amps>;
++		simple-audio-card,dai-link@1 {
++			reg = <1>;
++			format = "i2s";
++			bitclock-master = <&jack_cpu>;
++			frame-master = <&jack_cpu>;
++
++			jack_cpu: cpu {
++				sound-dai = <&mca4>;
++			};
++
++			codec {
++				sound-dai = <&jack_codec>;
++			};
+ 		};
+ 	};
+ };
+@@ -126,6 +153,23 @@
+ 		reg = <0x1a>;
+ 	};
+ 
++	/*
++	 * The headphone jack codec, /arm-io/i2c0/audio-codec in the ADT: reset
++	 * on AP GPIO 25, interrupt on AP GPIO 71. Its function-aop_mclk (AOP
++	 * GPIO 36) is left to the AOP: the codec takes its clock from SCLK.
++	 * Tip sense is inverted as on Apple's other CS42L83 boards (not yet
++	 * checked with a plug on an iPad).
++	 */
++	jack_codec: audio-codec@48 {
++		compatible = "cirrus,cs42l83";
++		reg = <0x48>;
++		reset-gpios = <&pinctrl_ap 25 GPIO_ACTIVE_HIGH>;
++		interrupts-extended = <&pinctrl_ap 71 IRQ_TYPE_LEVEL_LOW>;
++		#sound-dai-cells = <0>;
++		cirrus,ts-inv = <1>;
++		sound-name-prefix = "Jack";
++	};
++
+ 	d2365_pmic: pmic@3c {
+ 		compatible = "apple,angel-pmic", "apple,i2c-pmic";
+ 		reg = <0x3c>;
+@@ -204,6 +248,11 @@
+ 	status = "okay";
+ };
+ 
++&mca4 {
++	apple,i2s-switch = <&i2s_switch 4 4>;
++	status = "okay";
++};
++
+ &nco {
+ 	status = "okay";
+ };
+diff --git a/arch/arm64/boot/dts/apple/t8010.dtsi b/arch/arm64/boot/dts/apple/t8010.dtsi
+index 64fdf4d..ca6c63b 100644
+--- a/arch/arm64/boot/dts/apple/t8010.dtsi
++++ b/arch/arm64/boot/dts/apple/t8010.dtsi
+@@ -193,6 +193,23 @@
+ 			status = "disabled";
+ 		};
+ 
++		mca4: mca@20a0b0000 {
++			compatible = "apple,t8010-mca-i2s";
++			reg = <0x2 0x0a0b0000 0x0 0x4000>,
++			      <0x2 0x0a002010 0x0 0x4>;
++			reg-names = "mca", "mclk";
++			interrupts = <AIC_IRQ 231 IRQ_TYPE_LEVEL_HIGH>;
++			power-domains = <&ps_mca4>;
++			clocks = <&nco 4>;
++			clock-names = "bitclk";
++			dmas = <&sio 0x30>;
++			dma-names = "tx";
++			#clock-cells = <0>;
++			clock-output-names = "mca4-mclk";
++			#sound-dai-cells = <0>;
++			status = "disabled";
++		};
++
+ 		nco: clock-controller@20e044000 {
+ 			compatible = "apple,t8010-nco";
+ 			reg = <0x2 0x0e044000 0x0 0x14000>;

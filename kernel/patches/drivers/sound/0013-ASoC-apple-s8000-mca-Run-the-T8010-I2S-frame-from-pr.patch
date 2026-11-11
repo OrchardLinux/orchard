@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Duke Eagleman <301139544+jerricky26@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 17:30:00 -0500
+Subject: [PATCH] ASoC: apple: s8000-mca: Run the T8010 I2S frame from prepare
+
+The CS42L83 on the T8010 headphone link derives its MCLK from SCLK with
+its PLL, and cs42l42_mute_stream() starts and locks that PLL when ASoC
+unmutes the stream, which happens at the end of prepare, before
+trigger. This driver only set FRAME RUN at trigger, so the PLL never
+locked; the codec then switched to the dead PLL anyway, its control port
+lost its clock and stopped answering, and on J171 the stalled transfer
+wedged i2c0, which it shares with the PMIC and charger.
+
+Start the provider frame at prepare for this variant. It already keeps
+running until hw_free, after the codec has been muted and moved back to
+its internal oscillator. The MAX98357A speaker link is unchanged.
+
+Assisted-by: LLM
+---
+ sound/soc/apple/s8000-mca.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/sound/soc/apple/s8000-mca.c b/sound/soc/apple/s8000-mca.c
+--- a/sound/soc/apple/s8000-mca.c
++++ b/sound/soc/apple/s8000-mca.c
+@@ -143,6 +143,12 @@
+ struct s8000_mca_hw {
+ 	u32 version;
+ 	bool clock_provider;
++	/*
++	 * Run the provider frame from prepare, not trigger: a codec that
++	 * clocks itself from SCLK (CS42L42 family) locks its PLL when ASoC
++	 * unmutes it, which is after prepare and before trigger.
++	 */
++	bool clocks_at_prepare;
+ 	unsigned int dai_format;	/* SND_SOC_DAIFMT_* */
+ 	unsigned int channels;
+ 	unsigned int slots;
+@@ -516,7 +522,8 @@
+ 			   MCA_IRQ_RX_CAUSES);
+ 	mca_write(mca, MCA_IRQ_MASK, mca->irq_mask);
+ 	if (first)
+-		mca_write(mca, MCA_FRAME, mca->frame);
++		mca_write(mca, MCA_FRAME, mca->frame |
++			  (mca->hw->clocks_at_prepare ? MCA_FRAME_RUN : 0));
+ 	spin_unlock_irqrestore(&mca->hw_lock, flags);
+ 
+ 	if (first)
+@@ -861,6 +868,7 @@
+ static const struct s8000_mca_hw t8010_i2s_mca_hw = {
+ 	.version = 5,
+ 	.clock_provider = true,
++	.clocks_at_prepare = true,
+ 	.dai_format = SND_SOC_DAIFMT_I2S,
+ 	.channels = 2,
+ 	.slots = 2,
+-- 
+2.56.0
+

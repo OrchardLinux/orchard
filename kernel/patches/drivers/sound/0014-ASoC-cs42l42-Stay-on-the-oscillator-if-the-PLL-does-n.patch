@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Duke Eagleman <301139544+jerricky26@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 17:30:00 -0500
+Subject: [PATCH] ASoC: cs42l42: Stay on the oscillator if the PLL does not lock
+
+cs42l42_mute_stream() only warns when the PLL fails to lock, then
+switches MCLK to the PLL and turns off the internal oscillator. With no
+SCLK that leaves the codec without any clock: its control port stops
+answering and can hold up the I2C bus, which on Apple tablets is shared
+with the PMIC.
+
+On a lock failure stop the PLL, keep the oscillator and return the
+error.
+
+Assisted-by: LLM
+---
+ sound/soc/codecs/cs42l42.c | 15 +++++++++++++--
+ 1 file changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/sound/soc/codecs/cs42l42.c b/sound/soc/codecs/cs42l42.c
+--- a/sound/soc/codecs/cs42l42.c
++++ b/sound/soc/codecs/cs42l42.c
+@@ -1100,8 +1100,19 @@
+ 							       (regval & 1),
+ 							       CS42L42_PLL_LOCK_POLL_US,
+ 							       CS42L42_PLL_LOCK_TIMEOUT_US);
+-				if (ret < 0)
+-					dev_warn(component->dev, "PLL failed to lock: %d\n", ret);
++				if (ret < 0) {
++					/*
++					 * Without SCLK the PLL never locks. Keep the
++					 * internal oscillator: switching to the PLL
++					 * or marking SCLK present would leave the
++					 * codec without a clock, and its control port
++					 * would then hold up the I2C bus it shares.
++					 */
++					dev_err(component->dev, "PLL failed to lock: %d\n", ret);
++					snd_soc_component_update_bits(component, CS42L42_PLL_CTL1,
++								      CS42L42_PLL_START_MASK, 0);
++					return ret;
++				}
+ 
+ 				/* PLL must be running to drive glitchless switch logic */
+ 				snd_soc_component_update_bits(component,
+-- 
+2.56.0
+
