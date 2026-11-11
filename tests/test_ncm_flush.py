@@ -36,7 +36,8 @@ enum hrtimer_restart {HRTIMER_NORESTART,HRTIMER_RESTART};
 struct net_device;
 struct net_device_ops {int (*ndo_start_xmit)(void *,struct net_device *);};
 struct net_device {struct net_device_ops *netdev_ops;};
-struct f_ncm {struct hrtimer task_timer;struct net_device *netdev;};
+struct gether {int is_suspend;};
+struct f_ncm {struct gether port;struct hrtimer task_timer;struct net_device *netdev;};
 static unsigned calls, free_requests, pending=1, submissions;
 static unsigned long now;
 static void hrtimer_forward_now(struct hrtimer *t,unsigned long d){assert(d==300000);t->expiry=now+d;}
@@ -49,10 +50,12 @@ int main(void){
   assert(ncm_tx_timeout(&n.task_timer)==HRTIMER_RESTART);
   assert(pending&&n.task_timer.expiry==now+300000);now=n.task_timer.expiry;
  }
+ n.port.is_suspend=1;assert(ncm_tx_timeout(&n.task_timer)==HRTIMER_NORESTART&&pending&&calls==101);
+ n.port.is_suspend=0;
  free_requests=1;assert(ncm_tx_timeout(&n.task_timer)==HRTIMER_NORESTART);
- assert(!pending&&submissions==1&&calls==101);
- n.netdev=NULL;assert(ncm_tx_timeout(&n.task_timer)==HRTIMER_NORESTART&&calls==101);
- puts("PASS production NCM callback: repeated BUSY, future expiry, recovered request, successful drain and detached netdev");
+ assert(!pending&&submissions==1&&calls==102);
+ n.netdev=NULL;assert(ncm_tx_timeout(&n.task_timer)==HRTIMER_NORESTART&&calls==102);
+ puts("PASS production NCM callback: repeated BUSY, future expiry, suspended port, recovered request, successful drain and detached netdev");
 }
 '''
         with tempfile.TemporaryDirectory() as tmp:
