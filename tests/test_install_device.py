@@ -61,12 +61,15 @@ class PlatformLayer(unittest.TestCase):
         path, receipt = self.layer({'usr/lib/modules/6.18-orchard/vmlinuz': b'kernel',
                                     'usr/lib/modules/6.18-orchard/dtb/t8010-j71b.dtb': b'dtb',
                                     'usr/lib/firmware/regulatory.db': b'regdb',
-                                    'usr/share/alsa/ucm2/Orchard/j71b/HiFi.conf': b'ucm'})
-        self.assertEqual(D.install_layer(path, self.root, **receipt), 4)
+                                    'usr/share/alsa/ucm2/Orchard/j71b/HiFi.conf': b'ucm',
+                                    'usr/share/wireplumber/wireplumber.conf.d/50-orchard.conf': b'wp'})
+        self.assertEqual(D.install_layer(path, self.root, **receipt), 5)
         self.assertEqual((self.root / 'usr/lib/modules/6.18-orchard/vmlinuz').read_bytes(), b'kernel')
         self.assertEqual((self.root / 'usr/lib/firmware/brcm.bin').read_bytes(), b'distro firmware')
         self.assertEqual(D.kernel_version(self.root), '6.18-orchard')
         self.assertEqual((self.root / 'usr/share/alsa/ucm2/Orchard/j71b/HiFi.conf').read_bytes(), b'ucm')
+        self.assertEqual((self.root / 'usr/share/wireplumber/wireplumber.conf.d/50-orchard.conf').read_bytes(),
+                         b'wp')
 
     def test_executables_keep_their_exec_bit_and_nothing_more(self):
         path = self.work / 'layer.tar.gz'
