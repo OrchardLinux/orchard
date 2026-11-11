@@ -45,6 +45,8 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
 - iPad mini 4 (J96, J97): touchscreen, Wi-Fi and battery, with a firmware recipe.
   iPhone 6 and 6 Plus: battery. Not yet tested on Orchard's build. (Tom Ballard)
 - iPad Air (J85): measured RAM-boot status documented. (Christopher M. Smith)
+- iPad 6 (J71b): the buttons are marked working. iPad Air 2 (J81): Bluetooth
+  uses the sequence tested on a J81.
 - iPad Air 2 (J81): native-root boot, desktop and peripheral status recorded.
   (micro23)
 - iPad Air 2 (J81): the touchscreen works, with five fingers and no frame
@@ -67,6 +69,10 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
   not only the recovery.
 - Linux hosts: recognize direct installers and grant USB/serial access throughout
   boot and installed-system development. (Anders Haas Franzen)
+- The installer picks the internal disk correctly on iPads with several NVMe
+  namespaces.
+- An install error says whether anything was written, and what to do next.
+- m1n1 shows the distribution's boot splash while installing, at its own size.
 
 ### Hardware
 
@@ -89,6 +95,8 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
   Alexandre's AOP work.
 - A10 (T8010): shared IOP mailbox for the GPU and AOP drivers; the NCO clock's
   boot rate is described per board.
+- Apple Wi-Fi follows the regulatory country, so 5 GHz networks connect (iPads
+  with Broadcom PCIe Wi-Fi).
 - iPad 6 (J71b): sleeps with the GPU desktop and wakes instantly with the Power
   button, touch included. A battery-gauge
   poll that rebooted every HDQ-gauge iPad in sleep is fixed; the other A10
