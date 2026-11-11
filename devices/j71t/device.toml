@@ -54,6 +54,3 @@ usb_network = "untested"
 audio_output = "untested"
 audio_input = "untested"
 camera = "missing"
-
-# Local capability delta: netconsole.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/netconsole.md.
