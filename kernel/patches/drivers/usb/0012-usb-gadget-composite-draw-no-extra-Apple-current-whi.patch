@@ -1,17 +1,22 @@
-From: brkosebay <brkosebay@users.noreply.github.com>
-Date: Sun, 08 Nov 2026 16:00:00 +0100
-Subject: [PATCH] usb: J71t guarded Mac current profile
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 16:00:00 +0100
+Subject: [PATCH] usb: gadget: composite: draw no extra Apple current while
+ suspended
 
-Use 05ac:1014 only for explicitly selected J71t Orchard gadgets. Preserve NCM and ACM, bound real host current grants and keep new grants inactive during suspend. Requires matching userspace opt-in; physical charging remains a device gate.
-
-Integration fixups are folded into the final delta. Device observations apply
-to the integration build; the isolated topic requires qualification.
+The extra current an Apple host grants must not be drawn while the bus
+is suspended. reset_config() could apply it during suspend, because the
+suspended flag was cleared only at the end of composite_resume(). Skip
+the extra current while suspended and clear the flag before the
+configuration is applied again on resume.
 
 Assisted-by: LLM
 ---
+ drivers/usb/gadget/composite.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
 
 diff --git a/drivers/usb/gadget/composite.c b/drivers/usb/gadget/composite.c
-index 14e87fbc8..be66793e5 100644
+index 1da3effb2..ea76d3918 100644
 --- a/drivers/usb/gadget/composite.c
 +++ b/drivers/usb/gadget/composite.c
 @@ -959,7 +959,7 @@ static void reset_config(struct usb_composite_dev *cdev)

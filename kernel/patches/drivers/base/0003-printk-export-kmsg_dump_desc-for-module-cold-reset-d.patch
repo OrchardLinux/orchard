@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 00:54:33 +0100
+Subject: [PATCH] printk: export kmsg_dump_desc for module cold-reset
+ diagnostics
+
+The VXD shutdown fail-safe is a GPL module. Allow it to dump emergency
+evidence before a cold reset, matching the built-in GPU and PCIe paths.
+No printk behavior changes.
+
+Assisted-by: LLM
+---
+ kernel/printk/printk.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/kernel/printk/printk.c b/kernel/printk/printk.c
+index fcc51b699..a812ec1e5 100644
+--- a/kernel/printk/printk.c
++++ b/kernel/printk/printk.c
+@@ -4882,6 +4882,7 @@ void kmsg_dump_desc(enum kmsg_dump_reason reason, const char *desc)
+ 	}
+ 	rcu_read_unlock();
+ }
++EXPORT_SYMBOL_GPL(kmsg_dump_desc);
+ 
+ /**
+  * kmsg_dump_get_line - retrieve one kmsg log line

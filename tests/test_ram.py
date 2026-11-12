@@ -475,7 +475,6 @@ class RamTests(unittest.TestCase):
             ram.build_directory(example, hardware=self.hardware)
         archive = gzip.decompress((example / 'out/apple-16k/initramfs.cpio.gz').read_bytes())
         self.assertIn(b'usr/libexec/orchard/usb-session\0', archive)
-        self.assertIn(b'usr/libexec/orchard/usb-identity\0', archive)
         self.assertIn(b'etc/orchard/authorized_keys\0', archive)
         public = (self.base / 'home/private/ram-ssh/id_ed25519.pub').read_bytes()
         self.assertIn(public, archive)
@@ -485,7 +484,6 @@ class RamTests(unittest.TestCase):
             ram.build_directory(example, hardware=self.hardware)
         archive = gzip.decompress((example / 'out/apple-16k/initramfs.cpio.gz').read_bytes())
         self.assertNotIn(b'usr/libexec/orchard/usb-session\0', archive)
-        self.assertNotIn(b'usr/libexec/orchard/usb-identity\0', archive)
         self.assertNotIn(b'etc/orchard/authorized_keys\0', archive)
 
     def test_arbitrary_directory_layout_uses_active_hardware_package(self):

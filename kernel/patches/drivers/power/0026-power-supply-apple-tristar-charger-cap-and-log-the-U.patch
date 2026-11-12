@@ -1,20 +1,28 @@
-From: brkosebay <brkosebay@users.noreply.github.com>
-Date: Sun, 08 Nov 2026 16:00:00 +0100
-Subject: [PATCH] power: J71t guarded Mac current profile
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 16:00:00 +0100
+Subject: [PATCH] power: supply: apple_tristar_charger: cap and log the USB
+ host budget
 
-Use 05ac:1014 only for explicitly selected J71t Orchard gadgets. Preserve NCM and ACM, bound real host current grants and keep new grants inactive during suspend. Requires matching userspace opt-in; physical charging remains a device gate.
+An Apple host can grant more current than the standard USB budget, and
+the gadget reports the granted budget to the charger. A stale report
+from an earlier connection was already dropped, but a report above the
+charger's maximum was passed on as is.
 
-Integration fixups are folded into the final delta. Device observations apply
-to the integration build; the isolated topic requires qualification.
+Cap the reported budget and the input current limit at the charger's
+maximum, re-evaluate the source when only the budget changes, and log
+the reported and accepted values with the connection epoch.
 
 Assisted-by: LLM
 ---
+ drivers/power/supply/apple_tristar_charger.c | 24 +++++++++++++++-----
+ 1 file changed, 18 insertions(+), 6 deletions(-)
 
 diff --git a/drivers/power/supply/apple_tristar_charger.c b/drivers/power/supply/apple_tristar_charger.c
-index b95142dad..9b3a0733e 100644
+index a953cedcb..c50bfc861 100644
 --- a/drivers/power/supply/apple_tristar_charger.c
 +++ b/drivers/power/supply/apple_tristar_charger.c
-@@ -669,7 +669,12 @@ static int tristar_identify(struct tristar_charger *chg, struct tristar_ident *i
+@@ -649,7 +649,12 @@ static int tristar_identify(struct tristar_charger *chg, struct tristar_ident *i
   */
  static unsigned int tristar_usb_ma(struct tristar_charger *chg)
  {
@@ -28,7 +36,7 @@ index b95142dad..9b3a0733e 100644
  }
  
  /*
-@@ -1231,7 +1236,8 @@ static int tristar_get_property(struct power_supply *psy,
+@@ -1140,7 +1145,8 @@ static int tristar_get_property(struct power_supply *psy,
  		break;
  	case POWER_SUPPLY_PROP_CURRENT_MAX:
  		/* What the identified source or USB host allows; 0 when unknown. */
@@ -38,7 +46,7 @@ index b95142dad..9b3a0733e 100644
  		break;
  	default:
  		mutex_unlock(&chg->lock);
-@@ -1254,23 +1260,29 @@ static int tristar_set_property(struct power_supply *psy,
+@@ -1163,23 +1169,29 @@ static int tristar_set_property(struct power_supply *psy,
  				const union power_supply_propval *val)
  {
  	struct tristar_charger *chg = power_supply_get_drvdata(psy);

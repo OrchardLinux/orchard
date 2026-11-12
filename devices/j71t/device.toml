@@ -34,9 +34,9 @@ screen_off = "untested"
 backlight = "untested"
 touch = "untested"
 buttons = "untested"
-accelerometer = "missing"
-gyroscope = "missing"
-light_sensor = "untested"
+accelerometer = "working"
+gyroscope = "working"
+light_sensor = "working"
 touch_id = "missing"
 storage_read = "untested"
 storage_write = "untested"
@@ -54,12 +54,3 @@ usb_network = "untested"
 audio_output = "untested"
 audio_input = "untested"
 camera = "missing"
-
-# Local capability delta: pmu-rtc.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/pmu-rtc.md.
-
-# Local capability delta: mac-current.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/mac-current.md.
-
-# Local capability delta: usb-stable-serial.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/usb-stable-serial.md.

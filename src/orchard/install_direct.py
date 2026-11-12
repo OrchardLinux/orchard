@@ -34,7 +34,9 @@ from .transports.ssh import KEY, one_connection, ssh_argv, wait_authenticated
 ADD_ON = ROOT / 'boot/initramfs/install'
 HOST = '172.16.42.1'
 # The one internal disk: NVMe on 64-bit boards, the iOS flash translation layer on 32-bit ones.
-INTERNAL_DISK = re.compile(r'nvme[0-9]+n[0-9]+|applesftl[0-9]+')
+# Apple's NVMe has several namespaces; the storage iOS and Linux live on is the first,
+# the others hold the controller's own data (nvme0n2 and up on an iPad 6).
+INTERNAL_DISK = re.compile(r'nvme[0-9]+n1|applesftl[0-9]+')
 BOOT_ARGS = 'fbcon=map:9 vt.global_cursor_default=0'
 INITRAMFS_MAGIC = b'm1n1_initramfs'
 XBOOTLDR, ROOT_ARM64 = D.XBOOTLDR, D.ROOT_ARM64

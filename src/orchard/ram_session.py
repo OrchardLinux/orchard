@@ -18,7 +18,6 @@ import shlex
 import subprocess
 import sys
 import time
-import uuid
 
 from .serial import SerialError, SerialPort
 from .state import cache_root, private_directory
@@ -50,9 +49,7 @@ def identity():
 def payload_files():
     """RAM-root files that enable the USB session in a payload."""
     helper = resources.files('orchard') / 'usb-session'
-    return {HELPER: Path(str(helper)),
-            'usr/libexec/orchard/usb-identity': Path(str(resources.files('orchard') / 'usb-identity')),
-            AUTHORIZED: identity().with_suffix('.pub')}
+    return {HELPER: Path(str(helper)), AUTHORIZED: identity().with_suffix('.pub')}
 
 
 def target():
@@ -72,20 +69,17 @@ def target():
 
 
 def _check(device):
-    # Stable descriptors identify the unit, not its boot. RAM SSH is pinned to
-    # the per-boot key read on the open ACM endpoint; a reboot invalidates it.
-    fields = ('location', 'mode', 'profile', 'usb_id', 'boot_id', 'serial_port')
     def check():
         from .apple import usb
-        if not any(all(item.get(key) == device.get(key) for key in fields)
+        if not any(item['location'] == device['location'] and item.get('boot_id') == device.get('boot_id')
                    for item in usb.devices()):
             raise ValueError('The RAM payload disconnected or rebooted')
     return check
 
 
 def connect(device=None, user=None, *, host=None, ram=False):
-    """SSH argv for the running payload (its boot and host key read over ACM)
-    or installed system (as its user, with this computer's key)."""
+    """SSH argv for the running payload (its host key pinned over serial once
+    per boot) or installed system (as its user, with this computer's key)."""
     if ram and (not host or user):
         raise ValueError('--ram requires --host and connects as root, not --user')
     if host:
@@ -112,33 +106,20 @@ def connect(device=None, user=None, *, host=None, ram=False):
         argv = computer_key.ssh_argv(user)
         wait_authenticated(argv, _check(device), seconds=20)
         return argv
-    if not (device.get('boot_id') or device.get('usb_id')):
+    boot = device.get('boot_id')
+    if not boot:
         raise ValueError('The RAM payload has no boot identity; rebuild it with a current orchard')
     check = _check(device)
-    # Query every connection: the same stable USB serial can name a new boot.
-    # ACM supplies both boot ID and trusted host key without changing any USB
-    # descriptor, and also works with payloads built before stable identities.
-    with SerialPort(device['serial_port'], check) as serial:
-        code, text = serial.run('cat /proc/sys/kernel/random/boot_id && '
-                                'cat /run/orchard/ssh_host_ed25519_key.pub', timeout=15)
-    if code:
-        raise ValueError('No SSH in this payload; its /init must run '
-                         '/' + HELPER + ' (or build without transport = false)')
-    lines = text.strip().splitlines()
-    try:
-        boot = str(uuid.UUID(lines[0].strip()))
-    except (ValueError, IndexError) as error:
-        raise ValueError('Invalid RAM boot identity over USB serial') from error
-    if device.get('boot_id') and boot != device['boot_id']:
-        raise ValueError('The RAM payload disconnected or rebooted')
-    pinned = HOST + ' ' + host_key('\n'.join(lines[1:])) + '\n'
     hosts = _directory() / f'known_hosts-{boot}'
-    if hosts.is_file() and hosts.read_text() != pinned:
-        raise ValueError('The RAM SSH host key changed within the same boot')
     if not hosts.is_file():
+        with SerialPort(device['serial_port'], check) as serial:
+            code, text = serial.run('cat /run/orchard/ssh_host_ed25519_key.pub', timeout=15)
+        if code:
+            raise ValueError('No SSH in this payload; its /init must run '
+                             '/' + HELPER + ' (or build without transport = false)')
         for old in _directory().glob('known_hosts-*'):
             old.unlink()
-        hosts.write_text(pinned)
+        hosts.write_text(HOST + ' ' + host_key(text) + '\n')
         hosts.chmod(0o600)
     argv = ssh_argv(identity(), hosts, HOST, 22)
     wait_authenticated(argv, check, seconds=20)

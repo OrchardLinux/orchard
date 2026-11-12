@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orchard"
-version = "0.2.0"
+version = "0.3.0"
 description = "Linux on Apple devices: hardware support, recipes, and the orchard tool"
 readme = "README.md"
 license = "GPL-2.0-only AND GPL-2.0-or-later AND MIT AND ISC"
@@ -37,7 +37,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-orchard = ["py.typed", "usb-session", "usb-identity"]
+orchard = ["py.typed", "usb-session"]
 
 [dependency-groups]
 dev = ["mypy==1.18.2", "jsonschema>=4.25,<5"]

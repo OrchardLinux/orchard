@@ -1,12 +1,9 @@
 """Boot identity publication from bounded ADT fixtures; no device activation."""
 import importlib.util
-import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import stat
-import subprocess
 import struct
 import sys
 import tempfile
@@ -108,76 +105,6 @@ class Identity(unittest.TestCase):
         source=(ROOT/'boot/initramfs/recovery/usb-gadget').read_text()
         self.assertLess(source.index('identity.py'),source.index('/serialnumber'))
         self.assertLess(source.index('/serialnumber'),source.index('"$g/UDC"'))
-
-
-class GadgetIdentity(unittest.TestCase):
-    def setUp(self):
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
-        self.tree = self.root / 'proc/device-tree'
-        self.tree.mkdir(parents=True)
-        (self.tree / 'compatible').write_bytes(b'apple,j71t\0apple,s8003\0')
-        boot = self.root / 'proc/sys/kernel/random/boot_id'
-        boot.parent.mkdir(parents=True)
-        boot.write_text(BOOT)
-        self.script = (ROOT / 'src/orchard/usb-identity').read_text().replace(
-            '/proc/sys/kernel/random/boot_id', str(boot))
-
-    def serial(self):
-        return subprocess.run(['sh', '-ec', self.script], check=True, capture_output=True, text=True,
-                              env={**os.environ, 'ORCHARD_DEVICE_TREE': str(self.tree)})
-
-    def test_hardware_serial_is_hashed_stable_across_boots_and_distinct_per_unit(self):
-        number = self.tree / 'serial-number'
-        number.write_bytes(b'HardwareSerialA\0')
-        first = self.serial()
-        expected = hashlib.sha256(b'orchard-HardwareSerialA').hexdigest()[:12]
-        self.assertEqual(first.stdout.strip(), f'BOARD:j71t ID:{expected}')
-        self.assertNotIn('HardwareSerialA', first.stdout + first.stderr)
-        (self.root / 'proc/sys/kernel/random/boot_id').write_text('22222222-2222-4222-8222-222222222222')
-        self.assertEqual(self.serial().stdout, first.stdout)
-        number.write_bytes(b'HardwareSerialB\0')
-        self.assertNotEqual(self.serial().stdout, first.stdout)
-
-    def test_missing_or_empty_serial_preserves_rescue_usb_with_a_warning(self):
-        for value in (None, b'', b'\0'):
-            if value is not None:
-                (self.tree / 'serial-number').write_bytes(value)
-            result = self.serial()
-            self.assertEqual(result.stdout.strip(), f'BOOT:{BOOT} BOARD:j71t')
-            self.assertIn('no device-tree serial-number', result.stderr)
-
-    def test_installed_and_ram_gadgets_use_the_same_stable_serial_before_binding(self):
-        (self.tree / 'serial-number').write_bytes(b'HardwareSerialA\0')
-        expected = self.serial().stdout.strip()
-        for relative in ('boot/initramfs/root/init', 'src/orchard/usb-session'):
-            with self.subTest(path=relative):
-                source = (ROOT / relative).read_text()
-                if relative.endswith('/init'):
-                    start = source.index('usb_gadget() {')
-                    source = source[start:source.index('\nusb_gadget ||', start)] + '\nusb_gadget'
-                else:
-                    source = source[source.index('name=$(cat'):source.index('\nifconfig ')]
-                for directory in ('sys/kernel/config/usb_gadget', 'sys/class/udc/usbdev',
-                                  'newroot/etc', 'newroot/usr/lib', 'etc', 'usr/libexec/orchard'):
-                    (self.root / directory).mkdir(parents=True, exist_ok=True)
-                (self.root / 'newroot/etc/os-release').write_text('NAME="Linux"\n')
-                (self.root / 'etc/hostname').write_text('ram-test\n')
-                for helper in ('etc/orchard/usb-identity', 'usr/libexec/orchard/usb-identity'):
-                    path = self.root / helper
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text(self.script)
-                source = re.sub(r'/(sys|newroot|etc|usr)/', lambda m: str(self.root) + m.group(), source)
-                source = source.replace('mkdir "$g"', 'mkdir -p "$g/functions"')
-                subprocess.run(['sh', '-ec', 'mount() { :; };\n' + source], check=True, capture_output=True,
-                               env={**os.environ, 'ORCHARD_DEVICE_TREE': str(self.tree)})
-                name = 'orchard-system' if relative.endswith('/init') else 'ram-test'
-                gadget = self.root / 'sys/kernel/config/usb_gadget' / name
-                self.assertEqual((gadget / 'strings/0x409/serialnumber').read_text().strip(), expected)
-                self.assertEqual((gadget / 'UDC').read_text().strip(), 'usbdev')
-                for function in ('ncm.usb0', 'acm.usb0'):
-                    self.assertTrue((gadget / 'configs/c.1' / function).is_symlink())
 
 
 if __name__ == '__main__':

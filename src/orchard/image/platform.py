@@ -111,7 +111,6 @@ def initrd(modules, release, busybox, *, hardware=None, storage_modules=STORAGE_
     entries = {name: (directory, b'') for name in ('bin', 'dev', 'proc', 'sys', 'etc', 'etc/orchard', 'newroot',
                                                     'lib', 'lib/modules', 'lib/modules/' + release)}
     entries['init'] = (stat.S_IFREG | 0o755, (hardware / 'boot/initramfs/root/init').read_bytes())
-    entries['etc/orchard/usb-identity'] = (stat.S_IFREG | 0o644, (hardware / 'src/orchard/usb-identity').read_bytes())
     entries['bin/busybox'] = (stat.S_IFREG | 0o755, Path(busybox).read_bytes())
     entries['etc/orchard/modules'] = (stat.S_IFREG | 0o644, ('\n'.join(loaded) + '\n').encode())
     if usb:
