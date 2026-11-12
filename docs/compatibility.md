@@ -174,8 +174,8 @@ Boards Orchard builds for. States: working, untested, missing, none (no such har
 | `d101` | untested | untested | untested | missing | untested | untested | missing | missing | missing | untested | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing |
 | `d11` | untested | untested | untested | untested | untested | untested | missing | untested | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing |
 | `d111` | untested | untested | untested | untested | untested | untested | missing | untested | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing |
-| `j171` | working | untested | working | working | working | untested | missing | untested | missing | working | working | working | missing | missing | none | working | untested | missing | untested | untested | untested | untested | working | missing | missing | missing |
-| `j172` | untested | untested | untested | untested | untested | untested | missing | untested | missing | untested | untested | untested | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | untested | missing | missing | missing |
+| `j171` | working | untested | working | working | working | untested | missing | untested | missing | working | working | working | missing | missing | none | working | untested | missing | untested | untested | untested | untested | working | missing | missing | untested |
+| `j172` | untested | untested | untested | untested | untested | untested | missing | untested | missing | untested | untested | untested | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | untested | missing | missing | untested |
 | `j71b` | working | working | working | working | working | working | missing | missing | missing | working | working | working | working | working | none | working | working | working | working | working | working | working | working | missing | missing | untested |
 | `j72b` | untested | untested | untested | untested | untested | untested | missing | missing | missing | untested | untested | untested | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | untested | missing | missing | untested |
 | `j120` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing |
@@ -229,8 +229,8 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `d101` | experimental | yes | – | yes | yes | – | yes | yes | – | yes | yes | – | – | yes | yes | – | – |
 | `d11` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes | yes | – | – |
 | `d111` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes | yes | – | – |
-| `j171` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – |
-| `j172` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – |
+| `j171` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| `j172` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
 | `j71b` | supported | yes | yes | yes | yes | – | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
 | `j72b` | experimental | yes | yes | yes | yes | – | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
 | `j120` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | yes | yes | – | – |

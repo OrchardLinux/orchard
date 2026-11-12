@@ -142,6 +142,7 @@
       "touch",
       "usb_network",
       "usb_serial",
+      "video_decode_hevc",
       "wifi"
     ],
     "j172": [
@@ -159,6 +160,7 @@
       "touch",
       "usb_network",
       "usb_serial",
+      "video_decode_hevc",
       "wifi"
     ],
     "j207": [
