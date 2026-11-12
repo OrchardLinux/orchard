@@ -1,0 +1,72 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 11:42:25 +0100
+Subject: [PATCH] drm/apple-g5p: ring a phase's doorbell unless its own stamp
+ retired it
+
+The publish-time doorbell of a render phase was skipped when the
+engine's completion-event count had moved since the job was armed.
+The count is taken when the job starts, before its TA is published, and
+with two jobs in flight the previous job's 3D completes during this
+job's TA: its completion event moved the count, the 3D of this job was
+taken for already retired, and its doorbell was never rung. The
+firmware then did not consume the 3D command until something else woke
+its scheduler; when nothing did, the event stream stayed silent for a
+second and the job and its context were lost ("3d-silent"). Scenes
+with long fragment phases hit it: glmark2 terrain lost its context in
+two of about eleven runs.
+
+Apple's TA and 3D submit paths ring the doorbell after every ring entry
+without any retirement check, and a doorbell for an entry the firmware
+already consumed adds no work. Skip it only when the phase's own stamp
+words show the phase retired; keep the event count as evidence.
+
+Assisted-by: LLM
+---
+ drivers/gpu/apple-g5p/render-user-wake.h | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/gpu/apple-g5p/render-user-wake.h b/drivers/gpu/apple-g5p/render-user-wake.h
+index c8fd0aa..a4650d5 100644
+--- a/drivers/gpu/apple-g5p/render-user-wake.h
++++ b/drivers/gpu/apple-g5p/render-user-wake.h
+@@ -29,7 +29,7 @@
+  * repaired, never a power arm), dma_wmb(), R0+0xb00 = 0x10 | engine.  At most one attempt
+  * per phase.  Never after a timeout or fault (the terminal latch's sticky `failed`), never
+  * with the boot failed or stopped, never unpowered, never with an r74f bell in flight,
+- * never once the phase shows any sign of retirement, never on a ring that is not exactly
++ * never once the phase's own stamp shows it retired, never on a ring that is not exactly
+  * this publish.  A consumer already at the target does not cancel (Apple never checks
+  * it); it is recorded.  The natural TA completion (terminal kind COMPLETE, the epoch's
+  * first note) is not a failure: the factor's sequence is the one licensed exception to the
+@@ -90,7 +90,7 @@ enum g5p_wk_did {
+ 	G5P_WK_SKIP_POWER, /* one of G5P_WK_PWR_REQUIRED is absent */
+ 	G5P_WK_SKIP_R74F, /* an r74f bell is published, open or firing */
+ 	G5P_WK_SKIP_RING, /* the ring is not exactly this publish */
+-	G5P_WK_SKIP_RETIRED, /* a stamp == seq or a completion event since the publish */
++	G5P_WK_SKIP_RETIRED, /* a stamp == seq: this phase retired */
+ 	G5P_WK_SKIP_FENCE, /* R1+0x14 read back outside 7: no further register */
+ 	G5P_WK_SKIP_GPC, /* GPC not active: no 0xb00 */
+ 	G5P_WK_DIDS,
+@@ -120,7 +120,11 @@ struct g5p_wk_in {
+ 	u32 start, target, prod,
+ 		cons; /* ring: producer before this publish, our target, now */
+ 	u32 stamp[2]; /* this engine's stamp words */
+-	u32 type1; /* this engine's completion events decoded since the phase armed */
++	/* This engine's completion events decoded since the job armed: evidence only.  With two
++	 * jobs in flight the previous job's completion lands here too, so it cannot tell that
++	 * this phase retired; the stamps can.
++	 */
++	u32 type1;
+ };
+ 
+ /* The register access of the factor, in order.  The kernel binds them to writel/readl on the
+@@ -221,7 +225,7 @@ static inline u32 g5p_wk_guard(const struct g5p_wk_in *in)
+ 	    in->cons > 255 || ((in->target - in->start) & 255) != 1 ||
+ 	    ((in->cons - in->start) & 255) > 1)
+ 		return G5P_WK_SKIP_RING;
+-	if (in->stamp[0] == in->seq || in->stamp[1] == in->seq || in->type1)
++	if (in->stamp[0] == in->seq || in->stamp[1] == in->seq)
+ 		return G5P_WK_SKIP_RETIRED;
+ 	return 0;
+ }

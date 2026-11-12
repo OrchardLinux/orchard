@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 00:43:32 +0100
+Subject: [PATCH] drm/apple-g5p: preserve halt and poweroff after quiesce
+ failure
+
+Only restart can expose a new kernel to retained DMA. Never turn halt or
+poweroff into a cold reboot. A fully retired instance is already handed
+over and needs no MMIO or second cycle.
+
+Assisted-by: LLM
+---
+ drivers/gpu/apple-g5p/teardown.inc | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/apple-g5p/teardown.inc b/drivers/gpu/apple-g5p/teardown.inc
+index 051ddedb8..93eb34f79 100644
+--- a/drivers/gpu/apple-g5p/teardown.inc
++++ b/drivers/gpu/apple-g5p/teardown.inc
+@@ -589,7 +589,7 @@ static int g5p_kq_run(struct g5p_diag *g, const char *why)
+ 		return -EALREADY; /* Only a witnessed successful handover is latched. */
+ 	if (g5p_r8_is_retired()) {
+ 		dev_emerg(g->dev, "GPU-KQ why=%s retired; no MMIO\n", why);
+-		return -ENODEV;
++		return -EALREADY; /* td-final retired this instance; no DMA remains. */
+ 	}
+ 	if (READ_ONCE(g->sleep_failed)) {
+ 		dev_emerg(g->dev,
+@@ -683,7 +683,7 @@ static int g5p_td_reboot_notify(struct notifier_block *nb, unsigned long action,
+ 		 * kexec with live DMA: persist the reason, override the guard,
+ 		 * and take the native watchdog's cold-reset path.
+ 		 */
+-		if (ret && ret != -EALREADY) {
++		if (action == SYS_RESTART && ret && ret != -EALREADY) {
+ 			dev_emerg(g->dev,
+ 				  "GPU-KQ unsafe handover ret=%d; forcing cold watchdog reset to iOS\n", ret);
+ 			/* PANIC dump reason reaches default pstore filters without

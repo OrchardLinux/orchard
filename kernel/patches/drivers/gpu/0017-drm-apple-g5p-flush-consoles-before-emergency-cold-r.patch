@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 00:43:33 +0100
+Subject: [PATCH] drm/apple-g5p: flush consoles before emergency cold reset
+
+Use the shared cold escape to give printk threads a bounded opportunity
+to deliver evidence before IRQs and other CPUs stop. A pstore dump alone
+is not recoverable evidence across an iOS boot.
+
+Assisted-by: LLM
+---
+ drivers/gpu/apple-g5p/teardown.inc | 9 +++------
+ 1 file changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/gpu/apple-g5p/teardown.inc b/drivers/gpu/apple-g5p/teardown.inc
+index 93eb34f79..252c3e488 100644
+--- a/drivers/gpu/apple-g5p/teardown.inc
++++ b/drivers/gpu/apple-g5p/teardown.inc
+@@ -1,3 +1,5 @@
++#include <linux/soc/apple/cold-reset.h>
++
+ // SPDX-License-Identifier: GPL-2.0-only OR MIT
+ /*
+  * Kernel glue for the GPU teardown state machine (teardown.h).
+@@ -686,12 +688,7 @@ static int g5p_td_reboot_notify(struct notifier_block *nb, unsigned long action,
+ 		if (action == SYS_RESTART && ret && ret != -EALREADY) {
+ 			dev_emerg(g->dev,
+ 				  "GPU-KQ unsafe handover ret=%d; forcing cold watchdog reset to iOS\n", ret);
+-			/* PANIC dump reason reaches default pstore filters without
+-			 * entering panic() or consulting panic_timeout.
+-			 */
+-			kmsg_dump_desc(KMSG_DUMP_PANIC, "GPU-KQ cold-reset fallback (no panic)");
+-			WRITE_ONCE(reboot_mode, REBOOT_COLD);
+-			emergency_restart();
++			apple_cold_reset("GPU-KQ cold-reset fallback (no panic)");
+ 		}
+ 	}
+ 	{

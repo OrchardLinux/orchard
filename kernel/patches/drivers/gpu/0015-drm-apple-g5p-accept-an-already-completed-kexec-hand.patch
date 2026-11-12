@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 00:43:32 +0100
+Subject: [PATCH] drm/apple-g5p: accept an already completed kexec handover
+
+Report a second td-kexec as success so quiesce-gpu removes its pending
+receipt. Other sysfs errors remain failures.
+
+Assisted-by: LLM
+---
+ drivers/gpu/apple-g5p/teardown.inc | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/apple-g5p/teardown.inc b/drivers/gpu/apple-g5p/teardown.inc
+index 8d511b0ba..051ddedb8 100644
+--- a/drivers/gpu/apple-g5p/teardown.inc
++++ b/drivers/gpu/apple-g5p/teardown.inc
+@@ -650,8 +650,11 @@ static int g5p_td_command(struct g5p_diag *g, const char *command)
+ 		ret = g5p_td_capture(g, "sysfs");
+ 	else if (sysfs_streq(command, "td-final"))
+ 		ret = g5p_td_final(g, "sysfs");
+-	else if (sysfs_streq(command, "td-kexec"))
++	else if (sysfs_streq(command, "td-kexec")) {
+ 		ret = g5p_kq_run(g, "sysfs");
++		if (ret == -EALREADY)
++			return 0; /* The witnessed handover is already complete. */
++	}
+ 	else
+ 		return -EINVAL;
+ 	return ret == -EAGAIN ? 0 : ret;

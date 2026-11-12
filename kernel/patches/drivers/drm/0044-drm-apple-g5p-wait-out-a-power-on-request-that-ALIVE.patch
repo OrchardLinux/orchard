@@ -1,0 +1,255 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 15:30:00 +0100
+Subject: [PATCH] drm/apple-g5p: wait out a power-on request that ALIVE
+ overtook
+
+The firmware boots without waiting for the GPU cores' power-on, so its
+ALIVE message can arrive while the power-on request is still in
+flight. The request register then still has its busy bit (bit 4) set
+next to the target state, e.g. 0x14 for state 4. After ALIVE, only the
+first-ALIVE handler may read the power registers, so the release poll
+stops there. It already handed an unread state to that handler, but it
+counted a busy read as a failed power-on. That latched a power abort and
+left the GPU unusable for the boot, which then fell back to software
+rendering. On J71t this happened twice in a day of boots, once cold and
+once warm. The last reads were 0x14 after 43 and 52 polls, while good
+power-ons settle after 13 to 54 polls.
+
+Apple's setGPCPerformanceState and setGPUCorePower wait for bit 4 to
+clear before anything else and allow up to 30 s. When the last read
+shows a request toward a powered state still in flight and the poll
+has time left, defer the decision to the first-ALIVE handler as for
+an unread state. The handler waits for bit 4 for the rest of the
+power-on bound, never less than its own limit. Its settled read decides
+before any GPU register write.
+
+So no power register is read beyond what the release poll was already
+allowed. A poll that ran out its bound, an all-ones read, a parking
+request (0x10) or a settled state that is not powered still abort as
+before. The settle loop now stops re-reading once register access is
+revoked or the boot has failed or stopped.
+
+Assisted-by: LLM
+---
+ drivers/gpu/apple-g5p/boot-r73b.inc |  2 ++
+ drivers/gpu/apple-g5p/boot.inc      | 20 +++++++----
+ drivers/gpu/apple-g5p/lifecycle.inc | 24 +++++++++----
+ drivers/gpu/apple-g5p/r74e112.h     | 52 ++++++++++++++++++++++++++---
+ 4 files changed, 80 insertions(+), 18 deletions(-)
+
+diff --git a/drivers/gpu/apple-g5p/boot-r73b.inc b/drivers/gpu/apple-g5p/boot-r73b.inc
+index 3948aab..d47d8d5 100644
+--- a/drivers/gpu/apple-g5p/boot-r73b.inc
++++ b/drivers/gpu/apple-g5p/boot-r73b.inc
+@@ -287,6 +287,8 @@ struct g5p_r73b {
+ 	atomic_t early_proof;
+ 	u32 early_proof_gen, early_proof_gen_now, early_proof_why;
+ 	s32 early_defer_ret;
++	/* The owner's bit-4 wait for a deferred proof (g5p_px_settle_us()). */
++	u32 early_proof_settle_us;
+ 	/* boot_alive_settle_us: limit, first in-flight value seen, re-reads, time spent. */
+ 	u32 settle_us, settle_first, settle_samples;
+ 	u64 settle_ns;
+diff --git a/drivers/gpu/apple-g5p/boot.inc b/drivers/gpu/apple-g5p/boot.inc
+index 836a1d4..585e699 100644
+--- a/drivers/gpu/apple-g5p/boot.inc
++++ b/drivers/gpu/apple-g5p/boot.inc
+@@ -1235,6 +1235,7 @@ static int g5p_r74e_fender_start(struct g5p_diag *g)
+ 	bool on_ran = false;
+ 	u32 samples =
+ 		0; /* wake112: the reads of the poll that ran last (the printed raw) */
++	u32 on_bound_us = b->perf_poweron ? 10000 : 1800, on_us;
+ 	int ret;
+ 
+ 	r->early_power_start_ns = ktime_get_mono_fast_ns();
+@@ -1252,8 +1253,7 @@ static int g5p_r74e_fender_start(struct g5p_diag *g)
+ 	if (!ret) {
+ 		on_ran = true;
+ 		/* poweron: the first request above pstate 1, a voltage step; a longer bound */
+-		ret = g5p_r74e_power_poll(g, b->perf_poweron ?: 1,
+-					  b->perf_poweron ? 10000 : 1800,
++		ret = g5p_r74e_power_poll(g, b->perf_poweron ?: 1, on_bound_us,
+ 					  &r->early_on_ns, &samples);
+ 		if (b->perf_poweron)
+ 			dev_emerg(
+@@ -1262,12 +1262,17 @@ static int g5p_r74e_fender_start(struct g5p_diag *g)
+ 				b->perf_poweron, r->early_power_raw,
+ 				r->early_on_ns, ret);
+ 	}
+-	/* wake112: only ALIVE preempting the on-poll before its first read defers; the
+-	 * first-ALIVE owner owes the proof.  A sampled on-poll (0x11, ...) aborts as before.
++	/* ALIVE preempting the on-poll before its first read, or while its last read
++	 * shows a request still in flight with time left, defers; the first-ALIVE owner owes
++	 * the proof and waits out the rest of the bound.  Any other sampled preemption aborts.
+ 	 */
+-	latch = g5p_px_poll(on_ran, ret, ret == -EHOSTDOWN, samples);
++	on_us = (u32)min_t(u64, div_u64(r->early_on_ns, NSEC_PER_USEC), U32_MAX);
++	latch = g5p_px_poll(on_ran, ret, ret == -EHOSTDOWN, samples,
++			    r->early_power_raw, on_us, on_bound_us);
+ 	if (latch == G5P_PXP_DEFER) {
+ 		r->early_defer_ret = ret;
++		r->early_proof_settle_us = g5p_px_settle_us(
++			samples, on_us, on_bound_us, r->settle_us);
+ 		r->early_proof_gen = g5p_ds_gen();
+ 		ret = 0;
+ 		atomic_set_release(&r->early_proof, G5P_PX_DEFERRED);
+@@ -1288,9 +1293,10 @@ static int g5p_r74e_fender_start(struct g5p_diag *g)
+ 	if (latch == G5P_PXP_DEFER)
+ 		dev_emerg(
+ 			g->dev,
+-			"R74E112 defer gen=%u on_ret=%d raw=%08x alive=%u end=r74e112\n",
++			"R74E112 defer gen=%u on_ret=%d raw=%08x alive=%u settle_us=%u end=r74e112\n",
+ 			r->early_proof_gen, r->early_defer_ret,
+-			r->early_power_raw, READ_ONCE(b->alive));
++			r->early_power_raw, READ_ONCE(b->alive),
++			r->early_proof_settle_us);
+ 	return ret;
+ }
+ 
+diff --git a/drivers/gpu/apple-g5p/lifecycle.inc b/drivers/gpu/apple-g5p/lifecycle.inc
+index 5195849..164d538 100644
+--- a/drivers/gpu/apple-g5p/lifecycle.inc
++++ b/drivers/gpu/apple-g5p/lifecycle.inc
+@@ -174,20 +174,27 @@ static int g5p_r73e_prepare(struct g5p_diag *g)
+ 
+ /* Apple's GPC precondition (AGXMetaFender_setGPCPerformanceState, ...6ca4ccc): a request in
+  * device test shows R1+0x1000 bit 4; wait for it to clear before judging the state.  R1 reads only,
+- * bounded by boot_alive_settle_us; with 0 the first read stands, as before.
++ * bounded by limit_us (boot_alive_settle_us, or a deferred proof's rest of the power-on bound);
++ * with 0 the first read stands, as before.  Each re-read first rechecks that R1 is still
++ * licensed and the boot neither failed nor stopped; if not, the busy word stands and refuses.
+  */
+-static u32 g5p_r74e_settled(struct g5p_diag *g, struct g5p_r73b *r, u32 raw)
++static u32 g5p_r74e_settled(struct g5p_diag *g, struct g5p_r73b *r, u32 raw,
++			    u32 limit_us)
+ {
++	struct g5p_boot *b = g->boot;
+ 	u64 start;
+ 
+-	if (!r->settle_us || !(raw & 0x10))
++	if (!limit_us || !(raw & 0x10))
+ 		return raw;
+ 	if (!r->settle_first)
+ 		r->settle_first = raw;
+ 	start = ktime_get_mono_fast_ns();
+ 	while ((raw & 0x10) && ktime_get_mono_fast_ns() - start <
+-				       (u64)r->settle_us * NSEC_PER_USEC) {
++				       (u64)limit_us * NSEC_PER_USEC) {
+ 		udelay(10);
++		if (!g5p_r8_r1_allowed() || READ_ONCE(b->stopped) ||
++		    READ_ONCE(b->failed))
++			break;
+ 		raw = readl(g->window[1] + 0x1000);
+ 		r->settle_samples++;
+ 	}
+@@ -216,7 +223,10 @@ static int g5p_r73e_irq_submit(struct g5p_diag *g)
+ 		return -EPROTO;
+ 	if (gate == G5P_PXG_PROVE && !g5p_r74e_take(g))
+ 		return -EHOSTDOWN;
+-	r->early_state = g5p_r74e_settled(g, r, readl(g->window[1] + 0x1000));
++	r->early_state = g5p_r74e_settled(g, r, readl(g->window[1] + 0x1000),
++					  gate == G5P_PXG_PROVE ?
++						  r->early_proof_settle_us :
++						  r->settle_us);
+ 	if (gate == G5P_PXG_PROVE)
+ 		g5p_r74e_settle(r, r->early_state);
+ 	if (!g5p_gpc_ok(r->early_state))
+@@ -241,8 +251,8 @@ static int g5p_r73e_irq_submit(struct g5p_diag *g)
+ 	raw = readl(g->window[1] + 0x14);
+ 	if (raw & ~7U)
+ 		return -EPROTO;
+-	r->early_after_state =
+-		g5p_r74e_settled(g, r, readl(g->window[1] + 0x1000));
++	r->early_after_state = g5p_r74e_settled(
++		g, r, readl(g->window[1] + 0x1000), r->settle_us);
+ 	if (!g5p_gpc_ok(r->early_after_state))
+ 		return -EHOSTDOWN;
+ 	dev_emerg(
+diff --git a/drivers/gpu/apple-g5p/r74e112.h b/drivers/gpu/apple-g5p/r74e112.h
+index cacac73..4a0b44f 100644
+--- a/drivers/gpu/apple-g5p/r74e112.h
++++ b/drivers/gpu/apple-g5p/r74e112.h
+@@ -25,6 +25,17 @@
+  * before ALIVE (0x11 in rounds 74e..79b, or any other word) and every other R74E failure
+  * (off-poll, timeout, GPC1 write refused) abort exactly as before.
+  *
++ * One sampled case defers as well: the last read shows a power-state request still in
++ * flight (bit 4 set, a nonzero target, no other bit) and ALIVE arrived while the poll
++ * still had time left.  The firmware boots without waiting for the GPC, so ALIVE can land
++ * while the request is still in flight (0x14 after 43 and 52 reads, cold and warm; good
++ * power-ons settle after 13 to 54 reads).  Apple's
++ * setGPCPerformanceState and setGPUCorePower wait for bit 4 to clear before anything
++ * else, for up to 30 s.  The owner continues the poll for the rest of its bound
++ * (g5p_px_settle_us()): no R1 read beyond what the release poll was allowed, and no
++ * register write before the state field settles.  A poll that ran out its bound, an
++ * all-ones read, a parking request (0x10) or a settled wrong state still abort.
++ *
+  * States (r73b->early_proof):
+  *   NONE      no deferral: the poll decided, or the release has not run
+  *   DEFERRED  ALIVE preempted the on-poll; one owner read is owed (generation recorded)
+@@ -38,6 +49,8 @@
+ 
+ #define G5P_PX_STATE_MASK 0x1fU
+ #define G5P_PX_STATE_ON 0x01U
++#define G5P_PX_REQ_BUSY 0x10U /* a power-state request is in flight */
++#define G5P_PX_REQ_TARGET 0x0fU
+ 
+ enum g5p_px {
+ 	G5P_PX_NONE,
+@@ -74,20 +87,51 @@ enum g5p_pxp {
+ 	G5P_PXP_ABORT, /* anything else: power abort (cold) */
+ };
+ 
++/* A request toward a powered state still in flight, and nothing else: 0x11..0x1f. */
++static inline bool g5p_px_in_flight(u32 raw)
++{
++	return (raw & ~G5P_PX_STATE_MASK) == 0 && (raw & G5P_PX_REQ_BUSY) &&
++	       (raw & G5P_PX_REQ_TARGET);
++}
++
+ /*
+  * on_ran: the core request, the off-poll and the GPC1 write succeeded and the on-poll
+  * ran.  ret: the last step's result.  preempted: the on-poll stopped on ALIVE.
+- * samples: the on-poll's R1+0x1000 reads.  Only a preemption with no read defers (no
+- * abort, no release_ready); a sampled one saw the state and aborts.
++ * samples: the on-poll's R1+0x1000 reads; raw: the last of them.  elapsed_us, bound_us:
++ * the on-poll's time and its bound.  A preemption defers (no abort, no release_ready)
++ * when the poll read nothing, or when its last read is a request still in flight and the
++ * bound has time left; any other sampled preemption saw a wrong state and aborts.
+  */
+ static inline enum g5p_pxp g5p_px_poll(bool on_ran, int ret, bool preempted,
+-				       u32 samples)
++				       u32 samples, u32 raw, u32 elapsed_us,
++				       u32 bound_us)
+ {
+ 	if (!on_ran)
+ 		return G5P_PXP_ABORT;
+ 	if (!ret)
+ 		return G5P_PXP_READY;
+-	return preempted && !samples ? G5P_PXP_DEFER : G5P_PXP_ABORT;
++	if (!preempted)
++		return G5P_PXP_ABORT;
++	if (!samples)
++		return G5P_PXP_DEFER;
++	return g5p_px_in_flight(raw) && elapsed_us < bound_us ? G5P_PXP_DEFER :
++								G5P_PXP_ABORT;
++}
++
++/*
++ * How long the owner may wait for bit 4 to clear before its read decides.  An unsampled
++ * deferral keeps the owner's own limit (settle_us); a sampled in-flight one continues the
++ * on-poll for the rest of its bound, never less than settle_us.
++ */
++static inline u32 g5p_px_settle_us(u32 samples, u32 elapsed_us, u32 bound_us,
++				   u32 settle_us)
++{
++	u32 left;
++
++	if (!samples || elapsed_us >= bound_us)
++		return settle_us;
++	left = bound_us - elapsed_us;
++	return left > settle_us ? left : settle_us;
+ }
+ 
+ /* The first-ALIVE owner's admission. */

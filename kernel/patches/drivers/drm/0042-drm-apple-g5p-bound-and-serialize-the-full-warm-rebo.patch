@@ -1,0 +1,323 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 20:07:12 +0100
+Subject: [PATCH] drm/apple-g5p: bound handover and cold-reset instead of
+ jumping with live DMA
+
+Keep admission closed and latch only successful handovers. On notifier
+failure log at emergency level, request a pstore dump, override warm
+reboot mode and emergency restart. The tethered watchdog guard gives the
+native cold reset priority over PSCI. Never panic: the userspace warm
+guard sets panic_timeout=0.
+
+Assisted-by: LLM
+---
+ drivers/gpu/apple-g5p/boot.inc                | 23 ++++-
+ drivers/gpu/apple-g5p/core.inc                |  3 -
+ drivers/gpu/apple-g5p/teardown.inc            | 89 +++++++++++++++----
+ .../gpu/drm/apple-g5p/drm-render-sched.inc    |  2 +
+ .../gpu/drm/apple-g5p/drm-render-unbind.inc   |  7 +-
+ drivers/gpu/drm/apple-g5p/drm-render-v3.inc   | 11 ++-
+ 6 files changed, 110 insertions(+), 25 deletions(-)
+
+diff --git a/drivers/gpu/apple-g5p/boot.inc b/drivers/gpu/apple-g5p/boot.inc
+index 94c135bea..62c6636b7 100644
+--- a/drivers/gpu/apple-g5p/boot.inc
++++ b/drivers/gpu/apple-g5p/boot.inc
+@@ -176,6 +176,7 @@ struct g5p_boot {
+ 	int fifo_error;
+ 	int irq;
+ 	atomic_t irqs;
++	atomic_t irq_active;
+ 	spinlock_t event_lock;
+ 	void __iomem *swirq;
+ 	bool maps_ready, armed, copied, released, alive, failed, irq_ready;
+@@ -559,6 +560,7 @@ static int g5p_boot_maps(struct g5p_diag *g)
+ 		b->compute_slot, b->compute_boot_vm, b->preinstall_context);
+ 	spin_lock_init(&b->event_lock);
+ 	atomic_set(&b->irqs, 0);
++	atomic_set(&b->irq_active, 0);
+ 	ret = g5p_plan_layout(&b->layout);
+ 	if (ret)
+ 		goto out;
+@@ -965,7 +967,7 @@ static irqreturn_t g5p_boot_hardirq(int irq, void *data)
+ 	return IRQ_WAKE_THREAD;
+ }
+ 
+-static irqreturn_t g5p_boot_irq(int irq, void *data)
++static irqreturn_t g5p_boot_irq_run(int irq, void *data)
+ {
+ 	struct g5p_diag *g = data;
+ 	struct g5p_boot *b = g->boot;
+@@ -999,6 +1001,25 @@ static irqreturn_t g5p_boot_irq(int irq, void *data)
+ 	return IRQ_HANDLED;
+ }
+ 
++/* Shutdown masks new IRQs and waits only a bounded time for this RAM latch.
++ * A thread scheduled after freeze must not enter the GPU register path.
++ */
++static irqreturn_t g5p_boot_irq(int irq, void *data)
++{
++	struct g5p_diag *g = data;
++	struct g5p_boot *b = g->boot;
++	irqreturn_t ret = IRQ_HANDLED;
++
++	atomic_inc(&b->irq_active);
++	smp_mb__after_atomic();
++	if (!READ_ONCE(b->stopped))
++		ret = g5p_boot_irq_run(irq, data);
++	else if (b->swirq)
++		writel(0x4000, b->swirq + 0x94);
++	atomic_dec(&b->irq_active);
++	return ret;
++}
++
+ static int g5p_boot_irq_setup(struct g5p_diag *g)
+ {
+ 	struct g5p_boot *b = g->boot;
+diff --git a/drivers/gpu/apple-g5p/core.inc b/drivers/gpu/apple-g5p/core.inc
+index 72fc1ff4c..e2df8ca55 100644
+--- a/drivers/gpu/apple-g5p/core.inc
++++ b/drivers/gpu/apple-g5p/core.inc
+@@ -588,10 +588,7 @@ static ssize_t command_store(struct device *dev, struct device_attribute *attr,
+ 	if (!capable(CAP_SYS_RAWIO))
+ 		return -EPERM;
+ 	if (sysfs_streq(buf, "td-kexec")) {
+-		if (!g5p_sleep_enter(g))
+-			return -EBUSY;
+ 		ret = g5p_td_command(g, buf);
+-		g5p_sleep_exit(g);
+ 		return ret ?: count;
+ 	}
+ 	ret = g5p_run_phase(g, buf, &ran);
+diff --git a/drivers/gpu/apple-g5p/teardown.inc b/drivers/gpu/apple-g5p/teardown.inc
+index d40cfa26f..8d511b0ba 100644
+--- a/drivers/gpu/apple-g5p/teardown.inc
++++ b/drivers/gpu/apple-g5p/teardown.inc
+@@ -15,6 +15,7 @@
+  * unchanged.  docs/gpu/experiments/recovery108-driver.md.
+  */
+ #include <linux/limits.h>
++#include <linux/kmsg_dump.h>
+ #include <linux/notifier.h>
+ #include <linux/reboot.h>
+ #include "teardown.h"
+@@ -438,6 +439,7 @@ struct g5p_kq_ctx {
+ 	struct g5p_diag *g;
+ 	u32 slots[G5P_RU_USER_SLOTS];
+ 	u32 held;
++	bool irq_busy;
+ };
+ 
+ static void __maybe_unused g5p_kq_register(const struct g5p_kq_frontend *fe,
+@@ -488,14 +490,17 @@ static void g5p_kq_inputs(void *ctx, struct g5p_ru_kq_in *in)
+ 	const struct g5p_kq_frontend *fe = smp_load_acquire(&g5p_kq_fe);
+ 	u32 *ctl;
+ 
+-	if (!READ_ONCE(g->powered))
++	if (g5p_r8_is_retired() || !READ_ONCE(g->powered))
+ 		return; /* Already idle: no detach, MMIO or second gate cycle. */
+ 	in->pmgr = !!g->pmgr;
+-	if (!b || !READ_ONCE(b->maps_ready) || !READ_ONCE(b->released) ||
+-	    READ_ONCE(b->parked))
++	if (!b || !READ_ONCE(b->maps_ready) || !READ_ONCE(b->released))
+ 		return;
+ 	in->booted = true;
+-	in->failed = READ_ONCE(b->failed) || READ_ONCE(b->event_failed);
++	/* PARK is not a witnessed platform off: it still needs the PMGR cycle,
++	 * but a stopped firmware must never be sent another detach command.
++	 */
++	in->failed = READ_ONCE(b->failed) || READ_ONCE(b->event_failed) ||
++		     READ_ONCE(b->stopped) || READ_ONCE(b->parked);
+ 	ctl = (u32 *)g5p_boot_shared(b, 0x6c);
+ 	dma_rmb();
+ 	in->cons = READ_ONCE(ctl[0]);
+@@ -529,13 +534,24 @@ static void g5p_kq_freeze(void *ctx)
+  */
+ static void g5p_kq_irq_off(void *ctx)
+ {
+-	struct g5p_diag *g = ((struct g5p_kq_ctx *)ctx)->g;
++	struct g5p_kq_ctx *c = ctx;
++	struct g5p_diag *g = c->g;
+ 	struct g5p_boot *b = g->boot;
++	u64 deadline = ktime_get_ns() + 20 * NSEC_PER_MSEC;
+ 
+ 	g5p_td_op_aic_ack(g);
+ 	g5p_td_op_irq_mask(g);
+-	if (b && b->irq_ready && b->irq > 0)
+-		synchronize_irq(b->irq);
++	/* Pairs with the thread's active latch and stopped check. No unbounded
++	 * synchronize_irq(): a stuck handler must not hold outgoing shutdown.
++	 */
++	smp_mb();
++	while (b && atomic_read(&b->irq_active)) {
++		if (ktime_get_ns() >= deadline) {
++			c->irq_busy = true;
++			break;
++		}
++		usleep_range(100, 200);
++	}
+ }
+ 
+ /* PMGR only: the bounded gate cycle of the r33/dirty-start path (refuses a gate that is not
+@@ -545,6 +561,8 @@ static int g5p_kq_cycle(void *ctx)
+ {
+ 	struct g5p_diag *g = ((struct g5p_kq_ctx *)ctx)->g;
+ 
++	if (((struct g5p_kq_ctx *)ctx)->irq_busy)
++		return -EBUSY;
+ 	g5p_mmio_gate(g);
+ 	return g5p_r33_gfx_off(g->dev, g->pmgr, G5P_KQ_OFF_MS);
+ }
+@@ -563,29 +581,42 @@ static int g5p_kq_run(struct g5p_diag *g, const char *why)
+ 	};
+ 	struct g5p_ru_kq_out out;
+ 	struct g5p_kq_ctx *c;
++	int ret;
+ 	u64 t0 = ktime_get_ns();
++	u64 deadline = t0 + (u64)G5P_KQ_LOCK_MS * NSEC_PER_MSEC;
+ 
++	if (atomic_read(&g5p_kq_ran) == 1)
++		return -EALREADY; /* Only a witnessed successful handover is latched. */
++	if (g5p_r8_is_retired()) {
++		dev_emerg(g->dev, "GPU-KQ why=%s retired; no MMIO\n", why);
++		return -ENODEV;
++	}
+ 	if (READ_ONCE(g->sleep_failed)) {
+ 		dev_emerg(g->dev,
+ 			  "GPU-KQ frozen after sleep failure; no MMIO\n");
+ 		return -EIO;
+ 	}
+-	if (atomic_xchg(&g5p_kq_ran, 1)) {
+-		dev_emerg(
+-			g->dev,
+-			"GPU-KQ why=%s already ran this boot; nothing done end=kq\n",
+-			why);
+-		return -EALREADY;
++	/* Match sleep prepare: close new admission even while users are inside.
++	 * A timeout still runs freeze/IRQ mask and the command-lock-safe plan.
++	 */
++	atomic_or(INT_MIN, &g->sleep_gate);
++	while (atomic_read(&g->sleep_gate) & INT_MAX) {
++		if (ktime_get_ns() >= deadline) {
++			dev_emerg(g->dev, "GPU-KQ why=%s sleep users busy; forcing quiesce\n", why);
++			break;
++		}
++		msleep(5);
+ 	}
++	if (atomic_cmpxchg(&g5p_kq_ran, 0, -1))
++		return atomic_read(&g5p_kq_ran) == 1 ? -EALREADY : -EBUSY;
+ 	c = kzalloc(sizeof(*c), GFP_KERNEL);
+ 	if (!c) {
+-		dev_emerg(g->dev, "GPU-KQ why=%s ret=%d end=kq\n", why,
+-			  -ENOMEM);
++		atomic_set(&g5p_kq_ran, 0);
+ 		return -ENOMEM;
+ 	}
+ 	c->g = g;
+ 	o.ctx = c;
+-	g5p_ru_kq_run(&o, min((G5P_RU_KQ_FULL), G5P_RU_KQ_FULL), &out);
++	g5p_ru_kq_run(&o, G5P_RU_KQ_FULL, &out);
+ 	dev_emerg(
+ 		g->dev,
+ 		"GPU-KQ why=%s mode=%u inside=%u locked=%u booted=%u failed=%u wedged=%u "
+@@ -599,7 +630,11 @@ static int g5p_kq_run(struct g5p_diag *g, const char *why)
+ 		out.detach_ret, out.froze, out.cycle_ret,
+ 		(ktime_get_ns() - t0) / NSEC_PER_MSEC);
+ 	kfree(c);
+-	return out.detach_ret ?: out.cycle_ret;
++	ret = out.cycle_ret ?:
++		(out.in.booted && !(out.plan & G5P_RU_KQ_CYCLE) ? -EBUSY : 0);
++	/* A successful cycle supersedes a failed detach; DMA is then stopped. */
++	atomic_set(&g5p_kq_ran, ret ? 0 : 1);
++	return ret;
+ }
+ 
+ /* sysfs `command`: td-capture / td-final / td-kexec. Runs before the command mutex, like
+@@ -637,7 +672,25 @@ static int g5p_td_reboot_notify(struct notifier_block *nb, unsigned long action,
+ 	    action != SYS_POWER_OFF)
+ 		return NOTIFY_DONE;
+ 	/* The quiesce needs a live firmware for its detach, so it runs before the ladder freezes. */
+-	g5p_kq_run(g, "reboot-notifier");
++	{
++		int ret = g5p_kq_run(g, "reboot-notifier");
++
++		dev_emerg(g->dev, "GPU-KQ notifier outcome=%d\n", ret);
++		/* The warm guard sets panic_timeout=0. Never panic or return to
++		 * kexec with live DMA: persist the reason, override the guard,
++		 * and take the native watchdog's cold-reset path.
++		 */
++		if (ret && ret != -EALREADY) {
++			dev_emerg(g->dev,
++				  "GPU-KQ unsafe handover ret=%d; forcing cold watchdog reset to iOS\n", ret);
++			/* PANIC dump reason reaches default pstore filters without
++			 * entering panic() or consulting panic_timeout.
++			 */
++			kmsg_dump_desc(KMSG_DUMP_PANIC, "GPU-KQ cold-reset fallback (no panic)");
++			WRITE_ONCE(reboot_mode, REBOOT_COLD);
++			emergency_restart();
++		}
++	}
+ 	{
+ 		return NOTIFY_DONE;
+ 	}
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-sched.inc b/drivers/gpu/drm/apple-g5p/drm-render-sched.inc
+index c2463af31..2b6f3bb9e 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-sched.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render-sched.inc
+@@ -181,6 +181,8 @@ static void g5p_rsched_work(struct work_struct *work)
+ 				g5p_render_close_deferred(d);
+ 			continue;
+ 		}
++		if (atomic_read(&d->core->sleep_gate) < 0)
++			break;
+ 		/* A lost job blocks the channel: hold every job until the drain is decided, and
+ 		 * until a recovery the drain or the executor asked for has run.
+ 		 */
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-unbind.inc b/drivers/gpu/drm/apple-g5p/drm-render-unbind.inc
+index 92d1a57f7..0bc1786b1 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-unbind.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render-unbind.inc
+@@ -66,7 +66,12 @@ static int g5p_rv3_unbind_slots(struct g5p_drm *d, const u32 *slots, u32 n,
+ 		return -EBUSY;
+ 	}
+ /* Invalidate PM-record reuse before any unbind is published. */
+-	mutex_lock(&rd->lock);
++	if (!strcmp(why, "kexec")) {
++		if (!mutex_trylock(&rd->lock))
++			return -EBUSY;
++	} else {
++		mutex_lock(&rd->lock);
++	}
+ 	{
+ 		struct g5p_render *r;
+ 
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+index 70b4ba2fb..d3369a2ff 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+@@ -1156,8 +1156,9 @@ static void g5p_rv3_dc_kick(struct g5p_diag *g, u32 start, u32 target,
+ 				  READ_ONCE(b->control_complete),
+ 				  g5p_rv3_wk_ds108(b),
+ 				  READ_ONCE(g->reset_transition));
+-	if (READ_ONCE(b->failed) || READ_ONCE(b->event_failed) ||
+-	    READ_ONCE(b->stopped) || g5p_ru_term_failed(&g5p_rv3_term) ||
++	if (g5p_r8_is_retired() || READ_ONCE(b->failed) ||
++	    READ_ONCE(b->event_failed) || READ_ONCE(b->stopped) ||
++	    g5p_ru_term_failed(&g5p_rv3_term) ||
+ 	    !g5p_wk_power_ready(power) || g5p_rv3_wk_r74f_busy(b->r73b) ||
+ 	    cons != start || READ_ONCE(ctl[4]) != target)
+ 		goto out;
+@@ -1224,6 +1225,12 @@ static int g5p_rv3_dc_wait(struct g5p_diag *g, u32 target, u64 *consumed_ns)
+ 		case G5P_RU_BIND_CONSUMED:
+ 			*consumed_ns = ktime_get_ns();
+ 			return 0;
++		case G5P_RU_BIND_PROTO:
++			return -EPROTO;
++		case G5P_RU_BIND_TIMEOUT:
++			return -ETIMEDOUT;
++		case G5P_RU_BIND_PENDING:
++			break;
+ 		}
+ 		usleep_range(100, 200);
+ 	}
