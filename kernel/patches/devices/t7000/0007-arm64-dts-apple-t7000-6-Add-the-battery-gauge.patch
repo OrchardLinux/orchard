@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Tue, 10 Nov 2026 19:35:08 +0800
+Subject: [PATCH] arm64: dts: apple: t7000-6: Add the battery gauge
+
+The iPhone 6 and 6 Plus have the iPad mini 4's battery gauge wiring:
+their ADTs (iOS 12.5.1 16H22 for the N61, 12.5.8 16H88 for the N56)
+name a bq27540 on HDQ (gas-gauge,bq27540) on UART5, with its line on
+GPIO 57, the same as the J96 and J97. Describe it in the shared
+t7000-6.dtsi.
+
+Not tried on either phone.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t7000-6.dtsi | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t7000-6.dtsi b/arch/arm64/boot/dts/apple/t7000-6.dtsi
+index d806865ae50d..5cf6cd4593e4 100644
+--- a/arch/arm64/boot/dts/apple/t7000-6.dtsi
++++ b/arch/arm64/boot/dts/apple/t7000-6.dtsi
+@@ -12,6 +12,10 @@
+ / {
+ 	chassis-type = "handset";
+ 
++	aliases {
++		serial5 = &serial5;
++	};
++
+ 	gpio-keys {
+ 		compatible = "gpio-keys";
+ 
+@@ -49,6 +53,21 @@ switch-mute {
+ 	};
+ };
+ 
++/* The bq27540 gauge on UART5's HDQ line (ADT uart5/gas-gauge). */
++&serial5 {
++	pinctrl-0 = <&uart5_pins>;
++	pinctrl-names = "default";
++	status = "okay";
++
++	onewire {
++		compatible = "ti,hdq-uart";
++
++		fuel-gauge {
++			compatible = "ti,bq27540-hdq";
++		};
++	};
++};
++
+ &framebuffer0 {
+ 	power-domains = <&ps_disp0 &ps_mipi_dsi>;
+ };

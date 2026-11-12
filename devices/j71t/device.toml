@@ -34,8 +34,8 @@ screen_off = "untested"
 backlight = "untested"
 touch = "untested"
 buttons = "untested"
-accelerometer = "untested"
-gyroscope = "untested"
+accelerometer = "missing"
+gyroscope = "missing"
 light_sensor = "untested"
 touch_id = "missing"
 storage_read = "untested"
@@ -54,6 +54,3 @@ usb_network = "untested"
 audio_output = "untested"
 audio_input = "untested"
 camera = "missing"
-
-# Local capability delta: aop.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/aop.md.
