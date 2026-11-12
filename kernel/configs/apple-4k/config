@@ -6001,6 +6001,7 @@ CONFIG_APPLE_M1_CPU_PMU=y
 # CONFIG_HNS3_PMU is not set
 # CONFIG_DWC_PCIE_PMU is not set
 # CONFIG_ARM_CORESIGHT_PMU_ARCH_SYSTEM_PMU is not set
+# CONFIG_APPLE_AMC_PMU is not set
 # end of Performance monitor support
 
 # CONFIG_RAS is not set
