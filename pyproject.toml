@@ -37,7 +37,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-orchard = ["py.typed", "usb-session"]
+orchard = ["py.typed", "usb-session", "usb-identity"]
 
 [dependency-groups]
 dev = ["mypy==1.18.2", "jsonschema>=4.25,<5"]
