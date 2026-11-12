@@ -5,13 +5,9 @@ import subprocess
 import sys
 import uuid
 
-from .linux_usb import devices as linux_devices, m1n1_ports as linux_m1n1_ports, serial_tags
+from .linux_usb import MODES, M1N1, devices as linux_devices, m1n1_ports as linux_m1n1_ports, serial_tags
 from orchard.state import EndpointUnavailable
 
-# 0x4144: a RAM payload's USB session (orchard/usb-session).
-# 0x4142: Orchard Recovery; 0x4145: an installed system (orchard's initrd);
-# 0x4146: orchard's initrd with the install add-on (install_direct.py).
-MODES = {0x1227: 'dfu', 0x4141: 'pongo', 0x4142: 'linux', 0x4144: 'ram', 0x4145: 'system', 0x4146: 'install'}
 
 
 class DeviceError(ValueError):
@@ -77,7 +73,7 @@ def m1n1_ports():
         node = pending.pop()
         pending.extend(node.get('IORegistryEntryChildren', []))
         if node.get('IOObjectClass') != 'IOUSBHostDevice' or \
-                (node.get('idVendor'), node.get('idProduct')) != (0x1209, 0x316d):
+                (node.get('idVendor'), node.get('idProduct')) != M1N1:
             continue
         ports = []
         stack = [(child, None) for child in node.get('IORegistryEntryChildren', [])]

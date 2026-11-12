@@ -9,7 +9,7 @@ releasing, rename that section to the version (`## [0.3.0] - YYYY-MM-DD`). The
 release workflow uses that section as the GitHub release notes and fails if it
 is missing or empty.
 
-## [Unreleased]
+## [0.3.0] - 2026-11-12
 
 ### Highlights
 
@@ -42,7 +42,11 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
   they'll work.
 - iPad mini 4 (J96): RAM-boot bring-up record: desktop, touch, battery and
   native Wi-Fi measured on a local kernel tree. Not a device profile yet. (Tom Ballard)
+- iPad mini 4 (J96, J97): touchscreen, Wi-Fi and battery, with a firmware recipe.
+  iPhone 6 and 6 Plus: battery. Not yet tested on Orchard's build. (Tom Ballard)
 - iPad Air (J85): measured RAM-boot status documented. (Christopher M. Smith)
+- iPad 6 (J71b): the buttons are marked working. iPad Air 2 (J81): Bluetooth
+  uses the sequence tested on a J81.
 - iPad Air 2 (J81): native-root boot, desktop and peripheral status recorded.
   (micro23)
 - iPad Air 2 (J81): the touchscreen works, with five fingers and no frame
@@ -63,6 +67,12 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
   strap, so storage works on that boot path.
 - `orchard shell`, `exec`, `push` and `pull` also reach an installed system,
   not only the recovery.
+- Linux hosts: recognize direct installers and grant USB/serial access throughout
+  boot and installed-system development. (Anders Haas Franzen)
+- The installer picks the internal disk correctly on iPads with several NVMe
+  namespaces.
+- An install error says whether anything was written, and what to do next.
+- m1n1 shows the distribution's boot splash while installing, at its own size.
 
 ### Hardware
 
@@ -77,12 +87,16 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
 - iPad 6 (J71b): speakers through the MCA audio path, with an ALSA UCM
   profile. (Dalton Alexandre)
 - iPad 5: UCM profile for the speakers and internal microphone.
+- iPad 7 Wi-Fi (J171): the speakers play. iPad 6 and 7 Cellular (J72b, J172)
+  get the same speakers, untested. (Duke Eagleman)
 - iPad 6 (J71b): the always-on processor (AOP) runs as an in-kernel driver,
   replacing the userspace DMA owner; its accelerometer is an IIO device with
   the panel's mount matrix, so desktops can rotate the screen. Based on Dalton
   Alexandre's AOP work.
 - A10 (T8010): shared IOP mailbox for the GPU and AOP drivers; the NCO clock's
   boot rate is described per board.
+- Apple Wi-Fi follows the regulatory country, so 5 GHz networks connect (iPads
+  with Broadcom PCIe Wi-Fi).
 - iPad 6 (J71b): sleeps with the GPU desktop and wakes instantly with the Power
   button, touch included. A battery-gauge
   poll that rebooted every HDQ-gauge iPad in sleep is fixed; the other A10

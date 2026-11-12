@@ -127,6 +127,26 @@
       ]
     },
     {
+      "destination": "lib/firmware/apple/gfx-t8010.bin",
+      "sha256": "d0e2115e66e186b4b88b789d2a8a67c88595aeb64f6be3f266bf1211ced1e07e",
+      "steps": [
+        {
+          "step": "agx-g9p-firmware-from-kernelcache@1",
+          "input": "kernelcache"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/vxd-deva.bin",
+      "sha256": "bf5167652e81540471aaca141943fd33d71c3990c137f145471305f5f5ade83b",
+      "steps": [
+        {
+          "step": "vxd-firmware-from-kernelcache@1",
+          "input": "kernelcache"
+        }
+      ]
+    },
+    {
       "destination": "lib/firmware/brcm/BCM.apple,j172-MUR.hcd",
       "sha256": "27b778a87f086d8c23f0ad06c77e4b62de9af83182f100ddf4a6e59b1d4249b7",
       "steps": [

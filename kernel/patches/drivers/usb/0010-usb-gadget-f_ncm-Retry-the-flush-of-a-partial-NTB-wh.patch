@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 16:00:00 +0100
+Subject: [PATCH] usb: gadget: f_ncm: Retry the flush of a partial NTB when no
+ request is free
+
+A partial NTB is sent by a timer once no further frame has joined it for
+300 us. The timer calls eth_start_xmit() without a frame, which returns
+NETDEV_TX_BUSY when every transmit request is still in flight. The return
+value was ignored and the timer not restarted, so the frames already
+packed stayed in the NTB until the network stack happened to send another
+one. With a peer waiting for exactly those frames, a transfer stalled.
+
+Restart the timer when the flush found no request. A suspended port
+reports the same value and is left as before: nothing can be sent until
+the host resumes the bus.
+
+Assisted-by: LLM
+[Orchard: from brkosebay/orchard f72349fc6 (OrchardLinux/orchard#109),
+ tested there on a J71t with 157 MB and 164 MB transfers. Changed: the
+ timer is not restarted while the port is suspended, where it would
+ otherwise fire every 300 us until the host wakes; that case is
+ untested on hardware.]
+---
+ drivers/usb/gadget/function/f_ncm.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/usb/gadget/function/f_ncm.c b/drivers/usb/gadget/function/f_ncm.c
+index bf02545b37a2..49972935961d 100644
+--- a/drivers/usb/gadget/function/f_ncm.c
++++ b/drivers/usb/gadget/function/f_ncm.c
+@@ -1158,7 +1158,15 @@ static enum hrtimer_restart ncm_tx_timeout(struct hrtimer *data)
+ 		 *
+ 		 * This will call directly into u_ether's eth_start_xmit()
+ 		 */
+-		netdev->netdev_ops->ndo_start_xmit(NULL, netdev);
++		if (netdev->netdev_ops->ndo_start_xmit(NULL, netdev) ==
++		    NETDEV_TX_BUSY && !READ_ONCE(ncm->port.is_suspend)) {
++			/*
++			 * No request was free, so the partial NTB was not
++			 * sent. Try again; a completion frees a request.
++			 */
++			hrtimer_forward_now(data, TX_TIMEOUT_NSECS);
++			return HRTIMER_RESTART;
++		}
+ 	}
+ 	return HRTIMER_NORESTART;
+ }
