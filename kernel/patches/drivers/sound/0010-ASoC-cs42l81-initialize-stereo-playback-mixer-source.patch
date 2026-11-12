@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 16:06:48 +0100
+Subject: [PATCH] ASoC: cs42l81: initialize stereo playback mixer sources
+
+The ASP slot geometry is configured at power-up but the playback mixer
+source selectors are left to their previous values. This can retain a
+silent or duplicated channel after codec reset or firmware use.
+
+Follow AppleCS42L81Audio::updateRouting by assigning mb00 and mb01 to
+ASP RX slots 0 and 1 before enabling the playback path. Keep the
+existing stereo power and volume sequence unchanged.
+
+Assisted-by: LLM
+---
+ sound/soc/codecs/cs42l81.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/sound/soc/codecs/cs42l81.c b/sound/soc/codecs/cs42l81.c
+index fc2e93b55..418f91d36 100644
+--- a/sound/soc/codecs/cs42l81.c
++++ b/sound/soc/codecs/cs42l81.c
+@@ -81,6 +81,9 @@
+ #define CS42L81_INT_STATUS4	0x007b
+ #define CS42L81_INT_STATUS5	0x007c
+ #define CS42L81_INT_STATUS6	0x0106
++/* Playback mixer bus n source: 0x19 + slot selects ASP RX slot. */
++#define CS42L81_MIX_SRC(n)	(0x010b + (n))
++#define CS42L81_MIX_SRC_ASP(n)	(0x19 + (n))
+ /* ASP TX slot n source: 0x18 = ADC A, 0x1c = ADC B (0x20/0x24 = DMIC2A/B) */
+ #define CS42L81_ASP_TX_SRC(n)	(0x0115 + (n))	/* n = 0..9 */
+ /* ADC channel n source, same codes as ASP_TX_SRC */
+@@ -318,6 +321,14 @@ static void cs42l81_set_asp(struct cs42l81 *cs)
+ 	/* The codec drives BCLK/LRCK (the MCA is the clock consumer). */
+ 	regmap_write(map, CS42L81_ASP_CLK, CS42L81_ASP_CLK_PROVIDER | c);
+ 
++	/*
++	 * iOS updateRouting maps mixer buses mb00/mb01 to ASP RX slots
++	 * 0/1. Program the sources as well as the slot geometry: reset or
++	 * a previous user of the codec need not leave a stereo route.
++	 */
++	regmap_write(map, CS42L81_MIX_SRC(0), CS42L81_MIX_SRC_ASP(0));
++	regmap_write(map, CS42L81_MIX_SRC(1), CS42L81_MIX_SRC_ASP(1));
++
+ 	/* ASP RX slot n: byte offset n * b, width b bytes */
+ 	for (n = 0; n < CS42L81_ASP_SLOTS; n++)
+ 		regmap_write(map, CS42L81_ASP_RX_SLOT(n),
