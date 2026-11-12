@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 16:18:38 +0000
+Subject: [PATCH] soc: apple: aop: refuse pre-sync sleep during firmware boot
+
+A suspend while the AOP firmware is still starting stops it part way
+through its boot, and the sensors behind it do not come back. Register a
+suspend precheck notifier that refuses sleep with -EBUSY until the
+firmware has reported ready.
+
+Assisted-by: LLM
+---
+ drivers/soc/apple/aop.c | 27 +++++++++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+diff --git a/drivers/soc/apple/aop.c b/drivers/soc/apple/aop.c
+--- a/drivers/soc/apple/aop.c
++++ b/drivers/soc/apple/aop.c
+@@ -32,6 +32,7 @@
+ #include <linux/list.h>
+ #include <linux/module.h>
+ #include <linux/mutex.h>
++#include <linux/suspend.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
+ #include <linux/random.h>
+@@ -226,6 +227,8 @@
+ };
+ 
+ struct apple_aop {
++	struct notifier_block sleep_precheck;
++	bool sleep_ready;
+ 	struct device *dev;
+ 	const struct apple_aop_hw *hw;
+ 	void __iomem *akf;
+@@ -1385,6 +1388,22 @@
+ 		dma_free_coherent(aop->dev, aop->ext_size, aop->ext, aop->ext_dma);
+ }
+ 
++static int apple_aop_sleep_precheck(struct notifier_block *nb, unsigned long action, void *data)
++{
++	struct apple_aop *aop = container_of(nb, struct apple_aop, sleep_precheck);
++
++	if (action == PM_SUSPEND_PRECHECK_COMPLETE)
++		return NOTIFY_DONE;
++	return READ_ONCE(aop->sleep_ready) ? NOTIFY_OK : notifier_from_errno(-EBUSY);
++}
++
++static void apple_aop_sleep_unregister(void *data)
++{
++	struct apple_aop *aop = data;
++
++	unregister_pm_suspend_precheck_notifier(&aop->sleep_precheck);
++}
++
+ static int apple_aop_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+@@ -1399,6 +1418,13 @@
+ 	if (!aop)
+ 		return -ENOMEM;
+ 	aop->dev = dev;
++	aop->sleep_precheck.notifier_call = apple_aop_sleep_precheck;
++	ret = register_pm_suspend_precheck_notifier(&aop->sleep_precheck);
++	if (ret)
++		return ret;
++	ret = devm_add_action_or_reset(dev, apple_aop_sleep_unregister, aop);
++	if (ret)
++		return ret;
+ 	aop->hw = of_device_get_match_data(dev);
+ 	mutex_init(&aop->listeners_lock);
+ 	INIT_LIST_HEAD(&aop->listeners);
+@@ -1514,6 +1540,7 @@
+ 	aop->hello = true;
+ 	dev_info(dev, "AOP start complete warm=%d iop_crashed=0\n", aop->spi0.ran);
+ 	platform_set_drvdata(pdev, aop);
++	WRITE_ONCE(aop->sleep_ready, true);
+ 	return 0;
+ 
+ err_halt:

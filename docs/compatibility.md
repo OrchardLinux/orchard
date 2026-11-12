@@ -161,7 +161,7 @@ Boards Orchard builds for. States: working, untested, missing, none (no such har
 | `n66` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing |
 | `n69u` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing |
 | `n71` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing |
-| `j71t` | untested | untested | untested | untested | untested | missing | missing | untested | missing | untested | untested | untested | untested | untested | none | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing |
+| `j71t` | untested | untested | untested | untested | untested | working | working | working | missing | untested | untested | untested | untested | untested | none | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing |
 | `j72t` | untested | untested | untested | untested | untested | missing | missing | untested | missing | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing |
 | `n66m` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing |
 | `n69` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing |
@@ -248,6 +248,7 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 
 | Board | Feature | |
 | --- | --- | --- |
+| `j71t` | Accelerometer | working, but no driver binds |
 | `d10` | Bluetooth input devices | missing, but a driver binds |
 | `d10` | Bluetooth audio | missing, but a driver binds |
 | `d101` | Bluetooth input devices | missing, but a driver binds |
