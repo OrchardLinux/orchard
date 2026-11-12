@@ -1,24 +1,16 @@
 diff --git a/src/fb.c b/src/fb.c
-index 2b85d9a..c071365 100644
+index ba606b2..aec12bf 100644
 --- a/src/fb.c
 +++ b/src/fb.c
-@@ -71,6 +71,7 @@ const struct image logo_256 = {
- };
- 
- struct image custom_logo = {};
-+static bool custom_logo_found; /* a custom logo payload came with this boot */
- 
- const struct image *logo;
- struct image orig_logo;
-@@ -246,8 +247,18 @@ void fb_display_logo(void)
+@@ -246,8 +246,18 @@ void fb_display_logo(void)
      if (!console.initialized)
          return;
  
 +#ifdef QUIET_BOOT
 +    /* Clear the inherited framebuffer; publish a black frame only once. A
-+       custom logo payload (a distribution's mark) is the only picture drawn. */
++       custom logo or splash payload (a distribution's mark) is the only picture drawn. */
 +    memset32(fb.ptr, 0, fb.size);
-+    if (custom_logo_found)
++    if (logo == &custom_logo)
 +        fb_blit_logo(logo);
 +    else
 +        fb_update();
@@ -29,7 +21,7 @@ index 2b85d9a..c071365 100644
  }
  
  void fb_restore_logo(void)
-@@ -255,9 +266,13 @@ void fb_restore_logo(void)
+@@ -255,9 +265,13 @@ void fb_restore_logo(void)
      if (!console.initialized)
          return;
  
@@ -43,7 +35,7 @@ index 2b85d9a..c071365 100644
  }
  
  void fb_improve_logo(void)
-@@ -385,6 +400,12 @@ struct iodev iodev_fb = {
+@@ -385,6 +399,12 @@ struct iodev iodev_fb = {
  
  static void fb_clear_console(void)
  {
@@ -56,17 +48,7 @@ index 2b85d9a..c071365 100644
      for (u32 row = 0; row < console.cursor.max_row; ++row)
          fb_clear_font_row(row);
  
-@@ -469,14 +490,19 @@ void fb_init(bool clear)
-         if (custom_logo.width == 256) {
-             custom_logo.ptr = custom_256;
-             logo = &custom_logo;
-+            custom_logo_found = true;
-         } else if (custom_logo.width == 128) {
-             custom_logo.ptr = custom_128;
-             logo = &custom_logo;
-+            custom_logo_found = true;
-         } else {
-             printf("fb: unexpected logo dimensions %ux%u\n", custom_logo.width, custom_logo.height);
+@@ -484,6 +504,9 @@ void fb_init(bool clear)
          }
      }
  
@@ -76,7 +58,7 @@ index 2b85d9a..c071365 100644
      if (clear) {
          memset32(fb.ptr, 0, fb.size);
      } else {
-@@ -484,6 +510,7 @@ void fb_init(bool clear)
+@@ -491,6 +514,7 @@ void fb_init(bool clear)
          memset32(fb.ptr, 0, min(256, fb.size));
      }
  
@@ -84,7 +66,7 @@ index 2b85d9a..c071365 100644
      fb_clear_console();
  
      printf("fb console: max rows %d, max cols %d\n", console.cursor.max_row,
-@@ -492,6 +519,12 @@ void fb_init(bool clear)
+@@ -499,6 +523,12 @@ void fb_init(bool clear)
  
  void fb_set_active(bool active)
  {

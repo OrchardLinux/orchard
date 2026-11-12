@@ -1,0 +1,130 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Tue, 10 Nov 2026 07:49:21 +0800
+Subject: [PATCH] media: apple: vxd: Add the T8010 decoder
+
+The T8010 (A10) VXD block runs the same DEVA firmware image as the
+S8000 one. Following the iOS 17.7.11 AppleD5500 kext, vxd-version 10
+differs from version 7 in what the host does in three ways:
+
+- a second register range holds an enable bit that is set, followed by
+  a 50 us wait, at every power-up before the core is first accessed;
+- the core has two pixel pipes, which it reports in CORE_ID and which
+  the existing pipe loops already follow;
+- the H.264 work buffers are twice the size, which the driver already
+  allocates.
+
+Map the second range for this variant and set the bit in runtime
+resume.
+
+Assisted-by: LLM
+---
+ .../media/platform/apple/vxd/apple-vxd-core.c | 27 +++++++++++++++++++
+ .../media/platform/apple/vxd/apple-vxd-regs.h | 11 ++++++++
+ drivers/media/platform/apple/vxd/apple-vxd.h  |  2 ++
+ 3 files changed, 40 insertions(+)
+
+diff --git a/drivers/media/platform/apple/vxd/apple-vxd-core.c b/drivers/media/platform/apple/vxd/apple-vxd-core.c
+index 2ed33f1ecf2c..ab7515feeb82 100644
+--- a/drivers/media/platform/apple/vxd/apple-vxd-core.c
++++ b/drivers/media/platform/apple/vxd/apple-vxd-core.c
+@@ -9,7 +9,9 @@
+  * on the first open of the video node (apple-vxd-fw.c).
+  */
+ 
++#include <linux/delay.h>
+ #include <linux/interrupt.h>
++#include <linux/io.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/pm_runtime.h>
+@@ -226,6 +228,15 @@ void apple_vxd_run_postamble(struct apple_vxd_ctx *ctx,
+ /* Runtime PM stubs: the genpd (ps_vdec) does all the work. */
+ static int apple_vxd_runtime_resume(struct device *dev)
+ {
++	struct apple_vxd_dev *vxd = dev_get_drvdata(dev);
++
++	/* The domain is on again: enable the core before anything reads it. */
++	if (vxd->integ) {
++		writel(readl(vxd->integ + VXD_INTEG_CTRL) | VXD_INTEG_CTRL_ENABLE,
++		       vxd->integ + VXD_INTEG_CTRL);
++		udelay(VXD_INTEG_ENABLE_DELAY_US);
++	}
++
+ 	return 0;
+ }
+ 
+@@ -245,8 +256,17 @@ static const struct apple_vxd_variant s8000_vxd_variant = {
+ 	.hevc_supported	= true,
+ };
+ 
++/* The T8010 core has two pixel pipes; it reports them in CORE_ID. */
++static const struct apple_vxd_variant t8010_vxd_variant = {
++	.vxd_version	= 10,
++	.num_gart_pts	= 512,
++	.hevc_supported	= true,
++	.has_integration = true,
++};
++
+ static const struct of_device_id apple_vxd_of_match[] = {
+ 	{ .compatible = "apple,s8000-vxd", .data = &s8000_vxd_variant },
++	{ .compatible = "apple,t8010-vxd", .data = &t8010_vxd_variant },
+ 	{ }
+ };
+ MODULE_DEVICE_TABLE(of, apple_vxd_of_match);
+@@ -286,6 +306,13 @@ static int apple_vxd_probe(struct platform_device *pdev)
+ 				     "failed to map the vxd registers\n");
+ 	vxd->regs_size = resource_size(res);
+ 
++	if (variant->has_integration) {
++		vxd->integ = devm_platform_ioremap_resource(pdev, 1);
++		if (IS_ERR(vxd->integ))
++			return dev_err_probe(&pdev->dev, PTR_ERR(vxd->integ),
++					     "failed to map the integration registers\n");
++	}
++
+ 	/* The block has no DART; DMA addresses are physical and the core's
+ 	 * own GART translates the low 32 bits into device address space.
+ 	 * GART entries hold PA >> 8 in 32 bits: 40-bit physical addresses.
+diff --git a/drivers/media/platform/apple/vxd/apple-vxd-regs.h b/drivers/media/platform/apple/vxd/apple-vxd-regs.h
+index 37a13ab32e53..edeccb8e0a95 100644
+--- a/drivers/media/platform/apple/vxd/apple-vxd-regs.h
++++ b/drivers/media/platform/apple/vxd/apple-vxd-regs.h
+@@ -13,6 +13,17 @@
+ 
+ #include <linux/bits.h>
+ 
++/*
++ * Integration registers: the second "reg" range of the vxd-version 9 and
++ * 10 blocks ("VDEC0_Integration" in AppleD5500).  The kext sets bit 12 of
++ * the word at offset 4 and waits 50 us at every power-up, before the first
++ * access to the core, and touches nothing else there (iOS 17.7.11
++ * 0xfffffff0063eda28 [E]).
++ */
++#define VXD_INTEG_CTRL			0x0004
++#define  VXD_INTEG_CTRL_ENABLE		BIT(12)
++#define VXD_INTEG_ENABLE_DELAY_US	50
++
+ /* Core identification (CPVDECCore::GetCoreRev [E]) */
+ #define VXD_REG_CORE_ID			0x0630
+ #define  VXD_CORE_ID_MAJOR_SH		16
+diff --git a/drivers/media/platform/apple/vxd/apple-vxd.h b/drivers/media/platform/apple/vxd/apple-vxd.h
+index 03de522d8aaa..bba04f75a63d 100644
+--- a/drivers/media/platform/apple/vxd/apple-vxd.h
++++ b/drivers/media/platform/apple/vxd/apple-vxd.h
+@@ -65,6 +65,7 @@ struct apple_vxd_variant {
+ 	unsigned int vxd_version;	/* ADT "vxd-version" */
+ 	u32 num_gart_pts;		/* mapped page tables (512 = 2 GiB) */
+ 	bool hevc_supported;
++	bool has_integration;		/* second reg range, see VXD_INTEG_CTRL */
+ };
+ 
+ /*
+@@ -277,6 +278,7 @@ struct apple_vxd_dev {
+ 
+ 	void __iomem *regs;
+ 	resource_size_t regs_size;	/* bounds every ring access */
++	void __iomem *integ;		/* integration registers, or NULL */
+ 	int irq;
+ 
+ 	/* Core state. */

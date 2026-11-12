@@ -9,12 +9,265 @@
     "sha256": "4de5c8c453328205b1e741faae218ee0f7848993334ff77f690c5a64a765a623"
   },
   "inputs": {
-    "DeviceTree.im4p": {
+    "s-C2_P-zinfandelb_M-STEL_V-m__m-4.13.txt": {
       "ipsw": {
-        "zip": "Firmware/all_flash/DeviceTree.j97ap.im4p"
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-zinfandelb_M-STEL_V-m__m-4.13.txt"
       },
-      "sha256": "da969d80e03e65d0cad3aad8b93f9bea927d472d9134342630ecd277bf414165"
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-zinfandelb_M-STEL_V-m__m-4.13.txt",
+      "sha256": "648117fb8dde27770ea9ac31f4976e6e83b751a20b75f16dd3416a6ab6587892"
+    },
+    "s-C2_P-zinfandelb_M-STEL_V-m__m-4.15.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-zinfandelb_M-STEL_V-m__m-4.15.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-zinfandelb_M-STEL_V-m__m-4.15.txt",
+      "sha256": "648117fb8dde27770ea9ac31f4976e6e83b751a20b75f16dd3416a6ab6587892"
+    },
+    "s-C2_P-zinfandelb_M-STEL_V-m__m-4.9.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-zinfandelb_M-STEL_V-m__m-4.9.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-zinfandelb_M-STEL_V-m__m-4.9.txt",
+      "sha256": "648117fb8dde27770ea9ac31f4976e6e83b751a20b75f16dd3416a6ab6587892"
+    },
+    "s-C2_P-zinfandelb_M-STEL_V-u__m-3.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-zinfandelb_M-STEL_V-u__m-3.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-zinfandelb_M-STEL_V-u__m-3.1.txt",
+      "sha256": "cfd4fcb52cb8127a80ae8981c37d5967806c3fee69d5f3c770895709673b0528"
+    },
+    "s-C2_P-zinfandelb_M-STEL_V-u__m-3.11.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-zinfandelb_M-STEL_V-u__m-3.11.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-zinfandelb_M-STEL_V-u__m-3.11.txt",
+      "sha256": "cfd4fcb52cb8127a80ae8981c37d5967806c3fee69d5f3c770895709673b0528"
+    },
+    "s-C2_P-zinfandelb_M-STEL_V-u__m-3.9.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-zinfandelb_M-STEL_V-u__m-3.9.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-zinfandelb_M-STEL_V-u__m-3.9.txt",
+      "sha256": "cfd4fcb52cb8127a80ae8981c37d5967806c3fee69d5f3c770895709673b0528"
+    },
+    "s-C2_zinfandelb.clmb": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/zinfandelb.clmb"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/zinfandelb.clmb",
+      "sha256": "53ffc95965b93fb633734592f04472a154adcc2f972b72a37b5829cec58edc64"
+    },
+    "s-C2_zinfandelb.trx": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/zinfandelb.trx"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/zinfandelb.trx",
+      "sha256": "fb1c8d1d73c6742226bd12a19d09630190f4cac053792a6bae96aab6bc1e59f8"
+    },
+    "s-C2_zinfandelb.txcb": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/zinfandelb.txcb"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/zinfandelb.txcb",
+      "sha256": "aa843b326e497fd318d38d4859919aa23a8829ecce66a25720e55fcce03356ae"
+    },
+    "s-C5_P-zinfandelb_M-STEL_V-m__m-4.15.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-zinfandelb_M-STEL_V-m__m-4.15.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-zinfandelb_M-STEL_V-m__m-4.15.txt",
+      "sha256": "648117fb8dde27770ea9ac31f4976e6e83b751a20b75f16dd3416a6ab6587892"
+    },
+    "s-C5_P-zinfandelb_M-STEL_V-u__m-3.11.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-zinfandelb_M-STEL_V-u__m-3.11.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-zinfandelb_M-STEL_V-u__m-3.11.txt",
+      "sha256": "cfd4fcb52cb8127a80ae8981c37d5967806c3fee69d5f3c770895709673b0528"
+    },
+    "s-C5_zinfandelb.clmb": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/zinfandelb.clmb"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/zinfandelb.clmb",
+      "sha256": "ad6231dbe5532fe7753374b020b3bfff2d9195f1d5194c105e6f920f3fb79f66"
+    },
+    "s-C5_zinfandelb.trx": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/zinfandelb.trx"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/zinfandelb.trx",
+      "sha256": "85b4339fb00f4cb501e678cd79f268cbcbae6736e0fa19d76d99e9da5ba08254"
+    },
+    "s-C5_zinfandelb.txcb": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/zinfandelb.txcb"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/zinfandelb.txcb",
+      "sha256": "ddf26d07c52847c54900cc38a37bedcad69b4504ea549ae587d1cb47fcb72efb"
+    },
+    "J97.mtprops": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/multitouch/J97.mtprops"
+      },
+      "device": "/usr/share/firmware/multitouch/J97.mtprops",
+      "sha256": "59d9740b4ddfe88e22987bb77b91d4c84a1f4ced4396156ba5d7989485172c79"
     }
   },
-  "outputs": []
+  "outputs": [
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,zinfandelb-STEL-m-4.13.txt",
+      "sha256": "648117fb8dde27770ea9ac31f4976e6e83b751a20b75f16dd3416a6ab6587892",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-zinfandelb_M-STEL_V-m__m-4.13.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,zinfandelb-STEL-m-4.15.txt",
+      "sha256": "648117fb8dde27770ea9ac31f4976e6e83b751a20b75f16dd3416a6ab6587892",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-zinfandelb_M-STEL_V-m__m-4.15.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,zinfandelb-STEL-m-4.9.txt",
+      "sha256": "648117fb8dde27770ea9ac31f4976e6e83b751a20b75f16dd3416a6ab6587892",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-zinfandelb_M-STEL_V-m__m-4.9.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,zinfandelb-STEL-u-3.1.txt",
+      "sha256": "cfd4fcb52cb8127a80ae8981c37d5967806c3fee69d5f3c770895709673b0528",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-zinfandelb_M-STEL_V-u__m-3.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,zinfandelb-STEL-u-3.11.txt",
+      "sha256": "cfd4fcb52cb8127a80ae8981c37d5967806c3fee69d5f3c770895709673b0528",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-zinfandelb_M-STEL_V-u__m-3.11.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,zinfandelb-STEL-u-3.9.txt",
+      "sha256": "cfd4fcb52cb8127a80ae8981c37d5967806c3fee69d5f3c770895709673b0528",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-zinfandelb_M-STEL_V-u__m-3.9.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,zinfandelb.clm_blob",
+      "sha256": "53ffc95965b93fb633734592f04472a154adcc2f972b72a37b5829cec58edc64",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_zinfandelb.clmb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,zinfandelb.bin",
+      "sha256": "fb1c8d1d73c6742226bd12a19d09630190f4cac053792a6bae96aab6bc1e59f8",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_zinfandelb.trx"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,zinfandelb.txcap_blob",
+      "sha256": "aa843b326e497fd318d38d4859919aa23a8829ecce66a25720e55fcce03356ae",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_zinfandelb.txcb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,zinfandelb-STEL-m-4.15.txt",
+      "sha256": "648117fb8dde27770ea9ac31f4976e6e83b751a20b75f16dd3416a6ab6587892",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-zinfandelb_M-STEL_V-m__m-4.15.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,zinfandelb-STEL-u-3.11.txt",
+      "sha256": "cfd4fcb52cb8127a80ae8981c37d5967806c3fee69d5f3c770895709673b0528",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-zinfandelb_M-STEL_V-u__m-3.11.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,zinfandelb.clm_blob",
+      "sha256": "ad6231dbe5532fe7753374b020b3bfff2d9195f1d5194c105e6f920f3fb79f66",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_zinfandelb.clmb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,zinfandelb.bin",
+      "sha256": "85b4339fb00f4cb501e678cd79f268cbcbae6736e0fa19d76d99e9da5ba08254",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_zinfandelb.trx"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,zinfandelb.txcap_blob",
+      "sha256": "ddf26d07c52847c54900cc38a37bedcad69b4504ea549ae587d1cb47fcb72efb",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_zinfandelb.txcb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/j96-fwstart.z2fw",
+      "sha256": "5368ff249017a1d445fd56bd15dd05792c6112f8138a0e82b5e94cfaa3ddf27e",
+      "steps": [
+        {
+          "step": "z2fw-from-z2-packet@1",
+          "input": "J97.mtprops",
+          "profile": "C1F14,4",
+          "calibration_address": 268472320,
+          "calibration_size": 1024
+        }
+      ]
+    }
+  ]
 }

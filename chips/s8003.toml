@@ -15,6 +15,3 @@ stages = ["iBSS", "iBEC"]
 page_size = "xnu-6153.141.1 osfmk/arm/proc_reg.h"
 platform = "J71t on hardware"
 stages = "remote_boot two-stage CPID list"
-
-# Local capability delta: pmu-rtc.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/pmu-rtc.md.
