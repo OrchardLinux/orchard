@@ -31,6 +31,7 @@ status = "experimental"
 
 # States: working, untested, missing, none (features.toml).
 [features]
+usb_host = "missing"
 warm_restart = "untested"
 display = "working"
 screen_off = "working" # apple_dsi_bl: bl_power off sends DBV 0, the panel goes dark; on restores the level.

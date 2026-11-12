@@ -1,0 +1,112 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 02:11:49 +0100
+Subject: [PATCH] usb: roles: apple-s8000: bound manual host selection
+
+Restore the validated 60-second manual-host timeout. Accessory-owned
+host sessions cancel the timer and keep their existing lifetime. Cancel
+work outside the role lock during teardown and shutdown.
+
+Assisted-by: LLM
+---
+ drivers/usb/roles/apple-s8000-usb-role.c | 28 ++++++++++++++++++++++--
+ 1 file changed, 26 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/roles/apple-s8000-usb-role.c b/drivers/usb/roles/apple-s8000-usb-role.c
+index a5331cf3f..6bfad077a 100644
+--- a/drivers/usb/roles/apple-s8000-usb-role.c
++++ b/drivers/usb/roles/apple-s8000-usb-role.c
+@@ -9,7 +9,7 @@
+  * while the PHY is powered for the host pair.
+  *
+  * Device mode is the default. Host mode is entered on request through the
+- * usb_role class and lasts until the device role is requested again. The
++ * usb_role class and reverts after 60 seconds unless claimed by an accessory. The
+  * Lightning accessory policy may claim a host entry for an accessory (the
+  * camera adapter, see <linux/usb/apple-s8000-role.h>): that entry also
+  * powers the accessory through the PMIC's accessory LDO (LDO5) and its
+@@ -33,6 +33,7 @@
+ #include <linux/usb/apple-s8000-role.h>
+ #include <linux/usb/gadget.h>
+ #include <linux/usb/role.h>
++#include <linux/workqueue.h>
+ 
+ #include "apple-s8000-tristar-route.h"
+ 
+@@ -94,6 +95,7 @@ struct apple_usb_role {
+ 
+ 	/* Serializes role changes, accessory power and the state below. */
+ 	struct mutex lock;
++	struct delayed_work revert_work;
+ 	enum usb_role role;
+ 	struct device *gadget;
+ 	struct platform_device *ehci;
+@@ -514,6 +516,18 @@ static void apple_usb_role_enter_device(struct apple_usb_role *ur)
+ 	dev_dbg(ur->dev, "device mode\n");
+ }
+ 
++/* Manual host entry must not strand the stable device link indefinitely. */
++static void apple_usb_role_revert(struct work_struct *work)
++{
++	struct apple_usb_role *ur = container_of(to_delayed_work(work),
++						 struct apple_usb_role, revert_work);
++
++	if (READ_ONCE(ur->dying) || READ_ONCE(ur->accessory))
++		return;
++	dev_warn(ur->dev, "manual host timeout: returning to device mode\n");
++	usb_role_switch_set_role(ur->sw, USB_ROLE_DEVICE);
++}
++
+ static int apple_usb_role_set(struct usb_role_switch *sw, enum usb_role role)
+ {
+ 	struct apple_usb_role *ur = usb_role_switch_get_drvdata(sw);
+@@ -530,8 +544,12 @@ static int apple_usb_role_set(struct usb_role_switch *sw, enum usb_role role)
+ 		ret = -EUCLEAN;
+ 	} else if (role == ur->role) {
+ 		/* The accessory takes over a requested host role. */
+-		if (role == USB_ROLE_HOST && ur->accessory_claim)
++		if (role == USB_ROLE_HOST && ur->accessory_claim) {
+ 			ur->accessory = true;
++			cancel_delayed_work(&ur->revert_work);
++		} else if (role == USB_ROLE_HOST && !ur->accessory) {
++			mod_delayed_work(system_wq, &ur->revert_work, 60 * HZ);
++		}
+ 	} else if (role == USB_ROLE_HOST) {
+ 		bool accessory = ur->accessory_claim;
+ 
+@@ -540,8 +558,11 @@ static int apple_usb_role_set(struct usb_role_switch *sw, enum usb_role role)
+ 			WRITE_ONCE(ur->role, USB_ROLE_HOST);
+ 			ur->accessory = accessory;
+ 			ur->accessory_power_prepared = false;
++			if (!accessory)
++				mod_delayed_work(system_wq, &ur->revert_work, 60 * HZ);
+ 		}
+ 	} else {
++		cancel_delayed_work(&ur->revert_work);
+ 		apple_usb_role_enter_device(ur);
+ 		WRITE_ONCE(ur->role, USB_ROLE_DEVICE);
+ 		ur->accessory = false;
+@@ -825,6 +846,7 @@ static void apple_usb_role_teardown(void *data)
+ 		WRITE_ONCE(ur->role, USB_ROLE_DEVICE);
+ 	}
+ 	mutex_unlock(&ur->lock);
++	cancel_delayed_work_sync(&ur->revert_work);
+ }
+ 
+ static int apple_usb_role_probe(struct platform_device *pdev)
+@@ -837,6 +859,7 @@ static int apple_usb_role_probe(struct platform_device *pdev)
+ 	ur = devm_kzalloc(dev, sizeof(*ur), GFP_KERNEL);
+ 	if (!ur)
+ 		return -ENOMEM;
++	INIT_DELAYED_WORK(&ur->revert_work, apple_usb_role_revert);
+ 	ur->dev = dev;
+ 	ur->role = USB_ROLE_DEVICE;
+ 	platform_set_drvdata(pdev, ur);
+@@ -911,6 +934,7 @@ static void apple_usb_role_shutdown(struct platform_device *pdev)
+ 		phy_set_mode(ur->phy, PHY_MODE_USB_DEVICE);
+ 	apple_usb_role_acc_power_off(ur);
+ 	mutex_unlock(&ur->lock);
++	cancel_delayed_work_sync(&ur->revert_work);
+ }
+ 
+ static int apple_usb_role_prepare(struct device *dev)

@@ -30,6 +30,7 @@ status = "experimental"
 
 # States: working, untested, missing, none (features.toml).
 [features]
+usb_host = "missing"
 warm_restart = "untested"
 display = "untested"
 screen_off = "untested"

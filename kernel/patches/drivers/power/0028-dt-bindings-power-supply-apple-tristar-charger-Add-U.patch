@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 16:48:16 +0100
+Subject: [PATCH] dt-bindings: power: supply: apple,tristar-charger: Add USB
+ role switch
+
+On the iPad 5 the Lightning port is either the USB device (DWC2) or, for
+the Lightning-to-USB camera adapter, a USB host (EHCI/OHCI), and a role
+switch moves it between the two. The adapter announces itself over the
+Lightning ID bus, which the charger's Tristar (CBTL1610) masters, so the
+charger is where the decision is made.
+
+The charger already sets the device controller's role through its port.
+Add an optional phandle to the role switch that gives the PHY to the
+host controllers; while the port is a host, the device controller stays
+off. A board without it (the iPad 6) keeps the port a USB device and
+identifies no accessory.
+
+Assisted-by: LLM
+---
+ .../bindings/power/supply/apple,tristar-charger.yaml  | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/power/supply/apple,tristar-charger.yaml b/Documentation/devicetree/bindings/power/supply/apple,tristar-charger.yaml
+index c839ad0ac..59bc52c42 100644
+--- a/Documentation/devicetree/bindings/power/supply/apple,tristar-charger.yaml
++++ b/Documentation/devicetree/bindings/power/supply/apple,tristar-charger.yaml
+@@ -60,6 +60,17 @@ properties:
+     $ref: /schemas/types.yaml#/definitions/phandle
+     description: The Tristar (CBTL1610) port controller on its I2C bus.
+ 
++  apple,usb-role-switch:
++    $ref: /schemas/types.yaml#/definitions/phandle
++    description: |
++      The role switch that gives the Lightning port's PHY to the USB host
++      controllers, such as the Apple S8000 USB role switch. When present, the
++      charger also identifies Lightning accessories over the Tristar ID bus
++      and makes the port a USB host while a camera adapter is attached, as
++      iOS does; the adapter then is the power source, and the device
++      controller linked through port stays off. Without it, the port stays a
++      USB device and no accessory is identified.
++
+   input-current-limit-microamp:
+     description: Board maximum input current.
+ 

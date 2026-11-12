@@ -15,3 +15,4 @@ stages = ["iBSS", "iBEC"]
 page_size = "xnu-6153.141.1 osfmk/arm/proc_reg.h"
 platform = "J71t on hardware"
 stages = "remote_boot two-stage CPID list"
+usb_host = "apple,s8000-usb-role-switch: AUSB PHY shared by DWC2 and EHCI/OHCI"

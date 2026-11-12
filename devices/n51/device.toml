@@ -31,6 +31,7 @@ status = "experimental"
 # this board with Orchard: "untested" means a driver binds in its device tree
 # (tools/catalog/drivers.json), plus the display's boot console.
 [features]
+usb_host = "missing"
 warm_restart = "untested"
 display = "untested"
 screen_off = "missing"

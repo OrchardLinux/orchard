@@ -206,6 +206,7 @@
       "charging",
       "light_sensor",
       "touch",
+      "usb_host",
       "usb_network",
       "usb_serial",
       "video_decode_hevc"
@@ -222,6 +223,7 @@
       "storage_read",
       "storage_write",
       "touch",
+      "usb_host",
       "usb_network",
       "usb_serial",
       "video_decode_hevc",
@@ -254,6 +256,7 @@
       "charging",
       "light_sensor",
       "touch",
+      "usb_host",
       "usb_network",
       "usb_serial",
       "video_decode_hevc"
@@ -270,6 +273,7 @@
       "storage_read",
       "storage_write",
       "touch",
+      "usb_host",
       "usb_network",
       "usb_serial",
       "video_decode_hevc",

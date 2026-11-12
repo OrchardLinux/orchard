@@ -377,6 +377,14 @@
             "missing",
             "none"
           ]
+        },
+        "usb_host": {
+          "enum": [
+            "working",
+            "untested",
+            "missing",
+            "none"
+          ]
         }
       },
       "required": [
@@ -406,7 +414,8 @@
         "audio_input",
         "camera",
         "video_decode_hevc",
-        "warm_restart"
+        "warm_restart",
+        "usb_host"
       ],
       "additionalProperties": false
     },

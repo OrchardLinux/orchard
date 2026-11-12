@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 14:46:21 +0100
+Subject: [PATCH] arm64: dts: apple: s800-0-3: Add the USB role switch and
+ EHCI/OHCI
+
+Add the A9 USB role switch to the USB complex, disabled, with the EHCI
+and OHCI it creates in the host role as its children: they share the
+AUSB PHY with usbdev, and the switch decides which side has it.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/s800-0-3.dtsi | 31 +++++++++++++++++++++++++
+ 1 file changed, 31 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/s800-0-3.dtsi b/arch/arm64/boot/dts/apple/s800-0-3.dtsi
+index ff1c5c66e..135c9f8e6 100644
+--- a/arch/arm64/boot/dts/apple/s800-0-3.dtsi
++++ b/arch/arm64/boot/dts/apple/s800-0-3.dtsi
+@@ -282,6 +282,37 @@ usbdev: usbdev@20c100000 {
+ 				resets = <&ps_usbotg>;
+ 				dr_mode = "peripheral";
+ 			};
++
++			/* Moves the PHY between usbdev and the EHCI/OHCI pair. */
++			usb_role: usb-role-switch@20e0d8000 {
++				compatible = "apple,s8000-usb-role-switch";
++				reg = <0x2 0x0e0d8000 0x0 0x1000>;
++				#address-cells = <2>;
++				#size-cells = <2>;
++				ranges;
++				/* The usb-complex dma-ranges apply to the host pair. */
++				dma-ranges;
++				nonposted-mmio;
++				phys = <&ausbphy0 PHY_TYPE_USB2>;
++				phy-names = "usb2-phy";
++				apple,usb-device = <&usbdev>;
++				status = "disabled";
++
++				/* Created by the switch in the host role only. */
++				usb@20c200000 {
++					compatible = "apple,s8000-ehci", "generic-ehci";
++					reg = <0x2 0x0c200000 0x0 0x10000>;
++					interrupts = <AIC_IRQ 215 IRQ_TYPE_LEVEL_HIGH>;
++					power-domains = <&ps_usb2host0>;
++				};
++
++				usb@20c300000 {
++					compatible = "apple,s8000-ohci", "generic-ohci";
++					reg = <0x2 0x0c300000 0x0 0x10000>;
++					interrupts = <AIC_IRQ 216 IRQ_TYPE_LEVEL_HIGH>;
++					power-domains = <&ps_usb2host0_ohci>;
++				};
++			};
+ #if 0
+ 			ehci0: usb-ehci@20c200000 {
+ 				compatible = "apple,s8000-ehci", "generic-ehci";
