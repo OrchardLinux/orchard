@@ -30,6 +30,12 @@ def serial_tags(serial):
             'pwned': pwned.group(1) if pwned else ('checkra1n' if 'YOLO:checkra1n' in serial else None)}
 
 
+def stable_id(serial):
+    """Hashed per-device identity, absent on legacy gadgets."""
+    match = re.search(r'\bID:([0-9a-fA-F]{12})\b', serial)
+    return match.group(1).lower() if match else None
+
+
 def devices(root=Path('/sys/bus/usb/devices')):
     found = []
     for node in root.iterdir():
@@ -45,6 +51,7 @@ def devices(root=Path('/sys/bus/usb/devices')):
         ecid = re.search(r'\bECID:([0-9a-fA-F]+)\b', serial)
         chip = re.search(r'\bCPID:([0-9a-fA-F]+)\b', serial)
         board = re.search(r'\bBDID:([0-9a-fA-F]+)\b', serial)
+        usb_id = stable_id(serial)
         profile = re.search(r'\bBOARD:([a-z0-9]+)\b', serial)
         ports = {str(Path('/dev') / p.name) for p in node.glob('**/tty/ttyACM*')}
         if len(ports) > 1:
@@ -53,6 +60,7 @@ def devices(root=Path('/sys/bus/usb/devices')):
         found.append(dict(location=node.name, mode=MODES.get(pid, 'other'),
                           ecid=int(ecid.group(1), 16) if ecid else None,
                           boot_id=str(uuid.UUID(boot.group(1))) if boot else None,
+                          usb_id=usb_id,
                           chip=int(chip.group(1), 16) if chip else None,
                           board=int(board.group(1), 16) if board else None,
                           profile=profile.group(1) if profile else None, product=product,
