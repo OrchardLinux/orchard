@@ -70,18 +70,6 @@
             "board"
           ],
           "additionalProperties": false
-        },
-        "linux": {
-          "type": "object",
-          "properties": {
-            "recovery": {
-              "const": true
-            }
-          },
-          "required": [
-            "recovery"
-          ],
-          "additionalProperties": false
         }
       },
       "required": [
@@ -145,6 +133,15 @@
       "required": [
         "recipe"
       ],
+      "additionalProperties": false
+    },
+    "storage": {
+      "type": "object",
+      "properties": {
+        "reclaims": {
+          "type": "boolean"
+        }
+      },
       "additionalProperties": false
     },
     "support": {

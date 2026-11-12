@@ -30,11 +30,14 @@ class CIEfficiency(unittest.TestCase):
         self.assertNotIn('build-pongo.py', job(workflow, 'assets'))
 
     def test_every_platform_kernel_is_built_once_and_bundled(self):
-        from orchard.image.platform import platforms
+        from orchard.ram import boards_by_platform
+        platforms = sorted(boards_by_platform(ROOT))  # every architecture, apple-armv7 too
+        self.assertIn('apple-armv7', platforms)
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
         matrix = re.search(r'platform: \[([^\]]*)\]', job(workflow, 'kernel')).group(1)
-        self.assertEqual([name.strip() for name in matrix.split(',')], platforms())
-        self.assertIn('for platform in ' + ' '.join(platforms()) + '; do', job(workflow, 'assets'))
+        self.assertEqual([name.strip() for name in matrix.split(',')], platforms)
+        self.assertIn('for platform in ' + ' '.join(platforms) + '; do', job(workflow, 'assets'))
+        self.assertIn('component-keys.json ' + ' '.join(platforms) + '\n', job(workflow, 'assets'))
 
     def test_apple_build_has_exact_input_cache_and_one_compiler_invocation(self):
         body = job((ROOT / '.github/workflows/build.yml').read_text(), 'pongo')
@@ -43,6 +46,16 @@ class CIEfficiency(unittest.TestCase):
         self.assertIn('steps.toolchain.outputs.fingerprint', body)
         self.assertIn("hashFiles('boot/quiet/build-pongo.py', 'boot/quiet/pongo.patch')", body)
         self.assertIn('xcrun --sdk iphoneos --show-sdk-build-version', body)
+
+    def test_pongo_needs_a_mac_only_when_its_recipe_changed(self):
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        check = job(workflow, 'pongo-check')
+        self.assertIn('runs-on: ubuntu-24.04', check)
+        self.assertIn('boot/quiet/build-pongo.py boot/quiet/pongo.patch', check)
+        body = job(workflow, 'pongo')
+        self.assertIn('runs-on: ${{ needs.pongo-check.outputs.runner }}', body)
+        self.assertIn('sha256sum -c', body)
+        self.assertIn("&& needs.pongo-check.outputs.tag == ''", body)
 
     def test_shared_toolchain_package_lists_can_be_queried_without_installing(self):
         recipes = [('kernel/install-toolchain', 'kmod'),

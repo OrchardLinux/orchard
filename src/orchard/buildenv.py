@@ -2,7 +2,7 @@
 
 Recipes address inputs through ORCHARD_* path variables. Native mode provides
 real paths; local mode provides the corresponding container mount paths. Native
-mode is not a sandbox and is only for trusted, disposable Linux ARM64 workers.
+mode is not a sandbox and is only for trusted, disposable Linux ARM workers.
 """
 import argparse
 import os
@@ -17,8 +17,8 @@ def native():
     if value not in ('0', '1'):
         raise ValueError('ORCHARD_BUILD_NATIVE must be 0 or 1')
     if value == '1':
-        if platform.system() != 'Linux' or platform.machine() not in ('aarch64', 'arm64'):
-            raise ValueError('Native builds require Linux ARM64')
+        if platform.system() != 'Linux' or platform.machine().lower() not in ('aarch64', 'arm64', 'armv7l', 'armv7', 'armhf'):
+            raise ValueError('Native builds require Linux ARM64 or ARMv7')
         if not os.environ.get('ORCHARD_BUILD_ENV_ID'):
             raise ValueError('Native builds require ORCHARD_BUILD_ENV_ID')
         return True
@@ -26,20 +26,31 @@ def native():
 
 
 # Podman's names for host machines it can build for.
-HOST_ARCHES = {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'}
+HOST_ARCHES = {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64',
+               'armv7l': 'arm', 'armv7': 'arm', 'armhf': 'arm'}
+
+
+def architecture_arguments(arch):
+    # OCI's ARM architecture needs a variant; plain arm can resolve to ARMv5.
+    return ['--platform', 'linux/arm/v7'] if arch == 'arm' else (['--arch', arch] if arch else [])
+
+
+def check_native_architecture(arch):
+    if arch is not None and HOST_ARCHES.get(platform.machine().lower()) != arch:
+        raise ValueError(f'Native target {arch} differs from host architecture '
+                         f'{HOST_ARCHES.get(platform.machine().lower(), platform.machine())}')
 
 
 def build(image, containerfile, context, arch=None):
     if native():
-        if arch not in (None, 'arm64'):
-            raise ValueError('Native builds require ARM64 inputs')
+        check_native_architecture(arch)
         print('Using provisioned native environment: ' + identity(image), flush=True)
     else:
         # Always name the architecture: recipes share base images such as
         # debian:bookworm, and an arm64 recipe re-points that local tag, which
         # a host-architecture build would otherwise silently inherit.
         arch = arch or HOST_ARCHES.get(platform.machine().lower())
-        argv = ['podman', 'build'] + (['--arch', arch] if arch else [])
+        argv = ['podman', 'build', *architecture_arguments(arch)]
         subprocess.run([*argv, '-f', str(containerfile), '-t', image, str(context)], check=True)
 
 
@@ -60,10 +71,10 @@ def translate(value, mounts):
     return value
 
 
-def run(image, command, mounts=(), *, env=None, cwd=None, root=False, network=False, arch=None):
+def run(image, command, mounts=(), *, env=None, cwd=None, root=False, network=False, arch=None, memory=None):
+    """MEMORY: keep ORCHARD_WORK in memory of this size where a container runs it (e.g. '12g')."""
     if native():
-        if arch not in (None, 'arm64'):
-            raise ValueError('Native builds require ARM64 inputs')
+        check_native_architecture(arch)
         with tempfile.TemporaryDirectory(prefix='orchard-recipe-') as temporary:
             work, tmp = Path(temporary) / 'work', Path(temporary) / 'tmp'
             work.mkdir()
@@ -76,10 +87,11 @@ def run(image, command, mounts=(), *, env=None, cwd=None, root=False, network=Fa
                            env={**os.environ, **paths, **extra}, check=True)
     else:
         argv = ['podman', 'run', '--rm', '--userns', 'keep-id:uid=0,gid=0' if root else 'keep-id']
-        if arch:
-            argv += ['--arch', arch]
+        argv += architecture_arguments(arch)
         if not network:
             argv += ['--network', 'none']
+        if memory:
+            argv += ['--tmpfs', f'/work:size={memory},exec']
         paths = {'ORCHARD_WORK': '/work', 'ORCHARD_TMP': '/tmp'}
         for source, target, readonly in mounts:
             # Shared labels allow concurrent recipe containers to read the same

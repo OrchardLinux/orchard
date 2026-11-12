@@ -1,0 +1,158 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tom Ballard <tom.ballard08@googlemail.com>
+Date: Thu, 5 Nov 2026 19:34:30 +0000
+Subject: [PATCH] arm64: dts: apple: t7000-mini4: Add Wi-Fi and the battery
+ gauge
+
+Wire the iPad mini 4's BCM4350 on PCIe port 1 and its battery gauge on
+UART5, as on the iPad Air 2, with the mini 4's own lines from its ADT:
+
+- Wi-Fi: PERST# GPIO 77, DEVICE_WAKE GPIO 63 (active high), REG_ON on
+  D2207 GPIO 3 as a fixed regulator and the link at Gen1 (pci-bridge1
+  maximum-link-speed). m1n1 fills the MAC address through the wifi0
+  alias. Port 0 has nothing attached.
+- Battery: the ADT names the gauge a bq27540 on HDQ (gas-gauge,bq27540)
+  on UART5 with its line on GPIO 57.
+
+The J96 and J97 ADTs (iPadOS 15.8.8, 19H422) are the same for all of
+this apart from phandles, so it goes into the shared t7000-mini4.dtsi.
+Each board names its Wi-Fi module for brcmfmac's firmware selection:
+zinfandela on the J96, zinfandelb on the J97.
+
+On a J96 the link trained at Gen1, brcmfmac loaded the zinfandela
+firmware for this unit's BCM4350 C5 and the gauge reported the
+battery status, on a local tree with these values. The J97 has not
+been tried.
+
+[Orchard: from tcballard/orchard#115 (399106a), which wired this in
+ t7000-j96.dts only; moved into t7000-mini4.dtsi for the J97.]
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t7000-j96.dts    |  5 ++
+ arch/arm64/boot/dts/apple/t7000-j97.dts    |  5 ++
+ arch/arm64/boot/dts/apple/t7000-mini4.dtsi | 72 ++++++++++++++++++++++
+ 3 files changed, 82 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t7000-j96.dts b/arch/arm64/boot/dts/apple/t7000-j96.dts
+index 8a32a50cc2df..7aa3ccbac0e4 100644
+--- a/arch/arm64/boot/dts/apple/t7000-j96.dts
++++ b/arch/arm64/boot/dts/apple/t7000-j96.dts
+@@ -12,3 +12,8 @@ / {
+ 	compatible = "apple,j96", "apple,t7000", "apple,arm-platform";
+ 	model = "Apple iPad mini 4 (Wi-Fi)";
+ };
++
++/* ADT uart2/wlan module-instance, for brcmfmac's firmware selection */
++&wifi0 {
++	brcm,board-type = "apple,zinfandela";
++};
+diff --git a/arch/arm64/boot/dts/apple/t7000-j97.dts b/arch/arm64/boot/dts/apple/t7000-j97.dts
+index ac7d501f88d2..61154f0e15f8 100644
+--- a/arch/arm64/boot/dts/apple/t7000-j97.dts
++++ b/arch/arm64/boot/dts/apple/t7000-j97.dts
+@@ -12,3 +12,8 @@ / {
+ 	compatible = "apple,j97", "apple,t7000", "apple,arm-platform";
+ 	model = "Apple iPad mini 4 (Cellular)";
+ };
++
++/* ADT uart2/wlan module-instance, for brcmfmac's firmware selection */
++&wifi0 {
++	brcm,board-type = "apple,zinfandelb";
++};
+diff --git a/arch/arm64/boot/dts/apple/t7000-mini4.dtsi b/arch/arm64/boot/dts/apple/t7000-mini4.dtsi
+index 5dd9181db766..256acc8e2bfa 100644
+--- a/arch/arm64/boot/dts/apple/t7000-mini4.dtsi
++++ b/arch/arm64/boot/dts/apple/t7000-mini4.dtsi
+@@ -13,6 +13,20 @@
+ / {
+ 	chassis-type = "tablet";
+ 
++	aliases {
++		serial5 = &serial5;
++		wifi0 = &wifi0;
++	};
++
++	/* Wi-Fi REG_ON is D2207 GPIO 3. */
++	wlan_vdd: regulator-wlan-vdd {
++		compatible = "regulator-fixed";
++		regulator-name = "wlan-vdd";
++		gpio = <&pmu_gpio 3 GPIO_ACTIVE_HIGH>;
++		enable-active-high;
++		off-on-delay-us = <100000>;
++	};
++
+ 	gpio-keys {
+ 		compatible = "gpio-keys";
+ 
+@@ -44,6 +58,56 @@ button-voldown {
+ 	};
+ };
+ 
++/* The bq27540 gauge on UART5's HDQ line (ADT uart5/gas-gauge). */
++&serial5 {
++	pinctrl-0 = <&uart5_pins>;
++	pinctrl-names = "default";
++	status = "okay";
++
++	onewire {
++		compatible = "ti,hdq-uart";
++
++		fuel-gauge {
++			compatible = "ti,bq27540-hdq";
++		};
++	};
++};
++
++&pcie_dart1 {
++	status = "okay";
++};
++
++/*
++ * The BCM4350 on root port 1 (ADT apcie/pci-bridge1): PERST# GPIO 77,
++ * DEVICE_WAKE GPIO 63, Gen1. Port 0 has nothing attached on either model;
++ * the J97's baseband is not on PCIe. CLKREQ# (GPIO 41) is not described,
++ * as on the T7001. Each board names its Wi-Fi module.
++ */
++&pcie {
++	/* ADT dart-apcie1 vm-offset and vm-size; SID 0 */
++	iommu-map = <0x100 &pcie_dart1 0 0x0 0x80000000 0x0 0x3ffff000 1>;
++	iommu-map-mask = <0xff00>;
++	status = "okay";
++
++	pci@1,0 {
++		device_type = "pci";
++		reg = <0x800 0x0 0x0 0x0 0x0>;
++		bus-range = <1 1>;
++		reset-gpios = <&pinctrl 77 GPIO_ACTIVE_LOW>;
++		max-link-speed = <1>;
++		#address-cells = <3>;
++		#size-cells = <2>;
++		ranges;
++
++		wifi0: wifi@0,0 {
++			compatible = "pci14e4,43a3";
++			reg = <0x10000 0x0 0x0 0x0 0x0>;
++			device-wake-gpios = <&pinctrl 63 GPIO_ACTIVE_HIGH>;
++			vdd-supply = <&wlan_vdd>;
++		};
++	};
++};
++
+ &framebuffer0 {
+ 	power-domains = <&ps_disp0 &ps_dp>;
+ };
+@@ -86,5 +150,13 @@ rtc_offset: rtc-offset@4 {
+ 				};
+ 			};
+ 		};
++
++		pmu_gpio: gpio {
++			compatible = "apple,d2207-pmic-gpio";
++			gpio-controller;
++			#gpio-cells = <2>;
++			/* Only REG_ON (3) is used; the others stay as iBoot left them. */
++			gpio-reserved-ranges = <0 3>, <4 17>;
++		};
+ 	};
+ };

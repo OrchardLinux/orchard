@@ -1,0 +1,20 @@
+{
+  "schema": 2,
+  "device": "iPhone6,1",
+  "ipsw": {
+    "version": "12.5.8",
+    "build": "16H88",
+    "url": "https://updates.cdn-apple.com/2026WinterFCS/fullrestores/047-28551/FB7714DB-6E9C-4750-8012-082B09341569/iPhone_4.0_64bit_12.5.8_16H88_Restore.ipsw",
+    "bytes": 3017069797,
+    "sha256": "65bb7235c1c8c76c951a37c76746c3e7015fdbe9f05850e1a4705103c1f00238"
+  },
+  "inputs": {
+    "DeviceTree.im4p": {
+      "ipsw": {
+        "zip": "Firmware/all_flash/DeviceTree.n51ap.im4p"
+      },
+      "sha256": "6273d71c630e7ed0975567a09a4276496ae8d1acac2a60e561f6ffd116bf0eed"
+    }
+  },
+  "outputs": []
+}

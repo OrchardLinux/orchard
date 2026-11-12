@@ -52,6 +52,23 @@ To start an installed system again, connect the device in DFU mode and run
 from the device's boot partition and starts the one you choose (`--entry ID` picks
 one without asking). Any computer with Orchard can launch any installed system.
 
+## Connect to a running system
+
+`orchard shell`, `exec`, `push` and `pull` discover a running device over USB by
+default. To use Wi-Fi instead, pass an SSH address, for example
+`orchard shell --host 192.168.0.19 --user tablet` or
+`orchard exec --host 192.168.0.19 --user tablet -- uname -a`. The installed
+system must allow this computer's Orchard SSH key. For a RAM payload, use
+`--host 192.168.0.19 --ram` instead; it connects as root with the RAM key.
+The payload must have SSH and Wi-Fi configured.
+
+Network connections accept and remember a new SSH host key on first use; unlike
+USB RAM sessions, this does not verify the device's identity over serial. Verify
+the key out of band. Changed keys are rejected. RAM payloads generate a new
+key each boot; to trust a new boot, remove the old address with
+`ssh-keygen -R 192.168.0.19 -f ~/.cache/orchard/private/ram-ssh/network_known_hosts`
+(adjust the cache path if configured differently).
+
 ## Develop
 
 The `orchard` command `./setup` puts on your PATH (`tools/launcher`) runs the

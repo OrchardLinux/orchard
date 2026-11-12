@@ -1,0 +1,46 @@
+#!/bin/sh
+# Give the network interface with index $1, which reports Orchard's Wi-Fi
+# placeholder address, this unit's own (70-orchard-wifi-address.rules).
+#
+# The address is locally administered, stable and unique per unit: from a
+# SHA-256 of the device tree's serial-number, which the boot stage copies
+# from Apple's device tree (m1n1 on 64-bit boards). Without a serial number
+# the interface gets a random locally administered address for this boot,
+# and the journal says why. Neither the address nor the serial is logged.
+set -eu
+PLACEHOLDER=02:00:00:00:00:00
+tree=${ORCHARD_DEVICE_TREE:-/proc/device-tree}
+net=${ORCHARD_SYSFS_NET:-/sys/class/net}
+index=$1
+
+log() { logger -t orchard-wifi-address -- "$*" 2>/dev/null || :; }
+
+interface=
+for path in "$net"/*; do
+	if [ "$(cat "$path/ifindex" 2>/dev/null)" = "$index" ]; then
+		interface=${path##*/}
+	fi
+done
+if [ -z "$interface" ] || [ "$(cat "$net/$interface/address")" != "$PLACEHOLDER" ]; then
+	exit 0
+fi
+
+serial=
+if [ -r "$tree/serial-number" ]; then
+	serial=$(tr -d '\000' < "$tree/serial-number")
+fi
+if [ -n "$serial" ]; then
+	bytes=$(printf 'orchard-wifi-address:%s' "$serial" | sha256sum | cut -c1-12)
+	source='the serial number'
+else
+	bytes=$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')
+	source='a random address for this boot: the device tree has no serial-number'
+fi
+# First octet: unicast, locally administered.
+first=$(printf '%02x' $(( (0x$(echo "$bytes" | cut -c1-2) & 0xfc) | 0x02 )))
+address=$first$(echo "$bytes" | cut -c3-12 | sed 's/../:&/g')
+if [ "$address" = "$PLACEHOLDER" ]; then
+	address=02:00:00:00:00:01
+fi
+ip link set dev "$interface" address "$address"
+log "$interface: placeholder address replaced from $source"

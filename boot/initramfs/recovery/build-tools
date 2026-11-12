@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
-# Acquire pinned public inputs and build static AArch64 recovery tools.
+# Acquire pinned public inputs and build static recovery tools for the selected ARM architecture.
 set -euo pipefail
 # Recipes need only Python 3.11+ and its standard library; Orchard passes its own.
 python=${ORCHARD_PYTHON:-python3}
+arch=arm64
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --arch) [[ $# -ge 2 ]] || { echo '--arch needs arm or arm64' >&2; exit 1; }; arch=$2; shift 2 ;;
+    *) echo "Unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
+case "$arch" in arm|arm64) ;; *) echo '--arch needs arm or arm64' >&2; exit 1 ;; esac
 here=$(cd "$(dirname "$0")" && pwd)
-work="${OMA_RECOVERY_TOOLS_WORK:-$here/.work/tools}"
+work="${OMA_RECOVERY_TOOLS_WORK:-$here/.work/tools-$arch}"
 mkdir -p "$work"
-"$python" - "$here/upstream.lock" "$work" <<'PY'
+"$python" - "$here/upstream.lock" "$work" "$arch" <<'PY'
 import hashlib
 import json
 import pathlib
@@ -20,8 +28,11 @@ for component, filename in (('busybox', 'busybox.deb'),
                             ('dropbear', 'dropbear.tar.bz2'),
                             ('libnl', 'libnl.tar.gz'),
                             ('wpa_supplicant', 'wpa_supplicant.tar.gz'),
-                            ('iw', 'iw.tar.xz')):
-    item = lock[component]
+                            ('iw', 'iw.tar.xz'),
+                            ('zstd', 'zstd.tar.gz'),
+                            ('e2fsprogs', 'e2fsprogs.tar.gz')):
+    key = 'busybox_arm' if component == 'busybox' and sys.argv[3] == 'arm' else component
+    item = lock[key]
     target = work / filename
     if target.exists():
         source = target.open('rb')
@@ -47,9 +58,15 @@ for component, filename in (('busybox', 'busybox.deb'),
         pathlib.Path(temporary.name).rename(target)
     print(f'Verified {component}: {target}')
 PY
-"$python" "$here/../../../src/orchard/buildenv.py" build --arch arm64 --file "$here/Containerfile" \
-  --image localhost/orchard-hardware-recovery-tools:bookworm --context "$here"
-"$python" "$here/../../../src/orchard/buildenv.py" run --arch arm64 \
-  --bind "$work:/work:rw" --bind "$here:/recipe:ro" \
-  --image localhost/orchard-hardware-recovery-tools:bookworm -- bash /recipe/build-tools-in-container
+if [[ "$arch" == arm64 ]]; then
+  image=localhost/orchard-hardware-recovery-tools:bookworm containerfile=Containerfile build_arch=(--arch arm64)
+else
+  # Cross-compiled on this machine's own architecture: Apple and most ARM64 hosts cannot run ARMv7.
+  image=localhost/orchard-hardware-recovery-tools-arm:bookworm containerfile=Containerfile.arm build_arch=()
+fi
+"$python" "$here/../../../src/orchard/buildenv.py" build ${build_arch[@]+"${build_arch[@]}"} \
+  --file "$here/$containerfile" --image "$image" --context "$here"
+"$python" "$here/../../../src/orchard/buildenv.py" run ${build_arch[@]+"${build_arch[@]}"} \
+  --bind "$work:/work:rw" --bind "$here:/recipe:ro" --env "ORCHARD_RECOVERY_ARCH=$arch" \
+  --image "$image" -- bash /recipe/build-tools-in-container
 echo "Recovery tools: $work/bin"

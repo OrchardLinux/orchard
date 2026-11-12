@@ -1,0 +1,51 @@
+# Install boot, sourced by orchard's initrd after its modules load. BusyBox and the tools beside this
+# file are all there is here; the host drives the rest over SSH (src/orchard/install_direct.py).
+# Serial and SSH come up first, whatever happens later. Setting root hands back to the normal boot.
+board=$(tr '\000' '\n' < /proc/device-tree/compatible | head -1)
+mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run
+mkdir -p /dev/pts /run/orchard /sys/kernel/config /root/.ssh
+mark() { echo "$(cut -d' ' -f1 /proc/uptime) $1" >> /run/orchard/timeline; }
+mark 'install hook starts, modules loaded'
+mount -t devpts -o mode=0620,ptmxmode=0666 devpts /dev/pts
+mount -t configfs -o nodev,noexec,nosuid configfs /sys/kernel/config
+g=/sys/kernel/config/usb_gadget/orchard-system
+mkdir "$g"
+echo 0x05ac > "$g/idVendor"
+echo 0x4146 > "$g/idProduct"
+mkdir -p "$g/strings/0x409" "$g/configs/c.1/strings/0x409"
+echo 'Orchard Linux' > "$g/strings/0x409/manufacturer"
+echo 'Orchard Install' > "$g/strings/0x409/product"
+echo "ECID:$(cat /install/ecid) BOOT:$(cat /proc/sys/kernel/random/boot_id) BOARD:${board#apple,}" > "$g/strings/0x409/serialnumber"
+echo 'USB network and serial' > "$g/configs/c.1/strings/0x409/configuration"
+echo 500 > "$g/configs/c.1/MaxPower"
+mkdir "$g/functions/ncm.usb0" "$g/functions/acm.usb0"
+ln -s "$g/functions/ncm.usb0" "$g/configs/c.1/ncm.usb0"
+ln -s "$g/functions/acm.usb0" "$g/configs/c.1/acm.usb0"
+basename "$(ls -d /sys/class/udc/* | head -1)" > "$g/UDC"
+mark 'gadget bound'
+ip address add 172.16.42.1/30 dev usb0
+ip link set usb0 up
+# A fixed link-local address: the host needn't wait for DHCP, which takes it about 5 s.
+echo 0 > /proc/sys/net/ipv6/conf/usb0/dad_transmits
+ip -6 address add fe80::1/64 dev usb0
+mark 'network up'
+udhcpd -f /install/udhcpd.conf &
+(while :; do getty -n -l /bin/sh ttyGS0 115200 vt100; sleep 1; done) &
+keeper=$!
+cp /install/authorized_keys /root/.ssh/authorized_keys
+chmod 700 /root/.ssh; chmod 600 /root/.ssh/authorized_keys
+# -W: Dropbear's default receive window would halve the stream.
+/install/dropbear -F -E -s -g -j -k -W 4194304 -P /run/dropbear.pid -r /install/host_key -p 22 > /run/dropbear.log 2>&1 &
+mark 'dropbear started'
+while [ ! -e /run/orchard/done ]; do sleep 0.1; done
+root=$(cat /run/orchard/done)
+# The system from here: its own USB identity, and nothing of this boot left running.
+name=$(sed -n 's/^NAME=//p' /run/orchard/os-release 2>/dev/null | head -1 | tr -d "\"'")
+kill "$keeper" 2>/dev/null
+killall dropbear udhcpd getty 2>/dev/null
+udc=$(cat "$g/UDC")
+echo '' > "$g/UDC"; echo 0x4145 > "$g/idProduct"; echo "${name:-Linux}" > "$g/strings/0x409/product"
+echo "BOOT:$(cat /proc/sys/kernel/random/boot_id) BOARD:${board#apple,}" > "$g/strings/0x409/serialnumber"
+echo "$udc" > "$g/UDC"
+umount /dev/pts 2>/dev/null
+umount /run

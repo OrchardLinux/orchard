@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 HARDWARE = Path(__file__).resolve().parents[1]
 DEVICE = HARDWARE / 'devices/j71b/device.toml'
-RECIPE_SHA256 = 'e77ecec5cc65da69823ae1114c0103386771745784940b62eb82d983028e6fde'
+RECIPE_SHA256 = 'e14dea67c90d0ad78dcb66a664e181d02a8535e0795f8ec928ae340685cb090c'
 
 
 class J71bData(unittest.TestCase):
@@ -46,7 +46,8 @@ class J71bData(unittest.TestCase):
         self.assertEqual(self.device['device']['apple_products'], [self.recipe['device']])
         self.assertEqual(self.device['device']['dt_compatible'], ['apple,j71b'])
         self.assertEqual(self.device['match']['dfu'], {'chip': 0x8010, 'board': 0x18})
-        self.assertIs(self.device['match']['linux']['recovery'], True)
+        from orchard import hardware
+        self.assertTrue(hardware.has_recovery(self.device))
 
     def test_ipsw_is_pinned(self):
         ipsw = self.recipe['ipsw']
@@ -68,7 +69,7 @@ class J71bData(unittest.TestCase):
 
     def test_every_output_is_pinned_and_uses_known_inputs(self):
         outputs = self.recipe['outputs']
-        self.assertEqual(len(outputs), 12)
+        self.assertEqual(len(outputs), 14)
         self.assertEqual(len({o['destination'] for o in outputs}), len(outputs))
         for output in outputs:
             self.assertRegex(output['sha256'], r'^[0-9a-f]{64}$')

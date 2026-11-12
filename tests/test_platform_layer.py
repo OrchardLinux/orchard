@@ -48,12 +48,15 @@ class PlatformLayer(unittest.TestCase):
             names = {member.name for member in members}
             description = json.load(archive.extractfile('usr/lib/orchard/platform.json'))
         self.assertTrue(all(member.isfile() and member.name.startswith('usr/') for member in members))
+        self.assertEqual(next(m for m in members if m.name == 'usr/lib/orchard/wifi-address').mode, 0o755)
         self.assertEqual(receipt['members'], len(members))
         base = f'usr/lib/modules/{RELEASE}/'
         self.assertLessEqual({base + 'vmlinuz', base + 'initrd', base + 'modules.dep', base + 'kernel/drivers/x.ko',
                               base + 'dtb/t8010-j71b.dtb', 'usr/lib/firmware/regulatory.db',
                               'usr/lib/firmware/regulatory.db.p7s',
                               'usr/lib/NetworkManager/conf.d/30-orchard-usb.conf',
+                              'usr/lib/udev/rules.d/70-orchard-wifi-address.rules',
+                              'usr/lib/orchard/wifi-address',
                               'usr/lib/orchard/platform.SHA256SUMS'}, names)
         self.assertEqual(len([name for name in names if '/dtb/' in name]), len(set(self.boards.values())))
         self.assertEqual(description, {'schema': 1, 'platform': 'apple-16k', 'kernel_release': RELEASE,
@@ -79,7 +82,10 @@ class PlatformLayer(unittest.TestCase):
         base = f'lib/modules/{RELEASE}/'
         self.assertEqual(names['bin/busybox'], b'static busybox')
         self.assertEqual(names['init'], (ROOT / 'boot/initramfs/root/init').read_bytes())
+        self.assertEqual(names['etc/orchard/usb-identity'], (ROOT / 'src/orchard/usb-identity').read_bytes())
         self.assertEqual(names['etc/orchard/modules'], b'nvme\n')
+        self.assertEqual(names['etc/orchard/dtbs/j71t.dtb'], b's8003-j71t')
+        self.assertIn(b'apple,j71t j71t.dtb\n', names['etc/orchard/pristine-map'])
         self.assertEqual(sorted(name for name in names if name.endswith('.ko')),
                          [base + 'kernel/drivers/nvme/host/nvme-core.ko', base + 'kernel/drivers/nvme/host/nvme.ko'])
         self.assertEqual(names[base + 'modules.dep'],
@@ -147,44 +153,11 @@ class PlatformLayer(unittest.TestCase):
             for verb in re.findall(r'File "(/[^"]+)"', card.read_text()):
                 self.assertTrue((ucm / verb.lstrip('/')).is_file(), f'{card.name}: {verb}')
 
-    def test_suspend_is_allowed_only_on_boards_whose_device_data_says_it_works(self):
+    def test_the_layer_does_not_decide_whether_a_board_may_suspend(self):
         receipt = platform.build('apple-16k', self.work, bundle=self.bundle, busybox=self.busybox)
         with tarfile.open(self.work / receipt['file']) as archive:
-            boards = archive.extractfile('usr/lib/orchard/suspend-boards').read().decode().split()
-            modes = {member.name: member.mode for member in archive.getmembers()}
-        self.assertIn('apple,j71b', boards)       # suspend = "working"
-        self.assertNotIn('apple,j171', boards)    # suspend = "untested"
-        self.assertEqual(modes['usr/lib/orchard/orchard-sleep'], 0o755)
-        self.assertEqual(modes['usr/lib/systemd/system-generators/orchard-sleep-generator'], 0o755)
-        self.assertEqual(modes['usr/lib/systemd/system/orchard-sleep.service'], 0o644)
-
-    def test_orchard_sleep_writes_the_boards_decision(self):
-        import subprocess
-        script = ROOT / 'system/defaults/usr/lib/orchard/orchard-sleep'
-        listed = self.work / 'suspend-boards'
-        listed.write_text('apple,j71b\n')
-
-        def decide(compatible, boards=listed):
-            tree = self.work / 'compatible'
-            tree.write_bytes(b'\0'.join(compatible) + b'\0')
-            out = self.work / 'sleep.conf.d'
-            env = {**os.environ, 'ORCHARD_SUSPEND_BOARDS': str(boards),
-                   'ORCHARD_COMPATIBLE': str(tree), 'ORCHARD_SLEEP_CONF_DIR': str(out)}
-            subprocess.run(['sh', str(script)], env=env, check=True)
-            self.assertEqual(sorted(path.name for path in out.iterdir()), ['50-orchard-board.conf'])
-            return (out / '50-orchard-board.conf').read_text()
-
-        self.assertIn('AllowSuspend=yes\n', decide([b'apple,j71b', b'apple,t8010', b'apple,arm-platform']))
-        self.assertIn('AllowSuspend=no\n', decide([b'apple,j171', b'apple,t8010', b'apple,arm-platform']))
-        self.assertIn('AllowSuspend=no\n', decide([b'apple,j71b'], boards=self.work / 'missing'))
-
-    def test_the_generator_pulls_orchard_sleep_into_every_boot(self):
-        import subprocess
-        out = self.work / 'generator'
-        subprocess.run(['sh', str(ROOT / 'system/defaults/usr/lib/systemd/system-generators/orchard-sleep-generator'),
-                        str(out), str(out), str(out)], check=True)
-        link = out / 'sysinit.target.wants/orchard-sleep.service'
-        self.assertEqual(os.readlink(link), '/usr/lib/systemd/system/orchard-sleep.service')
+            names = archive.getnames()
+        self.assertFalse([name for name in names if 'orchard-sleep' in name or 'suspend-boards' in name])
 
     def test_unknown_platform_lists_the_known_ones(self):
         with self.assertRaisesRegex(ValueError, 'Unknown platform apple-64k; known: apple-16k, apple-4k'):

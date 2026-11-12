@@ -10,5 +10,6 @@ platform = "apple-armv7"
 stages = ["iBSS", "iBEC"]
 
 [evidence]
-platform = "platform description only; not run"
-stages = "iBSS far smaller than iBEC in the IPSW; not run"
+platform = "J1 on a Cascadia-based build (Linux 6.12 from RAM)"
+stages = "J1 boot chain from 9.3.5 / 13G36: kloader starts iBSS, then iBEC (devices/j1/README.md)"
+usb_phy = "J1 retains the S5L8940X PHY/controller compatibles; the shared gate-helper change awaits a regression boot (docs/bring-up/p105-usb-handoff.md)."

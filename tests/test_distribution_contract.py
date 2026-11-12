@@ -14,8 +14,12 @@ from orchard import inputs  # noqa: E402
 
 # Every command of the contract and the options a distribution may rely on.
 COMMANDS = {
-    'orchard.inputs': ['--output', '--platform', '--kernel-dir', '--m1n1', '--pongo', '--tools', '--kernel-tree'],
+    'orchard.inputs': ['--output', '--platform', '--kernel-dir', '--m1n1', '--pongo', '--tools', '--kernel-tree',
+                       '--loader'],
     'orchard.image.platform': ['--output', '--kernel-dir', '--busybox', '--receipt'],
+    'orchard.image.platforms_index': ['--release', '--inputs', '--kernels', '--tools', '--commit', '--platform',
+                                      '--architecture', '--loader'],
+    'orchard.image.root_image': ['--output'],
     'orchard.image.recovery': ['--dtb', '--loader', '--logo', '--kernel', '--modules-dir', '--busybox', '--dropbear',
                                '--dropbearkey', '--wpa-supplicant', '--wpa-cli', '--iw', '--base', '--base-receipt',
                                '--root-receipt', '--output', '--verbose'],
@@ -42,7 +46,7 @@ class DistributionContract(unittest.TestCase):
             self.assertIn(option, release)
 
     def test_the_by_path_scripts_need_no_orchard_package(self):
-        for script in ('src/orchard/image/assemble.py', 'src/orchard/buildenv.py'):
+        for script in ('src/orchard/image/assemble.py', 'src/orchard/image/cascadia.py', 'src/orchard/buildenv.py'):
             with self.subTest(script=script):
                 result = subprocess.run([sys.executable, '-I', str(ROOT / script), '--help'], capture_output=True,
                                         text=True, cwd=tempfile.gettempdir())
@@ -64,7 +68,8 @@ class DistributionContract(unittest.TestCase):
         self.assertIn('j71b', document['platforms']['apple-16k']['boards'])
         self.assertEqual(document['shared']['m1n1'], str((root / 'm1n1.bin').resolve()))
         self.assertEqual(set(document['shared']['tools']),
-                         {'busybox', 'dropbear', 'dropbearkey', 'wpa_supplicant', 'wpa_cli', 'iw'})
+                         {'busybox', 'dropbear', 'dropbearkey', 'wpa_supplicant', 'wpa_cli', 'iw',
+                          'orchard-write', 'resize2fs', 'tune2fs'})
         self.assertIn('commit', document['orchard'])
         json.dumps(document)
 

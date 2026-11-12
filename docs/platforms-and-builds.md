@@ -320,15 +320,20 @@ pin, so an unexpected version never boots a device silently; `ORCHARD_PALERA1N` 
 of orchard main when main moved since the last nightly, or on dispatch with
 `nightly: true`. Every nightly is its own immutable pre-release,
 `nightly-YYYYMMDD-COMMIT`, with the same assets as a release (the tooling as
-`orchard-source.tar.gz`, per arm64 platform a component bundle, m1n1, Pongo,
+`orchard-source.tar.gz`, per platform a component bundle, m1n1, Pongo,
 tools, `component-keys.json`, `SHA256SUMS`, attestation) plus `nightly.json`. The
 release `nightly` only points at the newest (`latest.json`); nightlies older
 than 14 days go, the newest always stays. GitHub's latest release, which
 `orchard update` and the installer read, never points at a pre-release.
 Distribution CI takes one with `HARDWARE_TAG=nightly` (resolved once through
-the pointer) or `HARDWARE_TAG=nightly-YYYYMMDD-COMMIT`. apple-armv7 is not in
-it: it shares no patch layer with the arm64 platforms, so a nightly would
-only rebuild the same kernel.
+the pointer) or `HARDWARE_TAG=nightly-YYYYMMDD-COMMIT`. apple-armv7 is in it
+too, with its kernel, modules and device trees alone, because the boot tools
+and loaders in the other bundles are arm64. CI building it every nightly is
+also what catches a broken Cascadia re-import.
+
+CI builds Pongo only when its recipe (`boot/quiet/build-pongo.py`, `pongo.patch`)
+differs from the last nightly's, because that takes a Mac. Otherwise it reuses
+that nightly's Pongo and checks it against `SHA256SUMS`.
 
 **Planned: orchard as versioned tooling** (agreed November 2026, after
 Flutter's SDK and channels). The hidden mainline clone (`orchard-main`) is
@@ -392,8 +397,8 @@ branch, OrchardLinux/m1n1 main, the Pongo pin.
   from its tree.
 - A nightly runs when any of those repositories moved since the last one.
 - A platform is rebuilt only when its source key moved; otherwise the last
-  nightly's bundle is reused. apple-armv7 then joins and rebuilds only when
-  its branch or the shared files move.
+  nightly's bundle is reused, so apple-armv7 rebuilds only when its branch or
+  the shared files move.
 - **Nightlies follow the branch heads; releases pin them.** A kernel change
   needs no second commit in orchard to reach the nightly.
 - **Changes land in dependency order:** m1n1, then the kernel, then orchard,

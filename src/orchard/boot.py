@@ -32,6 +32,8 @@ def boot_ram(output, *, yes=False, logs=None):
     from .hardware import device as hardware_device
     from .apple import entries, usb
     from .apple.boot import start_pongo
+    from .progress import Progress
+    from .service import Background, fetch_chain
     from .state import operation_lock
     from .transports import pongo
 
@@ -69,12 +71,23 @@ def boot_ram(output, *, yes=False, logs=None):
                 print('WARNING: The intended device for this build is unknown.')
                 print('Compatibility with your connected device has not been established.')
             print('It may fail to boot or stop responding until you restart it.')
+        if receipt.get('loader_format') == 'cascadia':
+            # 32-bit boards: orchard-launcher takes the device from DFU to the payload (launcher.py).
+            if not yes:
+                confirm_boot(mismatch=mismatch)
+            verify_ram(output)
+            start_cascadia(output, receipt, device)
+            print('The launcher reports the payload started; Linux readiness has NOT been verified.')
+            return
+        # Before the question, so that it can finish while it is being read.
+        entry = entries.select(description if not mismatch else None)
+        fetching = Background(fetch_chain, entries.inputs(entry) if device['mode'] == 'dfu' else [], Progress())
         if not yes:
             confirm_boot(mismatch=mismatch)
+        fetching.result()
         verify_ram(output)
         usb.selected(device['location'], ecid, chip=chip, board=board, mode=device['mode'])
         if device['mode'] == 'dfu':
-            entry = entries.select(description if not mismatch else None)
             with (Path(logs or output) / f'{entry}.log').open('wb') as log:
                 start_pongo(device, output / 'pongo.bin', log, print,
                             chip=chip, board=board, product='', seconds=60, entry=entry)
@@ -83,6 +96,21 @@ def boot_ram(output, *, yes=False, logs=None):
     print('Upload/boot request sent; Linux readiness has NOT been verified.')
     print('Connect to its USB serial port: screen /dev/cu.usbmodemYOUR_PORT 115200 (macOS)')
     print('or screen /dev/ttyACM0 115200 (Linux; verify the actual port).')
+
+
+def start_cascadia(output, receipt, device):
+    """The Cascadia payload in OUTPUT through orchard-launcher, with the device's serial number in its tree."""
+    import tempfile
+    from . import launcher
+    from .hardware import data_root
+    from .image import cascadia
+    from .progress import Progress
+    image = Path(output) / 'linux.bin'
+    with tempfile.TemporaryDirectory(prefix='payload-') as directory:
+        if device.get('serial_number'):
+            image = Path(directory) / 'linux.bin'
+            image.write_bytes(cascadia.with_serial((Path(output) / 'linux.bin').read_bytes(), device['serial_number']))
+        launcher.load(image, chain=receipt.get('boot_method', 'recovery-autogo'), catalog=data_root(), progress=Progress())
 
 
 def run_directory(directory, *, yes=False, build=True, device=None, platform=None, **build_options):

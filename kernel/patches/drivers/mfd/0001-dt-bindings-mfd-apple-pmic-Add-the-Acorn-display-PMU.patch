@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Eduardo Martins <eduardo@martins.ws>
+Date: Thu, 5 Nov 2026 13:16:40 -0600
+Subject: [PATCH] dt-bindings: mfd: apple,pmic: Add the Acorn display PMU
+
+Acorn is the iPhone X display PMU (ADT "display-pmu,acorn", I2C 0x2a on
+i2c3), the successor of the iPhone 6/7 Chestnut with the same 8-bit
+register file. Among its supplies is the touchscreen's.
+
+Assisted-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ Documentation/devicetree/bindings/mfd/apple,pmic.yaml | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/devicetree/bindings/mfd/apple,pmic.yaml b/Documentation/devicetree/bindings/mfd/apple,pmic.yaml
+index 47c31b32e..294a323aa 100644
+--- a/Documentation/devicetree/bindings/mfd/apple,pmic.yaml
++++ b/Documentation/devicetree/bindings/mfd/apple,pmic.yaml
+@@ -46,7 +46,9 @@ properties:
+               - apple,agnes-pmic
+               - apple,calpe-pmic
+           - const: apple,spmi-pmic
+-      - const: apple,chestnut-pmic
++      - enum:
++          - apple,acorn-pmic
++          - apple,chestnut-pmic
+ 
+   reg:
+     maxItems: 1

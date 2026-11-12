@@ -1,5 +1,6 @@
 """Read-only UDIF (.dmg) reader: koly trailer, blkx tables, per-chunk decompression."""
 import bisect
+import bz2
 import plistlib
 import struct
 import zlib
@@ -9,6 +10,40 @@ from . import lzfse
 SECTOR = 512
 
 
+def adc(data, size):
+    """Apple Data Compression; after Project Cascadia (rzxvx)."""
+    out, pos = bytearray(), 0
+    while pos < len(data):
+        tag = data[pos]
+        pos += 1
+        if tag & 0x80:
+            length = (tag & 0x7f) + 1
+            if pos + length > len(data):
+                raise ValueError('Truncated ADC literal')
+            out += data[pos:pos + length]
+            pos += length
+        else:
+            width = 2 if tag & 0x40 else 1
+            if pos + width > len(data):
+                raise ValueError('Truncated ADC match')
+            if width == 2:
+                length = (tag & 0x3f) + 4
+                distance = int.from_bytes(data[pos:pos + 2], 'big') + 1
+            else:
+                length = ((tag & 0x3c) >> 2) + 3
+                distance = ((tag & 3) << 8 | data[pos]) + 1
+            pos += width
+            if distance > len(out):
+                raise ValueError('Invalid ADC distance')
+            for _ in range(length):
+                out.append(out[-distance])
+        if len(out) > size:
+            raise ValueError('ADC output exceeds chunk size')
+    if len(out) != size:
+        raise ValueError('ADC output size differs')
+    return bytes(out)
+
+
 class Udif:
     def __init__(self, source):
         """source has read(offset, length) and size."""
@@ -16,6 +51,7 @@ class Udif:
         koly = source.read(source.size - 512, 512)
         if koly[:4] != b'koly':
             raise ValueError('No koly trailer')
+        data_fork = struct.unpack_from('>Q', koly, 24)[0]
         xml_offset, xml_length = struct.unpack_from('>QQ', koly, 0xD8)
         plist = plistlib.loads(source.read(xml_offset, xml_length))
         self.chunks = []  # (first sector, sector count, kind, compressed offset, compressed length)
@@ -27,12 +63,12 @@ class Udif:
             first, count = struct.unpack_from('>QQ', mish, 8)
             data_offset = struct.unpack_from('>Q', mish, 24)[0]
             n = struct.unpack_from('>I', mish, 200)[0]
-            self.partitions.append((entry.get('Name', ''), first, count))
+            self.partitions.append((entry.get('Name') or entry.get('CFName', ''), first, count))
             for i in range(n):
                 kind, _, sector, sectors, coff, clen = struct.unpack_from('>IIQQQQ', mish, 204 + 40 * i)
                 if kind in (0x7FFFFFFE, 0xFFFFFFFF) or sectors == 0:
                     continue
-                self.chunks.append((first + sector, sectors, kind, data_offset + coff, clen))
+                self.chunks.append((first + sector, sectors, kind, data_fork + data_offset + coff, clen))
         self.chunks.sort()
         self.starts = [c[0] for c in self.chunks]
         self.size = max(c[0] + c[1] for c in self.chunks) * SECTOR
@@ -52,6 +88,10 @@ class Udif:
             raw = self.source.read(coff, clen)
             if kind == 0x80000005:
                 data = zlib.decompress(raw)
+            elif kind == 0x80000006:
+                data = bz2.decompress(raw)
+            elif kind == 0x80000004:
+                data = adc(raw, size)
             elif kind == 0x80000007:
                 data = lzfse.decompress(raw)
             else:
@@ -65,10 +105,14 @@ class Udif:
         return data
 
     def read(self, offset, length):
+        if not 0 <= offset <= offset + length <= self.size:
+            raise ValueError('Read outside UDIF image')
         out = bytearray()
         while length:
             sector = offset // SECTOR
             i = bisect.bisect_right(self.starts, sector) - 1
+            if i < 0:
+                raise ValueError('Read before first UDIF chunk')
             first, sectors = self.chunks[i][:2]
             if not first <= sector < first + sectors:
                 raise ValueError('Offset not covered by any chunk')

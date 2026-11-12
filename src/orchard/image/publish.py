@@ -38,6 +38,21 @@ def local_asset(directory, receipt):
     return path
 
 
+def orchard_assets(directory):
+    """{sha256: URL} of the files this release took finished from a published orchard build.
+
+    platforms.toml names its `base_url` when it came from one; a local build's has none, so a
+    developer's own kernel is hosted with the release like anything else.
+    """
+    path = directory / 'platforms.toml'
+    if not path.is_file():
+        return {}
+    from .platforms_index import receipts
+    document = tomllib.loads(path.read_text())
+    base = document.get('base_url')
+    return {entry['sha256']: base + '/' + entry['file'] for entry in receipts(document)} if base else {}
+
+
 def publish(directory, tag, output, *, distro):
     if not re.fullmatch(r'[a-z0-9][a-z0-9._-]*', distro):
         raise ValueError('Invalid distro repository name')
@@ -57,8 +72,12 @@ def publish(directory, tag, output, *, distro):
         raise ValueError('Manifest does not match its index')
     metadata_names = {'index.toml', source.name}
     receipts = [manifest['root'], manifest['pongo']]
-    receipts += [files[role] for files in manifest['platforms'].values() for role in ('boot', 'layer')]
+    receipts += [manifest[name] for name in ('m1n1', 'install_tools', 'logo') if name in manifest]
+    if 'map' in manifest['root']:
+        receipts.append(manifest['root']['map'])
+    receipts += [files[role] for files in manifest['platforms'].values() for role in ('boot', 'layer') if role in files]
     base = 'https://github.com/OrchardLinux/' + distro + '/releases/download/' + tag
+    offered = orchard_assets(directory)
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.publish-', dir=output.parent) as temporary:
         stage = Path(temporary) / 'release'
@@ -66,6 +85,11 @@ def publish(directory, tag, output, *, distro):
         hosted = copy.deepcopy(index)
         for receipt in receipts:
             artifact = local_asset(directory, receipt)
+            if receipt['sha256'] in offered:
+                # orchard's own file: the release links it and doesn't carry a copy.
+                receipt['url'] = offered[receipt['sha256']]
+                del receipt['file']
+                continue
             if artifact.name in metadata_names:
                 raise ValueError('Artifact name collides with release metadata')
             target = stage / artifact.name

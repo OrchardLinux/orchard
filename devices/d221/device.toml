@@ -15,10 +15,6 @@ dt_compatible = ["apple,d221"]
 chip = 0x8015
 board = 0x0e
 
-# Orchard Recovery runs here (USB "Orchard Recovery", serial BOARD:<profile>).
-[match.linux]
-recovery = true
-
 [boot]
 methods = ["checkm8-pongo"]
 # Not published yet: no d221 launcher release exists. Mirrors the j71b URL pattern.
@@ -36,10 +32,10 @@ status = "experimental"
 # States: working, untested, missing, none (features.toml).
 [features]
 display = "working"
-screen_off = "untested"
-backlight = "missing"
-touch = "missing"
-buttons = "missing"
+screen_off = "working" # apple_dsi_bl: bl_power off sends DBV 0, the panel goes dark; on restores the level.
+backlight = "working" # apple_dsi_bl: DCS 0x51 to the OLED panel (docs/bring-up/d221-backlight.md).
+touch = "working" # On the C1R1FC0,2 variant; C1R1FC0,1 and ,2-W3 are installed but untested. apple_hidspi_ts: firmware from the recipe, calibration from the ADT (docs/bring-up/d221-touch.md).
+buttons = "working" # macsmc-input: volume, side button, ring/silent switch.
 accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "missing"
@@ -50,11 +46,11 @@ wifi = "untested"
 bluetooth_input = "missing"
 bluetooth_audio = "missing"
 cellular = "missing"
-battery = "untested"
+battery = "working" # macsmc-power; charge_now reads negative.
 charging = "missing"
 charging_control = "missing"
-suspend = "missing"
-resume = "missing"
+suspend = "untested"
+resume = "untested"
 usb_serial = "working"
 usb_network = "untested"
 audio_output = "missing"

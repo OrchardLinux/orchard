@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 00:00:00 +0100
+Subject: [PATCH] arm64: dts: apple: retain charger wake after shared PMU data
+
+Keep the charger marked as a wake source after the shared PMU data has
+been applied. Preserve the separate RTC event ownership.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/s800x-ipad5.dtsi |    1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi b/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
+--- a/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
++++ b/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
+@@ -185,6 +185,7 @@
+ 		};
+ 
+ 		tristar_charger: charger@180 {
++			wakeup-source;
+ 			compatible = "apple,j71t-tristar-charger", "apple,tristar-charger";
+ 			reg = <0x180 0x10>, <0xa00 0x04>, <0x4000 0x03>;
+ 			reg-names = "status", "control", "adc";

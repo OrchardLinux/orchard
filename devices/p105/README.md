@@ -6,23 +6,55 @@ port on Linux 6.12). Device data from Shayne Legault's P105 bring-up
 
 ## Firmware
 
-`firmware.json` pins the iOS 8.4.1 (12H321) IPSW and the measured inputs, and
-produces nothing yet (`outputs` is empty): orchard cannot read this IPSW's
-encrypted root filesystem, and the steps below are not in its recipe
-vocabulary yet. What the board needs, as Shayne's recipe recorded it:
+`firmware.json` pins the iOS 8.4.1 (12H321) IPSW and makes four outputs.
+All of them read encrypted images, with keys the launcher caches from the
+device ([key file](../../docs/firmware-recipes.md#legacy-image-keys)). All
+four were made and checked on 2026-11-07
+([P105 firmware](../../docs/bring-up/p105-firmware.md)).
 
 | Destination | Made by | SHA-256 |
 |---|---|---|
 | `lib/firmware/P105.mtprops` | copy of `P105.mtprops` | `516b8db5f6144ad64698867b8f6e6209a49010fcff1cb103539fe5ea4ffb1390` |
-| `lib/firmware/brcm/brcmfmac4334.bin` | `cascadia-trx-add-nvram` (scripts/trx-add-nvram.py) from `borg.trx`, `borg-t-st.txt` | `c02d3308434b7e2251bb2e235362e31a6033a4bc909c030888e8f9085afec5f4` |
-| `lib/firmware/brcm/BCM4334B0.hcd` | `cascadia-bluetool-borg-tdk` (scripts/extract-bt-firmware.py) from `usr/sbin/BlueTool` | `b6791a67141f1a16447e916237180a049b89dfaab9c38451b33864dbb6a50dda` |
-| `lib/firmware/apple/sgx543.fw` | `cascadia-sgx543-firmware` (scripts/extract-sgx-firmware.py) from the IPSW member `kernelcache.release.p105` | `5f929f351459b169ed91a68dce086dbc682b639c4a31846ef5b12837562e9a77` |
+| `lib/firmware/brcm/brcmfmac4334.bin` | `trx-add-nvram@1` (after Cascadia's scripts/trx-add-nvram.py) from `borg.trx`, `borg-t-st.txt`, placeholder address `02:00:00:00:00:00` | `f1fb3a66341adbd4ce7f6e2065c9767575db6457deb79f5a85c398278a3d1d93` |
+| `lib/firmware/brcm/BCM4334B0.hcd` | `bluetool-hcd@1` from `usr/sbin/BlueTool` | `b6791a67141f1a16447e916237180a049b89dfaab9c38451b33864dbb6a50dda` |
+| `lib/firmware/apple/sgx543.fw` | `sgx543-from-kernelcache@1` (Cascadia's container format) from the IPSW member `kernelcache.release.p105` | `5f929f351459b169ed91a68dce086dbc682b639c4a31846ef5b12837562e9a77` |
 
-These were prepared with Cascadia's own workflow (https://github.com/rzxvx/Project-Cascadia.git at
+Cascadia's hashes were prepared with its own workflow (https://github.com/rzxvx/Project-Cascadia.git at
 `c20b85ebb951`, `scripts/build-firmware.sh`; the root filesystem is
 `058-24036-023.dmg` of the IPSW, read by `scripts/rootfs-extract.py`), from
 the IPSW members `058-24036-023.dmg`, `kernelcache.release.p105`, `Firmware/dfu/iBSS.p105.RELEASE.dfu`, `Firmware/dfu/iBEC.p105.RELEASE.dfu`.
 
 The touch calibration is per unit and private: `lib/firmware/mtcal.bin`, the
-unit's syscfg `MtCl`, captured from its jailbroken iOS. It is never part of a
-public recipe or release.
+unit's syscfg `MtCl`, captured from its jailbroken iOS and supplied through
+`orchard mixin`. It is never part of a public recipe or release.
+
+The Wi-Fi firmware carries a placeholder address; the platform layer gives
+each iPad its own at boot ([Wi-Fi address](../../docs/bring-up/p105-firmware.md#wi-fi-address)).
+
+## Open work
+
+- Storage: the NAND driver (OrchardLinux/orchard#86, #87), the iOS disk
+  translation layer and its append writes (#89, #91) are in
+  `kernel/patches/armv7/mtd`; the disk is `applesftlN`, on the 64 GB model
+  only. Reclamation (#93) is unfinished: until it lands, writes stop once
+  the blank flash blocks are used up.
+- Installing: `orchard install` writes a root into an existing Linux LwVM
+  partition (the shared initrd finds it by its LwVM GUID); creating that
+  partition belongs to the iOS resize step, which does not exist yet. There
+  is no boot partition: starting the installed system later needs the
+  Cascadia bundle the install leaves on the host, placed for iOS's boot
+  chain. Starting any payload needs `orchard-launcher` (recovery-autogo).
+- USB: the cold-handoff topic (#90) awaits a device boot of its exact
+  revision, and the iPad 3 (J1) a regression boot of the shared PHY code;
+  see [USB handoff](../../docs/bring-up/p105-usb-handoff.md).
+
+## Unmerged code
+
+- #85's per-patch platform scopes (007a95b, also carried by #86/#87):
+  reverted; 32-bit patches live in `kernel/patches/armv7`.
+- #87's `MTD_APPLE_H2FMI_WRITE` build option (fa59001): removed, programming
+  is part of the driver.
+- #89's read budget and lifetime module parameters (ffa74e8, source
+  e7d118292) and its module build (a607325): dropped; the reader is built in.
+- #91's `MTD_APPLE_SFTL_WRITE` option and `write_enable` parameter (e049bb4):
+  removed, writing is part of the driver.

@@ -3,10 +3,10 @@ From: rzxvx <rrzxznewid@gmail.com>
 Date: Fri, 16 Oct 2026 18:07:30 +0300
 Subject: [PATCH] ASoC: Add the Apple S5L audio and the CS35L19 codec
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at c20b85e:
-  patches/files/sound/soc/apple/s5l-audio.c
-  patches/files/sound/soc/codecs/cs35l19.c
-  patches/tree/0001-cascadia.patch
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+  devices/a5/patches/files/sound/soc/apple/s5l-audio.c
+  devices/a5/patches/files/sound/soc/codecs/cs35l19.c
+  devices/a5/patches/tree/0001-cascadia.patch
 
 Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (1 commit).
 

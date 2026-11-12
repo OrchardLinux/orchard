@@ -68,28 +68,60 @@ def recipe_for(profile, hardware=None):
     return recipes.check(json.loads(firmware_path(profile, hardware).read_text()))
 
 
+def cached(profile, hardware=None):
+    """Whether every firmware output of the device's recipe is here; downloads nothing."""
+    recipe = recipe_for(profile, hardware)
+    outputs = cache_root() / 'firmware' / profile / 'outputs'
+    expected = {o['sha256']: o['sha256'] for o in recipes.pinned(recipe)}
+    return not missing_inputs({sha: outputs / sha for sha in expected}, expected)
+
+
 def ensure(profile, clock, progress, *, allow_download=True, hardware=None):
     """Every firmware output of the device's recipe, verified and cached by hash.
 
     Only missing outputs are produced, from only the IPSW inputs they need,
     read from Apple's server by byte range (apple/remote_ipsw.py).
     Returns the directory holding the outputs, named by their sha256.
+    Outputs whose hash is still pending are not made or installed (measure).
     """
     recipe = recipe_for(profile, hardware)
     root = cache_root() / 'firmware' / profile
     outputs = root / 'outputs'
     outputs.mkdir(parents=True, exist_ok=True, mode=0o700)
     root.chmod(0o700)
-    expected = {o['sha256']: o['sha256'] for o in recipe['outputs']}
+    for output in recipes.pending(recipe):
+        progress.phase(f"Not installing {output['destination']}: its hash is pending verification")
+    installed = recipes.pinned(recipe)
+    expected = {o['sha256']: o['sha256'] for o in installed}
     absent = set(missing_inputs({sha: outputs / sha for sha in expected}, expected))
-    missing = [o for o in recipe['outputs'] if o['sha256'] in absent]
+    missing = [o for o in installed if o['sha256'] in absent]
     if not missing:
         progress.phase('Verified cached firmware')
         return outputs
     if not allow_download:
         raise ValueError('Verified private firmware cache is missing. Launch does not download firmware by default; '
                          'explicitly use --allow-firmware-download to acquire it.')
+    for destination, data in _produce(profile, recipe, missing, clock, progress).items():
+        checksum = next(o['sha256'] for o in missing if o['destination'] == destination)
+        store_input(outputs / checksum, data, checksum)
+    return outputs
+
+
+def measure(profile, clock, progress, *, hardware=None):
+    """{destination: sha256} of the recipe's pending outputs, made from its pinned
+    inputs and kept nowhere: what the recipe's verifier compares and pins."""
+    recipe = recipe_for(profile, hardware)
+    wanted = recipes.pending(recipe)
+    if not wanted:
+        return {}
+    return {destination: hashlib.sha256(data).hexdigest()
+            for destination, data in _produce(profile, recipe, wanted, clock, progress).items()}
+
+
+def _produce(profile, recipe, outputs, clock, progress):
+    """{destination: bytes} of OUTPUTS, from only the IPSW inputs they need."""
     from .apple.remote_ipsw import Ipsw
+    from .apple.firmware_keys import KeyStore
     source = recipe['ipsw']
     task = progress.task('Apple firmware')
     task.phase('Downloading only the needed parts')
@@ -97,8 +129,9 @@ def ensure(profile, clock, progress, *, allow_download=True, hardware=None):
     # Byte ranges of one IPSW: the total is known only at the end, so count files.
     files, done = len(recipe['inputs']), [0]
     with clock.exclude('download'):
-        ipsw = Ipsw(source['url'], source['bytes'], on_bytes=lambda sent: task.transfer(
-            sent, None, prefix=f'{min(done[0], files)} of {files} files  '))
+        ipsw = Ipsw(source['url'], source['bytes'], keys=KeyStore(source['sha256']),
+                    on_bytes=lambda sent: task.transfer(
+                        sent, None, prefix=f'{min(done[0], files)} of {files} files  '))
 
         def read_input(name):
             done[0] += 1
@@ -109,11 +142,9 @@ def ensure(profile, clock, progress, *, allow_download=True, hardware=None):
                 return ipsw.kernelcache(profile + 'ap')
             return ipsw.system_file(location['rootfs'])
 
-        for destination, data in recipes.run(recipe, read_input, missing).items():
-            checksum = next(o['sha256'] for o in missing if o['destination'] == destination)
-            store_input(outputs / checksum, data, checksum)
+        result = recipes.run(recipe, read_input, outputs)
     task.phase('Verified')
-    return outputs
+    return result
 
 
 def mixin(profile, firmware_dir, outdir):
@@ -124,7 +155,7 @@ def mixin(profile, firmware_dir, outdir):
     outdir.mkdir(parents=True, mode=0o700)
     prepared = outdir / 'prepared'
     files = {}
-    for output in recipe['outputs']:
+    for output in recipes.pinned(recipe):
         source = Path(firmware_dir) / output['sha256']
         if source.is_symlink() or not source.is_file() or digest(source) != output['sha256']:
             raise ValueError('Cached firmware output is missing or differs: ' + output['destination'])

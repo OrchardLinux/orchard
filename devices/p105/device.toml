@@ -22,7 +22,15 @@ platform = "apple-armv7"  # kernel/series/apple-armv7, kernel/configs/apple-armv
 dtb = "s5l8942x-p105"       # arch/arm/boot/dts/apple/<dtb>.dtb
 
 [firmware]
+# Encrypted IPSW: keys from the launcher's cache (docs/bring-up/p105-firmware.md).
 recipe = "firmware.json"
+
+# The iOS disk's translation layer writes append-only: until reclamation lands
+# (OrchardLinux/orchard#93), freed space is never reused and writes fail once
+# the blank flash runs out. Drop this table when it lands; the installer
+# warns from it and allows the install either way.
+[storage]
+reclaims = false
 
 [support]
 status = "experimental"
@@ -38,8 +46,10 @@ accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "missing"
 touch_id = "missing"
-storage_read = "missing"
-storage_write = "missing"
+# The H2FMI driver reads the NAND and programs verified pages; this revision is
+# untested on hardware (docs/bring-up/p105-nand-reads.md, p105-nand-program.md).
+storage_read = "untested"
+storage_write = "untested"
 wifi = "untested"
 bluetooth_input = "untested"
 bluetooth_audio = "untested"
@@ -49,6 +59,8 @@ charging = "untested"
 charging_control = "untested"
 suspend = "missing"
 resume = "missing"
+# The cold-handoff USB topic awaits an exact-revision boot.
+# See docs/bring-up/p105-usb-handoff.md for observations and software checks.
 usb_serial = "untested"
 usb_network = "untested"
 audio_output = "untested"

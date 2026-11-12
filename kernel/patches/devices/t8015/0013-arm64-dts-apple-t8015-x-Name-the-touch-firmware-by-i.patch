@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Fri, 6 Nov 2026 20:35:41 +0800
+Subject: [PATCH] arm64: dts: apple: t8015-x: Name the touch firmware by its
+ variant
+
+apple_hidspi_ts appends the unit's variant to firmware-name, so it now
+holds the start of the file name.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8015-x.dtsi | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8015-x.dtsi b/arch/arm64/boot/dts/apple/t8015-x.dtsi
+index 55efb1f74e3f..84d09c4d3155 100644
+--- a/arch/arm64/boot/dts/apple/t8015-x.dtsi
++++ b/arch/arm64/boot/dts/apple/t8015-x.dtsi
+@@ -72,7 +72,7 @@ touchscreen: touchscreen@0 {
+ 		reset-gpios = <&pinctrl_ap 33 GPIO_ACTIVE_LOW>;
+ 		ana-supply = <&touch_ana>;
+ 		clocks = <&touchclk>;
+-		firmware-name = "apple/d221-touch.bin";
++		firmware-name = "apple/d221-touch";
+ 		touchscreen-size-x = <1125>;
+ 		touchscreen-size-y = <2436>;
+ 	};

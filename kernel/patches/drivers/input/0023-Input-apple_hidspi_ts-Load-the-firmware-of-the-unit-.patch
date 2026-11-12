@@ -1,0 +1,123 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Fri, 6 Nov 2026 20:35:40 +0800
+Subject: [PATCH] Input: apple_hidspi_ts: Load the firmware of the unit's
+ variant
+
+Apple's iPhone X touch firmware comes in variants, and each unit's ADT
+names the one it needs. The driver loaded one fixed file on any unit, so
+a unit that needs another variant got firmware not made for it, with no
+sign in the log.
+
+Build the file name from firmware-name and the unit's
+apple,hid-merge-personality, as brcmfmac does with its module properties.
+If the file or the property is missing, the touchscreen stays off and the
+log says what's missing. Adding a variant now takes a firmware file and
+no kernel change.
+
+Assisted-by: LLM
+---
+ .../touchscreen/apple,d221-touchscreen.yaml   | 14 ++++++++---
+ drivers/input/touchscreen/apple_hidspi_ts.c   | 23 ++++++++++++++++---
+ 2 files changed, 31 insertions(+), 6 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/input/touchscreen/apple,d221-touchscreen.yaml b/Documentation/devicetree/bindings/input/touchscreen/apple,d221-touchscreen.yaml
+index 3403191e0f7c..9b642c7efe9d 100644
+--- a/Documentation/devicetree/bindings/input/touchscreen/apple,d221-touchscreen.yaml
++++ b/Documentation/devicetree/bindings/input/touchscreen/apple,d221-touchscreen.yaml
+@@ -42,8 +42,14 @@ properties:
+   firmware-name:
+     maxItems: 1
+     description:
+-      The controller firmware load, converted from Apple's multitouch
+-      firmware.
++      Start of the controller firmware's file name; the driver appends
++      -<apple,hid-merge-personality>.bin. The firmware is converted from
++      Apple's multitouch firmware.
++
++  apple,hid-merge-personality:
++    $ref: /schemas/types.yaml#/definitions/string
++    description:
++      The ADT's hid-merge-personality, the firmware variant this unit needs.
+ 
+   apple,z2-cal-blob:
+     $ref: /schemas/types.yaml#/definitions/uint8-array
+@@ -62,6 +68,7 @@ required:
+   - ana-supply
+   - clocks
+   - firmware-name
++  - apple,hid-merge-personality
+ 
+ unevaluatedProperties: false
+ 
+@@ -82,7 +89,8 @@ examples:
+             reset-gpios = <&pinctrl_ap 33 GPIO_ACTIVE_LOW>;
+             ana-supply = <&touch_ana>;
+             clocks = <&touchclk>;
+-            firmware-name = "apple/d221-touch.bin";
++            firmware-name = "apple/d221-touch";
++            apple,hid-merge-personality = "C1R1FC0,2";
+             touchscreen-size-x = <1125>;
+             touchscreen-size-y = <2436>;
+         };
+diff --git a/drivers/input/touchscreen/apple_hidspi_ts.c b/drivers/input/touchscreen/apple_hidspi_ts.c
+index c7a64ddb221c..99e9273ac17e 100644
+--- a/drivers/input/touchscreen/apple_hidspi_ts.c
++++ b/drivers/input/touchscreen/apple_hidspi_ts.c
+@@ -10,6 +10,11 @@
+  * remain, length, data, CRC-16). Touches arrive on interface 0 as report 0x44
+  * with apple_z2 finger records.
+  *
++ * Apple's firmware comes in variants ("personalities"), and each unit's ADT
++ * names the one it needs. m1n1 passes that on as apple,hid-merge-personality;
++ * the file is <firmware-name>-<personality>.bin. If it isn't there, the
++ * touchscreen stays off and the log names the variant.
++ *
+  * Firmware file ("D221OPS1" + ops, little endian):
+  *   'T' u32 len, label       'S' u16 ack (0: none), u32 len, HBPP packet
+  *   'P' u32 addr, mask, value, timeout_ms        'R' u32 addr
+@@ -418,7 +423,9 @@ static int ahts_boot(struct apple_hidspi_ts *ts)
+ 
+ 	ret = request_firmware(&fw, ts->fw_name, dev);
+ 	if (ret)
+-		return dev_err_probe(dev, ret, "no firmware %s\n", ts->fw_name);
++		return dev_err_probe(dev, ret,
++				     "no firmware for this unit's touch variant (%s): touchscreen left off\n",
++				     ts->fw_name);
+ 	ts->pkt_size = SZ_256K;
+ 	ts->pkt = kmalloc(ts->pkt_size, GFP_KERNEL);
+ 	if (!ts->pkt) {
+@@ -628,6 +635,7 @@ static int ahts_probe(struct spi_device *spi)
+ 	struct device *dev = &spi->dev;
+ 	struct apple_hidspi_ts *ts;
+ 	struct input_dev *input;
++	const char *fw_prefix, *personality;
+ 	int ret;
+ 
+ 	ts = devm_kzalloc(dev, sizeof(*ts), GFP_KERNEL);
+@@ -658,9 +666,18 @@ static int ahts_probe(struct spi_device *spi)
+ 	ts->reset = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
+ 	if (IS_ERR(ts->reset))
+ 		return dev_err_probe(dev, PTR_ERR(ts->reset), "no reset GPIO\n");
+-	ret = device_property_read_string(dev, "firmware-name", &ts->fw_name);
++	ret = device_property_read_string(dev, "firmware-name", &fw_prefix);
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "no firmware-name\n");
++	ret = device_property_read_string(dev, "apple,hid-merge-personality", &personality);
++	if (ret)
++		return dev_err_probe(dev, ret,
++				     "the bootloader passed no touch firmware variant: touchscreen left off\n");
++	if (strchr(personality, '/'))
++		return dev_err_probe(dev, -EINVAL, "bad touch firmware variant\n");
++	ts->fw_name = devm_kasprintf(dev, GFP_KERNEL, "%s-%s.bin", fw_prefix, personality);
++	if (!ts->fw_name)
++		return -ENOMEM;
+ 
+ 	input = devm_input_allocate_device(dev);
+ 	if (!input)
+@@ -732,4 +749,4 @@ module_spi_driver(ahts_driver);
+ 
+ MODULE_DESCRIPTION("Apple HIDSPI touchscreen (iPhone X)");
+ MODULE_LICENSE("GPL");
+-MODULE_FIRMWARE("apple/d221-touch.bin");
++MODULE_FIRMWARE("apple/d221-touch-*.bin");

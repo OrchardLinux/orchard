@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Fri, 6 Nov 2026 20:15:06 +0800
+Subject: [PATCH] kboot: Pass on which touch firmware variant the unit needs
+
+The iPhone X's ADT names the variant of Apple's touch firmware the unit
+needs. Copy it through the touchscreen0 alias, so the driver can load the
+firmware of that variant.
+
+Assisted-by: LLM
+---
+ src/kboot.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/kboot.c b/src/kboot.c
+index 27ebe5e..b3a9639 100644
+--- a/src/kboot.c
++++ b/src/kboot.c
+@@ -947,6 +947,8 @@ static int dt_set_touchscreen(void)
+         {"luna-shape-flex-noise", "apple,luna-shape-flex-noise"},
+         {"luna-racer-tmon-comp", "apple,luna-racer-tmon-comp"},
+         {"luna-afe-calibration", "apple,luna-afe-calibration"},
++        /* Which firmware variant this unit needs; the driver loads that one. */
++        {"hid-merge-personality", "apple,hid-merge-personality"},
+     };
+     const char *path = fdt_get_alias(dt, "touchscreen0");
+     if (path == NULL)
+-- 
+2.54.0 (Apple Git-157)
+

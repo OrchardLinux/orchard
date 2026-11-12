@@ -96,22 +96,24 @@ The device tree from the newest full restore Apple signs for this board
 | --- | --- |
 | Wi-Fi | `wlan-pcie,bcm4357`, `module-instance herculesk`, firmware dir `C-4357__s-B1` |
 | Bluetooth | `bluetooth,n88` |
-| Touch | `hid-transport,k1`, image-tag `wftm`, `hid-merge-personality C1R1FC0,1` — not the Z2 the iPad/iPhone 7 use |
+| Touch | `hid-transport,k1`, image-tag `wftm`, `hid-merge-personality C1R1FC0,1` in the IPSW (`C1R1FC0,2` on the tested unit) — not the Z2 the iPad/iPhone 7 use; see [d221-touch.md](d221-touch.md) |
 
 `devices/d221/firmware.json` ships only the Wi-Fi set for now (BCM4357
 `herculesk` trx/clmb/txcb and the two real GINS NVRAM profiles), each pinned by
-sha256. Bluetooth HCD, touch and PMP firmware are still to be extracted.
+sha256, and the touch firmware converted from `Firmware/D221_Multitouch.im4p`
+([d221-touch.md](d221-touch.md)). Bluetooth HCD and PMP firmware are still to
+be extracted.
 
 ## What is untested
 
-Display (full DRM/GPU), touch, Wi-Fi, Bluetooth, mounting the NVMe root,
-battery/charging, backlight, audio, camera and cellular. The A11-specific work
+Full display DRM (the console works through simpledrm; see `d221-display.md`),
+Wi-Fi, Bluetooth, mounting the NVMe root, charging, audio, camera and cellular
+(brightness, buttons and battery: [d221-backlight.md](d221-backlight.md)). The
+A11-specific work
 still needed before this board is usable beyond a RAM shell:
 
 1. `apple/pmp-t8015.bin` (and any other coprocessor firmware) in the recipe.
-2. A touch driver for the `hid-transport,k1` controller — the Z2 drivers here
-   do not cover it.
-3. The `t8015-x`/`d221` device tree nodes for Wi-Fi, Bluetooth and backlight
+2. The `t8015-x`/`d221` device tree nodes for Wi-Fi and Bluetooth
    (upstream describes the SoC alone).
-4. An installer and launcher release, then `resize-apfs` qualification on this
+3. An installer and launcher release, then `resize-apfs` qualification on this
    board.

@@ -1,0 +1,330 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 17:23:32 +0000
+Subject: [PATCH] media: apple-vxd: stop the A9 firmware for system sleep
+
+The DEVA firmware boots on the first open of the video node and stays
+resident until the driver is unbound. udev and media daemons open the
+node at boot, so the firmware is resident in practice. Over s2idle the
+decoder power domain goes off and the resident firmware does not survive
+it, and the J71t sleep precheck refuses any bound decoder without a
+reserved sleep admission.
+
+Follow AppleD5500 instead, which stops the core and frees the firmware
+when its last client closes (terminateDeviceInternal, fffffff00628a604:
+clear the ready magic, write 1 to 0x200, known state v1, free, power
+down). Register a sleep admission provider for the A9 variant. Its
+prepare does no MMIO: it refuses while a file is open and otherwise
+closes the open gate until complete, after resume or any abort. The
+system suspend callback then stops the firmware in that order and frees
+what it used; the next open boots it again, as the first open after
+probe does. If the core does not reach its known state, every buffer it
+may still read is kept and the sleep is refused.
+
+The T8010 variant registers no provider and keeps its behaviour.
+
+Assisted-by: LLM
+---
+ .../media/platform/apple/vxd/apple-vxd-core.c | 63 ++++++++++++++-
+ .../media/platform/apple/vxd/apple-vxd-fw.c   | 77 +++++++++++++++++++
+ .../media/platform/apple/vxd/apple-vxd-regs.h |  6 ++
+ .../media/platform/apple/vxd/apple-vxd-v4l2.c |  9 ++-
+ drivers/media/platform/apple/vxd/apple-vxd.h  | 12 +++
+ 5 files changed, 164 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/media/platform/apple/vxd/apple-vxd-core.c b/drivers/media/platform/apple/vxd/apple-vxd-core.c
+index ab7515fee..31a024233 100644
+--- a/drivers/media/platform/apple/vxd/apple-vxd-core.c
++++ b/drivers/media/platform/apple/vxd/apple-vxd-core.c
+@@ -245,7 +245,51 @@ static int apple_vxd_runtime_suspend(struct device *dev)
+ 	return 0;
+ }
+ 
++/*
++ * Sleep admission: no MMIO. Refuse while a file is open (its contexts and
++ * any queued pictures belong to the running firmware); otherwise close the
++ * open gate until complete, after resume or any abort.
++ */
++static int apple_vxd_sleep_prepare(struct device *dev)
++{
++	struct apple_vxd_dev *vxd = dev_get_drvdata(dev);
++	int ret = 0;
++
++	mutex_lock(&vxd->power_lock);
++	if (vxd->users)
++		ret = -EBUSY;
++	else
++		vxd->sleep_gate = true;
++	mutex_unlock(&vxd->power_lock);
++	if (ret)
++		dev_info(dev, "system sleep refused: decoder in use\n");
++	return ret;
++}
++
++static void apple_vxd_sleep_complete(struct device *dev)
++{
++	struct apple_vxd_dev *vxd = dev_get_drvdata(dev);
++
++	mutex_lock(&vxd->power_lock);
++	vxd->sleep_gate = false;
++	mutex_unlock(&vxd->power_lock);
++}
++
++static int apple_vxd_suspend(struct device *dev)
++{
++	struct apple_vxd_dev *vxd = dev_get_drvdata(dev);
++
++	if (!vxd->variant->sleep_stop)
++		return 0;
++
++	/* No open file: nothing can queue a picture, let the last one finish. */
++	flush_work(&vxd->job_done_work);
++	cancel_delayed_work_sync(&vxd->watchdog_work);
++	return apple_vxd_fw_sleep_stop(vxd);
++}
++
+ static const struct dev_pm_ops apple_vxd_pm_ops = {
++	.suspend = pm_sleep_ptr(apple_vxd_suspend),
+ 	RUNTIME_PM_OPS(apple_vxd_runtime_suspend, apple_vxd_runtime_resume, NULL)
+ };
+ 
+@@ -254,6 +298,7 @@ static const struct apple_vxd_variant s8000_vxd_variant = {
+ 	.num_gart_pts	= 512,		/* "setting 2GB mapping" [E] */
+ 	/* HEVCSupported = ((rev - 7) < 4) && ((0xD >> (rev - 7)) & 1) [E] */
+ 	.hevc_supported	= true,
++	.sleep_stop	= true,
+ };
+ 
+ /* The T8010 core has two pixel pipes; it reports them in CORE_ID. */
+@@ -353,14 +398,27 @@ static int apple_vxd_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		goto err_disable_runtime_pm;
+ 
++	/* Before the video node exists: nothing can open it unadmitted. */
++	if (variant->sleep_stop) {
++		vxd->sleep_admission.dev = &pdev->dev;
++		vxd->sleep_admission.prepare = apple_vxd_sleep_prepare;
++		vxd->sleep_admission.complete = apple_vxd_sleep_complete;
++		ret = register_pm_suspend_admission(&vxd->sleep_admission);
++		if (ret)
++			goto err_gart_fini;
++	}
++
+ 	ret = apple_vxd_h264_register(vxd);
+ 	if (!ret)
+ 		ret = apple_vxd_v4l2_init(vxd);
+ 	if (ret)
+-		goto err_gart_fini;
++		goto err_admission;
+ 
+ 	return 0;
+ 
++err_admission:
++	if (variant->sleep_stop)
++		unregister_pm_suspend_admission(&vxd->sleep_admission);
+ err_gart_fini:
+ 	apple_vxd_gart_fini(vxd);
+ err_disable_runtime_pm:
+@@ -373,6 +431,9 @@ static void apple_vxd_remove(struct platform_device *pdev)
+ {
+ 	struct apple_vxd_dev *vxd = platform_get_drvdata(pdev);
+ 
++	/* Before any teardown; also waits out a transition in progress. */
++	if (vxd->variant->sleep_stop)
++		unregister_pm_suspend_admission(&vxd->sleep_admission);
+ 	cancel_delayed_work_sync(&vxd->watchdog_work);
+ 	apple_vxd_v4l2_cleanup(vxd);
+ 	apple_vxd_fw_cleanup(vxd);
+diff --git a/drivers/media/platform/apple/vxd/apple-vxd-fw.c b/drivers/media/platform/apple/vxd/apple-vxd-fw.c
+index 753ca4944..ede737efd 100644
+--- a/drivers/media/platform/apple/vxd/apple-vxd-fw.c
++++ b/drivers/media/platform/apple/vxd/apple-vxd-fw.c
+@@ -435,6 +435,83 @@ int apple_vxd_boot_firmware(struct apple_vxd_dev *vxd)
+ 	return ret;
+ }
+ 
++/*
++ * One reference per open file. A sleep that has been admitted closes the
++ * gate first, so an open between admission and the device's suspend
++ * callback fails instead of booting the firmware behind it.
++ */
++int apple_vxd_fw_open(struct apple_vxd_dev *vxd)
++{
++	int ret;
++
++	mutex_lock(&vxd->power_lock);
++	if (vxd->sleep_gate) {
++		mutex_unlock(&vxd->power_lock);
++		return -EBUSY;
++	}
++	vxd->users++;
++	mutex_unlock(&vxd->power_lock);
++
++	ret = apple_vxd_boot_firmware(vxd);
++	if (ret)
++		apple_vxd_fw_close(vxd);
++	return ret;
++}
++
++void apple_vxd_fw_close(struct apple_vxd_dev *vxd)
++{
++	mutex_lock(&vxd->power_lock);
++	if (!WARN_ON(!vxd->users))
++		vxd->users--;
++	mutex_unlock(&vxd->power_lock);
++}
++
++/*
++ * System sleep, after admission and with no open file: stop the MTX in
++ * AppleD5500's terminate order (clear the ready magic, the 0x200 write,
++ * known state v1), then free what the running firmware used. The next
++ * open boots it again, as the first open after probe does. If the core
++ * does not reach its known state, keep every buffer it may still read
++ * and refuse the sleep; the decoder then stays failed (-EIO) until rebind.
++ */
++int apple_vxd_fw_sleep_stop(struct apple_vxd_dev *vxd)
++{
++	int ret;
++
++	mutex_lock(&vxd->power_lock);
++	if (!vxd->sleep_gate || vxd->users) {
++		mutex_unlock(&vxd->power_lock);
++		return -EBUSY;
++	}
++	if (!vxd->fw_loaded) {
++		mutex_unlock(&vxd->power_lock);
++		return 0;
++	}
++
++	apple_vxd_mbox_stop(vxd);
++	vxd->hw_ready = false;
++	vxd_write(vxd, VXD_REG_FW_READY_MAGIC, 0);
++	vxd_write(vxd, VXD_REG_VECT_CFG, VXD_VECT_CFG_TERMINATE);
++	ret = vxd_known_state_v1(vxd, "Terminate");
++	if (ret) {
++		dev_err(vxd->dev, "firmware stop for sleep failed: %d\n", ret);
++		mutex_unlock(&vxd->power_lock);
++		return ret;
++	}
++
++	apple_vxd_cmdbufs_fini(vxd);
++	apple_vxd_gart_unmap(vxd, &vxd->fw_map);
++	dma_free_coherent(vxd->dev, vxd->fw_size, vxd->fw_vaddr, vxd->fw_dma);
++	vxd->fw_vaddr = NULL;
++	vxd->fw_loaded = false;
++	mutex_unlock(&vxd->power_lock);
++
++	/* The reference boot took; the PM core holds its own until complete. */
++	pm_runtime_put_noidle(vxd->dev);
++	dev_info(vxd->dev, "firmware stopped for system sleep\n");
++	return 0;
++}
++
+ void apple_vxd_fw_cleanup(struct apple_vxd_dev *vxd)
+ {
+ 	bool was_loaded;
+diff --git a/drivers/media/platform/apple/vxd/apple-vxd-regs.h b/drivers/media/platform/apple/vxd/apple-vxd-regs.h
+index edeccb8e0..fdbe48903 100644
+--- a/drivers/media/platform/apple/vxd/apple-vxd-regs.h
++++ b/drivers/media/platform/apple/vxd/apple-vxd-regs.h
+@@ -89,6 +89,12 @@
+ 
+ /* VEC block and entropy decoder pipes */
+ #define VXD_REG_VECT_CFG		0x0200
++/*
++ * AppleD5500's terminate path (fffffff00628c474 -> fffffff00629972c [E])
++ * writes 1 here after clearing the ready magic and before known state v1.
++ * Nothing beyond that order is known about the write.
++ */
++#define  VXD_VECT_CFG_TERMINATE		0x00000001
+ #define VXD_REG_VECT_CFG2		0x0208
+ #define  VXD_VECT_CFG2_MSGS_MINUS1	0x000000c7	/* core[0xb4] - 1 */
+ #define VXD_REG_ENTDEC_0_SIZE		0x0340
+diff --git a/drivers/media/platform/apple/vxd/apple-vxd-v4l2.c b/drivers/media/platform/apple/vxd/apple-vxd-v4l2.c
+index 23c051f1d..e9467232d 100644
+--- a/drivers/media/platform/apple/vxd/apple-vxd-v4l2.c
++++ b/drivers/media/platform/apple/vxd/apple-vxd-v4l2.c
+@@ -885,13 +885,15 @@ static int apple_vxd_open(struct file *filp)
+ 	 * can be read, and keeps running (and the block powered) until the
+ 	 * driver is unbound. Later opens find it running.
+ 	 */
+-	ret = apple_vxd_boot_firmware(vxd);
++	ret = apple_vxd_fw_open(vxd);
+ 	if (ret)
+ 		return ret;
+ 
+ 	ctx = kzalloc_obj(*ctx);
+-	if (!ctx)
++	if (!ctx) {
++		apple_vxd_fw_close(vxd);
+ 		return -ENOMEM;
++	}
+ 
+ 	ctx->vxd = vxd;
+ 	v4l2_fh_init(&ctx->fh, vdev);
+@@ -900,6 +902,7 @@ static int apple_vxd_open(struct file *filp)
+ 	if (ret) {
+ 		v4l2_fh_exit(&ctx->fh);
+ 		kfree(ctx);
++		apple_vxd_fw_close(vxd);
+ 		return ret;
+ 	}
+ 
+@@ -910,11 +913,13 @@ static int apple_vxd_open(struct file *filp)
+ static int apple_vxd_release(struct file *filp)
+ {
+ 	struct apple_vxd_ctx *ctx = file_to_vxd_ctx(filp);
++	struct apple_vxd_dev *vxd = ctx->vxd;
+ 
+ 	v4l2_fh_del(&ctx->fh, filp);
+ 	apple_vxd_ctx_fini(ctx);
+ 	v4l2_fh_exit(&ctx->fh);
+ 	kfree(ctx);
++	apple_vxd_fw_close(vxd);
+ 
+ 	return 0;
+ }
+diff --git a/drivers/media/platform/apple/vxd/apple-vxd.h b/drivers/media/platform/apple/vxd/apple-vxd.h
+index bba04f75a..81fef0f1a 100644
+--- a/drivers/media/platform/apple/vxd/apple-vxd.h
++++ b/drivers/media/platform/apple/vxd/apple-vxd.h
+@@ -25,6 +25,7 @@
+ #include <linux/io.h>
+ #include <linux/mutex.h>
+ #include <linux/platform_device.h>
++#include <linux/pm-suspend-admission.h>
+ #include <linux/sizes.h>
+ #include <linux/spinlock.h>
+ #include <linux/types.h>
+@@ -66,6 +67,11 @@ struct apple_vxd_variant {
+ 	u32 num_gart_pts;		/* mapped page tables (512 = 2 GiB) */
+ 	bool hevc_supported;
+ 	bool has_integration;		/* second reg range, see VXD_INTEG_CTRL */
++	/*
++	 * Stop the firmware for system sleep the way AppleD5500 does when its
++	 * last client closes, and boot it again on the next open.
++	 */
++	bool sleep_stop;
+ };
+ 
+ /*
+@@ -284,6 +290,9 @@ struct apple_vxd_dev {
+ 	/* Core state. */
+ 	struct mutex power_lock;	/* boot vs. runtime suspend */
+ 	bool hw_ready;			/* firmware took its init message */
++	unsigned int users;		/* open files, under power_lock */
++	bool sleep_gate;		/* sleep admitted: no new open */
++	struct pm_suspend_admission sleep_admission;
+ 	u32 core_id;
+ 	u32 core_rev;
+ 	u32 num_entropy_pipes;
+@@ -448,6 +457,9 @@ void apple_vxd_dev_buf_free(struct apple_vxd_dev *vxd,
+ 
+ /* fw.c */
+ int apple_vxd_boot_firmware(struct apple_vxd_dev *vxd);
++int apple_vxd_fw_open(struct apple_vxd_dev *vxd);
++void apple_vxd_fw_close(struct apple_vxd_dev *vxd);
++int apple_vxd_fw_sleep_stop(struct apple_vxd_dev *vxd);
+ void apple_vxd_fw_cleanup(struct apple_vxd_dev *vxd);
+ 
+ /* mbox.c */

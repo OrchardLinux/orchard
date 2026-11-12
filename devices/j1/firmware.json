@@ -1,0 +1,35 @@
+{
+  "schema": 2,
+  "device": "iPad3,1",
+  "ipsw": {
+    "version": "9.3.5",
+    "build": "13G36",
+    "url": "https://secure-appldnld.apple.com/iOS9.3.5/031-73961-20160825-88328FDE-6714-11E6-97F2-B63D34D2D062/iPad3,1_9.3.5_13G36_Restore.ipsw",
+    "bytes": 1670499692,
+    "sha256": "ceec5670fe63f113b766a09b189c50a31e96e4c538905076216fb21170385c95"
+  },
+  "inputs": {
+    "J1.mtprops": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/multitouch/J1.mtprops"
+      },
+      "device": "/usr/share/firmware/multitouch/J1.mtprops",
+      "sha256": "2d3c60af96fe72f30b8be5ebe0400a9379fb9825eb2bfca4beaee1536aec2e1f"
+    },
+    "mike.trx": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/4330b2/mike.trx"
+      },
+      "device": "/usr/share/firmware/wifi/4330b2/mike.trx",
+      "sha256": "2ce01ba14f562179551e4cf22c7b056199c07a4e1402ac3a1d8756196d8c88b0"
+    },
+    "mike.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/4330b2/mike.txt"
+      },
+      "device": "/usr/share/firmware/wifi/4330b2/mike.txt",
+      "sha256": "7ba79a7cfd270c653552d256fc3224f82b779ff8d13085fb696f2a508f822c27"
+    }
+  },
+  "outputs": []
+}

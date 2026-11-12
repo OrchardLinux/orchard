@@ -138,6 +138,9 @@ def build(output, *, loaders, boards=None, release=None, hardware=None):
     hardware = Path(hardware or ROOT)
     boards = sorted(boards) if boards is not None else profiles(hardware)
     members = core_files()
+    # What the install adds to a kernel's initrd (install_direct.py).
+    for name in ('run', 'udhcpd.conf'):
+        members[f'boot/initramfs/install/{name}'] = hardware / 'boot/initramfs/install' / name
     for name in ('pongo', 'm1n1'):
         path = Path(loaders[name])
         if path.is_symlink() or not path.is_file():

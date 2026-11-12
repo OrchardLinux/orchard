@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Christopher M. Smith"
+ <25436950+theChristopher16@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 10:43:24 -0600
+Subject: [PATCH] drm/imagination: Stop reset when acquiring a power reference
+ fails
+
+pvr_power_reset() only warns when pvr_power_get_clear() fails, then
+continues into reset callbacks and eventually calls pvr_power_put()
+without owning the corresponding runtime-PM reference.
+
+Return the acquisition/recovery error before taking reset_sem. Leave
+the existing helper's recovery attempt and successful reset path intact,
+and document that this prerequisite failure does not mark the GPU lost.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_power.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_power.c b/drivers/gpu/drm/imagination/pvr_power.c
+index 57f4994c28f5..54dba0ae18c6 100644
+--- a/drivers/gpu/drm/imagination/pvr_power.c
++++ b/drivers/gpu/drm/imagination/pvr_power.c
+@@ -506,7 +506,9 @@ pvr_power_get_clear(struct pvr_device *pvr_dev)
+  * If @hard_reset is %false and the FW processor fails to respond during the reset process, this
+  * function will attempt a hard reset.
+  *
+- * If a hard reset fails then the GPU device is reported as lost.
++ * If a power reference cannot be acquired, return without starting the reset
++ * or changing the device lost state. Otherwise, if a hard reset fails then
++ * the GPU device is reported as lost.
+  *
+  * Returns:
+  *  * 0 on success, or
+@@ -522,7 +524,9 @@ pvr_power_reset(struct pvr_device *pvr_dev, bool hard_reset)
+ 	 * Take a power reference during the reset. This should prevent any interference with the
+ 	 * power state during reset.
+ 	 */
+-	WARN_ON(pvr_power_get_clear(pvr_dev));
++	err = pvr_power_get_clear(pvr_dev);
++	if (err)
++		return err;
+ 
+ 	down_write(&pvr_dev->reset_sem);
+ 

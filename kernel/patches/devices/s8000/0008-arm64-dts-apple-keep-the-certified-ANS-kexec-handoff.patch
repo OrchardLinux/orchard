@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 17:15:00 +0100
+Subject: [PATCH] arm64: dts: apple: keep the certified ANS kexec handoff
+
+Resetting the ANS host or its translations destroys the state required
+by the next kernel. Describe the board-selected retained handoff.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/s8003-j71t.dts | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/s8003-j71t.dts b/arch/arm64/boot/dts/apple/s8003-j71t.dts
+index 733cefc66..0bc19727d 100644
+--- a/arch/arm64/boot/dts/apple/s8003-j71t.dts
++++ b/arch/arm64/boot/dts/apple/s8003-j71t.dts
+@@ -11,6 +11,14 @@
+ #include "s8003.dtsi"
+ #include "s800x-ipad5.dtsi"
+ 
++&pcie0 {
++	apple,ans-kexec-handoff;
++};
++
++&pcie0_dart0 {
++	apple,ans-dart-handoff;
++};
++
+ / {
+ 	compatible = "apple,j71t", "apple,s8003", "apple,arm-platform";
+ 	model = "Apple iPad 5 (Wi-Fi) (TSMC)";

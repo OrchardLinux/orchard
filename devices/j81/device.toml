@@ -15,10 +15,6 @@ dt_compatible = ["apple,j81"]
 chip = 0x7001
 board = 0x06
 
-# Orchard Recovery runs here (USB "Orchard Recovery", serial BOARD:<profile>).
-[match.linux]
-recovery = true
-
 [boot]
 methods = ["checkm8-pongo"]
 
@@ -52,8 +48,8 @@ cellular = "none"
 battery = "working"
 charging = "missing"
 charging_control = "missing"
-suspend = "missing"
-resume = "missing"
+suspend = "untested"
+resume = "untested"
 usb_serial = "working"
 usb_network = "working"
 audio_output = "missing"

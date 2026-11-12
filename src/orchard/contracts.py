@@ -20,7 +20,8 @@ class _SelectionDetails(TypedDict, total=False):
     board: Optional[int]
     product: Optional[str]
     serial_port: Optional[str]
-    pwned: bool
+    pwned: Optional[str]
+    serial_number: Optional[str]
     boot_id: Optional[str]
 
 
@@ -95,14 +96,20 @@ class Adapter(Protocol):
 
     def discover(self) -> SelectedDevice: ...
 
+    def boot_inputs(self) -> List[Any]: ...
+
     def boot(self, device: SelectedDevice, assets: BootAssets,
              manifest: BootRequest, progress: Progress) -> None: ...
+
+    def boot_payload(self, device: SelectedDevice, payload: Path, pongo_image: Path, progress: Progress) -> Dict[str, Any]: ...
 
     def start_loader(self, device: SelectedDevice, loader: Dict[str, Path], progress: Progress) -> str: ...
 
     def connect(self, device: SelectedDevice) -> AbstractContextManager[Connection]: ...
 
     def capture_adt(self, device: Optional[SelectedDevice] = None) -> bytes: ...
+
+    def firmware_cached(self) -> bool: ...
 
     def firmware_inputs(self, clock: Clock, progress: Progress, *, allow_download: bool = True) -> Path: ...
 

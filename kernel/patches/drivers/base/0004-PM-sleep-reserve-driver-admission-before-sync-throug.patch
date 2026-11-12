@@ -1,0 +1,205 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 16:18:37 +0000
+Subject: [PATCH] PM: sleep: reserve driver admission before sync through
+ resume or abort
+
+Some drivers can only enter system sleep while no new work is admitted,
+and they have to decide that before the filesystems are synced. Once
+sync has run, a refusal from a suspend callback aborts the transition
+late, after work that cannot be undone. There is no hook between the
+start of a transition and sync for this.
+
+Add a small admission list to kernel/power/suspend.c. A driver registers
+a prepare/complete pair. enter_state() calls every prepare under
+system_transition_mutex before sync, then a blocking precheck notifier
+chain on which a driver can refuse the transition with -EBUSY. complete
+runs in reverse order after resume and after every abort, including a
+failed prepare, and the chain is then called with
+PM_SUSPEND_PRECHECK_COMPLETE so that notifier users can drop their
+state. pm_suspend_admission_reserved() lets a precheck ask whether a
+device's admission is held.
+
+Assisted-by: LLM
+---
+ include/linux/pm-suspend-admission.h | 29 ++++++++++
+ include/linux/suspend.h              | 10 ++++
+ kernel/power/suspend.c               | 82 ++++++++++++++++++++++++++++
+ 3 files changed, 121 insertions(+)
+ create mode 100644 include/linux/pm-suspend-admission.h
+
+diff --git a/include/linux/pm-suspend-admission.h b/include/linux/pm-suspend-admission.h
+new file mode 100644
+index 000000000..f1c92e058
+--- /dev/null
++++ b/include/linux/pm-suspend-admission.h
+@@ -0,0 +1,29 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef _LINUX_PM_SUSPEND_ADMISSION_H
++#define _LINUX_PM_SUSPEND_ADMISSION_H
++#include <linux/device.h>
++#include <linux/list.h>
++
++/* Driver-owned reversible admission gate. Registration must precede exposing
++ * hardware work. Unregister before removing the hardware or freeing this object.
++ * prepare must reserve admission without destructive MMIO; complete releases it
++ * after resume or ANY abort, including a failed prepare. No PM-op inference.
++ */
++struct pm_suspend_admission {
++	struct list_head node;
++	struct device *dev;
++	int (*prepare)(struct device *dev);
++	void (*complete)(struct device *dev);
++	bool reserved;
++};
++#ifdef CONFIG_SUSPEND
++int register_pm_suspend_admission(struct pm_suspend_admission *admission);
++void unregister_pm_suspend_admission(struct pm_suspend_admission *admission);
++/* Only callable from a precheck notifier, under system_transition_mutex. */
++bool pm_suspend_admission_reserved(struct device *dev);
++#else
++static inline int register_pm_suspend_admission(struct pm_suspend_admission *a) { return 0; }
++static inline void unregister_pm_suspend_admission(struct pm_suspend_admission *a) {}
++static inline bool pm_suspend_admission_reserved(struct device *dev) { return false; }
++#endif
++#endif
+diff --git a/include/linux/suspend.h b/include/linux/suspend.h
+index b02876f1a..93082b990 100644
+--- a/include/linux/suspend.h
++++ b/include/linux/suspend.h
+@@ -142,9 +142,19 @@ struct platform_s2idle_ops {
+ 	void (*end)(void);
+ };
+ 
++#ifdef CONFIG_SUSPEND
++int register_pm_suspend_precheck_notifier(struct notifier_block *nb);
++int unregister_pm_suspend_precheck_notifier(struct notifier_block *nb);
++#else
++static inline int register_pm_suspend_precheck_notifier(struct notifier_block *nb) { return 0; }
++static inline int unregister_pm_suspend_precheck_notifier(struct notifier_block *nb) { return 0; }
++#endif
++#define PM_SUSPEND_PRECHECK_COMPLETE 0
++
+ #ifdef CONFIG_SUSPEND
+ extern suspend_state_t pm_suspend_target_state;
+ extern suspend_state_t mem_sleep_current;
++
+ extern suspend_state_t mem_sleep_default;
+ 
+ /**
+diff --git a/kernel/power/suspend.c b/kernel/power/suspend.c
+index 57c442686..307e6d5f3 100644
+--- a/kernel/power/suspend.c
++++ b/kernel/power/suspend.c
+@@ -9,6 +9,7 @@
+ 
+ #define pr_fmt(fmt) "PM: " fmt
+ 
++#include <linux/pm-suspend-admission.h>
+ #include <linux/string.h>
+ #include <linux/delay.h>
+ #include <linux/errno.h>
+@@ -573,8 +574,68 @@ static void suspend_finish(void)
+  * Fail if that's not the case.  Otherwise, prepare for system suspend, make the
+  * system enter the given sleep state and clean up after wakeup.
+  */
++static LIST_HEAD(suspend_admissions);
++
++int register_pm_suspend_admission(struct pm_suspend_admission *a)
++{
++	struct pm_suspend_admission *other;
++
++	if (!a->dev || !a->prepare || !a->complete)
++		return -EINVAL;
++	mutex_lock(&system_transition_mutex);
++	list_for_each_entry(other, &suspend_admissions, node) {
++		if (other->dev == a->dev) {
++			mutex_unlock(&system_transition_mutex);
++			return -EEXIST;
++		}
++	}
++	a->reserved = false;
++	get_device(a->dev);
++	list_add_tail(&a->node, &suspend_admissions);
++	mutex_unlock(&system_transition_mutex);
++	return 0;
++}
++EXPORT_SYMBOL_GPL(register_pm_suspend_admission);
++
++void unregister_pm_suspend_admission(struct pm_suspend_admission *a)
++{
++	/* Serializes removal/module unload with reservation through complete. */
++	mutex_lock(&system_transition_mutex);
++	list_del(&a->node);
++	put_device(a->dev);
++	mutex_unlock(&system_transition_mutex);
++}
++EXPORT_SYMBOL_GPL(unregister_pm_suspend_admission);
++
++bool pm_suspend_admission_reserved(struct device *dev)
++{
++	struct pm_suspend_admission *a;
++
++	lockdep_assert_held(&system_transition_mutex);
++	list_for_each_entry(a, &suspend_admissions, node)
++		if (a->dev == dev)
++			return a->reserved;
++	return false;
++}
++EXPORT_SYMBOL_GPL(pm_suspend_admission_reserved);
++
++static BLOCKING_NOTIFIER_HEAD(suspend_precheck_chain);
++
++int register_pm_suspend_precheck_notifier(struct notifier_block *nb)
++{
++	return blocking_notifier_chain_register(&suspend_precheck_chain, nb);
++}
++EXPORT_SYMBOL_GPL(register_pm_suspend_precheck_notifier);
++
++int unregister_pm_suspend_precheck_notifier(struct notifier_block *nb)
++{
++	return blocking_notifier_chain_unregister(&suspend_precheck_chain, nb);
++}
++EXPORT_SYMBOL_GPL(unregister_pm_suspend_precheck_notifier);
++
+ static int enter_state(suspend_state_t state)
+ {
++	struct pm_suspend_admission *admission;
+ 	int error;
+ 
+ 	trace_suspend_resume(TPS("suspend_enter"), state, true);
+@@ -594,6 +655,18 @@ static int enter_state(suspend_state_t state)
+ 	if (state == PM_SUSPEND_TO_IDLE)
+ 		s2idle_begin();
+ 
++	list_for_each_entry(admission, &suspend_admissions, node) {
++		/* Also release a provider whose prepare returned an error. */
++		admission->reserved = true;
++		error = admission->prepare(admission->dev);
++		if (error)
++			goto Unlock;
++	}
++	error = notifier_to_errno(blocking_notifier_call_chain(
++		&suspend_precheck_chain, state, NULL));
++	if (error)
++		goto Unlock;
++
+ 	if (sync_on_suspend_enabled) {
+ 		trace_suspend_resume(TPS("sync_filesystems"), 0, true);
+ 
+@@ -622,6 +695,15 @@ static int enter_state(suspend_state_t state)
+ 	pm_pr_dbg("Finishing wakeup.\n");
+ 	suspend_finish();
+  Unlock:
++	list_for_each_entry_reverse(admission, &suspend_admissions, node) {
++		if (!admission->reserved)
++			continue;
++		admission->complete(admission->dev);
++		admission->reserved = false;
++	}
++	/* Release driver admission reservations on success and every abort. */
++	blocking_notifier_call_chain(&suspend_precheck_chain,
++				    PM_SUSPEND_PRECHECK_COMPLETE, NULL);
+ 	mutex_unlock(&system_transition_mutex);
+ 	return error;
+ }

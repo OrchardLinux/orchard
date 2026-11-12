@@ -59,6 +59,16 @@ def device_path(profile, root=None):
     return path
 
 
+def payload_profile(profile, kind, root=None):
+    """The board-owned profile for a source-built payload loader."""
+    if kind not in ('cascadia',):
+        raise ValueError('Unsupported payload profile: ' + str(kind))
+    path = device_path(profile, root).with_name(kind + '.toml')
+    if not path.is_file() or path.is_symlink():
+        raise ValueError(f'{profile} has no {kind} handoff profile')
+    return path
+
+
 def profiles(root=None):
     """Every device this hardware data describes."""
     devices = Path(root or data_root()) / 'devices'
@@ -87,11 +97,16 @@ def install_blockers(profile, described=None):
     as soon as it could work, even if other features don't work yet.
     """
     described = device(profile) if described is None else described
+    from . import launcher
     blockers = []
     if 'kernel' not in described:
         blockers.append('it has no kernel or device tree yet')
-    if not any(_method_usable(profile, name) for name in described.get('boot', {}).get('methods', [])):
-        blockers.append('this Orchard has no boot method for it yet')
+    listed = described.get('boot', {}).get('methods', [])
+    if not any(_method_usable(profile, name) for name in listed):
+        if any(launcher.delivers(name) and _method_listed(profile, name) for name in listed) and launcher.find() is None:
+            blockers.append(f'it starts through {launcher.NAME}, which is not installed')
+        else:
+            blockers.append('this Orchard has no boot method for it yet')
     if 'firmware' not in described:
         blockers.append('it has no firmware recipe yet')
     if described.get('features', {}).get('storage_write', 'missing') == 'missing':
@@ -99,9 +114,34 @@ def install_blockers(profile, described=None):
     return blockers
 
 
-def _method_usable(profile, name):
-    if name not in IMPLEMENTED_METHODS:
+def has_recovery(described, root=None):
+    """Whether Orchard's recovery runs on a board: it follows from the board's kernel.
+
+    Recovery is built per platform with every board's device tree, on the arm64 root
+    distributions build, so 32-bit boards have none until a root of their own exists.
+    """
+    if 'kernel' not in described:
         return False
+    chips = Path(root) if root else data_root()
+    for path in (chips / 'chips').glob('*.toml'):
+        chip = tomllib.loads(path.read_text())
+        if chip['cpid'] == described['match']['dfu']['chip']:
+            return chip['architecture'] == 'arm64'
+    return False
+
+
+def method_implemented(name):
+    """Whether this Orchard can run boot method NAME: its own code, or orchard-launcher when installed."""
+    from . import launcher
+    return name in IMPLEMENTED_METHODS or (launcher.delivers(name) and launcher.find() is not None)
+
+
+def _method_usable(profile, name):
+    return method_implemented(name) and _method_listed(profile, name)
+
+
+def _method_listed(profile, name):
+    """Whether the board has what method NAME needs: its boot.json recipe, where the method takes one."""
     if not methods()[name]['boot_json']:
         return True
     recipe = device_path(profile).parent / 'boot.json'

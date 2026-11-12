@@ -1,5 +1,6 @@
-# iPad mini 4 (Wi-Fi) (J96): identity from public sources
-# (tools/catalog/generate). No Orchard bring-up yet; see docs/device-bring-up.md.
+# iPad mini 4 (Wi-Fi) (J96): identity from public sources (tools/catalog/generate),
+# hardware description from kernel/patches/devices/t7000/0003-0006. Bring-up record:
+# docs/bring-up/j96.md.
 schema = 1
 kind = "hardware.device"
 
@@ -16,5 +17,44 @@ board = 0x08
 [boot]
 methods = ["checkm8-pongo"] # palera1n's device list (palera.in); not run with Orchard yet.
 
-[catalog]
-dtb = "t7000-j96" # Exists in OrchardLinux/linux; not enabled here yet.
+[kernel]
+platform = "apple-4k"
+dtb = "t7000-j96" # arch/arm64/boot/dts/apple/<dtb>.dtb
+
+[firmware]
+recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until bring-up needs it.
+
+[support]
+status = "experimental"
+
+# States: working, untested, missing, none (features.toml). Nothing here has run on
+# this board with Orchard: "untested" means a driver binds in its device tree
+# (tools/catalog/drivers.json), plus the display's boot console. Touch, Wi-Fi and the
+# battery gauge were seen working on a local kernel tree with the same device tree
+# (touch on a different driver there), not yet on Orchard's build.
+[features]
+display = "untested"
+screen_off = "missing"
+backlight = "untested"
+touch = "untested" # apple_z2 (C1F14,4); multitouch worked on a local bring-up driver.
+buttons = "untested"
+accelerometer = "missing"
+gyroscope = "missing"
+light_sensor = "missing"
+touch_id = "missing"
+storage_read = "missing"
+storage_write = "missing"
+wifi = "untested" # BCM4350 over PCIe (brcmfmac); C2 and C5 modules exist, C5 seen working.
+bluetooth_input = "missing"
+bluetooth_audio = "missing"
+cellular = "none"
+battery = "untested" # bq27xxx over HDQ (W1_MASTER_UART).
+charging = "missing"
+charging_control = "missing"
+suspend = "untested"
+resume = "untested"
+usb_serial = "untested"
+usb_network = "untested"
+audio_output = "missing"
+audio_input = "missing"
+camera = "missing"

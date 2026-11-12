@@ -117,6 +117,19 @@ class DeviceIsolation(unittest.TestCase):
         self.assertEqual(rows[0]['serial_port'],'/dev/ttyACM0')
         self.assertIsNone(rows[0]['ecid'])
 
+    def test_linux_direct_installer_preserves_identity_and_matches_usb_modes(self):
+        node = self.root/'1-2'
+        node.mkdir()
+        for name, value in {'idVendor':'05ac', 'idProduct':'4146', 'product':'Orchard Install',
+                            'serial':f'ECID:0000000000000002 BOOT:{BOOT_B} BOARD:j71b'}.items():
+            (node/name).write_text(value)
+        (node/'iface/tty/ttyACM0').mkdir(parents=True)
+        rows = linux_usb.devices(self.root)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]['mode'], rows[0]['ecid'], rows[0]['boot_id'], rows[0]['profile']),
+                         ('install', 2, BOOT_B, 'j71b'))
+        self.assertEqual(rows[0]['serial_port'], '/dev/ttyACM0')
+
 
 if __name__ == '__main__':
     unittest.main()

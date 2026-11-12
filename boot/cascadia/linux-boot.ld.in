@@ -1,0 +1,22 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+ENTRY(_start)
+SECTIONS
+{
+	. = @LOAD_ADDRESS@;
+	.text : {
+		KEEP(*(.text.start))
+		*(.text .text.*)
+		*(.rodata .rodata.*)
+		*(.data .data.*)
+	}
+	ASSERT(. <= @LOAD_ADDRESS@ + 0x6000, "loader overlaps its stack")
+	. = @LOAD_ADDRESS@ + 0x7f00;
+	.loader_config : { KEEP(*(.loader_config)) }
+	ASSERT(SIZEOF(.loader_config) == 68, "loader configuration changed")
+	.ARM.attributes 0 : { *(.ARM.attributes) }
+	/DISCARD/ : {
+		*(.comment) *(.note*) *(.eh_frame*)
+		*(.ARM.exidx*) *(.ARM.extab*)
+	}
+}
+ASSERT(_start == @LOAD_ADDRESS@, "loader entry differs from the upload address")

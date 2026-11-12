@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 17:15:00 +0100
+Subject: [PATCH] dt-bindings: pci: keep the certified ANS kexec handoff
+
+Resetting the ANS host or its translations destroys the state required
+by the next kernel. Describe the board-selected retained handoff.
+
+Assisted-by: LLM
+---
+ Documentation/devicetree/bindings/pci/apple,t8010-pcie.yaml | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/pci/apple,t8010-pcie.yaml b/Documentation/devicetree/bindings/pci/apple,t8010-pcie.yaml
+index f6497a4e1..f9b72ce26 100644
+--- a/Documentation/devicetree/bindings/pci/apple,t8010-pcie.yaml
++++ b/Documentation/devicetree/bindings/pci/apple,t8010-pcie.yaml
+@@ -140,6 +140,10 @@ allOf:
+         - apple,nvme-hmb
+ 
+ properties:
++  apple,ans-kexec-handoff:
++    type: boolean
++    description: Retain storage port power across a certified stopped-DMA kexec handoff.
++
+   compatible:
+     oneOf:
+       - enum:

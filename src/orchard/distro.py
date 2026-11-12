@@ -165,10 +165,10 @@ def latest(root):
 
 
 def run(root, *, build_first=True, version=None, yes=False, progress=None, kernel_tree=None):
-    """Build (unless BUILD_FIRST is false), then boot the release's recovery on the attached board from RAM.
+    """Build (unless BUILD_FIRST is false), then boot the release's installer system on the attached board from RAM.
 
-    Nothing is installed: the recovery is the installer's system, and its
-    session (USB network, SSH) is how to look around. Never retries a boot.
+    Nothing is installed: its session (USB network, SSH) is how to look
+    around. Never retries a boot.
     """
     from .boot import confirm_boot
     from .devices import choose
@@ -191,11 +191,17 @@ def run(root, *, build_first=True, version=None, yes=False, progress=None, kerne
     with operation_lock():
         adapter, device = choose()
         record, assets = resolve(str(index), adapter.PROFILE, progress, purpose='boot')
-        print(f'{record["name"]} {record["release"]}: its {record["platform"]} recovery, from RAM; nothing is installed.')
+        what = 'recovery' if 'recovery' in assets else "kernel and installer system"
+        print(f'{record["name"]} {record["release"]}: its {record["platform"]} {what}, from RAM; nothing is installed.')
         if not yes:
             confirm_boot()
         try:
-            adapter.boot(device, assets, record, progress)
+            if 'recovery' in assets:
+                adapter.boot(device, assets, record, progress)
+            else:
+                from .install_direct import HOST, start_for_inspection
+                start_for_inspection(adapter, device, assets, device['ecid'], progress)
+                print(f'On USB. Sign in with: ssh root@{HOST}')
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError, KeyboardInterrupt) as error:
             raise SystemExit(f'{error}\nStopped. Inspect device state before any new boot attempt.')
     return {'recovery_observed': True, 'release': record['release']}

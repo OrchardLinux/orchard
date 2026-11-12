@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Eduardo Martins <eduardo@martins.ws>
+Date: Thu, 5 Nov 2026 13:16:14 -0600
+Subject: [PATCH] dt-bindings: spi: apple,spi: Add the T8015 SPI controller
+
+The A11's SPI controllers report the same "spi-1,samsung" compatible and
+spi-version 1 in the ADT as the A10's, and the T8010 variant of the
+driver drives them unchanged: describe them with the T8010 fallback.
+
+Assisted-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ Documentation/devicetree/bindings/spi/apple,spi.yaml | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/spi/apple,spi.yaml b/Documentation/devicetree/bindings/spi/apple,spi.yaml
+index 00c0c594f..a34a7bec3 100644
+--- a/Documentation/devicetree/bindings/spi/apple,spi.yaml
++++ b/Documentation/devicetree/bindings/spi/apple,spi.yaml
+@@ -25,6 +25,10 @@ maintainers:
+ properties:
+   compatible:
+     oneOf:
++      - items:
++          - const: apple,t8015-spi
++          - const: apple,t8010-spi
++          - const: apple,spi
+       - items:
+           - const: apple,t6020-spi
+           - const: apple,t8103-spi

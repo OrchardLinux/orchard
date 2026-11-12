@@ -9,7 +9,7 @@ releasing, rename that section to the version (`## [0.3.0] - YYYY-MM-DD`). The
 release workflow uses that section as the GitHub release notes and fails if it
 is missing or empty.
 
-## [Unreleased]
+## [0.3.0] - 2026-11-12
 
 ### Highlights
 
@@ -32,11 +32,31 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
   Feature states are more detailed, for example separate storage read and write.
 - iPhone X (GSM, d221): Linux boots from RAM, with a device description and a
   Wi-Fi firmware recipe. Experimental. (Eduardo Martins)
+- iPhone X (GSM, d221): the touchscreen works, with its firmware converted from
+  the IPSW and its calibration from the device; each phone gets the firmware
+  variant it asks for. Brightness works over the panel's DSI command, and buttons
+  and battery are confirmed working. (Eduardo Martins)
+- 32 more iPads and iPhones (A7 to A11) now have a place in Orchard's kernels.
+  Experimental: none has booted with Orchard yet. The iPhone 8, 8 Plus and X
+  (Global) can try installing, because a storage driver binds; that doesn't mean
+  they'll work.
+- iPad mini 4 (J96): RAM-boot bring-up record: desktop, touch, battery and
+  native Wi-Fi measured on a local kernel tree. Not a device profile yet. (Tom Ballard)
+- iPad mini 4 (J96, J97): touchscreen, Wi-Fi and battery, with a firmware recipe.
+  iPhone 6 and 6 Plus: battery. Not yet tested on Orchard's build. (Tom Ballard)
 - iPad Air (J85): measured RAM-boot status documented. (Christopher M. Smith)
+- iPad 6 (J71b): the buttons are marked working. iPad Air 2 (J81): Bluetooth
+  uses the sequence tested on a J81.
 - iPad Air 2 (J81): native-root boot, desktop and peripheral status recorded.
   (micro23)
 - iPad Air 2 (J81): the touchscreen works, with five fingers and no frame
   errors on main's kernel. (Martin Puškáč)
+- iPad 3 (Wi-Fi, J1): the display, touchscreen, Wi-Fi and USB serial and
+  network work on Orchard's kernel tree, booted from RAM with the J1 boot kit
+  on a jailbroken iOS 9.3.5. That kernel was built with GCC, because the kit's
+  loader can't start a clang build yet. Device description, device tree and a
+  firmware recipe. Orchard's launcher doesn't run this boot chain yet.
+  Experimental. (Stephen Cox)
 
 ### Install & launch
 
@@ -47,9 +67,18 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
   strap, so storage works on that boot path.
 - `orchard shell`, `exec`, `push` and `pull` also reach an installed system,
   not only the recovery.
+- Linux hosts: recognize direct installers and grant USB/serial access throughout
+  boot and installed-system development. (Anders Haas Franzen)
+- The installer picks the internal disk correctly on iPads with several NVMe
+  namespaces.
+- An install error says whether anything was written, and what to do next.
+- m1n1 shows the distribution's boot splash while installing, at its own size.
 
 ### Hardware
 
+- USB is about three times faster on Apple devices: SSH over USB reaches 36
+  MiB/s, up from 12 on the iPad 6. A process that pauses reading no longer takes
+  down the device's USB network and serial.
 - Add experimental PMIC power-off handling for iPad (6th generation, Wi-Fi;
   iPad7,5 / J71b).
 - iPhone X (GSM, d221): internal storage through the Apple ANS2 NVMe driver
@@ -58,19 +87,30 @@ entry. The iPad 6 gets speakers and an accelerometer for screen rotation.
 - iPad 6 (J71b): speakers through the MCA audio path, with an ALSA UCM
   profile. (Dalton Alexandre)
 - iPad 5: UCM profile for the speakers and internal microphone.
+- iPad 7 Wi-Fi (J171): the speakers play. iPad 6 and 7 Cellular (J72b, J172)
+  get the same speakers, untested. (Duke Eagleman)
 - iPad 6 (J71b): the always-on processor (AOP) runs as an in-kernel driver,
   replacing the userspace DMA owner; its accelerometer is an IIO device with
   the panel's mount matrix, so desktops can rotate the screen. Based on Dalton
   Alexandre's AOP work.
 - A10 (T8010): shared IOP mailbox for the GPU and AOP drivers; the NCO clock's
   boot rate is described per board.
+- Apple Wi-Fi follows the regulatory country, so 5 GHz networks connect (iPads
+  with Broadcom PCIe Wi-Fi).
 - iPad 6 (J71b): sleeps with the GPU desktop and wakes instantly with the Power
   button, touch included. A battery-gauge
   poll that rebooted every HDQ-gauge iPad in sleep is fixed; the other A10
   boards carry the same support, untested.
-- Installed systems allow suspend only on boards whose device data says it
-  works (`orchard-sleep` in the platform layer); distributions decide when to
-  suspend. How to bring it up on another board: docs/bring-up/suspend.md.
+- A plug or unplug now wakes the tablet, and a wall charger keeps its full rate
+  during sleep. Seen on the iPad 6; the iPad 7 and iPad 5 use the same path,
+  untested.
+- Every board can now suspend. Untested boards may reboot or fail to wake
+  instead; please report what you see. Distributions decide when to suspend.
+  How to bring it up on another board: docs/bring-up/suspend.md.
+- Older 32-bit devices (apple-armv7): the kernel is now Project Cascadia at
+  091d441 (it was c20b85e), with Cascadia's iPad 3 driver changes and charger
+  fixes. The importer follows Cascadia's A5 tree into its new `devices/a5/`
+  folder. (Stephen Cox)
 
 ### Development
 

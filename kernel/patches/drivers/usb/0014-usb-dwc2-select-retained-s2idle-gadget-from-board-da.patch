@@ -1,0 +1,160 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 16:18:38 +0000
+Subject: [PATCH] usb: dwc2: select retained s2idle gadget from board data
+
+A USB gadget network link, and anything on it such as a root over NBD,
+survives a short suspend to idle when the controller, its PHY and the
+gadget are left connected. The host sees NAKs while the system sleeps.
+
+Keep the gadget connected over suspend to idle when the board sets
+apple,retain-gadget-in-s2idle and the port is in device mode and active.
+The controller and the PHY are put on the wakeup path so that their
+power domains stay on. A suspend precheck refuses any other sleep state,
+or a port that is not a connected peripheral, with -EBUSY before sync.
+
+Assisted-by: LLM
+---
+ drivers/usb/dwc2/core.h     |  5 +++
+ drivers/usb/dwc2/platform.c | 63 +++++++++++++++++++++++++++++++++++++
+ 2 files changed, 68 insertions(+)
+
+diff --git a/drivers/usb/dwc2/core.h b/drivers/usb/dwc2/core.h
+index ae563cadc..9dbddbb0d 100644
+--- a/drivers/usb/dwc2/core.h
++++ b/drivers/usb/dwc2/core.h
+@@ -14,6 +14,7 @@
+ #include <linux/regulator/consumer.h>
+ #include <linux/usb/gadget.h>
+ #include <linux/usb/otg.h>
++#include <linux/notifier.h>
+ #include <linux/usb/phy.h>
+ #include "hw.h"
+ 
+@@ -882,6 +883,8 @@ struct dwc2_hregs_backup {
+  * @reset_phy_on_wake:	Quirk saying that we should assert PHY reset on a
+  *			remote wakeup.
+  * @phy_off_for_suspend: Status of whether we turned the PHY off at suspend.
++ * @kept_for_s2idle:    The gadget was left connected and running over
++ *                      suspend-to-idle (dwc2.s2idle_keep_gadget).
+  * @need_phy_for_wake:	Quirk saying that we should keep the PHY on at
+  *			suspend if we need USB to wake us up.
+  * @frame_number:       Frame number read from the core. For both device
+@@ -1088,6 +1091,8 @@ struct dwc2_hsotg {
+ 	unsigned int reset_phy_on_wake:1;
+ 	unsigned int need_phy_for_wake:1;
+ 	unsigned int phy_off_for_suspend:1;
++	unsigned int kept_for_s2idle:1;
++	struct notifier_block sleep_precheck;
+ 	u16 frame_number;
+ 
+ 	struct phy *phy;
+diff --git a/drivers/usb/dwc2/platform.c b/drivers/usb/dwc2/platform.c
+index ef0d73077..fabee8363 100644
+--- a/drivers/usb/dwc2/platform.c
++++ b/drivers/usb/dwc2/platform.c
+@@ -17,6 +17,7 @@
+ #include <linux/phy/phy.h>
+ #include <linux/platform_data/s3c-hsotg.h>
+ #include <linux/reset.h>
++#include <linux/suspend.h>
+ 
+ #include <linux/usb/of.h>
+ 
+@@ -436,6 +437,9 @@ int dwc2_check_core_version(struct dwc2_hsotg *hsotg)
+  * in the device private data. This allows the driver to access the dwc2_hsotg
+  * structure on subsequent calls to driver methods for this device.
+  */
++static int dwc2_sleep_precheck(struct notifier_block *, unsigned long, void *);
++static void dwc2_sleep_unregister(void *);
++
+ static int dwc2_driver_probe(struct platform_device *dev)
+ {
+ 	struct dwc2_hsotg *hsotg;
+@@ -625,6 +629,14 @@ static int dwc2_driver_probe(struct platform_device *dev)
+ 		}
+ 	}
+ #endif /* CONFIG_USB_DWC2_PERIPHERAL || CONFIG_USB_DWC2_DUAL_ROLE */
++	hsotg->sleep_precheck.notifier_call = dwc2_sleep_precheck;
++	retval = register_pm_suspend_precheck_notifier(&hsotg->sleep_precheck);
++	if (retval)
++		goto error;
++	retval = devm_add_action_or_reset(&dev->dev, dwc2_sleep_unregister, hsotg);
++	if (retval)
++		goto error;
++
+ 	return 0;
+ 
+ #if IS_ENABLED(CONFIG_USB_DWC2_PERIPHERAL) || \
+@@ -646,6 +658,49 @@ static int dwc2_driver_probe(struct platform_device *dev)
+ 	return retval;
+ }
+ 
++/*
++ * Suspend-to-idle with dwc2.s2idle_keep_gadget: leave the controller and
++ * its PHY powered and the gadget connected. Its interrupt is off while the
++ * system sleeps, so the host sees NAKs and nothing else; a gadget network
++ * link (and anything on it, e.g. an NBD root) survives a short sleep.
++ * The controller and PHY are put on the wakeup path so that their power
++ * domains stay on (GENPD_FLAG_ACTIVE_WAKEUP).
++ */
++static bool dwc2_keep_gadget_for_s2idle(struct dwc2_hsotg *dwc2)
++{
++	if (!device_property_read_bool(dwc2->dev, "apple,retain-gadget-in-s2idle") || !pm_suspend_no_platform() ||
++	    !dwc2_is_device_mode(dwc2) || dwc2->lx_state != DWC2_L0)
++		return false;
++
++	device_set_wakeup_path(dwc2->dev);
++	if (dwc2->phy && dwc2->phy->dev.parent)
++		device_set_wakeup_path(dwc2->phy->dev.parent);
++	dwc2->kept_for_s2idle = 1;
++	dev_info(dwc2->dev, "s2idle: gadget stays connected\n");
++	return true;
++}
++
++static int dwc2_sleep_precheck(struct notifier_block *nb, unsigned long action, void *data)
++{
++	struct dwc2_hsotg *dwc2 = container_of(nb, struct dwc2_hsotg, sleep_precheck);
++
++	if (action == PM_SUSPEND_PRECHECK_COMPLETE)
++		return NOTIFY_DONE;
++	if (device_property_read_bool(dwc2->dev, "apple,retain-gadget-in-s2idle") &&
++	    (action != PM_SUSPEND_TO_IDLE ||
++	     (dwc2->op_state != OTG_STATE_B_PERIPHERAL &&
++	      dwc2->op_state != OTG_STATE_B_IDLE)))
++		return notifier_from_errno(-EBUSY);
++	return NOTIFY_OK;
++}
++
++static void dwc2_sleep_unregister(void *data)
++{
++	struct dwc2_hsotg *dwc2 = data;
++
++	unregister_pm_suspend_precheck_notifier(&dwc2->sleep_precheck);
++}
++
+ static int __maybe_unused dwc2_suspend(struct device *dev)
+ {
+ 	struct dwc2_hsotg *dwc2 = dev_get_drvdata(dev);
+@@ -655,6 +710,9 @@ static int __maybe_unused dwc2_suspend(struct device *dev)
+ 	if (!dwc2->ll_hw_enabled)
+ 		return 0;
+ 
++	if (dwc2_keep_gadget_for_s2idle(dwc2))
++		return 0;
++
+ 	is_device_mode = dwc2_is_device_mode(dwc2);
+ 	if (is_device_mode)
+ 		dwc2_hsotg_suspend(dwc2);
+@@ -735,6 +793,11 @@ static int __maybe_unused dwc2_resume(struct device *dev)
+ 	if (!dwc2->ll_hw_enabled)
+ 		return 0;
+ 
++	if (dwc2->kept_for_s2idle) {
++		dwc2->kept_for_s2idle = 0;
++		return 0;
++	}
++
+ 	if (dwc2->phy_off_for_suspend && dwc2->ll_hw_enabled) {
+ 		ret = __dwc2_lowlevel_hw_enable(dwc2);
+ 		if (ret)

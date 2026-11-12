@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Eduardo Martins <eduardo@martins.ws>
+Date: Thu, 5 Nov 2026 13:16:15 -0600
+Subject: [PATCH] arm64: dts: apple: t8015: Add the touch clock
+
+Boards set clock-frequency to their ADT's TCLK rate; the iPhone X runs
+it at 24 MHz.
+
+Assisted-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/apple/t8015-pmgr.dtsi | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t8015-pmgr.dtsi b/arch/arm64/boot/dts/apple/t8015-pmgr.dtsi
+index 480e54ca3..6fa987b5e 100644
+--- a/arch/arm64/boot/dts/apple/t8015-pmgr.dtsi
++++ b/arch/arm64/boot/dts/apple/t8015-pmgr.dtsi
+@@ -6,6 +6,15 @@
+  */
+ 
+ &pmgr {
++	touchclk: clock-controller@78000 {
++		compatible = "apple,t8015-touch-clock", "apple,t8010-touch-clock";
++		reg = <0x78000 0x8>;
++		#clock-cells = <0>;
++		clocks = <&clkref>;
++		clock-output-names = "touchclk";
++		clock-frequency = <24000000>;
++	};
++
+ 	ps_cpu0: power-controller@80000 {
+ 		compatible = "apple,t8015-pmgr-pwrstate", "apple,pmgr-pwrstate";
+ 		reg = <0x80000 4>;

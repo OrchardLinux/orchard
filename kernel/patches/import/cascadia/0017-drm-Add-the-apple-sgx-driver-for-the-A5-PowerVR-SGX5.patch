@@ -1,20 +1,20 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: rzxvx <rrzxznewid@gmail.com>
-Date: Sat, 24 Oct 2026 04:27:56 +0300
+Date: Wed, 4 Nov 2026 00:29:27 +0300
 Subject: [PATCH] drm: Add the apple-sgx driver for the A5 PowerVR SGX543
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at c20b85e:
-  patches/files/drivers/gpu/drm/apple-sgx/Kconfig
-  patches/files/drivers/gpu/drm/apple-sgx/Makefile
-  patches/files/drivers/gpu/drm/apple-sgx/apple_sgx.h
-  patches/files/drivers/gpu/drm/apple-sgx/apple_sgx_drm.c
-  patches/files/drivers/gpu/drm/apple-sgx/apple_sgx_hw.c
-  patches/files/drivers/gpu/drm/apple-sgx/apple_sgx_kms.c
-  patches/files/include/uapi/drm/apple_sgx_drm.h
-  patches/tree/0001-cascadia.patch
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+  devices/a5/patches/files/drivers/gpu/drm/apple-sgx/Kconfig
+  devices/a5/patches/files/drivers/gpu/drm/apple-sgx/Makefile
+  devices/a5/patches/files/drivers/gpu/drm/apple-sgx/apple_sgx.h
+  devices/a5/patches/files/drivers/gpu/drm/apple-sgx/apple_sgx_drm.c
+  devices/a5/patches/files/drivers/gpu/drm/apple-sgx/apple_sgx_hw.c
+  devices/a5/patches/files/drivers/gpu/drm/apple-sgx/apple_sgx_kms.c
+  devices/a5/patches/files/include/uapi/drm/apple_sgx_drm.h
+  devices/a5/patches/tree/0001-cascadia.patch
 
-Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (23 commits);
-  Claude <noreply@anthropic.com> (5a7c341, 196c058, e086f6f)
+Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (24 commits);
+  Claude <noreply@anthropic.com> (5a7c341, 196c058, e086f6f, 2bc582d)
 
 [Orchard: imported for the apple-armv7 platform; see kernel/sources.toml]
 ---
@@ -1565,7 +1565,7 @@ index 000000000..06ba495d2
 +}
 diff --git a/drivers/gpu/drm/apple-sgx/apple_sgx_hw.c b/drivers/gpu/drm/apple-sgx/apple_sgx_hw.c
 new file mode 100644
-index 000000000..05591c672
+index 000000000..cb951ae9c
 --- /dev/null
 +++ b/drivers/gpu/drm/apple-sgx/apple_sgx_hw.c
 @@ -0,0 +1,2474 @@
@@ -2378,7 +2378,7 @@ index 000000000..05591c672
 +
 +	ret = request_firmware(&fw, SGX_FW_NAME, sgx->dev);
 +	if (ret) {
-+		dev_err(sgx->dev, "no %s (./cascadia firmware): %d\n",
++		dev_err(sgx->dev, "no %s (./cascadia a5 firmware): %d\n",
 +			SGX_FW_NAME, ret);
 +		return ret;
 +	}

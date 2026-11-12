@@ -1,6 +1,6 @@
 #!/bin/busybox sh
 # orchard's initrd for installed systems: load storage, mount the root that
-# root=PARTUUID= names, start its init. The same for every distribution and
+# root=PARTUUID= names (on a GPT or LwVM disk), start its init. The same for every distribution and
 # init system; only BusyBox and the platform's storage modules are inside.
 export PATH=/bin
 /bin/busybox --install -s /bin
@@ -10,6 +10,7 @@ mount -t devtmpfs -o mode=0755,nosuid dev /dev
 exec </dev/console >/dev/console 2>&1
 
 stop() {
+    echo "<3>orchard initrd: $1; rescue shell" > /dev/kmsg
     echo "orchard initrd: $1"
     echo 'Starting a shell on the console; the system did not start.'
     exec sh
@@ -25,11 +26,23 @@ for argument in $(cat /proc/cmdline); do
     init=*) init=${argument#init=} ;;
     esac
 done
-[ -n "$root" ] || stop 'the boot entry names no root=PARTUUID='
 
-for module in $(cat /etc/orchard/modules); do
-    modprobe "$module" || stop "could not load $module"
+# The USB gadget's modules, where the kernel has them as modules: without them
+# only USB is missing, so the boot goes on.
+[ ! -e /etc/orchard/usb-modules ] || for module in $(cat /etc/orchard/usb-modules); do
+    modprobe "$module" || echo "orchard initrd: could not load $module; no USB"
 done
+echo '<6>orchard initrd: storage load begin' > /dev/kmsg
+for module in $(cat /etc/orchard/modules); do
+    echo "<6>orchard initrd: modprobe $module begin" > /dev/kmsg
+    modprobe "$module" || stop "could not load $module"
+    echo "<6>orchard initrd: modprobe $module complete" > /dev/kmsg
+done
+
+# An install boot: orchard's add-on, appended to this initrd by the CLI, writes the
+# system with the host, then sets root to what it wrote. Normal boots don't have it.
+[ ! -e /install/run ] || . /install/run
+[ -n "$root" ] || stop 'the boot entry names no root=PARTUUID='
 
 # gpt_partuuid DISK SECTOR_SIZE NUMBER: the unique GUID of GPT entry NUMBER,
 # read from the disk itself: the kernel's uevent does not report PARTUUID.
@@ -44,6 +57,16 @@ gpt_partuuid() {
     echo "$4$3$2$1-$6$5-$8$7-$9${10}-${11}${12}${13}${14}${15}${16}"
 }
 
+# lwvm_partuuid DISK NUMBER: the GUID of LwVM entry NUMBER (32-bit boards' iOS
+# disk), from the header the kernel's LwVM reader reads too; its partition
+# numbers are the entries' numbers.
+lwvm_partuuid() {
+    [ "$(od -An -tx1 -v -N 16 "$1" | tr -d ' \n')" = 6a9088cf8afd630ae351e24887e0b98b ] || return 1
+    set -- $(od -An -tx1 -v -j $((512 + ($2 - 1) * 128 + 16)) -N 16 "$1")
+    [ "$*" != '00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00' ] || return 1
+    echo "$1$2$3$4-$5$6-$7$8-$9${10}-${11}${12}${13}${14}${15}${16}"
+}
+
 device=
 seconds=0
 while [ -z "$device" ]; do
@@ -52,7 +75,10 @@ while [ -z "$device" ]; do
         part=${number%/partition}
         disk=$(basename "$(dirname "$(readlink -f "$part")")")
         sector=$(cat "/sys/class/block/$disk/queue/logical_block_size")
-        if [ "$(gpt_partuuid "/dev/$disk" "$sector" "$(cat "$number")")" = "$root" ]; then
+        # A GPT first, as always; only a disk without one is asked for LwVM.
+        id=$(gpt_partuuid "/dev/$disk" "$sector" "$(cat "$number")") ||
+            id=$(lwvm_partuuid "/dev/$disk" "$(cat "$number")")
+        if [ "$id" = "$root" ]; then
             device=/dev/${part##*/}
             break
         fi
@@ -65,7 +91,34 @@ done
 
 mkdir -p /newroot
 mount ${fstype:+-t "$fstype"} -o "$mode${flags:+,$flags}" "$device" /newroot || stop "could not mount $device"
+echo '<6>orchard initrd: root mounted' > /dev/kmsg
 [ -x "/newroot$init" ] || [ -L "/newroot$init" ] || stop "the root has no $init"
+
+# Preserve the running boot's *pristine* tree before any package update can
+# replace /boot or same-release module assets. The matching initrd embeds cold
+# DTBs; warm boots name their retained stage instead. Never infer it by uname.
+mkdir -p /run /newroot/run
+mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run
+mkdir -p /run/orchard-kexec
+warm_pristine=
+for argument in $(cat /proc/cmdline); do
+    case "$argument" in orchard_warm.dtb=*) warm_pristine=${argument#orchard_warm.dtb=} ;; esac
+done
+if [ -n "$warm_pristine" ]; then
+    case "$warm_pristine" in
+        /var/tmp/orchard-warm.*/pristine.dtb)
+            case "$warm_pristine" in *..*) stop 'invalid warm DT provenance' ;; esac
+            cp "/newroot$warm_pristine" /run/orchard-kexec/pristine.dtb || stop 'missing warm pristine DT' ;;
+        *) stop 'invalid warm DT provenance' ;;
+    esac
+elif [ -f /etc/orchard/pristine-map ]; then
+    board=$(tr '\000' '\n' < /proc/device-tree/compatible | head -1)
+    while read compatible file; do
+        [ "$compatible" != "$board" ] || cp "/etc/orchard/dtbs/$file" /run/orchard-kexec/pristine.dtb
+done < /etc/orchard/pristine-map
+fi
+cat /proc/sys/kernel/random/boot_id > /run/orchard-kexec/boot-id
+mount --move /run /newroot/run || stop 'cannot retain boot provenance'
 
 # USB for the host: network (usb0) and a serial console (ttyGS0), named after
 # the system, so `orchard devices` sees it. What runs on them is the system's.
@@ -75,13 +128,29 @@ usb_gadget() {
     [ ! -e "$g" ] || return 0
     name=$(sed -n 's/^NAME=//p' /newroot/etc/os-release /newroot/usr/lib/os-release 2>/dev/null | head -1 | tr -d "\"'")
     board=$(tr '\000' '\n' < /proc/device-tree/compatible | head -1)
+    # Opt-in compatibility identity in macOS's 2400 mA capability table.
+    # This requests a host grant; it does not set a charger limit. Keep the
+    # generic composite personality (no iOS/usbmux or preferred-config API).
+    pid=0x4145
+    device_class=0x00 device_subclass=0x00 device_protocol=0x00
+    if [ "$board" = apple,j71t ] &&
+       [ "$(cat /newroot/etc/orchard/mac-usb-current 2>/dev/null)" = 1 ]; then
+        pid=0x1014
+        # Standard IAD device: macOS defers its CDC composite match here,
+        # allowing the generic composite driver to deliver the grant.
+        device_class=0xef device_subclass=0x02 device_protocol=0x01
+    fi
+    serial=$(sh /etc/orchard/usb-identity) || return 1
     mkdir "$g" &&
     echo 0x05ac > "$g/idVendor" &&
-    echo 0x4145 > "$g/idProduct" &&
+    echo "$pid" > "$g/idProduct" &&
+    echo "$device_class" > "$g/bDeviceClass" &&
+    echo "$device_subclass" > "$g/bDeviceSubClass" &&
+    echo "$device_protocol" > "$g/bDeviceProtocol" &&
     mkdir -p "$g/strings/0x409" "$g/configs/c.1/strings/0x409" &&
     echo 'Orchard Linux' > "$g/strings/0x409/manufacturer" &&
     echo "${name:-Linux}" > "$g/strings/0x409/product" &&
-    echo "BOOT:$(cat /proc/sys/kernel/random/boot_id) BOARD:${board#apple,}" > "$g/strings/0x409/serialnumber" &&
+    echo "$serial" > "$g/strings/0x409/serialnumber" &&
     echo 'USB network and serial' > "$g/configs/c.1/strings/0x409/configuration" &&
     echo 500 > "$g/configs/c.1/MaxPower" &&
     mkdir "$g/functions/ncm.usb0" "$g/functions/acm.usb0" &&
@@ -90,6 +159,7 @@ usb_gadget() {
     basename "$(ls -d /sys/class/udc/* | head -1)" > "$g/UDC"
 }
 usb_gadget || echo 'orchard initrd: no USB gadget; continuing without USB'
+echo '<6>orchard initrd: USB setup complete; switching root' > /dev/kmsg
 
 for name in dev proc sys; do
     mount --move "/$name" "/newroot/$name"

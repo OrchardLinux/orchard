@@ -14,7 +14,7 @@ from orchard.progress import Progress
 from orchard.apple import entries, usb, boot as apple_boot, adt_capture
 from orchard.apple.adt_tree import parse
 from orchard.transports import ssh
-from orchard import firmware, hardware
+from orchard import firmware, hardware, launcher
 from .adt import validate as validate_adt
 
 
@@ -30,7 +30,7 @@ class Device:
         self.NAME = identity['name']
         self.APPLE_PRODUCT = identity['apple_products'][0]
         # USB product of Orchard's recovery, the same on every device; absent until it has one.
-        self.PRODUCT = RECOVERY_PRODUCT if descriptor['match'].get('linux', {}).get('recovery') else None
+        self.PRODUCT = RECOVERY_PRODUCT if hardware.has_recovery(descriptor) else None
         self.CHIP = descriptor['match']['dfu']['chip']
         self.BOARD = descriptor['match']['dfu']['board']
         dtb = descriptor.get('kernel', {}).get('dtb')
@@ -40,9 +40,16 @@ class Device:
         self.INSTALL = not self.INSTALL_BLOCKERS
         self.STATUS = support.get('status', 'experimental')
         self.FEATURES = dict(descriptor.get('features', {}))
+        # Facts about the internal storage that the installer tells the person (service.caveats).
+        self.STORAGE = dict(descriptor.get('storage', {}))
+        # The boot method orchard-launcher starts this board with, when no method of orchard's own fits.
+        listed = descriptor.get('boot', {}).get('methods', [])
+        self.LAUNCHER_CHAIN = None if any(name in hardware.IMPLEMENTED_METHODS for name in listed) else \
+            next((name for name in listed if launcher.delivers(name)), None)
         self.REBOOT_MESSAGE = ('A fresh recovery boot is required.\n'
                                f'Put the {self.NAME} in DFU mode, then run: orchard install')
         self.firmware_inputs = partial(firmware.ensure, self.PROFILE)
+        self.firmware_cached = partial(firmware.cached, self.PROFILE)
         self.prepare_mixin = partial(firmware.mixin, self.PROFILE)
 
     def matches_dfu(self, device: Dict[str, Any]) -> bool:
@@ -81,11 +88,20 @@ class Device:
         DeviceState(self.PROFILE, device['ecid'])
         return cast(SelectedDevice, {**device, 'resumed': False})
 
+    def boot_inputs(self) -> List[Any]:
+        if self.LAUNCHER_CHAIN:
+            return []   # the launcher brings what its chain needs
+        return entries.inputs(entries.select(self._descriptor))
+
     def boot(self, device: SelectedDevice, assets: BootAssets,
              manifest: BootRequest, progress: Progress) -> None:
         return apple_boot.boot(device, assets, manifest, progress,
                                profile=self.PROFILE, chip=self.CHIP, board=self.BOARD, product=self.PRODUCT,
                                entry=entries.select(self._descriptor))
+
+    def boot_payload(self, device: SelectedDevice, payload: Path, pongo_image: Path, progress: Progress) -> Dict[str, Any]:
+        return apple_boot.boot_payload(device, payload, pongo_image, progress, profile=self.PROFILE, chip=self.CHIP,
+                                       board=self.BOARD, product=self.PRODUCT, entry=entries.select(self._descriptor))
 
     def start_loader(self, device: SelectedDevice, loader: Dict[str, Path], progress: Progress,
                      quiet: bool = False) -> str:

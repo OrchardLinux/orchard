@@ -8,7 +8,21 @@ Which entry suits a board isn't established yet, so nothing is refused by chip o
 from dataclasses import dataclass
 import os
 
+from orchard import tools
+
 DEFAULT = 'palera1n'
+
+
+@dataclass(frozen=True)
+class ToolInput:
+    """Something a chain needs on this computer before it can start: cached, or fetchable."""
+    name: str
+
+    def cached(self):
+        return tools.find(self.name) is not None
+
+    def fetch(self, progress=None, clock=None):
+        return tools.ensure_tool(self.name, progress=progress, clock=clock)
 
 
 @dataclass(frozen=True)
@@ -28,6 +42,11 @@ ENTRIES = {
     # Arguments from thisiscamk's J72 boot (orchard#59), the only measured use so far.
     'checkra1n': Entry('checkra1n', 'checkm8-pongo', ('-E', '-p', '-v', '-n', '-k'), False),
 }
+
+
+def inputs(name):
+    """What the entry NAME needs before it can start. A chain with bootware adds its inputs here."""
+    return [ToolInput(ENTRIES[name].tool)]
 
 
 def select(described=None):

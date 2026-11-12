@@ -6,8 +6,9 @@ the installer imported (orchard.computer_key); root is sudo, as on any OS.
 `orchard build` adds the usb-session helper and this host's RAM key to every
 payload unless orchard.toml says transport = false. The device's host key is
 generated per boot and pinned over USB serial, which is physical and trusted.
-SSH carries everything else. Without SSH, push and pull fall back to
-length-prefixed serial transfers checked by SHA-256.
+SSH carries everything else. Explicit network addresses use SSH's trust-on-first-use
+host key checking instead; verify the host key out of band on first connection.
+Without SSH, push and pull can use length-prefixed serial transfers checked by SHA-256.
 """
 import hashlib
 from importlib import resources
@@ -17,6 +18,7 @@ import shlex
 import subprocess
 import sys
 import time
+import uuid
 
 from .serial import SerialError, SerialPort
 from .state import cache_root, private_directory
@@ -48,7 +50,9 @@ def identity():
 def payload_files():
     """RAM-root files that enable the USB session in a payload."""
     helper = resources.files('orchard') / 'usb-session'
-    return {HELPER: Path(str(helper)), AUTHORIZED: identity().with_suffix('.pub')}
+    return {HELPER: Path(str(helper)),
+            'usr/libexec/orchard/usb-identity': Path(str(resources.files('orchard') / 'usb-identity')),
+            AUTHORIZED: identity().with_suffix('.pub')}
 
 
 def target():
@@ -68,17 +72,36 @@ def target():
 
 
 def _check(device):
+    # Stable descriptors identify the unit, not its boot. RAM SSH is pinned to
+    # the per-boot key read on the open ACM endpoint; a reboot invalidates it.
+    fields = ('location', 'mode', 'profile', 'usb_id', 'boot_id', 'serial_port')
     def check():
         from .apple import usb
-        if not any(item['location'] == device['location'] and item.get('boot_id') == device.get('boot_id')
+        if not any(all(item.get(key) == device.get(key) for key in fields)
                    for item in usb.devices()):
             raise ValueError('The RAM payload disconnected or rebooted')
     return check
 
 
-def connect(device=None, user=None):
-    """SSH argv for the running payload (its host key pinned over serial once
-    per boot) or installed system (as its user, with this computer's key)."""
+def connect(device=None, user=None, *, host=None, ram=False):
+    """SSH argv for the running payload (its boot and host key read over ACM)
+    or installed system (as its user, with this computer's key)."""
+    if ram and (not host or user):
+        raise ValueError('--ram requires --host and connects as root, not --user')
+    if host:
+        # Keep user input from being interpreted as SSH options or a user/port.
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.:-]*', host):
+            raise ValueError('Invalid SSH host address')
+        if ram:
+            hosts = _directory() / 'network_known_hosts'
+            argv = ssh_argv(identity(), hosts, host, 22)
+            argv[argv.index('StrictHostKeyChecking=yes')] = 'StrictHostKeyChecking=accept-new'
+            return argv
+        from . import computer_key
+        user = user or computer_key.user()
+        if not user:
+            raise ValueError('No user for this system; name one with --user')
+        return computer_key.ssh_argv(user, host=host)
     device = device or target()
     if device['mode'] == 'system':
         from . import computer_key
@@ -89,33 +112,46 @@ def connect(device=None, user=None):
         argv = computer_key.ssh_argv(user)
         wait_authenticated(argv, _check(device), seconds=20)
         return argv
-    boot = device.get('boot_id')
-    if not boot:
+    if not (device.get('boot_id') or device.get('usb_id')):
         raise ValueError('The RAM payload has no boot identity; rebuild it with a current orchard')
     check = _check(device)
+    # Query every connection: the same stable USB serial can name a new boot.
+    # ACM supplies both boot ID and trusted host key without changing any USB
+    # descriptor, and also works with payloads built before stable identities.
+    with SerialPort(device['serial_port'], check) as serial:
+        code, text = serial.run('cat /proc/sys/kernel/random/boot_id && '
+                                'cat /run/orchard/ssh_host_ed25519_key.pub', timeout=15)
+    if code:
+        raise ValueError('No SSH in this payload; its /init must run '
+                         '/' + HELPER + ' (or build without transport = false)')
+    lines = text.strip().splitlines()
+    try:
+        boot = str(uuid.UUID(lines[0].strip()))
+    except (ValueError, IndexError) as error:
+        raise ValueError('Invalid RAM boot identity over USB serial') from error
+    if device.get('boot_id') and boot != device['boot_id']:
+        raise ValueError('The RAM payload disconnected or rebooted')
+    pinned = HOST + ' ' + host_key('\n'.join(lines[1:])) + '\n'
     hosts = _directory() / f'known_hosts-{boot}'
+    if hosts.is_file() and hosts.read_text() != pinned:
+        raise ValueError('The RAM SSH host key changed within the same boot')
     if not hosts.is_file():
-        with SerialPort(device['serial_port'], check) as serial:
-            code, text = serial.run('cat /run/orchard/ssh_host_ed25519_key.pub', timeout=15)
-        if code:
-            raise ValueError('No SSH in this payload; its /init must run '
-                             '/' + HELPER + ' (or build without transport = false)')
         for old in _directory().glob('known_hosts-*'):
             old.unlink()
-        hosts.write_text(HOST + ' ' + host_key(text) + '\n')
+        hosts.write_text(pinned)
         hosts.chmod(0o600)
     argv = ssh_argv(identity(), hosts, HOST, 22)
     wait_authenticated(argv, check, seconds=20)
     return argv
 
 
-def shell(user=None):
-    argv = connect(user=user)
+def shell(user=None, *, host=None, ram=False):
+    argv = connect(user=user, host=host, ram=ram)
     return subprocess.run([*argv[:-1], '-t', argv[-1]]).returncode
 
 
-def run(command, user=None):
-    argv = connect(user=user)
+def run(command, user=None, *, host=None, ram=False):
+    argv = connect(user=user, host=host, ram=ram)
     return subprocess.run([*argv, PATH + ' '.join(map(shlex.quote, command))]).returncode
 
 
@@ -134,7 +170,7 @@ def _remote_sha256(text):
     return match.group(1)
 
 
-def _transfer(argv, command, *, stdin=None, stdout=None, user=None):
+def _transfer(argv, command, *, stdin=None, stdout=None, user=None, host=None, ram=False):
     """Run one transfer over SSH; on a dropped connection (exit 255), connect again and retry once.
 
     The device can stall long enough under load (a busy GPU) for SSH's
@@ -152,13 +188,15 @@ def _transfer(argv, command, *, stdin=None, stdout=None, user=None):
         if result.returncode != 255 or attempt == 2:
             break
         print('orchard: the connection to the device dropped; connecting again', file=sys.stderr)
-        argv = connect(user=user)
+        argv = connect(user=user, host=host, ram=ram)
     raise ValueError('The transfer failed: the connection to the device dropped twice'
                      if result.returncode == 255 else f'The transfer failed on the device (exit {result.returncode})')
 
 
-def push(local, remote, *, serial=False, user=None):
+def push(local, remote, *, serial=False, user=None, host=None, ram=False):
     """Copy a host file to the payload, written atomically and checked by SHA-256."""
+    if serial and (host or ram):
+        raise ValueError('--serial cannot be combined with --host or --ram')
     local, expected = Path(local), _sha256(local)
     part = remote + '.part'
     quoted, quoted_part = shlex.quote(remote), shlex.quote(part)
@@ -176,9 +214,9 @@ def push(local, remote, *, serial=False, user=None):
             if actual == expected:
                 code, text = port.run(f'mv {quoted_part} {quoted}')
     else:
-        argv = connect(user=user)
+        argv = connect(user=user, host=host, ram=ram)
         with local.open('rb') as stream:
-            argv = _transfer(argv, f'cat > {quoted_part}', stdin=stream, user=user)
+            argv = _transfer(argv, f'cat > {quoted_part}', stdin=stream, user=user, host=host, ram=ram)
         reply = subprocess.run([*argv, f'sha256sum {quoted_part}'], capture_output=True, text=True, check=True)
         actual = _remote_sha256(reply.stdout)
         if actual == expected:
@@ -188,8 +226,10 @@ def push(local, remote, *, serial=False, user=None):
     print(f'{local} -> {remote} ({local.stat().st_size} bytes, sha256 {expected[:16]})')
 
 
-def pull(remote, local, *, serial=False, user=None):
+def pull(remote, local, *, serial=False, user=None, host=None, ram=False):
     """Copy a payload file to the host, checked by SHA-256."""
+    if serial and (host or ram):
+        raise ValueError('--serial cannot be combined with --host or --ram')
     local, quoted = Path(local), shlex.quote(remote)
     partial = local.with_name(local.name + '.part')
     if serial:
@@ -204,11 +244,11 @@ def pull(remote, local, *, serial=False, user=None):
             size, expected = int(lines[0]), _remote_sha256(' '.join(lines[1:]))
             partial.write_bytes(port.capture_exact(f'cat {quoted}', size, timeout=60 + size // 8000))
     else:
-        argv = connect(user=user)
+        argv = connect(user=user, host=host, ram=ram)
         reply = subprocess.run([*argv, f'sha256sum {quoted}'], capture_output=True, text=True, check=True)
         expected = _remote_sha256(reply.stdout)
         with partial.open('w+b') as stream:
-            _transfer(argv, f'cat {quoted}', stdout=stream, user=user)
+            _transfer(argv, f'cat {quoted}', stdout=stream, user=user, host=host, ram=ram)
     if _sha256(partial) != expected:
         raise ValueError(f'{remote}: checksum mismatch after transfer; left as {partial}')
     partial.replace(local)

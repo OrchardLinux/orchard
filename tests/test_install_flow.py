@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import Mock, patch
 
@@ -49,7 +50,10 @@ def layout(partitions, free):
 
 
 class InstallFlow(unittest.TestCase):
-    def run_install(self, disk, answers, outcome='ok', account=True, ready=None):
+    document = {'name': 'Omarchy'}
+
+    def run_install(self, disk, answers, outcome='ok', account=True, ready=None, input_fn=None, on_resolve=None,
+                    before_full_download=None):
         work = tempfile.TemporaryDirectory()
         self.addCleanup(work.cleanup)
         root = Path(work.name)
@@ -76,20 +80,69 @@ class InstallFlow(unittest.TestCase):
         status = self.status = Mock()
         status.call.return_value = {'release': '1.0'}
         replies, prompts = iter(answers), []
+
+        def resolved(*_, purpose='install', **__):
+            if on_resolve:
+                on_resolve()
+            if before_full_download and purpose == 'install':
+                before_full_download()
+            return record, {'root': image, 'layer': layer}
         with patch('orchard.service.choose', return_value=(adapter, {'mode': 'linux', 'ecid': 1, 'resumed': True})), \
-             patch('orchard.service.select_manifest', return_value=({'name': 'Omarchy'}, None)), \
-             patch('orchard.service.resolve', return_value=(record, {'root': image, 'layer': layer})), \
+             patch('orchard.service.select_manifest', return_value=(self.document, None)), \
+             patch('orchard.service.resolve', side_effect=resolved), \
              patch('orchard.service.Client', return_value=status), \
              patch('orchard.computer_key.public_keys', return_value=['ssh-ed25519 ' + 'A' * 68]), \
              patch('orchard.computer_key.remember_user') as remembered, \
              patch('orchard.service.check_started', return_value=None) as check, \
              patch('orchard.state.cache_root', return_value=root / 'cache'):
             output = io.StringIO()
-            result = install(input_fn=lambda text: prompts.append(text) or next(replies),
+            result = install(input_fn=input_fn or (lambda text: prompts.append(text) or next(replies)),
                              secrets_fn=lambda account: {'password': 'long enough', 'pin': '424242'},
                              progress=Progress(output))
         self.check = check
         return result, store, prompts, output.getvalue()
+
+    def test_downloads_run_while_the_person_answers(self):
+        disk = layout([{'number': 1, 'start': 6, 'blocks': 3 * GIB // 4096, 'type': APFS,
+                        'partuuid': '00000000-0000-4000-8000-000000000001'}],
+                      [{'start': 3 * GIB // 4096 + 6, 'blocks': 20 * GIB // 4096}])
+        started, answers = threading.Event(), iter(['', '', ''])
+
+        def answer(_):
+            self.assertTrue(started.wait(5), 'no download had started at the first question')
+            return next(answers)
+        self.run_install(disk, [], input_fn=answer, on_resolve=started.set)
+
+    def test_the_last_question_does_not_wait_for_the_system_to_download(self):
+        disk = layout([{'number': 1, 'start': 6, 'blocks': 3 * GIB // 4096, 'type': APFS,
+                        'partuuid': '00000000-0000-4000-8000-000000000001'}],
+                      [{'start': 3 * GIB // 4096 + 6, 'blocks': 20 * GIB // 4096}])
+        answered, order = threading.Event(), []
+
+        def answer(prompt):
+            order.append(prompt)
+            if prompt.startswith('Allow SSH'):
+                answered.set()
+            return ''
+
+        def before_full_download():
+            self.assertTrue(answered.wait(10), 'the system download held up the questions')
+            order.append('download finished')
+        result, store, _, _ = self.run_install(disk, [], input_fn=answer, before_full_download=before_full_download)
+        self.assertEqual(order[-1], 'download finished')
+        self.assertIn('Choose [1]: ', order)
+        self.assertEqual((store / 'root-stream').read_bytes(), b'root-stream')
+
+    def test_a_declared_account_is_asked_before_the_device_is_needed(self):
+        disk = layout([{'number': 1, 'start': 6, 'blocks': 3 * GIB // 4096, 'type': APFS,
+                        'partuuid': '00000000-0000-4000-8000-000000000001'}],
+                      [{'start': 3 * GIB // 4096 + 6, 'blocks': 20 * GIB // 4096}])
+        account = {'user': 'tablet', 'password': True, 'pin': True, 'passwordless_sudo': False}
+        with patch.object(InstallFlow, 'document', {'name': 'Omarchy', 'install': {'account': account}}):
+            result, store, prompts, output = self.run_install(disk, ['', '', ''])
+        self.assertEqual(prompts, ['Continue? [Y/n] ', 'Allow SSH logins from this computer? [Y/n] ', 'Choose [1]: '])
+        self.assertEqual(json.loads((store / 'secrets.json').read_text()), {'password': 'long enough', 'pin': '424242'})
+        self.assertEqual(json.loads((store / 'plan.json').read_text())['account']['user'], 'tablet')
 
     def test_free_space_install_uploads_script_plan_secrets_and_streams_the_root(self):
         disk = layout([{'number': 1, 'start': 6, 'blocks': 3 * GIB // 4096, 'type': APFS,

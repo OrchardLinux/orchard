@@ -1,23 +1,24 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: rzxvx <rrzxznewid@gmail.com>
-Date: Sat, 24 Oct 2026 05:22:43 +0300
+Date: Wed, 4 Nov 2026 06:40:30 +0100
 Subject: [PATCH] power: supply: Add the Apple PMU charger and HDQ battery
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at c20b85e:
-  patches/files/drivers/power/supply/apple-hdq-battery.c
-  patches/files/drivers/power/supply/apple-pmu-charger.c
-  patches/tree/0001-cascadia.patch
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+  devices/a5/patches/files/drivers/power/supply/apple-hdq-battery.c
+  devices/a5/patches/files/drivers/power/supply/apple-pmu-charger.c
+  devices/a5/patches/tree/0001-cascadia.patch
 
 Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (4 commits);
+  Marcolist <marco@neuraliquid.dev> (057baf1, 8fa828f)
   liquidmetal-Hg <liquidmetal-Hg@users.noreply.github.com> (0a4002d)
 
 [Orchard: imported for the apple-armv7 platform; see kernel/sources.toml]
 ---
  drivers/power/supply/Kconfig             |  16 +
  drivers/power/supply/Makefile            |   2 +
- drivers/power/supply/apple-hdq-battery.c | 273 ++++++++++++++++
- drivers/power/supply/apple-pmu-charger.c | 382 +++++++++++++++++++++++
- 4 files changed, 673 insertions(+)
+ drivers/power/supply/apple-hdq-battery.c | 276 ++++++++++++++++
+ drivers/power/supply/apple-pmu-charger.c | 392 +++++++++++++++++++++++
+ 4 files changed, 686 insertions(+)
  create mode 100644 drivers/power/supply/apple-hdq-battery.c
  create mode 100644 drivers/power/supply/apple-pmu-charger.c
 
@@ -63,10 +64,10 @@ index 8dcb41545..e3c9ca945 100644
  obj-$(CONFIG_BATTERY_BQ27XXX_HDQ) += bq27xxx_battery_hdq.o
 diff --git a/drivers/power/supply/apple-hdq-battery.c b/drivers/power/supply/apple-hdq-battery.c
 new file mode 100644
-index 000000000..703cc3ca4
+index 000000000..79efdfade
 --- /dev/null
 +++ b/drivers/power/supply/apple-hdq-battery.c
-@@ -0,0 +1,273 @@
+@@ -0,0 +1,276 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * The iPad mini 1's battery gauge: a TI bq27540 on HDQ, its one-wire bus,
@@ -225,7 +226,10 @@ index 000000000..703cc3ca4
 +	ret = hdq_refresh(b);
 +	mutex_unlock(&b->lock);
 +	if (psp == POWER_SUPPLY_PROP_PRESENT) {
-+		val->intval = ret == 0;
++		/* A refresh failure leaves battery presence unknown. */
++		if (ret)
++			return ret;
++		val->intval = 1;
 +		return 0;
 +	}
 +	if (ret)
@@ -342,10 +346,10 @@ index 000000000..703cc3ca4
 +MODULE_LICENSE("GPL");
 diff --git a/drivers/power/supply/apple-pmu-charger.c b/drivers/power/supply/apple-pmu-charger.c
 new file mode 100644
-index 000000000..5b34d9da9
+index 000000000..132aa7071
 --- /dev/null
 +++ b/drivers/power/supply/apple-pmu-charger.c
-@@ -0,0 +1,382 @@
+@@ -0,0 +1,392 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * The iPad mini 1's USB input current limit: D1946 PMU register 0x3d.
@@ -386,7 +390,8 @@ index 000000000..5b34d9da9
 + *    then it logs what it would do.  Disarming puts back the value it found
 + *    at probe.
 + *  - Above 45 C on the battery gauge it drops to 100 mA, and stays there
-+ *    until below 40 C.  iBEC's charge table ends at 45 C.
++ *    until below 40 C. Missing/failed temperature also selects this fallback.
++ *    iBEC's charge table ends at 45 C. This is derating, not charge inhibition.
 + */
 +#include <linux/delay.h>
 +#include <linux/devm-helpers.h>
@@ -528,9 +533,17 @@ index 000000000..5b34d9da9
 +	union power_supply_propval t;
 +	struct power_supply *bat = power_supply_get_by_name("battery");
 +
-+	if (!bat)
-+		return c->hot;
-+	if (!power_supply_get_property(bat, POWER_SUPPLY_PROP_TEMP, &t)) {
++	if (!bat) {
++		c->hot = true;
++		return true;
++	}
++	if (power_supply_get_property(bat, POWER_SUPPLY_PROP_TEMP, &t)) {
++		/* Missing temperature is not permission to raise the input limit.
++		 * Keep the existing hysteresis before accepting a cool sample again.
++		 * The minimum input profile is derating, not proven charge cutoff.
++		 */
++		c->hot = true;
++	} else {
 +		if (!c->hot && t.intval > HOT_DECI_C) {
 +			c->hot = true;
 +			dev_warn(c->dev, "battery at %d.%d C: input limited to 100 mA\n",
@@ -564,6 +577,15 @@ index 000000000..5b34d9da9
 +	u8 st, cur, target;
 +
 +	mutex_lock(&c->lock);
++	if (c->was_armed && !is_armed) {
++		if (pmu_chg_write(c, PMU_ILIM, c->probe_code))
++			goto out; /* Leave restoration pending for the next poll. */
++		dev_info(c->dev, "disarmed: 0x3d back to 0x%02x\n", c->probe_code);
++		c->last_written = 0;
++		c->logged_code = 0;
++		c->was_armed = false;
++		goto out;
++	}
 +	if (pmu_chg_read(c, PMU_STATUS0, &st) || pmu_chg_read(c, PMU_ILIM, &cur))
 +		goto out;
 +	online = st & PMU_STATUS0_VBUS;
@@ -576,14 +598,6 @@ index 000000000..5b34d9da9
 +			c->last_written = 0;	/* a new session: a low 0x3d now is not a sag */
 +	}
 +
-+	if (c->was_armed && !is_armed) {
-+		dev_info(c->dev, "disarmed: 0x3d back to 0x%02x\n", c->probe_code);
-+		pmu_chg_write(c, PMU_ILIM, c->probe_code);
-+		c->last_written = 0;
-+		c->logged_code = 0;
-+		c->was_armed = false;
-+		goto out;
-+	}
 +	if (!online)
 +		goto out;
 +

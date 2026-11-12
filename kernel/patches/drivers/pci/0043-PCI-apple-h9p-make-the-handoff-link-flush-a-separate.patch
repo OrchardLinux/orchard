@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 16:18:38 +0000
+Subject: [PATCH] PCI: apple-h9p: make the handoff link flush a separate
+ opt-in
+
+Waiting for the link-up status to fall under PERST before LTSSM is
+stopped was tied to the sleep path. A warm handoff can see the same
+stale status, but not every board needs the wait.
+
+Do the flush in the outgoing kexec shutdown path only, and only when
+apple,ans-kexec-link-flush is set, so it stays off unless a board asks
+for it. The incoming kernel restarts the storage port with the cold-boot
+power cycle, which needs no flush.
+
+Assisted-by: LLM
+---
+ drivers/pci/controller/pcie-apple-h9p.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/drivers/pci/controller/pcie-apple-h9p.c b/drivers/pci/controller/pcie-apple-h9p.c
+index 7a0a832e3..46c24f2b5 100644
+--- a/drivers/pci/controller/pcie-apple-h9p.c
++++ b/drivers/pci/controller/pcie-apple-h9p.c
+@@ -3894,7 +3894,12 @@ static void apple_h9p_s8003_shutdown(struct platform_device *pdev)
+ 			apple_cold_reset("Apple PCIe: PERST failed during handoff");
+ 			return;
+ 		}
++		if (!port && of_property_read_bool(pcie->dev->of_node, "apple,ans-kexec-link-flush")) {
++			u32 val;
+ 
++			readl_poll_timeout(pcie->base_port[0] + S8003_PORT_LINKSTS,
++				val, !(val & S8003_PORT_LINKSTS_UP), 100, 100000);
++		}
+ 		if (apple_s8003_port_stop(pcie, port)) {
+ 			apple_cold_reset("Apple PCIe: LTSSM stop failed during handoff");
+ 			return;

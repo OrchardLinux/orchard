@@ -104,7 +104,7 @@ jobs:
     strategy:
       matrix:
         # Every platform with a kernel series; distribution releases cover all of them.
-        platform: [apple-16k, apple-4k]
+        platform: [apple-16k, apple-4k, apple-armv7]
     defaults:
       run:
         shell: bash
@@ -168,7 +168,7 @@ jobs:
       - name: Install the combined toolchain once
         if: inputs.reuse_run_id == ''
         run: |
-          bash ci/install-toolchains recovery m1n1
+          bash ci/install-toolchains recovery recovery-arm m1n1
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - name: Build static recovery tools
         if: inputs.reuse_run_id == ''
@@ -176,6 +176,16 @@ jobs:
           OMA_RECOVERY_TOOLS_WORK="$PWD/out/recovery-tools" bash boot/initramfs/recovery/build-tools
           mkdir -p out/components/boot
           cp out/recovery-tools/bin/* out/components/boot/
+      - name: Build the ARMv7 tools and the boards' Cascadia loaders
+        if: inputs.reuse_run_id == ''
+        run: |
+          OMA_RECOVERY_TOOLS_WORK="$PWD/out/recovery-tools-arm" bash boot/initramfs/recovery/build-tools --arch arm
+          mkdir -p out/components/boot-arm
+          cp out/recovery-tools-arm/bin/* out/components/boot-arm/
+          for profile in devices/*/cascadia.toml; do
+            board=$(basename "$(dirname "$profile")")
+            python3 boot/cascadia/build --profile "$profile" --output "$PWD/out/components/cascadia/$board"
+          done
       - name: Build quiet loader
         if: inputs.reuse_run_id == ''
         run: |
@@ -191,12 +201,57 @@ jobs:
           compression-level: 0
           if-no-files-found: error
           retention-days: 2
-  pongo:
+  pongo-check:
+    # Pongo only builds on a Mac and doesn't change: while its recipe matches the last
+    # nightly's, use that nightly's Pongo, so a Mac shortage can't hold up a nightly.
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changed.outputs.nightly == 'true'
     needs: [native-smoke, changed]
-    runs-on: macos-15
-    timeout-minutes: 60
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      runner: ${{ steps.check.outputs.runner }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: check
+        env:
+          REUSE_RUN: ${{ inputs.reuse_run_id }}
+        run: |
+          tag= runner=macos-15
+          [[ -n "$REUSE_RUN" ]] && runner=ubuntu-24.04
+          if [[ -z "$REUSE_RUN" ]] && pointer=$(curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/nightly/latest.json"); then
+            commit=$(jq -r .commit <<<"$pointer")
+            if git fetch -q --depth 1 origin "$commit" && \
+               git diff --quiet "$commit" HEAD -- boot/quiet/build-pongo.py boot/quiet/pongo.patch; then
+              tag=$(jq -r .name <<<"$pointer") runner=ubuntu-24.04
+            fi
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "runner=$runner" >> "$GITHUB_OUTPUT"
+          if [[ -n "$tag" ]]; then echo "Pongo: from $tag, recipe unchanged" >> "$GITHUB_STEP_SUMMARY"; fi
+  pongo:
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changed.outputs.nightly == 'true'
+    needs: [native-smoke, changed, pongo-check]
+    runs-on: ${{ needs.pongo-check.outputs.runner }}
+    timeout-minutes: 60
+    env:
+      PONGO_TAG: ${{ needs.pongo-check.outputs.tag }}
+    steps:
+      - name: Use the Pongo of the last nightly
+        if: needs.pongo-check.outputs.tag != ''
+        run: |
+          mkdir -p out/quiet
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$PONGO_TAG"
+          curl -fsSL -o out/SHA256SUMS "$base/SHA256SUMS"
+          curl -fsSL -o out/quiet/pongo.bin "$base/pongo.bin"
+          curl -fsSL -o out/pongo-source.tar.gz "$base/pongo-source.tar.gz"
+          for file in pongo.bin pongo-source.tar.gz; do
+            sum=$(awk -v name="./$file" '$2 == name {print $1}' out/SHA256SUMS)
+            path=out/$file; [[ $file == pongo.bin ]] && path=out/quiet/pongo.bin
+            echo "$sum  $path" | sha256sum -c -
+          done
+          tar -C out/quiet -czf out/quiet-pongo.tar.gz pongo.bin
       - name: Reuse unchanged successful outputs
         if: inputs.reuse_run_id != ''
         uses: actions/download-artifact@v4
@@ -206,21 +261,21 @@ jobs:
           run-id: ${{ inputs.reuse_run_id }}
           github-token: ${{ github.token }}
       - uses: actions/checkout@v4
-        if: inputs.reuse_run_id == ''
+        if: inputs.reuse_run_id == '' && needs.pongo-check.outputs.tag == ''
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
-        if: inputs.reuse_run_id == ''
+        if: inputs.reuse_run_id == '' && needs.pongo-check.outputs.tag == ''
         with:
           python-version: '3.14'
       - name: Fingerprint the Apple toolchain
-        if: inputs.reuse_run_id == ''
+        if: inputs.reuse_run_id == '' && needs.pongo-check.outputs.tag == ''
         id: toolchain
         run: |
           fingerprint=$({ sw_vers; xcodebuild -version; xcrun --sdk iphoneos --show-sdk-build-version; xcrun clang --version; } | shasum -a 256 | awk '{print $1}')
           echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v4
-        if: inputs.reuse_run_id == ''
+        if: inputs.reuse_run_id == '' && needs.pongo-check.outputs.tag == ''
         id: pongo-cache
         with:
           path: |
@@ -228,13 +283,13 @@ jobs:
             out/pongo-source.tar.gz
           key: quiet-pongo-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('boot/quiet/build-pongo.py', 'boot/quiet/pongo.patch') }}
       - name: Build quiet Pongo once (including newlib)
-        if: steps.pongo-cache.outputs.cache-hit != 'true' && inputs.reuse_run_id == ''
+        if: steps.pongo-cache.outputs.cache-hit != 'true' && inputs.reuse_run_id == '' && needs.pongo-check.outputs.tag == ''
         run: |
           python boot/quiet/build-pongo.py --output out/quiet/pongo.bin --work-dir out/pongo-work
           tar -C out/quiet -czf out/quiet-pongo.tar.gz pongo.bin
           tar -C out/pongo-work/source --exclude=.git -czf out/pongo-source.tar.gz .
       - name: Record cache usage
-        if: inputs.reuse_run_id == ''
+        if: inputs.reuse_run_id == '' && needs.pongo-check.outputs.tag == ''
         env:
           CACHE_HIT: ${{ steps.pongo-cache.outputs.cache-hit }}
         run: |
@@ -275,10 +330,13 @@ jobs:
           tar -xzf out/downloads/quiet-pongo.tar.gz -C out/components/quiet
           # One bundle per platform carries its kernel, modules and every DTB, and the
           # shared tools and loaders; devices/<device>/device.toml names a device's DTB.
-          for platform in apple-16k apple-4k; do
+          # The tools and loaders are arm64: apple-armv7's bundle is its kernel alone.
+          for platform in apple-16k apple-4k apple-armv7; do
             mkdir -p "out/platforms/$platform"
             tar -xzf "out/downloads/kernel-components-$platform.tar.gz" -C "out/platforms/$platform"
-            cp -R out/components/boot out/components/quiet out/components/*.lock "out/platforms/$platform/components/"
+            if [[ $platform != apple-armv7 ]]; then
+              cp -R out/components/boot out/components/quiet out/components/*.lock "out/platforms/$platform/components/"
+            fi
             python ci/package_components.py --platform "$platform" --directory "out/platforms/$platform/components" \
               --output "out/publication/$platform-components.tar.gz"
           done
@@ -301,13 +359,24 @@ jobs:
           python -m pip install -e .
           python -m orchard.installer core out/publication/orchard-core.pyz \
             --pongo out/components/quiet/pongo.bin --m1n1 out/components/quiet/m1n1.bin
+          # Each platform's finished kernel, the installer's tools, and the index a
+          # distribution builds its release from, so it stops copying any of them.
+          python -m orchard.image.platforms_index out/publication --kernels out/platforms \
+            --tools out/components/boot --commit "$GITHUB_SHA"
+          # The same for 32-bit roots, next to it: platforms-armv7.toml.
+          loaders=()
+          for loader in out/components/cascadia/*/loader.bin; do
+            loaders+=(--loader "$(basename "$(dirname "$loader")")=$loader")
+          done
+          python -m orchard.image.platforms_index out/publication --architecture arm --kernels out/platforms \
+            --tools out/components/boot-arm --commit "$GITHUB_SHA" "${loaders[@]}"
           # tool-components.tar.gz stays: a distribution build takes its tools from it.
           rm out/publication/kernel-components-*.tar.gz out/publication/quiet-pongo.tar.gz
           # Source keys of each platform's kernel, m1n1 and the tools: a distribution build
           # with the same state uses these instead of building them (orchard.published).
-          python -m orchard.published keys --output out/publication/component-keys.json apple-16k apple-4k
+          python -m orchard.published keys --output out/publication/component-keys.json apple-16k apple-4k apple-armv7
           git archive --format=tar.gz -o out/publication/orchard-source.tar.gz HEAD
-          (cd out/publication && sha256sum ./*.tar.gz ./*.bin ./*.pyz ./component-keys.json > SHA256SUMS)
+          (cd out/publication && sha256sum ./*.tar.gz ./*.bin ./*.pyz ./component-keys.json ./platforms.toml ./platforms-armv7.toml > SHA256SUMS)
       - name: Attest public build
         if: toJSON(github.event.repository.private) == 'false'
         id: attest

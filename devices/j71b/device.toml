@@ -12,9 +12,6 @@ dt_compatible = ["apple,j71b"]
 chip = 0x8010
 board = 0x18
 
-[match.linux]
-recovery = true
-
 [boot]
 methods = ["checkm8-pongo"]
 
@@ -34,7 +31,7 @@ display = "working"
 screen_off = "working"
 backlight = "working"
 touch = "working"
-buttons = "untested"
+buttons = "working" # Power, Home and volume keys in daily use on the desktop.
 accelerometer = "working"
 gyroscope = "missing"
 light_sensor = "missing"

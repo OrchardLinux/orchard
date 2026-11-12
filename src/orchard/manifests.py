@@ -39,12 +39,17 @@ def sources(document):
     if document['kind'] == 'orchard.index':
         yield 'release', document['release']
     elif document['kind'] in ('orchard.install', 'orchard.boot'):
-        for name in ('root', 'boot', 'pongo'):
+        for name in ('root', 'boot', 'pongo', 'logo', 'm1n1', 'install_tools'):
             if name in document:
                 yield name, document[name]
+        if 'map' in document.get('root', {}):
+            yield 'root.map', document['root']['map']
+        for board, receipt in document.get('cascadia', {}).items():
+            yield f'cascadia.{board}', receipt
         for platform, row in document.get('platforms', {}).items():
             for name in ('boot', 'layer'):
-                yield f'platforms.{platform}.{name}', row[name]
+                if name in row:     # a release that installs from a block image has no recovery
+                    yield f'platforms.{platform}.{name}', row[name]
 
 
 def check_source(source, where):

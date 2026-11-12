@@ -1,6 +1,7 @@
 """Terminal progress, private diagnostics and non-overlapping installation timing."""
 from contextlib import contextmanager
 import os
+import shutil
 import sys
 import tempfile
 import threading
@@ -11,6 +12,8 @@ class Clock:
     def __init__(self):
         self.started = time.monotonic()
         self.excluded = {'download': 0.0, 'input': 0.0}
+        self.not_counted = 0.0      # time in any exclusion: downloads now overlap with questions
+        self.outside = None
         self.phases = []
         self.lock = threading.Lock()
         self.active = {}
@@ -18,7 +21,10 @@ class Clock:
     @contextmanager
     def exclude(self, kind):
         with self.lock:
-            count, began = self.active.get(kind, (0, time.monotonic()))
+            now = time.monotonic()
+            if not self.active:
+                self.outside = now
+            count, began = self.active.get(kind, (0, now))
             self.active[kind] = (count + 1, began)
         try:
             yield
@@ -26,14 +32,20 @@ class Clock:
             with self.lock:
                 count, began = self.active[kind]
                 if count == 1:
-                    self.excluded[kind] += time.monotonic() - began
+                    now = time.monotonic()
+                    self.excluded[kind] += now - began
                     del self.active[kind]
+                    if not self.active:
+                        self.not_counted += now - self.outside
                 else:
                     self.active[kind] = (count - 1, began)
 
     def result(self):
-        elapsed = time.monotonic() - self.started
-        return {'install_seconds': max(0, elapsed - sum(self.excluded.values())),
+        now = time.monotonic()
+        elapsed = now - self.started
+        with self.lock:
+            running = now - self.outside if self.active else 0.0
+        return {'install_seconds': max(0, elapsed - self.not_counted - running),
                 'elapsed_seconds': elapsed, 'excluded_seconds': dict(self.excluded)}
 
 
@@ -53,43 +65,112 @@ class Progress:
         self.opened = self.started
         self.timings = []
         self.indent = ''
+        self.held = None        # the thread that may print while background rows wait
+        self.deferred = []
+        self.beside = None      # main-thread messages go to this row of the block, not lines of their own
 
     def task(self, name):
         return TaskProgress(self, name)
+
+    @contextmanager
+    def alongside(self, name):
+        """While background rows are drawing: messages of this work show as one more row among them."""
+        with self.lock:
+            self.beside = name
+            self.row(name, '…')
+        try:
+            yield
+        finally:
+            with self.lock:
+                self.beside = None
+
+    def pause(self):
+        """Background rows stay quiet from here: they redraw in place, over whatever is being typed."""
+        with self.lock:
+            self.held = threading.current_thread()
+
+    def resume(self):
+        with self.lock:
+            self.held = None
+            for line in self.deferred:
+                print(line, file=self.output, flush=True)
+            self.deferred.clear()
+
+    @contextmanager
+    def hold(self):
+        self.pause()
+        try:
+            yield
+        finally:
+            self.resume()
 
     def end_line(self):
         if self.active_line:
             # A step or transfer line in place is cleared, not left behind.
             print('\r\033[2K', end='', file=self.output, flush=True)
             self.active_line = False
-        self.rows.clear()
-        self.rendered = 0
+        if not self.held:
+            self.rows.clear()
+            self.rendered = 0
+
+    def draw_rows(self):
+        if self.interactive and self.rows:
+            if self.rendered:
+                self.output.write(f'\033[{self.rendered}A')
+            # A wrapped row would break the move back up over the block.
+            width = shutil.get_terminal_size().columns - 1
+            for label, text in self.rows.items():
+                self.output.write(f'\r\033[2K' + f'  {label:<16.16} {text}'[:width] + '\n')
+            self.output.flush()
+            self.rendered = len(self.rows)
 
     def say(self, message):
         """A line of its own, outside any section's indent (headings, questions' context)."""
         with self.lock:
+            if self.beside:
+                # An instruction has to stay readable: above the block, not replaced by the next status.
+                if self.interactive and self.rendered:
+                    self.output.write(f'\033[{self.rendered}A\033[J')
+                    self.rendered = 0
+                print('  ' + message, file=self.output, flush=True)
+                self.draw_rows()
+                return
             self.end_line()
             print(message, file=self.output, flush=True)
 
-    def section(self, title):
-        """A blank line and a title; what follows is indented under it."""
+    def section(self, title, *, keep_rows=False):
+        """A blank line and a title; what follows is indented under it. KEEP_ROWS: background rows go on under it."""
         with self.lock:
+            rows = dict(self.rows) if keep_rows else {}
+            if self.beside:
+                self.timings.append([round(time.monotonic() - self.opened, 1), title])
+                self.row(self.beside, title, complete=True)
+                return
             self.end_line()
             bold = ('\033[1m', '\033[0m') if self.interactive else ('', '')
             print(f'\n{bold[0]}{title}{bold[1]}', file=self.output, flush=True)
             self.indent = '  '
             self.timings.append([round(time.monotonic() - self.opened, 1), title])
+            self.rows.update(rows)
+            self.draw_rows()
 
     def step(self, message):
         """The current step of a section: one line, replaced by the next step."""
         with self.lock:
             self.timings.append([round(time.monotonic() - self.opened, 1), message])
-            if self.interactive:
+            if self.beside:
+                self.row(self.beside, message, complete=True)
+            elif self.interactive:
                 self.end_line()
                 print('\r\033[2K' + self.indent + message, end='', file=self.output, flush=True)
                 self.active_line = True
             else:
                 print(self.indent + message, file=self.output, flush=True)
+
+    def mark(self, message):
+        """A point in the operation's report, not shown."""
+        with self.lock:
+            self.timings.append([round(time.monotonic() - self.opened, 1), message])
 
     def done(self, message=None):
         """End the current step line, leaving MESSAGE (if any) in its place."""
@@ -102,6 +183,13 @@ class Progress:
 
     def phase(self, message):
         with self.lock:
+            if self.held and self.held is not threading.current_thread():
+                self.deferred.append(self.indent + message)
+                return
+            if self.beside:
+                self.timings.append([round(time.monotonic() - self.opened, 1), message])
+                self.row(self.beside, message, complete=True)
+                return
             self.end_line()
             print(self.indent + message, file=self.output, flush=True)
             # Where the time goes: kept for the operation's report, not shown.
@@ -130,7 +218,9 @@ class Progress:
                 return
             self.last = now
             message = transfer_text(sent, total, self.started, self.initial, now)
-            if sent == total:
+            if self.beside:
+                self.row(self.beside, message, complete=sent == total)
+            elif sent == total:
                 # Done: the phase line above says what it was; no stray size line.
                 if self.active_line:
                     print('\r\033[2K', end='', file=self.output, flush=True)
@@ -153,13 +243,10 @@ class Progress:
     def row(self, name, message, *, complete=False):
         with self.lock:
             self.rows[name] = message
+            if self.held:
+                return
             if self.interactive:
-                if self.rendered:
-                    self.output.write(f'\033[{self.rendered}A')
-                for label, text in self.rows.items():
-                    self.output.write(f'\r\033[2K  {label:<16.16} {text}\n')
-                self.output.flush()
-                self.rendered = len(self.rows)
+                self.draw_rows()
             elif complete:
                 print(f'  {name:<16.16} {message}', file=self.output, flush=True)
 

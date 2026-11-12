@@ -1,5 +1,5 @@
 # iPhone 8 Plus (Global) (D21): identity from public sources
-# (tools/catalog/generate). No Orchard bring-up yet; see docs/device-bring-up.md.
+# (tools/catalog/generate). In its platform's kernel, no bring-up yet; see docs/device-bring-up.md.
 schema = 1
 kind = "hardware.device"
 
@@ -16,5 +16,42 @@ board = 0x04
 [boot]
 methods = ["checkm8-pongo"] # palera1n's device list (palera.in); not run with Orchard yet.
 
-[catalog]
-dtb = "t8015-d21" # Exists in OrchardLinux/linux; not enabled here yet.
+[kernel]
+platform = "apple-16k"
+dtb = "t8015-d21" # arch/arm64/boot/dts/apple/<dtb>.dtb
+
+[firmware]
+recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until bring-up needs it.
+
+[support]
+status = "experimental"
+
+# States: working, untested, missing, none (features.toml). Nothing here has run on
+# this board with Orchard: "untested" means a driver binds in its device tree
+# (tools/catalog/drivers.json), plus the display's boot console.
+[features]
+display = "untested"
+screen_off = "missing"
+backlight = "untested"
+touch = "missing"
+buttons = "missing"
+accelerometer = "missing"
+gyroscope = "missing"
+light_sensor = "missing"
+touch_id = "missing"
+storage_read = "untested"
+storage_write = "untested"
+wifi = "missing"
+bluetooth_input = "missing"
+bluetooth_audio = "missing"
+cellular = "missing"
+battery = "untested"
+charging = "missing"
+charging_control = "missing"
+suspend = "untested"
+resume = "untested"
+usb_serial = "untested"
+usb_network = "untested"
+audio_output = "missing"
+audio_input = "missing"
+camera = "missing"

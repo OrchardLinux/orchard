@@ -9,7 +9,8 @@ import tempfile
 import tomllib
 
 from . import version
-from .hardware import IMPLEMENTED_METHODS, device as hardware_device
+from .hardware import IMPLEMENTED_METHODS, device as hardware_device, method_implemented
+from .launcher import delivers as launcher_delivers
 from .cache import cache_root
 from .downloads import download
 from .http import open_url
@@ -164,8 +165,9 @@ def select_manifest(source, profile, progress=None, clock=None, purpose='install
         raise ValueError('Manifest is not compatible with this device')
     if document['boot_method'] not in described.get('boot', {}).get('methods', []):
         raise ValueError(f'{profile} does not boot with {document["boot_method"]}')
-    if document['boot_method'] not in IMPLEMENTED_METHODS:
-        raise ValueError('This Orchard build implements only ' + ', '.join(sorted(IMPLEMENTED_METHODS)))
+    if not method_implemented(document['boot_method']):
+        raise ValueError('This Orchard build implements only ' + ', '.join(sorted(IMPLEMENTED_METHODS)) +
+                         (f'; {document["boot_method"]} needs orchard-launcher' if launcher_delivers(document['boot_method']) else ''))
     if document['protocol'] != 1:
         raise ValueError('Unsupported device protocol; this manifest is for another Orchard version')
     actual = tuple(int(part) for part in version().split('.'))
@@ -177,6 +179,49 @@ def select_manifest(source, profile, progress=None, clock=None, purpose='install
     return document, bundle
 
 
+def direct(document):
+    """Whether this release installs from a block image, with no recovery (install_direct.py)."""
+    return document.get('root', {}).get('format') == 'blocks'
+
+
+def receipts_for(document, profile, purpose):
+    """(platform, {role: receipt}) of what an install or a boot of this manifest needs."""
+    platform = platform_for(document, profile)
+    files = document['platforms'][platform]
+    if direct(document) and 'cascadia' in document:
+        # A 32-bit release: the board's Cascadia loader instead of Pongo and m1n1.
+        if profile not in document['cascadia']:
+            raise ValueError(f'This release has no Cascadia loader for {profile}')
+        receipts = {'layer': files['layer'], 'cascadia': document['cascadia'][profile],
+                    'install_tools': document['install_tools']}
+        if purpose == 'install':
+            receipts.update(root=document['root'], map=document['root']['map'])
+        return platform, receipts
+    receipts = {'pongo': document['pongo'], 'layer': files['layer']}
+    if direct(document):
+        receipts.update(m1n1=document['m1n1'], install_tools=document['install_tools'])
+        if 'logo' in document:
+            receipts['logo'] = document['logo']
+        if purpose == 'install':
+            receipts.update(root=document['root'], map=document['root']['map'])
+    else:
+        receipts['recovery'] = files['boot']
+        if purpose == 'install':
+            receipts['root'] = document['root']
+        else:
+            del receipts['layer']
+    return platform, receipts
+
+
+def needs_download(document, profile):
+    """Whether an install of this manifest would download any file; looks at names, hashes nothing."""
+    if document.get('kind') != 'orchard.install':
+        return False
+    folder = cache_root() / 'artifacts/sha256'
+    return any('file' not in receipt and not (folder / receipt['sha256']).exists()
+               for receipt in receipts_for(document, profile, 'install')[1].values())
+
+
 def resolve(manifest, profile, progress=None, clock=None, purpose='install'):
     """The selected release's record and verified local files for PROFILE.
 
@@ -185,16 +230,13 @@ def resolve(manifest, profile, progress=None, clock=None, purpose='install'):
     """
     document, bundle = select_manifest(manifest, profile, progress, clock, purpose)
     if document['kind'] == 'orchard.install':
-        platform = platform_for(document, profile)
-        files = document['platforms'][platform]
-        receipts = {'pongo': document['pongo'], 'recovery': files['boot']}
-        if purpose == 'install':
-            receipts.update(root=document['root'], layer=files['layer'])
+        platform, receipts = receipts_for(document, profile, purpose)
     else:
         platform = None
         receipts = {'pongo': document['pongo'], 'recovery': document['boot']}
     labels = {'pongo': 'Pongo', 'recovery': 'Recovery', 'root': document.get('name', 'Linux'),
-              'layer': 'Kernel and modules'}
+              'layer': 'Kernel and modules', 'map': 'Image map', 'logo': 'Logo',
+              'm1n1': 'm1n1', 'install_tools': 'Install tools', 'cascadia': 'Cascadia loader'}
     paths = {}
     with ThreadPoolExecutor(max_workers=len(receipts)) as pool:
         futures = {role: pool.submit(materialize, receipt, bundle, progress, clock, label=labels[role])

@@ -1,0 +1,20 @@
+{
+  "schema": 2,
+  "device": "iPad4,9",
+  "ipsw": {
+    "version": "12.5.8",
+    "build": "16H88",
+    "url": "https://updates.cdn-apple.com/2026WinterFCS/fullrestores/047-28568/4BF067D1-9411-43EF-AC86-8A6AAC1E2B0C/iPad_64bit_TouchID_12.5.8_16H88_Restore.ipsw",
+    "bytes": 2955525138,
+    "sha256": "f675a8a994abdead4619bcc40248ca733e7526ccb84d593f7542ef86670afb15"
+  },
+  "inputs": {
+    "DeviceTree.im4p": {
+      "ipsw": {
+        "zip": "Firmware/all_flash/DeviceTree.j87map.im4p"
+      },
+      "sha256": "f2abde9b646e922a09afeae7209a7fbe5c21240832118eb3b5d20f34de6358e5"
+    }
+  },
+  "outputs": []
+}

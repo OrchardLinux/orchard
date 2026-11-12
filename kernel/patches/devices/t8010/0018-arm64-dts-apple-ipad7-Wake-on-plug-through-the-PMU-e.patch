@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sat, 7 Nov 2026 02:15:50 +0800
+Subject: [PATCH] arm64: dts: apple: ipad7: Wake on plug, through the PMU event
+ line
+
+The iPad 7 device tree left the PMU event line out as "not described yet".
+The J171 ADT describes it exactly as on the iPad 6: PMU interrupt on AP GPIO
+38, flags 1, from a pmu,d2365. Use it, and give the D2365 charger the plug
+event 72. The event number comes from the iPad 6, whose PMIC this is.
+Untested on an iPad 7.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8010-ipad7.dtsi | 9 ++-------
+ 1 file changed, 2 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8010-ipad7.dtsi b/arch/arm64/boot/dts/apple/t8010-ipad7.dtsi
+index 8d3fa0467884..e0dff4b4183a 100644
+--- a/arch/arm64/boot/dts/apple/t8010-ipad7.dtsi
++++ b/arch/arm64/boot/dts/apple/t8010-ipad7.dtsi
+@@ -29,13 +29,6 @@ &usbdev {
+ 	/delete-node/ port;
+ };
+ 
+-/* The PMU event line of the iPad 7 is not described yet. */
+-&pmu_gpio {
+-	/delete-property/ interrupt-controller;
+-	/delete-property/ #interrupt-cells;
+-	/delete-property/ interrupts-extended;
+-};
+-
+ &battery_info {
+ 	charge-full-design-microamp-hours = <8557000>;
+ };
+@@ -108,6 +101,8 @@ d2365_charger: charger@180 {
+ 		compatible = "apple,j172-d2365-charger", "apple,d2365-charger";
+ 		reg = <0x180 0x1e>, <0xa00 0x0d>;
+ 		reg-names = "status", "control";
++		interrupt-parent = <&pmu_gpio>;
++		interrupts = <72 IRQ_TYPE_EDGE_RISING>;
+ 		power-supplies = <&usb_power>;
+ 	};
+ };
