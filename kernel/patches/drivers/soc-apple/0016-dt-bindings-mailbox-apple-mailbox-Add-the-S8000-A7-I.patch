@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 09:00:00 +0100
+Subject: [PATCH] dt-bindings: mailbox: apple,mailbox: Add the S8000 A7 IOP
+ mailbox
+
+The A9's always-on processor talks to the application processor
+through the same A7 IOP mailbox as the A10's. Add its compatible, with
+the T8010's as the fallback.
+
+[Orchard: from orchard PR #101, commit a54e2049; drivers/mailbox/0001
+ without the reload wording, the entry placed after the T8010's]
+
+Assisted-by: LLM
+---
+ .../devicetree/bindings/mailbox/apple,mailbox.yaml          | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/mailbox/apple,mailbox.yaml b/Documentation/devicetree/bindings/mailbox/apple,mailbox.yaml
+index ba035ff..ea414a8 100644
+--- a/Documentation/devicetree/bindings/mailbox/apple,mailbox.yaml
++++ b/Documentation/devicetree/bindings/mailbox/apple,mailbox.yaml
+@@ -59,6 +59,12 @@ properties:
+         items:
+           - const: apple,t8010-a7iop-mailbox
+ 
++      - description:
++          The same A7 IOP mailbox on the A9.
++        items:
++          - const: apple,s8000-a7iop-mailbox
++          - const: apple,t8010-a7iop-mailbox
++
+   reg:
+     maxItems: 1
+ 
+-- 
+2.54.0 (Apple Git-157)
+
