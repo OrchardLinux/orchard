@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 15:07:47 +0000
+Subject: [PATCH] drm/apple-g5p: default to the measured pipeline
+ configuration
+
+[Orchard: from brkosebay/linux 78775ea3b9ebd50647653d6e3b115447e5e75f9d;
+fixed source defaults, no production module controls.] Preserve the
+measured opt1 chain in dependency order.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/apple-g5p/drm-render-v3.inc | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+index 81f346623..c6c895756 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+@@ -54,7 +54,7 @@ static const bool render_user_ordered_waits = true;
+  * recovery bridge (terminal note and the observation-only CAPTURE entry); it is nothing without it.
+  */
+ 
+-static const bool render_user_abs_stamps;
++static const bool render_user_abs_stamps = true; /* opt1: measured configuration */
+ 
+ /*
+  * F5, depth-2 job pipelining (docs/gpu/lane-a2-ta-done-latency-spec.md §4.3; latched per job at
+@@ -69,7 +69,7 @@ static const bool render_user_abs_stamps;
+  * held from N's TA publish to N+1's 3D retire (Henrik's 0004: TA and 3D of one job adjacent,
+  * no other context's phase between them).
+  */
+-static const uint render_user_pipeline_depth = 1;
++static const uint render_user_pipeline_depth = 2;
+ 
+ /* F5: consecutive ahead starts before the executor lets one job end with the core lock released,
+  * so a VM bind or an idle step waiting for that lock is never starved by a busy context.
+@@ -83,8 +83,8 @@ static const uint render_user_pipeline_depth = 1;
+  * bumps d->ahead_poke, until a job is started or N's 3D is seen done.  Apple kicks on submit
+  * (AGXChannelQueue_submitBlockInvoke).  A no-op at render_user_pipeline_depth 1.
+  */
+-/* F2.1: Apple's pending-PM-record rule, read per job; default keeps tag6. */
+-static const bool render_user_pm_record;
++/* F2.1: Apple's pending-PM-record rule, read per job; 0 always emits tag6. */
++static const bool render_user_pm_record = true;
+ 
+ static const bool render_user_ahead_on_submit = true;
+ 
+@@ -365,7 +365,7 @@ static int g5p_rv3_errno(struct g5p_diag *g, int ret)
+  * 64-byte line, before every RAM sample of an in-flight phase.  RAM only, and an idle GPU
+  * has no sampler, so it costs nothing then.
+  */
+-static const bool render_user_joint;
++static const bool render_user_joint = true;
+ static const unsigned int render_user_fw_ready_mode = 2;
+ 
+ static void g5p_rv3_fw_touch(struct g5p_boot *b, const struct g5p_render *render)

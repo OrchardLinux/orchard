@@ -1,0 +1,286 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 15:07:47 +0000
+Subject: [PATCH] drm/apple-g5p: honor fragment-only own-context waits and
+ attribute ahead decisions
+
+[Orchard: from brkosebay/linux fd3bb22d5f627fdb6f88308d4b18c95a58a6f3dc;
+fixed source defaults, no production module controls.] Preserve the
+measured opt1 chain in dependency order.
+
+Assisted-by: LLM
+---
+ drivers/gpu/apple-g5p/render-user-jobtime.h |  5 ++
+ drivers/gpu/drm/apple-g5p/a9-gpu-drm.c      | 10 +--
+ drivers/gpu/drm/apple-g5p/drm-render-v3.inc | 28 +++++++--
+ drivers/gpu/drm/apple-g5p/drm-render.inc    | 69 ++++++++++++++++++++-
+ include/uapi/drm/apple_g5p_drm.h            |  7 +++
+ 5 files changed, 105 insertions(+), 14 deletions(-)
+
+diff --git a/drivers/gpu/apple-g5p/render-user-jobtime.h b/drivers/gpu/apple-g5p/render-user-jobtime.h
+index 61e2de97f..96ae1d258 100644
+--- a/drivers/gpu/apple-g5p/render-user-jobtime.h
++++ b/drivers/gpu/apple-g5p/render-user-jobtime.h
+@@ -19,9 +19,11 @@ struct g5p_jt {
+ 	u64 bell_cyc[2], hit_cyc[2], hard_cyc[2], exec_cyc, signal_cyc;
+ 	u64 prev_signal_cyc;
+ 	u8 src[2];
++	u8 dep_own, dep_full, why;
+ 	bool abs_enabled;
+ };
+ struct g5p_jt_stats {
++	u64 dep_own, dep_full, why[16];
+ 	u64 jobs, failed, joint, ahead, ta_ticks, td_ticks;
+ 	u64 ioctl_ns, queue_ns, prep_ns, ta_wait_ns, gap_ns, td_wait_ns;
+ 	u64 tail_ns, touch_ns, bell_ns, samples;
+@@ -52,6 +54,9 @@ static inline void g5p_jt_fold(struct g5p_jt_stats *s, const struct g5p_jt *j)
+ 	if (g5p_jt_has_ovh(j))
+ 		s->ovh_ns += g5p_jt_ovh_ns(j);
+ 	s->jobs++;
++	s->dep_own += j->dep_own;
++	s->dep_full += j->dep_full;
++	if (j->why < 16) s->why[j->why]++;
+ 	s->failed += j->ret != 0;
+ 	s->joint += !!(j->flags & 4);
+ 	s->ahead += !!(j->flags & 8); /* F5: started while the previous job's 3D ran */
+diff --git a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+index f9ed3aad0..09fa937a9 100644
+--- a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
++++ b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+@@ -208,10 +208,10 @@ static void g5p_jt_abs_line(char *buf, size_t size, const struct g5p_jt *j)
+ 			g5p_jt_cyc_us(ta1, j->hit_cyc[0]),
+ 			g5p_jt_cyc_us(j->flags & 4 ? ta1 : j->bell_cyc[1], td0),
+ 			g5p_jt_cyc_us(td0, td1), g5p_jt_cyc_us(td1, j->hit_cyc[1]));
+-	n += scnprintf(buf + n, size - n, " irqth=%lld/%lld src=%u/%u pgap=%lld",
++	n += scnprintf(buf + n, size - n, " irqth=%lld/%lld src=%u/%u pgap=%lld dep=%u/%u why=%u",
+ 		j->src[0] == 1 ? g5p_jt_cyc_us(j->hard_cyc[0], j->hit_cyc[0]) : -1LL,
+ 		j->src[1] == 1 ? g5p_jt_cyc_us(j->hard_cyc[1], j->hit_cyc[1]) : -1LL,
+-		j->src[0], j->src[1], g5p_jt_cyc_us(j->prev_signal_cyc, j->exec_cyc));
++		j->src[0], j->src[1], g5p_jt_cyc_us(j->prev_signal_cyc, j->exec_cyc), j->dep_own, j->dep_full, j->why);
+ 	if (j->abs_enabled)
+ 		n += scnprintf(buf + n, size - n,
+ 			" wp=%08x,%08x/%08x,%08x raw=%llx,%llx,%llx,%llx",
+@@ -282,12 +282,12 @@ static int g5p_gpu_stats_show(struct seq_file *m, void *unused)
+ 	spin_unlock_irqrestore(&d->status_lock, flags);
+ 	seq_printf(
+ 		m,
+-		"now_ns=%llu since_ns=%llu jobs=%llu failed=%llu ta_ticks=%llu td_ticks=%llu ioctl_ns=%llu queue_ns=%llu prep_ns=%llu ta_wait_ns=%llu gap_ns=%llu td_wait_ns=%llu tail_ns=%llu touch_ns=%llu bell_ns=%llu samples=%llu ta_irq_ns=%llu td_irq_ns=%llu ta_decide_ns=%llu td_decide_ns=%llu joint=%llu ovh_ns=%lld ahead=%llu\n",
++		"now_ns=%llu since_ns=%llu jobs=%llu failed=%llu ta_ticks=%llu td_ticks=%llu ioctl_ns=%llu queue_ns=%llu prep_ns=%llu ta_wait_ns=%llu gap_ns=%llu td_wait_ns=%llu tail_ns=%llu touch_ns=%llu bell_ns=%llu samples=%llu ta_irq_ns=%llu td_irq_ns=%llu ta_decide_ns=%llu td_decide_ns=%llu joint=%llu ovh_ns=%lld ahead=%llu dep_own=%llu dep_full=%llu aheadwhy=%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
+ 		now, s.since_ns, s.jobs, s.failed, s.ta_ticks, s.td_ticks,
+ 		s.ioctl_ns, s.queue_ns, s.prep_ns, s.ta_wait_ns, s.gap_ns,
+ 		s.td_wait_ns, s.tail_ns, s.touch_ns, s.bell_ns, s.samples,
+ 		s.ta_irq_ns, s.td_irq_ns, s.ta_decide_ns, s.td_decide_ns,
+-		s.joint, s.ovh_ns, s.ahead);
++		s.joint, s.ovh_ns, s.ahead, s.dep_own, s.dep_full, s.why[0], s.why[1], s.why[2], s.why[3], s.why[4], s.why[5], s.why[6], s.why[7], s.why[8], s.why[9], s.why[10], s.why[11], s.why[12], s.why[13], s.why[14], s.why[15]);
+ 	return 0;
+ }
+ static int g5p_gpu_stats_open(struct inode *inode, struct file *file)
+@@ -433,7 +433,7 @@ static int g5p_get_info(struct drm_device *drm, void *data,
+ 	;
+ 	;
+ 	{
+-		caps |= DRM_G5P_CAP_TYPED_RENDER_V3 |
++		caps |= DRM_G5P_CAP_SYNC_WAIT_3D | DRM_G5P_CAP_TYPED_RENDER_V3 |
+ 			DRM_G5P_CAP_RENDER_MULTI_CONTEXT |
+ 			DRM_G5P_CAP_RENDER_PIXEL_OUTPUT_WIDTH |
+ 			DRM_G5P_CAP_RENDER_OCCLUSION_QUERY;
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+index 18b33b2e5..85cb08d38 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+@@ -1,3 +1,6 @@
++/* F5b: honour DRM_G5P_SYNC_WAIT_3D (drop this context's own fences from a 3D-only input). A no-op
++ * at render_user_pipeline_depth 1: a job is picked only after its predecessor retired. */
++static const bool render_user_ordered_waits = true;
+ /* SPDX-License-Identifier: GPL-2.0-only OR MIT */
+ /*
+  * TYPED_V3 serial executor: the control flow that completed the natural TA and the
+@@ -2886,7 +2889,7 @@ static u32 g5p_rv3_ahead_why(struct g5p_drm *d, struct g5p_render *r,
+  * yet signalled gets the scheduler's callback, as at a pick.  NULL: none.
+  */
+ static struct g5p_rjob *g5p_rv3_ahead_next(struct g5p_drm *d,
+-					   struct g5p_render *r, bool pop)
++					   struct g5p_render *r, bool pop, u32 *why)
+ {
+ 	struct g5p_rdev *rd = d->rdev;
+ 	struct g5p_rs_entity *e = &r->entity;
+@@ -2894,14 +2897,19 @@ static struct g5p_rjob *g5p_rv3_ahead_next(struct g5p_drm *d,
+ 	unsigned long flags, deadline = 0;
+ 
+ 	spin_lock_irqsave(&rd->sched_lock, flags);
++	if (why) *why = 10;
+ 	if (e->in_run && !list_empty(&e->jobs)) {
+ 		struct g5p_rs_job *head =
+ 			list_first_entry(&e->jobs, struct g5p_rs_job, link);
+ 		struct g5p_rjob *j = container_of(head, struct g5p_rjob, node);
+ 
+-		if (j->v3 && !j->compute && !j->setup_error && !j->dep_error &&
+-		    g5p_rsched_ready(head, d, &deadline) && !j->dep_error)
++		if (!j->v3 || j->compute || j->setup_error || j->dep_error) {
++			if (why) *why = 11;
++		} else if (!g5p_rsched_ready(head, d, &deadline) || j->dep_error) {
++			if (why) *why = 12;
++		} else {
+ 			next = j;
++		}
+ 		if (next && pop) {
+ 			list_del_init(&head->link);
+ 			if (list_empty(&e->jobs) && !e->close_pending) {
+@@ -3000,16 +3008,24 @@ static void g5p_rv3_ahead(struct g5p_drm *d, struct g5p_render *r,
+ 	bool pm2 = !r->js_pm2[g5p_rv3_js(rd, cur->rv3.seq)];
+ 	struct g5p_rjob *next;
+ 
+-	if (g5p_rv3_ahead_why(d, r, cur) || !g5p_rv3_ahead_next(d, r, false) ||
+-	    (pm2 && !g5p_rv3_pm2_ready(d, r, cur->rv3.seq + 1))) {
++	u32 why = 0;
++	int ret = g5p_rv3_ahead_why(d, r, cur);
++	if (ret) why = ret + 1;
++	else if (!g5p_rv3_ahead_next(d, r, false, &why)) { }
++	else if (pm2 && !g5p_rv3_pm2_ready(d, r, cur->rv3.seq + 1)) why = 13;
++	else why = 0;
++	if (why) {
++		cur->jt.why = why;
+ 		rd->ahead_skipped++;
+ 		return;
+ 	}
+-	next = g5p_rv3_ahead_next(d, r, true);
++	next = g5p_rv3_ahead_next(d, r, true, NULL);
+ 	if (!next) {
++		cur->jt.why = 14;
+ 		rd->ahead_skipped++;
+ 		return;
+ 	}
++	cur->jt.why = 1;
+ 	g5p_rv3_ahead_start(d, r, cur, next);
+ }
+ 
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render.inc b/drivers/gpu/drm/apple-g5p/drm-render.inc
+index 2cd6737d1..d51dc945a 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render.inc
+@@ -362,6 +362,7 @@ struct g5p_rjob {
+ 	struct g5p_fence *fence;
+ 	struct dma_fence *inputs[G5P_MAX_SYNCS - 1];
+ 	u32 input_count;
++	u32 input_3d;
+ 	struct g5p_robj *objs;
+ 	u32 obj_count;
+ 	struct dma_fence **deps; /* implicit dependencies from dma_resv */
+@@ -988,6 +989,60 @@ static int g5p_render_implicit(struct g5p_rjob *job, u64 own_context)
+ }
+ 
+ /* Free the mappings unmapped beside jobs up to fence seqno `seqno` (all: every one). */
++/* F5b (render_user_ordered_waits): a 3D-only input (DRM_G5P_SYNC_WAIT_3D) needs none of this
++ * context's own earlier jobs: they are ahead of this job in the context's FIFO, and their 3D runs
++ * before this job's on the one 3D ring (TA N+1 may overlap 3D N, which a 3D-only wait allows).
++ * Each such input is replaced by its other unsignalled leaves; a leaf signalled with an error is
++ * kept, so the job still fails before the hardware.  No room for the leaves: keep it whole.
++ * Called before the job is pushed (dep_next 0).  Own-leaf errors after this point are covered by
++ * ctx->bad and the two-in-flight drain, not dep_error.  dma_fence_get_status() takes the fence
++ * lock: fine here (process context, before the push); keep the locked variant.
++ */
++static void g5p_render_order_inputs(struct g5p_rjob *job, u64 own)
++{
++	struct dma_fence *keep[ARRAY_SIZE(job->inputs)];
++	u32 n = 0;
++
++	for (u32 i = 0; i < job->input_count; i++) {
++		struct dma_fence *f = job->inputs[i], *leaf;
++		struct dma_fence_unwrap it;
++		u32 own_n = 0, other = 0, room;
++
++		if (!(job->input_3d & BIT(i))) {
++			keep[n++] = f;
++			continue;
++		}
++		dma_fence_unwrap_for_each(leaf, &it, f) {
++			if (dma_fence_is_signaled(leaf) && dma_fence_get_status(leaf) >= 0)
++				continue;
++			if (leaf->context == own && !dma_fence_is_signaled(leaf))
++				own_n++;
++			else
++				other++;
++		}
++		room = ARRAY_SIZE(job->inputs) - n - (job->input_count - i - 1);
++		if (!own_n || other > room) {
++			if (own_n && job->jt.dep_full < 255)
++				job->jt.dep_full++;
++			keep[n++] = f;
++			continue;
++		}
++		dma_fence_unwrap_for_each(leaf, &it, f) {
++			if (dma_fence_is_signaled(leaf) && dma_fence_get_status(leaf) >= 0)
++				continue;
++			if (leaf->context == own && !dma_fence_is_signaled(leaf))
++				continue;
++			if (n < ARRAY_SIZE(keep))
++				keep[n++] = dma_fence_get(leaf);
++		}
++		job->jt.dep_own = min(255U, job->jt.dep_own + own_n);
++		dma_fence_put(f);
++	}
++	memcpy(job->inputs, keep, n * sizeof(*keep));
++	job->input_count = n;
++	job->input_3d = 0;
++}
++
+ static void g5p_render_reap(struct g5p_render *r, u64 seqno, bool all)
+ {
+ 	struct g5p_mapping *m, *t;
+@@ -1714,9 +1769,12 @@ static int g5p_render_syncs(struct drm_file *file, struct g5p_rjob *job,
+ 			    syncs[i].point == syncs[j].point &&
+ 			    syncs[i].flags == syncs[j].flags)
+ 				return -EINVAL;
+-		if (syncs[i].flags & ~DRM_G5P_SYNC_SIGNAL)
++		if (syncs[i].flags & ~(DRM_G5P_SYNC_SIGNAL | DRM_G5P_SYNC_WAIT_3D))
++			return -EINVAL;
++		if ((syncs[i].flags & DRM_G5P_SYNC_SIGNAL) &&
++		    (syncs[i].flags & DRM_G5P_SYNC_WAIT_3D))
+ 			return -EINVAL;
+-		if (syncs[i].flags) {
++		if (syncs[i].flags & DRM_G5P_SYNC_SIGNAL) {
+ 			if (*signal)
+ 				return -EINVAL;
+ 			*signal = drm_syncobj_find(file, syncs[i].handle);
+@@ -1733,12 +1791,14 @@ static int g5p_render_syncs(struct drm_file *file, struct g5p_rjob *job,
+ 					     &job->inputs[job->input_count]);
+ 		if (ret)
+ 			return ret;
++		if (syncs[i].flags & DRM_G5P_SYNC_WAIT_3D)
++			job->input_3d |= BIT(job->input_count);
+ 		job->input_count++;
+ 	}
+ 	if (!*signal)
+ 		return -EINVAL;
+ 	for (u32 i = 0; i < count; i++)
+-		if (!syncs[i].flags && syncs[i].handle == signal_handle &&
++		if (!(syncs[i].flags & DRM_G5P_SYNC_SIGNAL) && syncs[i].handle == signal_handle &&
+ 		    (!*point || !syncs[i].point || syncs[i].point >= *point))
+ 			return -EINVAL;
+ 	if (*point) {
+@@ -2299,6 +2359,9 @@ static int g5p_render_submit_admitted(struct drm_device *drm,
+ 	}
+ 	*job_id = job->id;
+ 	job->deadline = jiffies + msecs_to_jiffies(G5P_RU_INPUT_MS);
++	if (job->input_3d && READ_ONCE(render_user_ordered_waits))
++		g5p_render_order_inputs(job, r->fence_context);
++	job->input_3d = 0;
+ 	job->setup_error = g5p_render_implicit(job, r->fence_context);
+ 	drm_dev_get(drm);
+ 	job->jt.id = job->id;
+diff --git a/include/uapi/drm/apple_g5p_drm.h b/include/uapi/drm/apple_g5p_drm.h
+index 5e41ab533..174e5957e 100644
+--- a/include/uapi/drm/apple_g5p_drm.h
++++ b/include/uapi/drm/apple_g5p_drm.h
+@@ -628,4 +628,11 @@ struct drm_g5p_submit_compute_typed {
+ 	DRM_IOWR(DRM_COMMAND_BASE + DRM_G5P_SUBMIT_COMPUTE_TYPED, \
+ 		 struct drm_g5p_submit_compute_typed)
+ 
++/* An input that gates only the job's 3D (fragment) stage. The kernel drops the parts of it that
++ * are this render context's own earlier jobs (same-context 3D runs in queue order); every other
++ * fence still gates the whole job. Not with DRM_G5P_SYNC_SIGNAL. Needs DRM_G5P_CAP_SYNC_WAIT_3D. */
++#define DRM_G5P_SYNC_WAIT_3D (1U << 1)
++/* DRM_G5P_CAP_SYNC_WAIT_3D - drm_g5p_sync.flags accepts DRM_G5P_SYNC_WAIT_3D */
++#define DRM_G5P_CAP_SYNC_WAIT_3D (1ULL << 34)
++
+ #endif
