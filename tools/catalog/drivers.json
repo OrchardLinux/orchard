@@ -193,6 +193,7 @@
       "touch",
       "usb_network",
       "usb_serial",
+      "video_decode_hevc",
       "wifi"
     ],
     "j71s": [
@@ -206,7 +207,8 @@
       "light_sensor",
       "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "video_decode_hevc"
     ],
     "j71t": [
       "audio_output",
@@ -222,6 +224,7 @@
       "touch",
       "usb_network",
       "usb_serial",
+      "video_decode_hevc",
       "wifi"
     ],
     "j72b": [
@@ -238,6 +241,7 @@
       "touch",
       "usb_network",
       "usb_serial",
+      "video_decode_hevc",
       "wifi"
     ],
     "j72s": [
@@ -251,7 +255,8 @@
       "light_sensor",
       "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "video_decode_hevc"
     ],
     "j72t": [
       "audio_output",
@@ -267,6 +272,7 @@
       "touch",
       "usb_network",
       "usb_serial",
+      "video_decode_hevc",
       "wifi"
     ],
     "j73": [

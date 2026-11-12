@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 21:25:37 +0100
+Subject: [PATCH] media: apple-vxd: Enable HEVC on the S8000 and T8010 decoders
+
+AppleD5500 advertises HEVCSupported for vxd-version 7, 9 and 10 and keys
+its HEVC choices on that version (VACreateDecodeDeviceHEVC,
+0xfffffff006293f2c, called with the ADT vxd-version): the aux-line and
+stream-state buffers are scaled by 2 from version 9 on, versions 7 and 9
+write 0x7474 twice after every slice structure, and the 0x701c line
+split starts from 0x1800 instead of 0xc00 from version 10 on.  Give the
+S8000 (vxd-version 7, A9) and T8010 (10, A10) variants those values,
+which turns the HEVC unit on for both.
+
+The J71t decodes HEVC bit-exact against software decoding; the T8010
+has not been tried yet.
+
+[Orchard: from orchard PR #121, commit 4016f5e2; the S8000 variant without the sleep_stop flag of PR #117 (not on main); message updated: HEVC decodes on the J71t]
+
+Assisted-by: LLM
+---
+diff --git a/drivers/media/platform/apple/vxd/apple-vxd-core.c b/drivers/media/platform/apple/vxd/apple-vxd-core.c
+index 97d388f..2940978 100644
+--- a/drivers/media/platform/apple/vxd/apple-vxd-core.c
++++ b/drivers/media/platform/apple/vxd/apple-vxd-core.c
+@@ -249,11 +249,22 @@ static const struct dev_pm_ops apple_vxd_pm_ops = {
+ 	RUNTIME_PM_OPS(apple_vxd_runtime_suspend, apple_vxd_runtime_resume, NULL)
+ };
+ 
++/*
++ * HEVC: AppleD5500 keys its per-SoC HEVC choices on the ADT vxd-version
++ * (VACreateDecodeDeviceHEVC 0xfffffff006293f2c): the buffer multiplier
++ * (2 for versions 9 and 10), the 0x7474 pair after each slice structure
++ * (versions 7 and 9) and the 0x701c line split base (0x1800 from 10 on).
++ */
+ static const struct apple_vxd_variant s8000_vxd_variant = {
+ 	.vxd_version	= 7,
+ 	.num_gart_pts	= 512,		/* "setting 2GB mapping" [E] */
+ 	/* HEVCSupported = ((rev - 7) < 4) && ((0xD >> (rev - 7)) & 1) [E] */
+ 	.hevc_supported	= true,
++	.hevc = {
++		.buf_mult	= 1,
++		.tail_7474	= true,
++		.cache_base	= 0xc00,
++	},
+ };
+ 
+ /* The T8010 core has two pixel pipes; it reports them in CORE_ID. */
+@@ -262,6 +273,11 @@ static const struct apple_vxd_variant t8010_vxd_variant = {
+ 	.num_gart_pts	= 512,
+ 	.hevc_supported	= true,
+ 	.has_integration = true,
++	.hevc = {
++		.buf_mult	= 2,
++		.tail_7474	= false,
++		.cache_base	= 0x1800,
++	},
+ };
+ 
+ static const struct of_device_id apple_vxd_of_match[] = {
+-- 
+2.54.0
