@@ -1,0 +1,85 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 00:43:07 +0100
+Subject: [PATCH] PCI: apple: cold-reset after an uncertified kexec handoff
+
+The warm guard sets panic_timeout to zero. Neither an uncertified ANS
+stop nor failed PERST, LTSSM stop or powered-port certificate can safely
+continue into the incoming kernel. Flush the reason and request a cold
+watchdog reset instead of hanging in panic. Return without further port
+writes if restart unexpectedly returns.
+
+Assisted-by: LLM
+---
+ drivers/pci/controller/pcie-apple-h9p.c |  9 +++++----
+ include/linux/soc/apple/cold-reset.h    | 19 +++++++++++++++++++
+ 2 files changed, 24 insertions(+), 4 deletions(-)
+ create mode 100644 include/linux/soc/apple/cold-reset.h
+
+diff --git a/drivers/pci/controller/pcie-apple-h9p.c b/drivers/pci/controller/pcie-apple-h9p.c
+index f0095394a..28305b0ee 100644
+--- a/drivers/pci/controller/pcie-apple-h9p.c
++++ b/drivers/pci/controller/pcie-apple-h9p.c
+@@ -49,6 +49,7 @@
+ #include <linux/apple-dart.h>
+ #include <linux/apple-ans.h>
+ #include <linux/kexec.h>
++#include <linux/soc/apple/cold-reset.h>
+ 
+ #include "pci-host-common.h"
+ 
+@@ -3609,7 +3610,7 @@ static void apple_h9p_s8003_shutdown(struct platform_device *pdev)
+ 	if (!READ_ONCE(pcie->ans_handoff_stopped) ||
+ 	    (of_property_read_bool(pcie->dev->of_node, "apple,ans-kexec-handoff") &&
+ 	     !apple_s8003_port_powered(pcie)))
+-		panic("Apple ANS: refusing uncertified powered handoff");
++		return apple_cold_reset("Apple ANS: refusing uncertified powered handoff");
+ 	for (port = 0; port < H9P_NUM_PORTS; port++) {
+ 		void __iomem *cfg = pcie->base_config + port * H9P_CFG_PORT_STRIDE;
+ 
+@@ -3621,9 +3622,9 @@ static void apple_h9p_s8003_shutdown(struct platform_device *pdev)
+ 		h9p_rmw(pcie->base_rc + S8003_RC_PORT_PWR(port), 0,
+ 			S8003_RC_PORT_PWR_REFCLK_NOGATE);
+ 		if (gpiod_direction_output(pcie->perst[port], 1))
+-			panic("Apple PCIe: PERST failed during handoff");
++			return apple_cold_reset("Apple PCIe: PERST failed during handoff");
+ 		if (apple_s8003_port_stop(pcie, port))
+-			panic("Apple PCIe: LTSSM stop failed during handoff");
++			return apple_cold_reset("Apple PCIe: LTSSM stop failed during handoff");
+ 		udelay(S8003_PERST_TO_REFCLK_US);
+ 		if (!port && pcie->nvmmu.ready) {
+ 			h9p_writel_flush(0, pcie->nvmmu.base + H9P_NVMMU_SART_CTRL);
+@@ -3635,7 +3636,7 @@ static void apple_h9p_s8003_shutdown(struct platform_device *pdev)
+ 		if (!port && of_property_read_bool(pcie->dev->of_node, "apple,ans-kexec-handoff") &&
+ 		    (!apple_s8003_port_powered(pcie) ||
+ 		     gpiod_get_value_cansleep(pcie->perst[0]) != 1))
+-			panic("Apple ANS: outgoing powered port certificate failed");
++			return apple_cold_reset("Apple ANS: outgoing powered port certificate failed");
+ 		pcie->enabled_ports &= ~BIT(port);
+ 	}
+ 	dev_info(pcie->dev, "kexec: PCIe PERST asserted, LTSSM stopped, ports powered; NVMMU SART disabled\n");
+diff --git a/include/linux/soc/apple/cold-reset.h b/include/linux/soc/apple/cold-reset.h
+new file mode 100644
+index 000000000..34467be50
+--- /dev/null
++++ b/include/linux/soc/apple/cold-reset.h
+@@ -0,0 +1,19 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _LINUX_SOC_APPLE_COLD_RESET_H
++#define _LINUX_SOC_APPLE_COLD_RESET_H
++
++#include <linux/kmsg_dump.h>
++#include <linux/printk.h>
++#include <linux/reboot.h>
++
++/* Shutdown has no safe return to a warm kernel after an unproven DMA stop. */
++static inline void apple_cold_reset(const char *reason)
++{
++	pr_emerg("Apple unsafe handover: %s; forcing cold watchdog reset\n", reason);
++	pr_flush(1000, true);
++	kmsg_dump_desc(KMSG_DUMP_PANIC, reason);
++	WRITE_ONCE(reboot_mode, REBOOT_COLD);
++	emergency_restart();
++}
++
++#endif
