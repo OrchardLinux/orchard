@@ -19,8 +19,8 @@ J71B_DTS = 'arch/arm64/boot/dts/apple/t8010-j71b.dts'
 J71B_UPSTREAM = 'cee9395acd8043be0644b25c34bfa86623f2b935'
 
 
-def patched_source(path):
-    """Read the added/context text of the one patch that changes this file."""
+def patched_source(path, every=False):
+    """Read the added/context text of the last patch that changes this file, or of every one."""
     found = []
     for patch in sorted(p for layer in ('drivers', 'devices')
                         for p in (ROOT / 'kernel/patches' / layer).rglob('*.patch')):
@@ -38,7 +38,7 @@ def patched_source(path):
     if not found:
         raise AssertionError('No patch changes ' + path)
     # The power driver is a new file; GPIO assertions only need final hunks.
-    return found[-1]
+    return ''.join(found) if every else found[-1]
 
 
 def driver_source():
@@ -73,6 +73,11 @@ class D2365DeviceTree(unittest.TestCase):
         source = resolved_j71b_dts()
         self.assertIn('compatible = "apple,d2365-poweroff";', source)
         self.assertIn('power-supplies = <&tristar_charger>;', source)
+        self.assertIn('simple-audio-card,name = "J71b Speakers";', source)
+
+    def test_ipad6_boards_share_the_tdm_speaker_link(self):
+        # Several patches add to the iPad 6 boards' shared file; the speaker link is in one of them.
+        source = patched_source('arch/arm64/boot/dts/apple/t8010-ipad6.dtsi', every=True)
         self.assertIn('maxim,tdm;', source)
         self.assertIn('simple-audio-card,format = "dsp_a";', source)
 

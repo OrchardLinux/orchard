@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 16:00:00 +0100
+Subject: [PATCH] usb: gadget: composite: draw no extra Apple current while
+ suspended
+
+The extra current an Apple host grants must not be drawn while the bus
+is suspended. reset_config() could apply it during suspend, because the
+suspended flag was cleared only at the end of composite_resume(). Skip
+the extra current while suspended and clear the flag before the
+configuration is applied again on resume.
+
+Assisted-by: LLM
+---
+ drivers/usb/gadget/composite.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/usb/gadget/composite.c b/drivers/usb/gadget/composite.c
+index 1da3effb2..ea76d3918 100644
+--- a/drivers/usb/gadget/composite.c
++++ b/drivers/usb/gadget/composite.c
+@@ -959,7 +959,7 @@ static void reset_config(struct usb_composite_dev *cdev)
+ static void composite_vbus_draw(struct usb_composite_dev *cdev, unsigned int mA)
+ {
+ 	cdev->vbus_draw_ma = mA;
+-	if (mA && cdev->apple_extra_ma)
++	if (mA && !cdev->suspended && cdev->apple_extra_ma)
+ 		mA = max(500 + cdev->apple_extra_ma, 0);
+ 	usb_gadget_vbus_draw(cdev->gadget, mA);
+ }
+@@ -2665,6 +2665,7 @@ void composite_resume(struct usb_gadget *gadget)
+ 	DBG(cdev, "resume\n");
+ 	if (cdev->driver->resume)
+ 		cdev->driver->resume(cdev);
++	cdev->suspended = 0;
+ 	if (cdev->config) {
+ 		list_for_each_entry(f, &cdev->config->functions, list) {
+ 			/*
+@@ -2695,8 +2696,6 @@ void composite_resume(struct usb_gadget *gadget)
+ 		maxpower = min(maxpower, 100U);
+ 		composite_vbus_draw(cdev, maxpower);
+ 	}
+-
+-	cdev->suspended = 0;
+ }
+ 
+ /*-------------------------------------------------------------------------*/

@@ -142,6 +142,8 @@ The CLI used to do that; it isn't needed for recipes any more.
 | `trx-add-nvram@1` | `input` (TRX), `nvram` (additional recipe input), `placeholder_mac` (`02:00:00:00:00:00`) | Broadcom USB TRX with stripped/padded NVRAM, the placeholder address, length token and recomputed CRC; existing nonzero NVRAM and embedded device MACs are refused |
 | `sgx543-from-kernelcache@1` | `input` (32-bit Mach-O), `build` | Cascadia's 64-byte `SGX543FW` header plus IMGSGX543 `__data` and `__const`; the output hash pins all bytes and addresses |
 | `smartio-from-kernelcache@1` | `input` (kernelcache) | SmartIO coprocessor firmware |
+| `vxd-firmware-from-kernelcache@1` | `input` (kernelcache) | the VXD (DEVA) video decoder firmware from AppleD5500 |
+| `agx-g9p-firmware-from-kernelcache@1` | `input` (kernelcache) | the A10 GPU firmware from AGXFirmwareKextG9PRTBuddy |
 | `im4p-payload@1` | `input` | the payload of an IM4P container |
 | `aop-image@1` | `coprocessor` | one image (`AOP`, `AOP_ext`) of an AOP firmware container, the OSSerializeBinary payload of `Firmware/AOP/aopfw-*.im4p` |
 | `z2fw-from-mtprops@1` | `input`, `profile`, `packet`, `load_address`, `hbpp_version` | Z2 touch firmware with calibration records |
@@ -236,19 +238,3 @@ The decompressed N61 kernel's SHA-256 is
 These fields are explicit recipe parameters, including zero-valued overrides.
 Physical qualification of firmware loading and input events remains separate
 from converting this shared firmware file.
-
-## S8003 G5P META firmware
-
-`agx-g5p-ldr-from-kernelcache@1` reads the unique `__TEXT,__const` section
-of `com.apple.AGXFirmwareKextG5P` in the user's own legacy prelinked
-kernelcache. It rejects any size other than 119112 bytes or any digest other
-than `33ae20cbbe2498e4f119ba4e9a55467e4e0192d4c86d5bf1903adce63ffa5dca`.
-The existing J71t kernelcache input names the active device kernelcache and
-the pinned restore-image fallback. The normal recipe installer writes the
-verified output to `/lib/firmware/apple/agx-g5p-c0.ldr`. No payload patch,
-calibration, firmware bytes or captured job is stored in the source tree.
-Other C0 revisions and other boards require separate digest qualification.
-
-The J71t G5P driver brings the GPU up automatically once the extracted
-`apple/agx-g5p-c0.ldr` is readable on the root filesystem (up to 120 seconds).
-No captured render or compute job fixtures are part of this recipe.

@@ -111,6 +111,7 @@ def initrd(modules, release, busybox, *, hardware=None, storage_modules=STORAGE_
     entries = {name: (directory, b'') for name in ('bin', 'dev', 'proc', 'sys', 'etc', 'etc/orchard', 'newroot',
                                                     'lib', 'lib/modules', 'lib/modules/' + release)}
     entries['init'] = (stat.S_IFREG | 0o755, (hardware / 'boot/initramfs/root/init').read_bytes())
+    entries['etc/orchard/usb-identity'] = (stat.S_IFREG | 0o644, (hardware / 'src/orchard/usb-identity').read_bytes())
     entries['bin/busybox'] = (stat.S_IFREG | 0o755, Path(busybox).read_bytes())
     entries['etc/orchard/modules'] = (stat.S_IFREG | 0o644, ('\n'.join(loaded) + '\n').encode())
     if usb:
@@ -152,6 +153,19 @@ def storage_modules(hardware, platform):
     return tuple(modules)
 
 
+
+def device_features(hardware, boards):
+    """Public board data for runtime policy, matched against the live DT compatible."""
+    from .. import hardware as catalog
+    records = []
+    for board in sorted(boards):
+        described = catalog.device(board, root=hardware)
+        records.append({'compatible': described['device'].get('dt_compatible', []),
+                        'features': described.get('features', {})})
+    return {'usr/lib/orchard/device-features.json':
+            ((json.dumps(records, sort_keys=True) + '\n').encode(), 0o644)}
+
+
 def files(bundle, platform, board_dtbs, *, busybox, hardware=None):
     """(kernel release, {path: (data, mode)}) of PLATFORM's layer from a staged kernel BUNDLE."""
     hardware = Path(hardware or ROOT)
@@ -170,6 +184,7 @@ def files(bundle, platform, board_dtbs, *, busybox, hardware=None):
     pristine = {board: result[base + 'dtb/' + dtb + '.dtb'][0] for board, dtb in board_dtbs.items()}
     result[base + 'initrd'] = (initrd(result, release, busybox, hardware=hardware, pristine_dtbs=pristine, storage_modules=modules_to_load), 0o644)
     result.update(regulatory_files())
+    result.update(device_features(hardware, board_dtbs))
     defaults = hardware / 'system/defaults'
     for path in sorted(defaults.rglob('*')):
         if path.is_symlink():

@@ -150,9 +150,7 @@ def entry_for(record, devicetree):
     name = record.get('name', 'Linux')
     return {'id': re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-') or 'linux', 'title': name,
             # Quiet as the recovery: no console text over the splash; the system maps its console.
-            'options': record.get('cmdline', 'rootwait') + ' fbcon=map:9 vt.global_cursor_default=0' + (
-                ' pcie_apple_h9p.ans_keep_power=1 pcie_apple_h9p.ans_boot_mode=handoff'
-                ' panic=0 apple_wdt.cold_restart=0' if devicetree == 's8003-j71t.dtb' else ''),
+            'options': record.get('cmdline', 'rootwait') + ' fbcon=map:9 vt.global_cursor_default=0',
             'devicetree': devicetree}
 
 
@@ -219,96 +217,108 @@ def install_direct(adapter, device, name, files, firmware_files, boot_files, cha
         progress.mark('Install mode on USB')
         progress.pause()
         progress.step('Connecting over SSH')
-        with direct.session(adapter.PROFILE, device, found, directory, client, host_key, interfaces) as connection:
-            progress.mark('SSH connected')
-            layout = direct.inspect(connection, disk or direct.find_disk(connection))
-            disk = layout['disk']['path']
-            progress.mark('Disk read')
-            progress.done()
-            option = choose_target(layout, clock, name=name, input_fn=input_fn, output=progress.say)
-            if answered is not None:
-                account = answered
-            else:
-                secrets, account = ask_account(boot_record.get('account'), clock, secrets_fn, input_fn, progress)
-            # That was the last question; nothing has been written yet.
-            progress.resume()
-            if not (files.done() and firmware_files.done()):
-                progress.section('Downloading the rest', keep_rows=True)
-            record, assets = files.result()
-            firmware = firmware_files.result()
-            root = record['assets']['root']
-            progress.section('Installing ' + name)
-            progress.step('Preparing the installation')
-            mixin, mixin_record = adapter.prepare_mixin(firmware, Path(directory) / 'mixin')
-            remote.put(connection, mixin.read_bytes(), 'firmware.tar.gz')
-            layer = record['assets']['layer']
-            remote.put(connection, assets['layer'].read_bytes(), 'platform.tar.gz', timeout=600)
-            image = {key: root[key] for key in ('bytes', 'sha256', 'expanded_bytes')}
-            plan = install_layout.plan(layout, option, image, entry_for(record, adapter.DEVICETREE), account=account, layer={
-                'path': remote.DIRECTORY + '/platform.tar.gz',
-                **{key: layer[key] for key in ('bytes', 'sha256', 'expanded_bytes')}}, firmware={
-                'path': remote.DIRECTORY + '/firmware.tar.gz',
-                'bytes': mixin_record['bytes'], 'sha256': mixin_record['sha256']})
-            if plan['boot'] is None:
-                # LwVM: the Linux partition is reused as it is; the table is not written.
-                root_node, partitions = direct.lwvm_target(connection, plan, disk)
-                boot_node = None
-            else:
-                nodes, partitions = direct.write_partitions(connection, plan, disk)
-                progress.step('Partitions created')
-                root_node = nodes[plan['root']['partuuid']]
-                if plan['boot']['create']:
-                    sector = layout['disk']['sector']
-                    for offset, data in direct.D.fat32_regions(plan['boot']['blocks'], sector, int(plan['boot']['fs_uuid'], 16)):
-                        direct.write_at(connection, disk, sector, plan['boot']['start'] + offset // sector, bytes(data))
-                    boot_node = nodes[plan['boot']['partuuid']]
+        stage = 'reading'  # reading, writing or installed: what an error says about the iPad
+        try:
+            with direct.session(adapter.PROFILE, device, found, directory, client, host_key, interfaces) as connection:
+                progress.mark('SSH connected')
+                layout = direct.inspect(connection, disk or direct.find_disk(connection))
+                disk = layout['disk']['path']
+                progress.mark('Disk read')
+                progress.done()
+                option = choose_target(layout, clock, name=name, input_fn=input_fn, output=progress.say)
+                if answered is not None:
+                    account = answered
                 else:
-                    boot_node = direct.D.node(disk, plan['boot']['number'])
-            ranges = json.loads(assets['map'].read_text())['ranges']
-            with assets['root'].open('rb') as source:
-                timings = direct.stream_image(connection, root_node, image, source,
-                                              ''.join(f'{start} {count}\n' for start, count in ranges), progress)
-            progress.step('System files written')
-            direct.grow(connection, root_node, plan['root']['fs_uuid'], plan['root']['label'])
-            progress.mark('Grown to the partition')
-            direct.mount_new_root(connection, root_node, boot_node)
-            progress.mark('Root mounted')
-            replaced = (plan.get('remove') or {}).get('partuuid')
-            plan['present'] = [p['partuuid'] for p in partitions if p['partuuid'] != replaced]
-            remote.put(connection, remote.SCRIPT.read_bytes(), remote.SCRIPT.name)
-            remote.put(connection, json.dumps(plan).encode(), 'plan.json')
-            if secrets is not None:
-                remote.put(connection, json.dumps(secrets).encode(), 'secrets.json')
-            secrets = None
-            inside = SimpleNamespace(argv=connection.argv + ['chroot /newroot'], check=connection.check)
-            events = remote.run(inside, ['finish', remote.DIRECTORY + '/plan.json'], progress=progress)
-            timeline = direct.shell(connection, 'cat /run/orchard/timeline').decode()
-            progress.mark('Finished inside the root')
-            direct.unmount_new_root(connection, plan['root']['partuuid'], boot=boot_node is not None)
-            progress.mark('Unmounted, boot continues')
-            report = {'device_timeline': timeline, 'profile': connection.scope.device.profile, 'ecid': connection.scope.device.ecid,
-                      'boot_id': connection.scope.boot_id, 'installed': True, 'release': record['release'],
-                      'root': plan['root']['partuuid'], 'boot': (plan['boot'] or {}).get('partuuid'),
-                      'written': timings, 'events': events, 'timing': clock.result()}
-            path = private_directory(connection.scope.root) / 'last-install.json'
-            save_report(path, report)
-            if plan['boot'] is None and 'cascadia' in boot_assets:
-                # No boot partition yet: later starts need this bundle placed where iOS's boot chain finds it.
-                bundle = path.with_name(f'boot-{plan["root"]["partuuid"].split("-")[0]}.bin')
-                bundle.write_bytes(direct.installed_bundle(adapter, boot_assets, device, plan))
-                report['boot_bundle'] = str(bundle)
+                    secrets, account = ask_account(boot_record.get('account'), clock, secrets_fn, input_fn, progress)
+                # That was the last question; nothing has been written yet.
+                progress.resume()
+                if not (files.done() and firmware_files.done()):
+                    progress.section('Downloading the rest', keep_rows=True)
+                record, assets = files.result()
+                firmware = firmware_files.result()
+                root = record['assets']['root']
+                progress.section('Installing ' + name)
+                progress.step('Preparing the installation')
+                mixin, mixin_record = adapter.prepare_mixin(firmware, Path(directory) / 'mixin')
+                remote.put(connection, mixin.read_bytes(), 'firmware.tar.gz')
+                layer = record['assets']['layer']
+                remote.put(connection, assets['layer'].read_bytes(), 'platform.tar.gz', timeout=600)
+                image = {key: root[key] for key in ('bytes', 'sha256', 'expanded_bytes')}
+                plan = install_layout.plan(layout, option, image, entry_for(record, adapter.DEVICETREE), account=account, layer={
+                    'path': remote.DIRECTORY + '/platform.tar.gz',
+                    **{key: layer[key] for key in ('bytes', 'sha256', 'expanded_bytes')}}, firmware={
+                    'path': remote.DIRECTORY + '/firmware.tar.gz',
+                    'bytes': mixin_record['bytes'], 'sha256': mixin_record['sha256']})
+                stage = 'writing'
+                if plan['boot'] is None:
+                    # LwVM: the Linux partition is reused as it is; the table is not written.
+                    root_node, partitions = direct.lwvm_target(connection, plan, disk)
+                    boot_node = None
+                else:
+                    nodes, partitions = direct.write_partitions(connection, plan, disk)
+                    progress.step('Partitions created')
+                    root_node = nodes[plan['root']['partuuid']]
+                    if plan['boot']['create']:
+                        sector = layout['disk']['sector']
+                        for offset, data in direct.D.fat32_regions(plan['boot']['blocks'], sector, int(plan['boot']['fs_uuid'], 16)):
+                            direct.write_at(connection, disk, sector, plan['boot']['start'] + offset // sector, bytes(data))
+                        boot_node = nodes[plan['boot']['partuuid']]
+                    else:
+                        boot_node = direct.D.node(disk, plan['boot']['number'])
+                ranges = json.loads(assets['map'].read_text())['ranges']
+                with assets['root'].open('rb') as source:
+                    timings = direct.stream_image(connection, root_node, image, source,
+                                                  ''.join(f'{start} {count}\n' for start, count in ranges), progress)
+                progress.step('System files written')
+                direct.grow(connection, root_node, plan['root']['fs_uuid'], plan['root']['label'])
+                progress.mark('Grown to the partition')
+                direct.mount_new_root(connection, root_node, boot_node)
+                progress.mark('Root mounted')
+                replaced = (plan.get('remove') or {}).get('partuuid')
+                plan['present'] = [p['partuuid'] for p in partitions if p['partuuid'] != replaced]
+                remote.put(connection, remote.SCRIPT.read_bytes(), remote.SCRIPT.name)
+                remote.put(connection, json.dumps(plan).encode(), 'plan.json')
+                if secrets is not None:
+                    remote.put(connection, json.dumps(secrets).encode(), 'secrets.json')
+                secrets = None
+                inside = SimpleNamespace(argv=connection.argv + ['chroot /newroot'], check=connection.check)
+                events = remote.run(inside, ['finish', remote.DIRECTORY + '/plan.json'], progress=progress)
+                timeline = direct.shell(connection, 'cat /run/orchard/timeline').decode()
+                progress.mark('Finished inside the root')
+                direct.unmount_new_root(connection, plan['root']['partuuid'], boot=boot_node is not None)
+                progress.mark('Unmounted, boot continues')
+                report = {'device_timeline': timeline, 'profile': connection.scope.device.profile, 'ecid': connection.scope.device.ecid,
+                          'boot_id': connection.scope.boot_id, 'installed': True, 'release': record['release'],
+                          'root': plan['root']['partuuid'], 'boot': (plan['boot'] or {}).get('partuuid'),
+                          'written': timings, 'events': events, 'timing': clock.result()}
+                path = private_directory(connection.scope.root) / 'last-install.json'
                 save_report(path, report)
-            progress.done('Installed')
-            progress.section('Starting ' + name)
-            if account and account['ssh_keys']:
-                problem = check_started(connection, account['user'], record.get('ready'), progress, poll=0.2,
-                                        hosts=lambda: direct.device_hosts(interfaces))
-                progress.mark('System reported ready')
-                progress.done('Could not confirm that it started: ' + problem if problem else None)
-                report['ready'] = problem is None
-            report['started'] = True
-            report['phases'] = progress.timings
-            save_report(path, report)
+                if plan['boot'] is None and 'cascadia' in boot_assets:
+                    # No boot partition yet: later starts need this bundle placed where iOS's boot chain finds it.
+                    bundle = path.with_name(f'boot-{plan["root"]["partuuid"].split("-")[0]}.bin')
+                    bundle.write_bytes(direct.installed_bundle(adapter, boot_assets, device, plan))
+                    report['boot_bundle'] = str(bundle)
+                    save_report(path, report)
+                progress.done('Installed')
+                stage = 'installed'
+                progress.section('Starting ' + name)
+                if account and account['ssh_keys']:
+                    problem = check_started(connection, account['user'], record.get('ready'), progress, poll=0.2,
+                                            hosts=lambda: direct.device_hosts(interfaces))
+                    progress.mark('System reported ready')
+                    progress.done('Could not confirm that it started: ' + problem if problem else None)
+                    report['ready'] = problem is None
+                report['started'] = True
+                report['phases'] = progress.timings
+                save_report(path, report)
+        except (ValueError, RuntimeError, OSError, KeyError, subprocess.SubprocessError) as error:
+            hint = {'reading': 'Nothing was written to the iPad; it is still running the installer from memory. '
+                               'Put it in DFU mode to run the install again.',
+                    'writing': 'The install stopped after it began writing, so the iPad may not start Linux. '
+                               'Put it in DFU mode and run the install again.'}.get(stage)
+            if hint:
+                error.args = (f'{error.args[0] if error.args else error}\n{hint}', *error.args[1:])
+            raise
     progress.done()
     login = (f'\nSign in over SSH: ssh {account["user"]}@172.16.42.1'
              if report.get('ready') and account and account['ssh_keys'] else '')

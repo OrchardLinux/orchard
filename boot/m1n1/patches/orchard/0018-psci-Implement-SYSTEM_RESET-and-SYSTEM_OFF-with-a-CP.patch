@@ -1,0 +1,497 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 16:01:53 +0100
+Subject: [PATCH] psci: Implement SYSTEM_RESET and SYSTEM_OFF with a CPU
+ rendezvous
+
+Give the kernel's ordinary reboot and power-off paths somewhere to go.
+On SYSTEM_RESET or SYSTEM_OFF the calling CPU sets the rendezvous flag,
+sends an event and an AIC IPI to every other CPU the kernel was given,
+and waits up to a second for all of them to park in the pen through the
+WFI/WFE traps. If one does not arrive, it clears the flag and returns
+without having changed anything, so the kernel goes on to its next
+restart or power-off method as it does today.
+
+Once they are parked it disarms the primary watchdog (the kernel, or
+systemd's reboot watchdog, may have armed it), stops its timers and
+drops the traps. SYSTEM_RESET then turns the EL1 MMU and caches off,
+writes back every data cache level by set/way, invalidates the EL1 TLB
+and I-cache and restarts m1n1 at EL1h with the original iBoot boot_args,
+saved in .data on the first cold start before top_of_memory_alloc()
+changes them. psci_reentered() and the new psci_reset_reentered() tell
+the restarted m1n1 where it came from. SYSTEM_OFF parks the caller too:
+there is no PMU driver here, so this halts rather than powers off.
+
+The payload variable psci_reset selects what SYSTEM_RESET leads to: boot
+(the default, used by the next change), proxy, or 0 for NOT_SUPPORTED
+with no WFI/WFE traps. It is reported by PSCI_FEATURES and armed by
+kboot_boot() through the private handoff call, which also records the
+boot CPU and needs an AIC v1 and a watchdog in the ADT.
+
+Assisted-by: LLM
+---
+ src/kboot.c    |   1 +
+ src/payload.c  |   2 +
+ src/psci.c     | 220 +++++++++++++++++++++++++++++++++++++++++++++++--
+ src/psci.h     |  25 +++++-
+ src/psci_asm.S |  44 +++++++++-
+ src/startup.c  |   1 +
+ 6 files changed, 280 insertions(+), 13 deletions(-)
+
+diff --git a/src/kboot.c b/src/kboot.c
+index a5f4238..299e388 100644
+--- a/src/kboot.c
++++ b/src/kboot.c
+@@ -3301,6 +3301,7 @@ int kboot_boot(void *kernel)
+ 
+     printf("Setting SMP mode to WFE...\n");
+     smp_set_wfe_mode(true);
++    psci_handoff();
+     printf("Preparing to boot kernel at %p with fdt at %p\n", kernel, dt);
+ 
+     next_stage.entry = kernel;
+diff --git a/src/payload.c b/src/payload.c
+index 4ffc9e2..0b7dc14 100644
+--- a/src/payload.c
++++ b/src/payload.c
+@@ -208,6 +208,8 @@ static bool check_var(u8 **p)
+         enable_tso = val[0] == '1';
+     } else if (IS_VAR("psci=")) {
+         psci_configure(val);
++    } else if (IS_VAR("psci_reset=")) {
++        psci_reset_configure(val);
+     } else {
+         printf("Unknown variable %s\n", *p);
+     }
+diff --git a/src/psci.c b/src/psci.c
+index af4f325..1821ebc 100644
+--- a/src/psci.c
++++ b/src/psci.c
+@@ -1,9 +1,19 @@
+ /* SPDX-License-Identifier: MIT */
+ 
+ #include "psci.h"
++#include "adt.h"
++#include "aic_regs.h"
++#include "memory.h"
+ #include "smp.h"
++#include "string.h"
+ #include "types.h"
+ #include "utils.h"
++#include "xnuboot.h"
++
++#define WDT_CTL 0x1c
++
++/* SYSTEM_RESET/SYSTEM_OFF wait this long for the other CPUs to park */
++#define RENDEZVOUS_TIMEOUT_US 1000000
+ 
+ struct psci_cpu {
+     volatile u64 state;
+@@ -39,7 +49,8 @@ struct psci_rdv {
+     volatile u64 cpus;  /* MPIDR indices that have been in the pen: handed to the kernel */
+     u64 aic;
+     u64 wdt;
+-    u64 pad[PSCI_CPU_SIZE / 8 - 5];
++    u64 reset; /* enum psci_reset_mode the kernel was started with */
++    u64 pad[PSCI_CPU_SIZE / 8 - 6];
+ } psci_rdv __attribute__((section(".data"), aligned(PSCI_CPU_SIZE)));
+ 
+ _Static_assert(sizeof(struct psci_rdv) == PSCI_CPU_SIZE, "psci_rdv layout");
+@@ -49,11 +60,18 @@ _Static_assert(offsetof(struct psci_rdv, traps) == PSCI_RDV_TRAPS, "psci_rdv lay
+ /* On unless the payload says psci=0; kept across a re-entry */
+ static u32 psci_mode __attribute__((section(".data"))) = 1;
+ 
++/* psci_reset=0|proxy|boot, kept across a re-entry */
++static u32 psci_reset_mode __attribute__((section(".data"))) = PSCI_RESET_BOOT;
++
++/* The iBoot boot_args m1n1 was first started with; SYSTEM_RESET starts m1n1 with them again */
++static struct boot_args reset_boot_args __attribute__((section(".data"), aligned(PSCI_CPU_SIZE)));
++
+ /* EL3 stacks a CPU gets when it leaves the pen */
+ static u8 psci_stacks[PSCI_MAX_CPUS][PSCI_STACK_SIZE] __attribute__((aligned(16)));
+ 
+ static bool psci_have_el3;
+ static bool reentered;
++static bool reset_reentered;
+ 
+ /* EL3 side */
+ 
+@@ -129,9 +147,113 @@ static s64 psci_affinity(u64 mpidr, u64 level)
+     return psci_cpus[idx].state;
+ }
+ 
++/*
++ * Gets every other CPU the kernel was given into the pen: they park at their
++ * next trapped WFI/WFE (see psci_wfx_entry). A CPU waiting in WFI is woken
++ * with an IPI, one in WFE with an event. If one doesn't arrive in time,
++ * nothing has been changed that the kernel cares about.
++ */
++static bool psci_rendezvous(int self)
++{
++    psci_line_sync(&psci_rdv);
++    u64 others = psci_rdv.cpus & ~BIT(self);
++
++    psci_rdv.pending = 1;
++    psci_line_sync(&psci_rdv);
++    sysop("sev");
++
++    for (int i = 0; i < PSCI_MAX_CPUS; i++) {
++        if (!(others & BIT(i)))
++            continue;
++        psci_line_sync(&psci_cpus[i]);
++        if (psci_cpus[i].state != PSCI_AFF_OFF)
++            write32(psci_rdv.aic + AIC_IPI_SEND, AIC_IPI_SEND_CPU(i));
++    }
++
++    u64 timeout = timeout_calculate(RENDEZVOUS_TIMEOUT_US);
++    do {
++        bool all = true;
++
++        for (int i = 0; i < PSCI_MAX_CPUS; i++) {
++            if (!(others & BIT(i)))
++                continue;
++            psci_line_sync(&psci_cpus[i]);
++            if (psci_cpus[i].state != PSCI_AFF_OFF)
++                all = false;
++        }
++        if (all) {
++            psci_rdv.pending = 0;
++            psci_line_sync(&psci_rdv);
++            return true;
++        }
++        sysop("sev");
++        udelay(100);
++    } while (!timeout_expired(timeout));
++
++    psci_rdv.pending = 0;
++    psci_line_sync(&psci_rdv);
++    return false;
++}
++
++/* Everything that must happen before this CPU leaves the kernel for good */
++static s64 psci_system_stop(void)
++{
++    int self = psci_mpidr_index(mrs(MPIDR_EL1));
++
++    psci_line_sync(&psci_rdv);
++    if (psci_rdv.reset == PSCI_RESET_OFF)
++        return PSCI_RET_NOT_SUPPORTED;
++    if (self < 0 || !psci_rendezvous(self))
++        return PSCI_RET_INTERNAL_FAILURE;
++
++    msr(CNTP_CTL_EL0, 0);
++    msr(CNTV_CTL_EL0, 0);
++    /* The kernel (or systemd's reboot watchdog) may have armed it */
++    write32(psci_rdv.wdt + WDT_CTL, 0);
++    read32(psci_rdv.wdt + WDT_CTL);
++
++    /*
++     * The WFx traps go away with the kernel; the next handoff sets them
++     * again, and the next kboot records which CPUs the next kernel gets.
++     */
++    psci_rdv.traps = 0;
++    psci_rdv.cpus = 0;
++    psci_line_sync(&psci_rdv);
++    msr(SCR_EL3, mrs(SCR_EL3) & ~(u64)(SCR_EL3_TWI | SCR_EL3_TWE));
++    sysop("isb");
++    return PSCI_RET_SUCCESS;
++}
++
++/* Returns only if the other CPUs could not be stopped: the kernel tries its next method */
++static s64 psci_system_reset(void)
++{
++    s64 ret = psci_system_stop();
++
++    if (ret != PSCI_RET_SUCCESS)
++        return ret;
++
++    psci_system_reset_entry(&reset_boot_args);
++}
++
++/* No PMU driver here: this halts the SoC with every CPU parked, it does not power off */
++static s64 psci_system_off(void)
++{
++    s64 ret = psci_system_stop();
++
++    if (ret != PSCI_RET_SUCCESS)
++        return ret;
++
++    for (;;)
++        sysop("wfi");
++}
++
+ static s64 psci_features(u32 fid)
+ {
+     switch (fid) {
++        case PSCI_0_2_FN_SYSTEM_OFF:
++        case PSCI_0_2_FN_SYSTEM_RESET:
++            psci_line_sync(&psci_rdv);
++            return psci_rdv.reset != PSCI_RESET_OFF ? PSCI_RET_SUCCESS : PSCI_RET_NOT_SUPPORTED;
+         case PSCI_0_2_FN_PSCI_VERSION:
+         case PSCI_0_2_FN_CPU_OFF:
+         case PSCI_0_2_FN_CPU_ON:
+@@ -144,21 +266,35 @@ static s64 psci_features(u32 fid)
+         default:
+             /*
+              * Includes SMCCC_VERSION (so callers assume SMCCC 1.0 and make
+-             * no other SMCs), CPU_SUSPEND, SYSTEM_OFF and SYSTEM_RESET.
++             * no other SMCs), CPU_SUSPEND and SYSTEM_RESET2.
+              */
+             return PSCI_RET_NOT_SUPPORTED;
+     }
+ }
+ 
+-/* Arms (or disarms) the WFx traps on this CPU and on every CPU leaving the pen */
+-static s64 psci_m1n1_handoff(u64 traps, u64 aic, u64 wdt)
++/*
++ * Arms (or disarms) the WFx traps on this CPU and on every CPU leaving the
++ * pen, and with them SYSTEM_RESET/SYSTEM_OFF (reset = enum psci_reset_mode).
++ */
++static s64 psci_m1n1_handoff(u64 reset, u64 aic, u64 wdt)
+ {
+-    u64 bits = traps ? (SCR_EL3_TWI | SCR_EL3_TWE) : 0;
++    if (reset > PSCI_RESET_PROXY || (reset && (!aic || !wdt)))
++        return PSCI_RET_INVALID_PARAMS;
++
++    u64 bits = reset ? (SCR_EL3_TWI | SCR_EL3_TWE) : 0;
++    int self = psci_mpidr_index(mrs(MPIDR_EL1));
++
++    if (self < 0)
++        return PSCI_RET_DENIED;
+ 
++    psci_line_sync(&psci_rdv);
++    /* The secondaries were added when kboot parked them */
++    psci_rdv.cpus |= BIT(self);
+     psci_rdv.pending = 0;
+     psci_rdv.traps = bits;
+     psci_rdv.aic = aic;
+     psci_rdv.wdt = wdt;
++    psci_rdv.reset = reset;
+     psci_line_sync(&psci_rdv);
+ 
+     msr(SCR_EL3, (mrs(SCR_EL3) & ~(u64)(SCR_EL3_TWI | SCR_EL3_TWE)) | bits);
+@@ -202,10 +338,13 @@ u64 psci_handle(u64 fid, u64 a1, u64 a2, u64 a3)
+             return 2; /* no trusted OS, nothing to migrate */
+         case PSCI_1_0_FN_PSCI_FEATURES:
+             return psci_features(a1);
++        case PSCI_0_2_FN_SYSTEM_RESET:
++            return psci_system_reset();
++        case PSCI_0_2_FN_SYSTEM_OFF:
++            return psci_system_off();
+         case PSCI_M1N1_SIP_HANDOFF:
+             return psci_m1n1_handoff(a1, a2, a3);
+         default:
+-            /* SYSTEM_RESET/SYSTEM_OFF too: the caller falls back to its own */
+             return PSCI_RET_NOT_SUPPORTED;
+     }
+ }
+@@ -216,6 +355,7 @@ void psci_note_boot_el(u64 el)
+ {
+     /* MMU still off: these .data accesses are uncached, like the writers' */
+     if (psci_persist.reentry_flag) {
++        reset_reentered = psci_persist.reentry_flag == PSCI_REENTRY_RESET;
+         reentered = true;
+         psci_persist.reentry_flag = 0;
+     }
+@@ -240,10 +380,72 @@ bool psci_reentered(void)
+     return reentered;
+ }
+ 
+-void psci_handoff(bool wfx_traps, u64 aic_base, u64 wdt_base)
++void psci_reset_configure(const char *val)
++{
++    if (val[0] == '0')
++        psci_reset_mode = PSCI_RESET_OFF;
++    else if (!strncmp(val, "proxy", 5))
++        psci_reset_mode = PSCI_RESET_PROXY;
++    else
++        psci_reset_mode = PSCI_RESET_BOOT;
++}
++
++enum psci_reset_mode psci_reset_mode_get(void)
+ {
+-    if (psci_active())
+-        psci_smc(PSCI_M1N1_SIP_HANDOFF, wfx_traps, aic_base, wdt_base);
++    return psci_reset_mode;
++}
++
++bool psci_reset_reentered(void)
++{
++    return reset_reentered;
++}
++
++void psci_reset_save_boot_args(void)
++{
++    if (reentered)
++        return;
++    memcpy(&reset_boot_args, &cur_boot_args, sizeof(reset_boot_args));
++    dc_civac_range(&reset_boot_args, sizeof(reset_boot_args));
++}
++
++/*
++ * The CPU rendezvous needs the AIC v1 IPI (A7-A9) and the primary watchdog
++ * (wdt-version 1 there, nothing else to stop). Without them SYSTEM_RESET and
++ * SYSTEM_OFF stay NOT_SUPPORTED and the kernel uses its own methods.
++ */
++void psci_handoff(void)
++{
++    enum psci_reset_mode reset = psci_reset_mode;
++    u64 aic = 0, wdt = 0;
++    int path[8];
++
++    if (!psci_active())
++        return;
++
++    if (reset != PSCI_RESET_OFF) {
++        int node = adt_path_offset_trace(adt, "/arm-io/aic", path);
++        if (node < 0 || !adt_is_compatible(adt, node, "aic,1") ||
++            adt_get_reg(adt, path, "reg", 0, &aic, NULL) < 0) {
++            printf("PSCI: SYSTEM_RESET/SYSTEM_OFF unavailable: no AIC v1\n");
++            reset = PSCI_RESET_OFF;
++        }
++        node = adt_path_offset_trace(adt, "/arm-io/wdt", path);
++        if (node < 0 || adt_get_reg(adt, path, "reg", 0, &wdt, NULL) < 0) {
++            printf("PSCI: SYSTEM_RESET/SYSTEM_OFF unavailable: no watchdog\n");
++            reset = PSCI_RESET_OFF;
++        }
++    }
++
++    if (psci_smc(PSCI_M1N1_SIP_HANDOFF, reset, aic, wdt) != PSCI_RET_SUCCESS) {
++        printf("PSCI: handoff refused, SYSTEM_RESET/SYSTEM_OFF unavailable\n");
++        psci_smc(PSCI_M1N1_SIP_HANDOFF, PSCI_RESET_OFF, 0, 0);
++        return;
++    }
++
++    static const char *const names[] = {"off", "warm reboot into the default entry",
++                                        "warm reboot into the proxy"};
++    printf("PSCI: SYSTEM_RESET: %s%s\n", names[reset],
++           reset ? "; EL1 WFI/WFE trap to EL3" : "");
+ }
+ 
+ int psci_affinity_info(u64 mpidr)
+diff --git a/src/psci.h b/src/psci.h
+index 1d3a88e..7c81af7 100644
+--- a/src/psci.h
++++ b/src/psci.h
+@@ -29,8 +29,9 @@
+ 
+ /*
+  * m1n1-private SiP call, made by m1n1 itself on the boot CPU right before it
+- * starts a kernel: x1 = 1 to trap EL1 WFI/WFE to EL3 on this and every CPU
+- * that later leaves the pen, x2 = AIC base, x3 = primary watchdog base.
++ * starts a kernel: x1 = enum psci_reset_mode (nonzero also traps EL1 WFI/WFE
++ * to EL3 on this and every CPU that later leaves the pen), x2 = AIC base,
++ * x3 = primary watchdog base.
+  */
+ #define PSCI_M1N1_SIP_HANDOFF 0xc200ff00
+ 
+@@ -59,6 +60,10 @@
+ #define PSCI_RDV_PENDING 0x00
+ #define PSCI_RDV_TRAPS   0x08
+ 
++/* psci_persist.reentry_flag */
++#define PSCI_REENTRY_KEXEC 1
++#define PSCI_REENTRY_RESET 2
++
+ #define SCR_EL3_IRQ (1 << 1)
+ #define SCR_EL3_FIQ (1 << 2)
+ #define SCR_EL3_TWI (1 << 12)
+@@ -83,13 +88,27 @@ int psci_park_cpu(int cpu, u64 mpidr);
+ /* Bring a parked CPU back into m1n1 (re-entry); returns 0 if it was parked */
+ int psci_unpark_cpu(int index, u64 mpidr, void *stack_top);
+ 
++/* What SYSTEM_RESET does: payload variable psci_reset=0|proxy|boot (default boot) */
++enum psci_reset_mode {
++    PSCI_RESET_OFF = 0,   /* NOT_SUPPORTED: the kernel resets the SoC its own way */
++    PSCI_RESET_BOOT = 1,  /* back into m1n1, which boots the default boot entry */
++    PSCI_RESET_PROXY = 2, /* back into m1n1, which only runs the proxy */
++};
++void psci_reset_configure(const char *val);
++enum psci_reset_mode psci_reset_mode_get(void);
++/* Set when m1n1 was re-entered by SYSTEM_RESET (psci_reentered() is too) */
++bool psci_reset_reentered(void);
++/* _start_c: keep the first boot_args, SYSTEM_RESET starts m1n1 with them */
++void psci_reset_save_boot_args(void);
++
+ /* EL1, boot CPU, last thing before the kernel: see PSCI_M1N1_SIP_HANDOFF */
+-void psci_handoff(bool wfx_traps, u64 aic_base, u64 wdt_base);
++void psci_handoff(void);
+ 
+ /* EL3 side */
+ u64 psci_handle(u64 fid, u64 a1, u64 a2, u64 a3);
+ void psci_pen(void *cpu, u64 stack_top) __attribute__((noreturn));
+ void psci_rendezvous_off(void) __attribute__((noreturn));
++void psci_system_reset_entry(void *boot_args) __attribute__((noreturn));
+ void psci_secondary_entry(void);
+ void _reentry(void);
+ 
+diff --git a/src/psci_asm.S b/src/psci_asm.S
+index ff31f3a..61a6a02 100644
+--- a/src/psci_asm.S
++++ b/src/psci_asm.S
+@@ -230,10 +230,52 @@ _reentry:
+ 
+     adrp x1, psci_persist // .reentry_flag
+     add x1, x1, :lo12:psci_persist
+-    mov x2, #1
++    mov x2, #PSCI_REENTRY_KEXEC
+     str x2, [x1]
+     dc civac, x1
+     dsb sy
+ 
+     mov x0, x19
+     b _start
++
++/*
++ * psci_system_reset_entry(boot_args): the end of SYSTEM_RESET, at EL3 on the
++ * calling CPU once every other CPU is in the pen (L1D clean) and nothing
++ * else runs. The kernel's EL1 MMU and caches may still be on; its stack and
++ * memory are never used again. Turn EL1 translation and caching off, write
++ * all data caches back, flag the reset and restart m1n1 at EL1h with the
++ * original boot_args, like a cold boot. _start resets the stack and reapplies
++ * the relocations; SP_EL3 goes back to the boot stack.
++ */
++.globl psci_system_reset_entry
++.type psci_system_reset_entry, @function
++psci_system_reset_entry:
++    msr daifset, #0xf
++    mov x19, x0
++    mov x1, #0x0800 // SCTLR_EL1: RES1 bits only, MMU and caches off
++    movk x1, #0x30d0, lsl #16
++    msr sctlr_el1, x1
++    isb
++    mov x0, #DCSW_OP_DCCISW
++    bl dcsw_op_all
++    tlbi alle1
++    ic iallu
++    dsb sy
++    isb
++
++    adrp x1, psci_persist // .reentry_flag
++    add x1, x1, :lo12:psci_persist
++    mov x2, #PSCI_REENTRY_RESET
++    str x2, [x1]
++    dc civac, x1
++    dsb sy
++
++    adrp x1, _start
++    add x1, x1, :lo12:_start
++    msr elr_el3, x1
++    mov x1, #0x3c5 // EL1h, DAIF masked
++    msr spsr_el3, x1
++    adrp x1, _stack_bot_el3
++    mov sp, x1
++    mov x0, x19
++    eret
+diff --git a/src/startup.c b/src/startup.c
+index 167fae8..4d9ac39 100644
+--- a/src/startup.c
++++ b/src/startup.c
+@@ -171,6 +171,7 @@ void _start_c(void *boot_args, void *base, u64 boot_el)
+         boot_cpu_idx = -1; // .data keeps the last run's value; find it again
+     boot_args_addr = (u64)boot_args;
+     memcpy(&cur_boot_args, boot_args, sizeof(cur_boot_args));
++    psci_reset_save_boot_args();
+ 
+     adt =
+         (void *)(((u64)cur_boot_args.devtree) - cur_boot_args.virt_base + cur_boot_args.phys_base);

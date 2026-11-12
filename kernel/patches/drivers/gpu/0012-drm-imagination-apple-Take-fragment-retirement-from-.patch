@@ -1,0 +1,155 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Tue, 10 Nov 2026 01:29:13 +0800
+Subject: [PATCH] drm/imagination: apple: Take fragment retirement from the
+ retirement stamp
+
+A fragment job's fence and the gate before the next geometry job counted
+one fragment-done event per job. The firmware accumulates retirements and
+may announce several with one event, so with more than one fragment job
+queued the count fell behind and jobs never completed. Neither the
+execution stamp nor the ring consumer index shows that the retirement,
+free-list unregister included, is finished.
+
+Every fragment command now names one retirement stamp (+0x89c). The
+firmware writes the command's scheduling token there after the retirement
+cleanup and before the type-1 event; the driver reads it as a watermark
+(its low byte is the sequence number) after taking events off the ring.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_apple.c       | 32 ++++++++++++++-----
+ .../gpu/drm/imagination/pvr_apple_layout.c    | 16 +++++++++-
+ .../gpu/drm/imagination/pvr_apple_layout.h    |  1 +
+ 3 files changed, 40 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_apple.c b/drivers/gpu/drm/imagination/pvr_apple.c
+index 018b94a2e029..6b980f713b19 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple.c
++++ b/drivers/gpu/drm/imagination/pvr_apple.c
+@@ -930,11 +930,27 @@ static void pvr_apple_ack_events(struct pvr_apple *apple)
+ 	spin_unlock_irqrestore(&apple->event_lock, flags);
+ }
+ 
+-/* Fragment-done events posted so far (taking new events off the ring) */
++/*
++ * The last fragment job whose retirement, free-list unregister included, is
++ * done: the retirement stamp every fragment command names (+0x89c), which the
++ * firmware writes before the type-1 event. One event may announce several
++ * retirements, so the stamp is read as a watermark, never counted per event.
++ * Its low byte is the job's sequence number; fewer than 256 are outstanding.
++ */
++static u32 pvr_apple_frag_retired_seq(struct pvr_apple *apple)
++{
++	u32 seq = READ_ONCE(apple->frag_seq), mark;
++
++	rmb();	/* after the events that announced it */
++	mark = heap_read32(apple, pvr_apple_layout_3d_retired_offset());
++	return seq - (u8)(seq - mark);
++}
++
++/* The retirement watermark, taking new events off the ring first */
+ static u32 pvr_apple_frag_events(struct pvr_apple *apple)
+ {
+ 	pvr_apple_ack_events(apple);
+-	return READ_ONCE(apple->frag_events);
++	return pvr_apple_frag_retired_seq(apple);
+ }
+ 
+ /* Drop the runtime-PM references of @n jobs that left the pending lists. */
+@@ -967,13 +983,13 @@ static void pvr_apple_poll_work(struct work_struct *work)
+ 		 * A fragment job's stamp comes before the firmware retires it, so
+ 		 * its target may not be complete in memory yet for readers that
+ 		 * do not go through the GPU, such as the display. Its fence also
+-		 * waits for the fragment-done event, which follows the retirement.
++		 * waits for the retirement stamp.
+ 		 */
+ 		if (engine == APPLE_ENGINE_FRAG) {
+-			u32 events = READ_ONCE(apple->frag_events);
++			u32 retired = pvr_apple_frag_retired_seq(apple);
+ 
+-			if ((s32)(events - done) < 0)
+-				done = events;
++			if ((s32)(retired - done) < 0)
++				done = retired;
+ 		}
+ 		list_for_each_entry_safe(fence, tmp, &apple->pending[engine], node) {
+ 			if ((s32)(done - (u32)fence->base.seqno) < 0)
+@@ -1276,7 +1292,7 @@ static int pvr_apple_queue_render(struct pvr_apple *apple, struct pvr_vm_context
+ 		 * the free list: a geometry job dispatched in between had its
+ 		 * registration cleared, and the next Start3D loaded a null entry and
+ 		 * crashed the firmware (fw 0x16634, Hyprland every few thousand
+-		 * renders). The fragment-done event follows the retirement.
++		 * renders). The retirement stamp is written after the unregister.
+ 		 */
+ 		if (!err) {
+ 			u32 events;
+@@ -1286,7 +1302,7 @@ static int pvr_apple_queue_render(struct pvr_apple *apple, struct pvr_vm_context
+ 						apple);
+ 			if (err) {
+ 				dev_err(apple_dev(apple),
+-					"no fragment-done event for fragment job %u (%u events)\n",
++					"fragment job %u not retired (retirement stamp %u)\n",
+ 					apple->frag_seq, events);
+ 				err = 0;
+ 			}
+diff --git a/drivers/gpu/drm/imagination/pvr_apple_layout.c b/drivers/gpu/drm/imagination/pvr_apple_layout.c
+index 10853e8eea6c..34c9c4983366 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple_layout.c
++++ b/drivers/gpu/drm/imagination/pvr_apple_layout.c
+@@ -101,6 +101,14 @@
+  * (0x908), microsequence +0xa00, scratch +0xb00, context +0xc00. Both inside
+  * heap descriptor 1 (0x50000-0x90000).
+  */
++/*
++ * Fragment retirement stamp: every fragment command's +0x89c names it, and the
++ * firmware writes the command's scheduling token (+0x8a4) there once the
++ * retirement, free-list unregister included, is done, before the type-1
++ * event. One event may announce several retirements: the stamp is the
++ * watermark. In the old single fragment command area.
++ */
++#define HEAP_3D_RETIRED		0x76000u
+ #define HEAP_3D_JOBS		0x5d000u
+ #define JOBS_3D			4u
+ #define JOB_3D_STRIDE		0x1000u
+@@ -378,6 +386,7 @@ static const struct { const char *name; u32 start, size; } heap2_areas[] = {
+ 	{ "power state", HEAP_POWER_STATE, 0x4314 },
+ 	{ "sku records", HEAP_SKU_RECORDS, 512 * 36 },
+ 	{ "sku control", HEAP_SKU_CONTROL, 0x100 },
++	{ "3d retirement stamp", HEAP_3D_RETIRED, 0x100 },
+ 	{ "3d queue..ring", HEAP_3D_QUEUE, HEAP_3D_POOL + 0x2000 - HEAP_3D_QUEUE },
+ 	{ "pds pt", HEAP_PDS_PT, 0x4000 },
+ 	{ "compute jobs", HEAP_JOBS, JOB_SLOTS * JOB_STRIDE },
+@@ -659,7 +668,7 @@ void pvr_apple_layout_write_3d_job(u8 *heap, u32 seq, const struct pvr_apple_3d_
+ 	wr32(heap, cmd + 0x018, 0xc8);
+ 	wr32(heap, cmd + 0x01c, fw_va(ctx));
+ 	/* Scheduling descriptor, as geometry's +0x550 block */
+-	wr32(heap, cmd + 0x89c, fw_va(sc + F_STAMP));
++	wr32(heap, cmd + 0x89c, fw_va(HEAP_3D_RETIRED));
+ 	wr32(heap, cmd + 0x8a4, sched_token(seq));
+ 	heap[cmd + 0x8a8] = F_SLOT;
+ 	wr32(heap, cmd + 0x8b4, seq);
+@@ -766,6 +775,11 @@ u32 pvr_apple_layout_event_producer(void)
+ 	return HEAP_EVENT_RING + 0x20;
+ }
+ 
++u32 pvr_apple_layout_3d_retired_offset(void)
++{
++	return HEAP_3D_RETIRED;
++}
++
+ u32 pvr_apple_layout_3d_stamp_offset(void)
+ {
+ 	return HEAP_STAMP + 0x20;
+diff --git a/drivers/gpu/drm/imagination/pvr_apple_layout.h b/drivers/gpu/drm/imagination/pvr_apple_layout.h
+index 8fa529bb3bcb..ff2205df1f65 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple_layout.h
++++ b/drivers/gpu/drm/imagination/pvr_apple_layout.h
+@@ -49,6 +49,7 @@ void pvr_apple_layout_write_3d_job(u8 *heap, u32 seq, const struct pvr_apple_3d_
+ u32 pvr_apple_layout_3d_producer(void);
+ u32 pvr_apple_layout_ring_indices_offset(unsigned int ring);
+ u32 pvr_apple_layout_3d_stamp_offset(void);
++u32 pvr_apple_layout_3d_retired_offset(void);
+ u32 pvr_apple_layout_mmu_root_offset(unsigned int ctx);
+ u32 pvr_apple_layout_mmu_gen_offset(unsigned int ctx);
+ u32 pvr_apple_layout_init_offset(void);

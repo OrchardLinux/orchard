@@ -1,4 +1,4 @@
-"""Host-only framing checks for the explicit J71t PSCI loader."""
+"""Host-only framing checks for the J71t PSCI loader variables."""
 from pathlib import Path
 import json
 import subprocess
@@ -24,6 +24,33 @@ class PSCILoader(unittest.TestCase):
             self.assertEqual(loader.read_bytes(), original)
             self.assertNotEqual(subprocess.run(cmd, capture_output=True).returncode, 0)
             self.assertEqual(output.read_bytes(), original + b'psci=1\n')
+
+    def test_reset_and_off_variables(self):
+        cases = {('--system-reset', 'proxy'): b'psci=1\npsci_reset=proxy\n',
+                 ('--system-reset', 'off'): b'psci=1\npsci_reset=0\n',
+                 ('--system-reset', 'boot'): b'psci=1\n',
+                 ('--no-psci',): b'psci=0\n'}
+        with tempfile.TemporaryDirectory() as tmp:
+            loader = Path(tmp) / 'm1n1.bin'
+            loader.write_bytes(b'bare')
+            for n, (extra, records) in enumerate(cases.items()):
+                output = Path(tmp) / f'out{n}.bin'
+                result = subprocess.run([sys.executable, str(TOOL), '--device', 'j71t', '--loader',
+                                         str(loader), '--output', str(output), *extra],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(output.read_bytes(), b'bare' + records)
+            both = subprocess.run([sys.executable, str(TOOL), '--device', 'j71t', '--loader', str(loader),
+                                   '--output', str(Path(tmp) / 'x.bin'), '--no-psci', '--system-reset',
+                                   'proxy'], capture_output=True)
+            self.assertNotEqual(both.returncode, 0)
+
+    def test_series_has_reset_patches(self):
+        names = sorted(p.name for p in (ROOT / 'boot/m1n1/patches/orchard').glob('*.patch'))
+        for prefix in ('0015-psci-', '0016-psci-Turn-the-resident-EL3-PSCI-on-by-default',
+                       '0017-psci-Trap-EL1-WFI-WFE', '0018-psci-Implement-SYSTEM_RESET',
+                       '0019-bootmgr-Boot-the-default-entry'):
+            self.assertTrue(any(n.startswith(prefix) for n in names), prefix)
 
     def test_manifest_psci_record_keeps_logo_first(self):
         with tempfile.TemporaryDirectory() as tmp:

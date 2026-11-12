@@ -85,16 +85,20 @@
       "usb_serial"
     ],
     "d22": [
+      "backlight",
       "battery",
       "storage_read",
       "storage_write",
+      "touch",
       "usb_network",
       "usb_serial"
     ],
     "d221": [
+      "backlight",
       "battery",
       "storage_read",
       "storage_write",
+      "touch",
       "usb_network",
       "usb_serial",
       "wifi"
@@ -125,6 +129,7 @@
     ],
     "j171": [
       "accelerometer",
+      "audio_output",
       "backlight",
       "battery",
       "bluetooth_audio",
@@ -141,6 +146,7 @@
     ],
     "j172": [
       "accelerometer",
+      "audio_output",
       "backlight",
       "battery",
       "bluetooth_audio",
@@ -220,6 +226,7 @@
     ],
     "j72b": [
       "accelerometer",
+      "audio_output",
       "backlight",
       "battery",
       "bluetooth_audio",
@@ -328,15 +335,21 @@
     ],
     "j96": [
       "backlight",
+      "battery",
       "buttons",
+      "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "wifi"
     ],
     "j97": [
       "backlight",
+      "battery",
       "buttons",
+      "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "wifi"
     ],
     "j98a": [
       "backlight",
@@ -364,12 +377,14 @@
     ],
     "n56": [
       "backlight",
+      "battery",
       "buttons",
       "usb_network",
       "usb_serial"
     ],
     "n61": [
       "backlight",
+      "battery",
       "buttons",
       "touch",
       "usb_network",

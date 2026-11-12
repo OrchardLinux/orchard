@@ -17,7 +17,7 @@ echo 0x05ac > "$g/idVendor"
 echo 0x4144 > "$g/idProduct"
 mkdir -p "$g/strings/0x409" "$g/configs/c.1/strings/0x409"
 echo "Orchard $name" > "$g/strings/0x409/product"
-echo "BOOT:$(cat /proc/sys/kernel/random/boot_id)" > "$g/strings/0x409/serialnumber"
+sh /usr/libexec/orchard/usb-identity > "$g/strings/0x409/serialnumber"
 echo 'USB network and serial' > "$g/configs/c.1/strings/0x409/configuration"
 # Descriptor only: not charging capability or PMIC policy.
 echo 100 > "$g/configs/c.1/MaxPower"

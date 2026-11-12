@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Tue, 10 Nov 2026 09:17:55 +0800
+Subject: [PATCH] drm/imagination: Count the Apple A10 as supported
+
+The A10 GPU needed exp_hw_support=1 to bind, which every installed
+system had to set in modprobe configuration. The desktop runs on it
+now, so it binds like the other supported cores. It still binds only
+where its firmware is installed.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_device.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_device.c b/drivers/gpu/drm/imagination/pvr_device.c
+index af1a61bdbb72..01bc08f7b84e 100644
+--- a/drivers/gpu/drm/imagination/pvr_device.c
++++ b/drivers/gpu/drm/imagination/pvr_device.c
+@@ -538,10 +538,8 @@ pvr_gpu_support_level(const struct pvr_gpu_id *gpu_id)
+ 	case PVR_PACKED_BVNC(33, 15, 11, 3):
+ 	case PVR_PACKED_BVNC(36, 52, 104, 182):
+ 	case PVR_PACKED_BVNC(36, 53, 104, 796):
+-		return PVR_GPU_SUPPORTED;
+-
+ 	case PVR_PACKED_BVNC(13, 10, 6, 2):	/* Apple A10 (T8010) */
+-		return PVR_GPU_EXPERIMENTAL;
++		return PVR_GPU_SUPPORTED;
+ 
+ 	default:
+ 		return PVR_GPU_UNKNOWN;

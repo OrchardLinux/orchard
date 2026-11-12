@@ -82,6 +82,7 @@ class PlatformLayer(unittest.TestCase):
         base = f'lib/modules/{RELEASE}/'
         self.assertEqual(names['bin/busybox'], b'static busybox')
         self.assertEqual(names['init'], (ROOT / 'boot/initramfs/root/init').read_bytes())
+        self.assertEqual(names['etc/orchard/usb-identity'], (ROOT / 'src/orchard/usb-identity').read_bytes())
         self.assertEqual(names['etc/orchard/modules'], b'nvme\n')
         self.assertEqual(names['etc/orchard/dtbs/j71t.dtb'], b's8003-j71t')
         self.assertIn(b'apple,j71t j71t.dtb\n', names['etc/orchard/pristine-map'])

@@ -34,9 +34,9 @@ screen_off = "untested"
 backlight = "untested"
 touch = "untested"
 buttons = "untested"
-accelerometer = "untested"
-gyroscope = "untested"
-light_sensor = "untested"
+accelerometer = "working"
+gyroscope = "working"
+light_sensor = "working"
 touch_id = "missing"
 storage_read = "untested"
 storage_write = "untested"
@@ -54,21 +54,3 @@ usb_network = "untested"
 audio_output = "untested"
 audio_input = "untested"
 camera = "missing"
-
-# Local capability delta: g5p.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/g5p.md.
-
-# Local capability delta: aop.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/aop.md.
-
-# Local capability delta: warm-storage.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/warm-storage.md.
-
-# Local capability delta: psci.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/psci.md.
-
-# Local capability delta: warm-peripherals.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/warm-peripherals.md.
-
-# Local capability delta: warm-kernel.
-# Integration evidence / qualification limits: linux-a9 docs/release/orchard-prs-20261108-final/warm-kernel.md.
