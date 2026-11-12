@@ -27,6 +27,7 @@ status = "supported"
 
 # States: working, untested, missing, none (features.toml).
 [features]
+warm_restart = "untested"
 display = "working"
 screen_off = "working"
 backlight = "working"

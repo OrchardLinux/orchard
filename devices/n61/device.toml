@@ -29,6 +29,7 @@ status = "experimental"
 
 # States: working, untested, missing, none (features.toml).
 [features]
+warm_restart = "untested"
 display = "working" # The minimal-boot framebuffer console was visible on the LCD.
 screen_off = "untested"
 backlight = "untested"

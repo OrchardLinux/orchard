@@ -369,6 +369,14 @@
             "missing",
             "none"
           ]
+        },
+        "warm_restart": {
+          "enum": [
+            "working",
+            "untested",
+            "missing",
+            "none"
+          ]
         }
       },
       "required": [
@@ -397,7 +405,8 @@
         "audio_output",
         "audio_input",
         "camera",
-        "video_decode_hevc"
+        "video_decode_hevc",
+        "warm_restart"
       ],
       "additionalProperties": false
     },

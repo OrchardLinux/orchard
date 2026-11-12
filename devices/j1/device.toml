@@ -33,6 +33,7 @@ status = "experimental"
 # with GCC 11.4 and the boot kit's config (README.md), but orchard's own clang
 # build has not booted on a J1 yet.
 [features]
+warm_restart = "untested"
 display = "untested" # simplefb on iBoot's scanout; a userspace dashboard drew to fb0 on the LCD.
 screen_off = "missing"
 backlight = "missing"

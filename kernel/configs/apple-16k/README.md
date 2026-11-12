@@ -72,3 +72,12 @@ To change configuration, use Kconfig tooling such as `menuconfig` or
 `scripts/config`, resolve it with `olddefconfig`, and review the resulting diff
 before updating the committed file. Preserve the pinned source/toolchain when
 checking reproducibility.
+
+## J71t system sleep preparation (0.4)
+
+Resolve with Orchard Clang 19. Enable KEYBOARD_GPIO_POLLED=y so the
+existing polled cover switches can probe; keep GPIO_APPLE_D2365=y and
+SUSPEND=y for PMU event wake and s2idle. Those latter options were already
+enabled. Disable DWARF debug information (DEBUG_INFO_NONE=y) to keep the
+local build footprint bounded. Kconfig also refreshes current derived options.
+These config choices do not qualify cover wake or suspend on hardware.

@@ -18,3 +18,12 @@ From `../apple-16k/config`, with `CONFIG_ARM64_4K_PAGES=y` and
 `CONFIG_ARM64_16K_PAGES` unset, resolved with `olddefconfig` on the pinned
 source as described in `../apple-16k/README.md`. Keep the two files in step: a
 change to `apple-16k` is made here too, then resolved again.
+
+## J71t system sleep preparation (0.4)
+
+Resolve with Orchard Clang 19. Enable KEYBOARD_GPIO_POLLED=y so the
+existing polled cover switches can probe; keep GPIO_APPLE_D2365=y and
+SUSPEND=y for PMU event wake and s2idle. Those latter options were already
+enabled. Disable DWARF debug information (DEBUG_INFO_NONE=y) to keep the
+local build footprint bounded. Kconfig also refreshes current derived options.
+These config choices do not qualify cover wake or suspend on hardware.
