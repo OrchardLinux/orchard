@@ -97,24 +97,9 @@ usb_gadget() {
     [ ! -e "$g" ] || return 0
     name=$(sed -n 's/^NAME=//p' /newroot/etc/os-release /newroot/usr/lib/os-release 2>/dev/null | head -1 | tr -d "\"'")
     board=$(tr '\000' '\n' < /proc/device-tree/compatible | head -1)
-    # Opt-in compatibility identity in macOS's 2400 mA capability table.
-    # This requests a host grant; it does not set a charger limit. Keep the
-    # generic composite personality (no iOS/usbmux or preferred-config API).
-    pid=0x4145
-    device_class=0x00 device_subclass=0x00 device_protocol=0x00
-    if [ "$board" = apple,j71t ] &&
-       [ "$(cat /newroot/etc/orchard/mac-usb-current 2>/dev/null)" = 1 ]; then
-        pid=0x1014
-        # Standard IAD device: macOS defers its CDC composite match here,
-        # allowing the generic composite driver to deliver the grant.
-        device_class=0xef device_subclass=0x02 device_protocol=0x01
-    fi
     mkdir "$g" &&
     echo 0x05ac > "$g/idVendor" &&
-    echo "$pid" > "$g/idProduct" &&
-    echo "$device_class" > "$g/bDeviceClass" &&
-    echo "$device_subclass" > "$g/bDeviceSubClass" &&
-    echo "$device_protocol" > "$g/bDeviceProtocol" &&
+    echo 0x4145 > "$g/idProduct" &&
     mkdir -p "$g/strings/0x409" "$g/configs/c.1/strings/0x409" &&
     echo 'Orchard Linux' > "$g/strings/0x409/manufacturer" &&
     echo "${name:-Linux}" > "$g/strings/0x409/product" &&

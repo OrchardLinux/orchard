@@ -1,14 +1,16 @@
-From: brkosebay <brkosebay@users.noreply.github.com>
-Date: Sun, 08 Nov 2026 16:00:00 +0100
-Subject: [PATCH] usb: Quiet polled cover inputs and exclusive RTC event
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 17:15:00 +0100
+Subject: [PATCH] usb: preserve PMU and RTC interrupt ownership
 
-Collapse the intermediate IRQ-driven cover change and its storm fix into the final polled-cover implementation, keeping PMU events 48/58 masked. Reserve event 16 exclusively for the RTC while retaining Tristar event-72 wake and parent-line protection. Add the one-shot RTC alarm interface and accept both directions of the known Apple current-grant request; do not fabricate a host grant or claim Mac charging is fixed. Cover wake remains deferred.
-
-Integration fixups are folded into the final delta. Device observations apply
-to the integration build; the isolated topic requires qualification.
+Shared wake events must have one interrupt owner. Preserve the PMU and
+RTC event split so that acknowledgement by one consumer cannot steal the
+other consumer's wake event.
 
 Assisted-by: LLM
 ---
+ drivers/usb/gadget/composite.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/usb/gadget/composite.c b/drivers/usb/gadget/composite.c
 index 1da3effb2..14e87fbc8 100644
@@ -23,7 +25,7 @@ index 1da3effb2..14e87fbc8 100644
  	    (s16)w_index, (s16)w_value);
  	composite_vbus_draw(cdev, cdev->vbus_draw_ma);
  	return 0;
-@@ -2221,7 +2221,7 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
+@@ -2221,7 +2221,7 @@ unknown:
  			goto check_value;
  		}
  

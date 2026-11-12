@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Wed, 11 Nov 2026 00:35:12 +0800
+Subject: [PATCH] arm64: dts: apple: t7001-air2: Let the Wi-Fi firmware follow
+ the country
+
+Apple's Broadcom firmware starts in the NVRAM's worldwide locale (XZ),
+and in it refuses joins on most 5 GHz channels at once, with nothing
+sent: brcmfmac reports status 16 within about 100 ms. brcmfmac passes
+the regulatory country (from an access point's country element, or
+user space) to the firmware only when the node says how to translate
+it. Use the trivial map, as the iPad 5 already does: Apple's CLM takes
+the ISO 3166 code with revision 0.
+
+On a J71b among access points that announce ID, joins on 5 GHz failed
+until a firmware reload while channel 6 worked; with the firmware's
+country set to ID, reconnects on channel 153 succeeded every time.
+This covers the iPad Air 2 (J81, J82).
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t7001-air2.dtsi | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t7001-air2.dtsi b/arch/arm64/boot/dts/apple/t7001-air2.dtsi
+index b1c59969fbd6..db441058bc4c 100644
+--- a/arch/arm64/boot/dts/apple/t7001-air2.dtsi
++++ b/arch/arm64/boot/dts/apple/t7001-air2.dtsi
+@@ -185,6 +185,7 @@ wifi0: wifi@0,0 {
+ 			reg = <0x10000 0x0 0x0 0x0 0x0>;
+ 			device-wake-gpios = <&pinctrl 165 GPIO_ACTIVE_HIGH>;
+ 			vdd-supply = <&wlan_vdd>;
++			brcm,ccode-map-trivial;
+ 		};
+ 	};
+ };

@@ -1,0 +1,84 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 15:56:40 +0100
+Subject: [PATCH] psci: Turn the resident EL3 PSCI on by default
+
+When m1n1 was entered at EL3 (A7-A9 booted by Pongo) it stays resident
+and already implements CPU_ON/CPU_OFF/AFFINITY_INFO for the kernel, but
+only when the payload asked for it with psci=1. Without it the kernel
+gets the spin table and can neither offline CPUs nor kexec on SMP, so
+every loader had to be built with the variable appended.
+
+Make it the default. psci=0 turns it off again (spin table, no /psci
+node), psci=1 is still accepted. Nothing changes where m1n1 is entered
+at EL1 or EL2: psci_active() still requires the EL3 entry.
+
+Assisted-by: LLM
+---
+ src/kboot.c | 4 ++--
+ src/psci.c  | 6 +++---
+ src/psci.h  | 4 ++--
+ 3 files changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/src/kboot.c b/src/kboot.c
+index 7123d60..a5f4238 100644
+--- a/src/kboot.c
++++ b/src/kboot.c
+@@ -576,7 +576,7 @@ static int dt_set_smbios(void)
+ }
+ 
+ /*
+- * With psci=1 and m1n1 owning EL3 (A7-A9), CPUs boot through m1n1's PSCI
++ * When m1n1 owns EL3 (A7-A9), CPUs boot through m1n1's PSCI
+  * (see psci.c) instead of the spin table, so the kernel can offline them
+  * for kexec and CPU hotplug. Also tells Linux how to re-enter m1n1.
+  */
+@@ -586,7 +586,7 @@ static int dt_set_psci(void)
+     int node;
+ 
+     if (!psci_active()) {
+-        printf("PSCI: off (needs psci=1 and m1n1 entered at EL3)\n");
++        printf("PSCI: off (m1n1 not entered at EL3, or psci=0)\n");
+         return 0;
+     }
+ 
+diff --git a/src/psci.c b/src/psci.c
+index 2b8ca0d..25e2a4f 100644
+--- a/src/psci.c
++++ b/src/psci.c
+@@ -28,8 +28,8 @@ struct {
+     u64 boot_el3;
+ } psci_persist __attribute__((section(".data"), aligned(PSCI_CPU_SIZE)));
+ 
+-/* psci=1 from the payload, kept across a re-entry */
+-static u32 psci_mode __attribute__((section(".data")));
++/* On unless the payload says psci=0; kept across a re-entry */
++static u32 psci_mode __attribute__((section(".data"))) = 1;
+ 
+ /* EL3 stacks a CPU gets when it leaves the pen */
+ static u8 psci_stacks[PSCI_MAX_CPUS][PSCI_STACK_SIZE] __attribute__((aligned(16)));
+@@ -177,7 +177,7 @@ void psci_note_boot_el(u64 el)
+ 
+ void psci_configure(const char *val)
+ {
+-    psci_mode = val[0] == '1';
++    psci_mode = val[0] != '0';
+ }
+ 
+ bool psci_active(void)
+diff --git a/src/psci.h b/src/psci.h
+index 6769ebe..9a213af 100644
+--- a/src/psci.h
++++ b/src/psci.h
+@@ -50,9 +50,9 @@
+ 
+ #ifndef __ASSEMBLER__
+ 
+-/* Payload variable psci=1 */
++/* Payload variable psci=0 turns PSCI off; anything else (psci=1) leaves it on */
+ void psci_configure(const char *val);
+-/* m1n1 entered at EL3 and psci=1 given: the kernel may use PSCI */
++/* m1n1 entered at EL3 and not psci=0: the kernel uses PSCI */
+ bool psci_active(void);
+ /* Called once from _start_c with the EL m1n1 was entered at */
+ void psci_note_boot_el(u64 el);

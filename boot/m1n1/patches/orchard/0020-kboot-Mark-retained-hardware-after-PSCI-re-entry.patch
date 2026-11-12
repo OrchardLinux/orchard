@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 12:00:00 +0100
+Subject: [PATCH] kboot: Mark retained hardware after PSCI re-entry
+
+SYSTEM_RESET re-enters m1n1 without resetting all peripherals. Mark the
+next kernel's /chosen with the existing linux,booted-from-kexec boolean
+so retained hardware is not mistaken for the cold iBoot baseline.
+
+Use psci_reentered(), which covers both SYSTEM_RESET and the kexec
+trampoline. This also preserves the contract when kboot loads a fresh
+BLS devicetree instead of inheriting the outgoing kernel's tree.
+
+The Orchard kernel's G5P, PMGR, PCIe/ANS and AOP consumers all use this
+property to select retained-state handling, with their existing hardware
+and certification guards. The only other reader is PowerPC-only. No
+kernel consumer needs a separate PSCI-specific property.
+
+Assisted-by: LLM
+---
+diff --git a/src/kboot.c b/src/kboot.c
+index 1d4b26f..7dc9874 100644
+--- a/src/kboot.c
++++ b/src/kboot.c
+@@ -278,6 +278,13 @@ static int dt_set_chosen(void)
+         printf("FDT: %s = '%s'\n", name, value);
+     }
+ 
++    /* Re-entry retains peripherals, just like a kernel-to-kernel handoff. */
++    if (psci_reentered()) {
++        if (fdt_setprop(dt, node, "linux,booted-from-kexec", NULL, 0))
++            bail("FDT: couldn't mark retained hardware after m1n1 re-entry\n");
++        printf("FDT: linux,booted-from-kexec (m1n1 re-entry)\n");
++    }
++
+     if (initrd_start && initrd_size) {
+         if (fdt_setprop_u64(dt, node, "linux,initrd-start", (u64)initrd_start))
+             bail("FDT: couldn't set chosen.linux,initrd-start property\n");

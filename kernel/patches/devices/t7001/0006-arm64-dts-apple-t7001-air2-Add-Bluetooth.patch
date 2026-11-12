@@ -4,20 +4,22 @@ Date: Fri, 30 Oct 2026 21:02:48 +0800
 Subject: [PATCH] arm64: dts: apple: t7001-air2: Add Bluetooth
 
 Describe the BCM4350C2's Bluetooth on UART3 from the ADT uart3/bluetooth
-node: 3 Mbit/s, power enable on D2207 GPIO 2 and BT_WAKE on AP GPIO 164.
-m1n1 adds the device address through the bluetooth0 alias.
+node: power enable on D2207 GPIO 2 and BT_WAKE on AP GPIO 164. m1n1
+adds the device address through the bluetooth0 alias.
 
-Signed-off-by: Henrik Klee <henrik@goat-code.com>
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+The link stays at 115,200 baud, the speed a J81 started the controller
+and scanned at. The ADT allows 3 Mbit/s; that switch has not been tried.
+
+Assisted-by: LLM
 ---
- arch/arm64/boot/dts/apple/t7001-air2.dtsi | 26 +++++++++++++++++++++--
- 1 file changed, 24 insertions(+), 2 deletions(-)
+ arch/arm64/boot/dts/apple/t7001-air2.dtsi | 25 +++++++++++++++++++++--
+ 1 file changed, 23 insertions(+), 2 deletions(-)
 
 diff --git a/arch/arm64/boot/dts/apple/t7001-air2.dtsi b/arch/arm64/boot/dts/apple/t7001-air2.dtsi
-index 0440b4a..6004c12 100644
+index 0440b4a2acca..b1c59969fbd6 100644
 --- a/arch/arm64/boot/dts/apple/t7001-air2.dtsi
 +++ b/arch/arm64/boot/dts/apple/t7001-air2.dtsi
-@@ -11,6 +11,8 @@
+@@ -11,6 +11,8 @@ / {
  	chassis-type = "tablet";
  
  	aliases {
@@ -26,7 +28,7 @@ index 0440b4a..6004c12 100644
  		touchscreen0 = &touchscreen;
  		wifi0 = &wifi0;
  	};
-@@ -111,8 +113,8 @@
+@@ -111,8 +113,8 @@ pmu_gpio: gpio {
  			compatible = "apple,d2207-pmic-gpio";
  			gpio-controller;
  			#gpio-cells = <2>;
@@ -37,15 +39,15 @@ index 0440b4a..6004c12 100644
  		};
  
  		rtc@5c0 {
-@@ -217,3 +219,23 @@
+@@ -217,3 +219,22 @@ touchscreen: touchscreen@0 {
  &touchclk {
  	status = "okay";
  };
 +
 +/*
 + * The BCM4350C2's Bluetooth on UART3, from the ADT uart3/bluetooth node:
-+ * 3 Mbit/s, power enable on D2207 GPIO 2, BT_WAKE on GPIO 164. m1n1 adds
-+ * the device address.
++ * power enable on D2207 GPIO 2, BT_WAKE on GPIO 164. m1n1 adds the device
++ * address. 115,200 baud is the speed tested on a J81; the ADT allows 3 Mbit/s.
 + */
 +&serial3 {
 +	pinctrl-0 = <&uart3_pins>;
@@ -56,7 +58,6 @@ index 0440b4a..6004c12 100644
 +	bluetooth: bluetooth {
 +		compatible = "apple,j81-bcm4350c2-bt";
 +		current-speed = <115200>;
-+		max-speed = <3000000>;
 +		shutdown-gpios = <&pmu_gpio 2 GPIO_ACTIVE_HIGH>;
 +		device-wakeup-gpios = <&pinctrl 164 GPIO_ACTIVE_HIGH>;
 +	};
