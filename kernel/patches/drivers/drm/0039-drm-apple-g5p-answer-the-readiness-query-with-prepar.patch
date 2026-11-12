@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 16:15:36 +0100
+Subject: [PATCH] drm/apple-g5p: answer the readiness query with prepare's
+ criterion
+
+The readiness query answered "ready" for any drainable busy state, since
+prepare drains work in flight. A drainable state with no job in device
+test is not drained by anything: on J71t with the GPU parked and no
+client in the driver, /sys/power/suspend_ready read "ready" while every
+attempt drained for 1 s and refused.
+
+A drainable state now counts as in flight only while an accepted job is
+not yet signalled (r8_queued); otherwise the query refuses it as
+"busy/<reasons>", as prepare's state check will after its drain. Prepare
+itself is unchanged.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/apple-g5p/system-sleep.inc | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/apple-g5p/system-sleep.inc b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+index e06b48430..40cf32e4f 100644
+--- a/drivers/gpu/drm/apple-g5p/system-sleep.inc
++++ b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+@@ -442,8 +442,11 @@ static __printf(3, 4) int g5p_sleep_why(struct g5p_drm *d, int ret,
+  * draining firmware events. Accepted or in-flight work is not a refusal,
+  * since prepare drains it, except under the never-park envelope, where the
+  * drained firmware still cannot certify. A busy state no drain clears
+- * (G5P_SB_STATIC) refuses here exactly as prepare would,
+- * so "ready" is never answered for it. Register samples are taken only
++ * (G5P_SB_STATIC) refuses here exactly as prepare would, and so does a
++ * drainable one with no job in flight (r8_queued: accepted, not yet
++ * signalled) to retire it: prepare's drain would wait 1 s on it and refuse.
++ * So "ready" is never answered for either. A close item still queued with
++ * no job may answer busy for a moment; prepare drains it. Register samples are taken only
+  * when the GPU is already idle and the core lock is free, with the same
+  * reads as g5p_sleep_certificate(); a sampled GPC 0 falls through to it.
+  */
+@@ -491,7 +494,8 @@ static int g5p_system_sleep_check(struct device *dev)
+ 	held = g5p_sleep_busy_mask(d);
+ 	if (held) {
+ 		/* Prepare drains work in flight; it cannot drain the rest. */
+-		if (never_park || !g5p_sleep_busy_drains(held))
++		if (never_park || !g5p_sleep_busy_drains(held) ||
++		    !(held & BIT(G5P_SB_R8_QUEUED)))
+ 			ret = g5p_sleep_why(d, -EBUSY, "%s%s",
+ 					    never_park ? "never-park/" : "busy/",
+ 					    g5p_sleep_busy_list(held, list,

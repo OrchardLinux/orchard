@@ -1,0 +1,393 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 18:10:28 +0000
+Subject: [PATCH] drm/apple-g5p: hold clients across the sleep reservation
+ instead of failing
+
+While a system sleep holds the G5P reservation, from the pre-sync
+admission through complete, every ioctl returns -EBUSY at once. A
+compositor or Vulkan client sees that on a submit or a syncobj wait and
+may report a lost device. A render-node close inside the window sleeps
+in a non-freezable loop, so freezing fails and the whole sleep aborts.
+And a syncobj wait that started earlier holds the host count, so the 20
+ms drain refuses a sleep for an idle GPU.
+
+Apple's GPU drivers never show their clients an error across sleep: work
+is simply not admitted until the GPU is powered again, and the same
+contexts continue.
+
+Split admission into two stages. Prepare first shuts a new client gate
+and lets the scheduler retire what was already accepted, bounded at one
+second; only then does it shut the host gate and run the unchanged
+drain, quiescence and certificate checks. Client ioctls wait for the
+client gate in a freezable wait that ends when the transition reopens
+admission after resume or any abort; a signal restarts the call. Queries
+that never touch the GPU (device and render info, job, context and fault
+status, BO create, mmap offset and CPU sync, and the DRM syncobj family)
+are neither gated nor counted, so a long syncobj wait can sleep through
+the transition. A file closed while client admission is shut is parked
+and torn down from a work item after admission reopens: its contexts
+stay idle survivors like an open file's, and no close item makes the GPU
+busy inside the window.
+
+Every refusal before a destructive step, the freeze after a sampled
+power abort or a failed resume, and the terminal error on failure are
+unchanged.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/apple-g5p/a9-gpu-drm.c     | 181 ++++++++++++++++++---
+ drivers/gpu/drm/apple-g5p/system-sleep.inc |  51 +++++-
+ 2 files changed, 200 insertions(+), 32 deletions(-)
+
+diff --git a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+index 6802578ff..523fdfa44 100644
+--- a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
++++ b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+@@ -106,6 +106,7 @@ struct g5p_file {
+ 	struct xarray contexts;
+ 	struct xarray results;
+ 	struct xarray targets; /* render targets; each holds its context */
++	struct list_head sleep_link; /* closed while client admission was shut */
+ 	u32 render_results;
+ 	bool submitted;
+ 	u64 job_id;
+@@ -186,6 +187,16 @@ struct g5p_drm {
+ 	/* Memory mapped into any VM, each object once (render_pinned_mib). */
+ 	struct mutex pin_lock;
+ 	u64 pinned_bytes;
++	/*
++	 * Client admission, closed before the host gate for a system sleep:
++	 * closed bit plus active client operations. Clients block on sleep_wq
++	 * instead of failing; files closed meanwhile wait on sleep_closes.
++	 */
++	atomic_t client_gate;
++	wait_queue_head_t sleep_wq;
++	spinlock_t sleep_close_lock; /* protects sleep_closes */
++	struct list_head sleep_closes;
++	struct work_struct sleep_close_work;
+ };
+ 
+ static inline struct g5p_drm *to_g5p(struct drm_device *drm)
+@@ -677,10 +688,9 @@ static int g5p_drm_open(struct drm_device *drm, struct drm_file *file)
+ 	return 0;
+ }
+ 
+-static void g5p_drm_postclose_host(struct drm_device *drm,
+-				   struct drm_file *file)
++static void g5p_drm_postclose_host(struct g5p_drm *d, struct g5p_file *f)
+ {
+-	struct g5p_file *f = file->driver_priv;
++	struct drm_device *drm = &d->drm;
+ 	struct g5p_context *c;
+ 	struct g5p_vm *vm;
+ 	unsigned long id;
+@@ -727,14 +737,76 @@ static void g5p_drm_postclose_host(struct drm_device *drm,
+ 		READ_ONCE(to_g5p(drm)->pinned_bytes) >> 10);
+ }
+ 
+-static void g5p_drm_postclose(struct drm_device *drm, struct drm_file *file)
++/* Client admission: open, and the host gate behind it open too. */
++static bool g5p_client_enter(struct g5p_drm *d)
+ {
+-	struct g5p_drm *d = container_of(drm, struct g5p_drm, drm);
++	int old = atomic_read(&d->client_gate);
++
++	do {
++		if (old < 0)
++			return false;
++	} while (!atomic_try_cmpxchg(&d->client_gate, &old, old + 1));
++	if (g5p_sleep_enter(d->core))
++		return true;
++	atomic_dec(&d->client_gate);
++	return false;
++}
+ 
+-	while (!g5p_sleep_enter(d->core))
+-		msleep(20);
+-	g5p_drm_postclose_host(drm, file);
++static void g5p_client_exit(struct g5p_drm *d)
++{
+ 	g5p_sleep_exit(d->core);
++	atomic_dec(&d->client_gate);
++}
++
++/*
++ * While a system sleep holds client admission, a closing file must neither
++ * block the freezer nor queue a close item that makes the GPU busy. Park the
++ * whole teardown; its contexts stay idle like an open file's and close once
++ * admission reopens, after resume or an abort.
++ */
++static void g5p_sleep_close_work(struct work_struct *work)
++{
++	struct g5p_drm *d = container_of(work, struct g5p_drm, sleep_close_work);
++	struct g5p_file *f;
++
++	for (;;) {
++		/* Shut again: the next reopen queues this work. */
++		if (!g5p_client_enter(d))
++			return;
++		spin_lock(&d->sleep_close_lock);
++		f = list_first_entry_or_null(&d->sleep_closes, struct g5p_file,
++					     sleep_link);
++		if (f)
++			list_del(&f->sleep_link);
++		spin_unlock(&d->sleep_close_lock);
++		if (f)
++			g5p_drm_postclose_host(d, f);
++		g5p_client_exit(d);
++		if (!f)
++			return;
++		drm_dev_put(&d->drm);
++	}
++}
++
++static void g5p_drm_postclose(struct drm_device *drm, struct drm_file *file)
++{
++	struct g5p_drm *d = to_g5p(drm);
++	struct g5p_file *f = file->driver_priv;
++
++	if (g5p_client_enter(d)) {
++		g5p_drm_postclose_host(d, f);
++		g5p_client_exit(d);
++		return;
++	}
++	drm_dev_get(drm);
++	spin_lock(&d->sleep_close_lock);
++	list_add_tail(&f->sleep_link, &d->sleep_closes);
++	spin_unlock(&d->sleep_close_lock);
++	file->driver_priv = NULL;
++	/* Pairs with the barrier in g5p_sleep_reopen(). */
++	smp_mb();
++	if (atomic_read(&d->client_gate) >= 0)
++		queue_work(system_unbound_wq, &d->sleep_close_work);
+ }
+ 
+ static const struct drm_ioctl_desc g5p_ioctls[] = {
+@@ -770,33 +842,86 @@ static const struct drm_ioctl_desc g5p_ioctls[] = {
+ 			  DRM_RENDER_ALLOW),
+ };
+ 
+-static long g5p_sleep_ioctl(struct file *filp, unsigned int cmd,
+-			    unsigned long arg)
++/*
++ * Neither MMIO, firmware memory nor scheduled work: these keep working while
++ * a system sleep holds client admission, and never delay its drain. A
++ * syncobj wait in particular may sleep across the whole transition.
++ */
++static bool g5p_ioctl_host_only(unsigned int cmd)
++{
++	unsigned int nr = DRM_IOCTL_NR(cmd);
++
++	if (nr >= DRM_COMMAND_BASE && nr < DRM_COMMAND_END) {
++		switch (nr - DRM_COMMAND_BASE) {
++		case DRM_G5P_GET_INFO:
++		case DRM_G5P_CREATE_BO:
++		case DRM_G5P_BO_MMAP_OFFSET:
++		case DRM_G5P_BO_SYNC:
++		case DRM_G5P_GET_EXEC_INFO:
++		case DRM_G5P_GET_JOB_STATUS:
++		case DRM_G5P_GET_CONTEXT_STATUS:
++		case DRM_G5P_GET_FAULT_INFO:
++		case DRM_G5P_GET_RENDER_INFO:
++			return true;
++		}
++		return false;
++	}
++	switch (nr) {
++	case DRM_IOCTL_NR(DRM_IOCTL_VERSION):
++	case DRM_IOCTL_NR(DRM_IOCTL_GET_CAP):
++	case DRM_IOCTL_NR(DRM_IOCTL_SET_CLIENT_CAP):
++	case DRM_IOCTL_NR(DRM_IOCTL_SYNCOBJ_CREATE):
++	case DRM_IOCTL_NR(DRM_IOCTL_SYNCOBJ_DESTROY):
++	case DRM_IOCTL_NR(DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD):
++	case DRM_IOCTL_NR(DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE):
++	case DRM_IOCTL_NR(DRM_IOCTL_SYNCOBJ_WAIT):
++	case DRM_IOCTL_NR(DRM_IOCTL_SYNCOBJ_RESET):
++	case DRM_IOCTL_NR(DRM_IOCTL_SYNCOBJ_SIGNAL):
++	case DRM_IOCTL_NR(DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT):
++	case DRM_IOCTL_NR(DRM_IOCTL_SYNCOBJ_QUERY):
++	case DRM_IOCTL_NR(DRM_IOCTL_SYNCOBJ_TRANSFER):
++	case DRM_IOCTL_NR(DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL):
++	case DRM_IOCTL_NR(DRM_IOCTL_SYNCOBJ_EVENTFD):
++		return true;
++	}
++	return false;
++}
++
++/*
++ * Every other ioctl waits for client admission instead of failing. The wait
++ * is freezable, so it never holds up the freezer, and it ends when the sleep
++ * transition reopens admission after resume or any abort. Nothing has run
++ * yet, so a signal restarts the call rather than surfacing to the client.
++ */
++static long g5p_client_ioctl(struct file *filp, unsigned int cmd,
++			     unsigned long arg,
++			     long (*ioctl)(struct file *, unsigned int,
++					   unsigned long))
+ {
+ 	struct drm_file *file = filp->private_data;
+-	struct g5p_drm *d = container_of(file->minor->dev, struct g5p_drm, drm);
++	struct g5p_drm *d = to_g5p(file->minor->dev);
+ 	long ret;
+ 
+-	if (!g5p_sleep_enter(d->core))
+-		return -EBUSY;
+-	ret = drm_ioctl(filp, cmd, arg);
+-	g5p_sleep_exit(d->core);
++	if (g5p_ioctl_host_only(cmd))
++		return ioctl(filp, cmd, arg);
++	if (wait_event_freezable(d->sleep_wq, g5p_client_enter(d)))
++		return -ERESTARTNOINTR;
++	ret = ioctl(filp, cmd, arg);
++	g5p_client_exit(d);
+ 	return ret;
+ }
+ 
++static long g5p_sleep_ioctl(struct file *filp, unsigned int cmd,
++			    unsigned long arg)
++{
++	return g5p_client_ioctl(filp, cmd, arg, drm_ioctl);
++}
++
+ #ifdef CONFIG_COMPAT
+ static long g5p_sleep_compat_ioctl(struct file *filp, unsigned int cmd,
+ 				   unsigned long arg)
+ {
+-	struct drm_file *file = filp->private_data;
+-	struct g5p_drm *d = container_of(file->minor->dev, struct g5p_drm, drm);
+-	long ret;
+-
+-	if (!g5p_sleep_enter(d->core))
+-		return -EBUSY;
+-	ret = drm_compat_ioctl(filp, cmd, arg);
+-	g5p_sleep_exit(d->core);
+-	return ret;
++	return g5p_client_ioctl(filp, cmd, arg, drm_compat_ioctl);
+ }
+ #endif
+ 
+@@ -931,6 +1056,11 @@ static int g5p_drm_probe(struct platform_device *pdev)
+ 	spin_lock_init(&d->status_lock);
+ 	d->jt_stats.since_ns = ktime_get_ns();
+ 	init_waitqueue_head(&d->ev_wq);
++	atomic_set(&d->client_gate, 0);
++	init_waitqueue_head(&d->sleep_wq);
++	spin_lock_init(&d->sleep_close_lock);
++	INIT_LIST_HEAD(&d->sleep_closes);
++	INIT_WORK(&d->sleep_close_work, g5p_sleep_close_work);
+ 	atomic_set(&d->ahead_poke, 0);
+ 	atomic_set(&d->accepted, 0);
+ 	atomic64_set(&d->job_sequence, 0);
+@@ -996,6 +1126,9 @@ static void g5p_drm_remove(struct platform_device *pdev)
+ 
+ 	/* Before any teardown; waits out a transition that holds it. */
+ 	unregister_pm_suspend_admission(&d->sleep_admission);
++	/* Admission is open again: finish files closed during the last sleep. */
++	queue_work(system_unbound_wq, &d->sleep_close_work);
++	flush_work(&d->sleep_close_work);
+ 	cancel_delayed_work_sync(&d->autoboot);
+ 	cancel_delayed_work_sync(&d->idle_work);
+ 	drm_dev_unplug(&d->drm);
+diff --git a/drivers/gpu/drm/apple-g5p/system-sleep.inc b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+index 25b1e8b2c..96a77078a 100644
+--- a/drivers/gpu/drm/apple-g5p/system-sleep.inc
++++ b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+@@ -92,6 +92,23 @@ static void g5p_sleep_fail(struct g5p_drm *d, int ret)
+ 	dev_err(g->dev, "GPU-PM frozen ret=%d; no further MMIO\n", ret);
+ }
+ 
++/*
++ * Reopen host, then client admission, after a refused prepare or complete.
++ * Blocked clients continue where they waited; parked closes run now.
++ */
++static void g5p_sleep_reopen(struct g5p_diag *g)
++{
++	struct g5p_drm *d = g->event_cookie;
++
++	atomic_andnot(BIT(31), &g->sleep_gate);
++	atomic_andnot(BIT(31), &d->client_gate);
++	/* Pairs with g5p_drm_postclose(): a parked file is seen or queued. */
++	smp_mb__after_atomic();
++	wake_up_all(&d->sleep_wq);
++	g5p_rsched_kick(d);
++	queue_work(system_unbound_wq, &d->sleep_close_work);
++}
++
+ void apple_g5p_system_sleep_complete(struct device *dev)
+ {
+ 	struct g5p_diag *g = dev_get_drvdata(dev);
+@@ -99,14 +116,16 @@ void apple_g5p_system_sleep_complete(struct device *dev)
+ 	if (!g || !g->sleep_reserved || g->sleep_off)
+ 		return;
+ 	g->sleep_reserved = false;
+-	/* A failed epoch stays terminal, but host close must still be possible. */
+-	atomic_andnot(BIT(31), &g->sleep_gate);
+-	g5p_rsched_kick(g->event_cookie);
++	/* A failed epoch stays terminal, but clients and host close continue. */
++	g5p_sleep_reopen(g);
+ 	dev_info(dev, "GPU-PM complete failed=%u\n", g->sleep_failed);
+ }
+ 
+ EXPORT_SYMBOL_GPL(apple_g5p_system_sleep_complete);
+ 
++/* Client work admitted before the client gate closed drains in this bound. */
++#define G5P_SLEEP_DRAIN_MS 1000
++
+ static int g5p_system_sleep_prepare(struct device *dev)
+ {
+ 	struct g5p_diag *g = dev_get_drvdata(dev);
+@@ -116,12 +135,24 @@ static int g5p_system_sleep_prepare(struct device *dev)
+ 	u64 deadline;
+ 	int ret = -EBUSY;
+ 
+-	if (!g || !g->event_cookie)
++	if (!g || !g->event_cookie || !g->boot)
+ 		return -EBUSY;
++	d = g->event_cookie;
+ 	if (READ_ONCE(g->sleep_reserved))
+ 		return g->sleep_failed ? -EBUSY : 0;
+-	if (atomic_fetch_or(BIT(31), &g->sleep_gate) < 0)
++	/*
++	 * Stage 1: shut client admission only. New client work and closes wait,
++	 * while the scheduler keeps running so accepted jobs retire.
++	 */
++	if (atomic_fetch_or(BIT(31), &d->client_gate) < 0)
+ 		return -EBUSY;
++	deadline = ktime_get_ns() + G5P_SLEEP_DRAIN_MS * NSEC_PER_MSEC;
++	while (((atomic_read(&d->client_gate) & INT_MAX) || !g5p_sleep_idle(d)) &&
++	       ktime_get_ns() < deadline)
++		usleep_range(500, 1000);
++	/* Stage 2: shut the host gate and certify, unchanged. */
++	if (atomic_fetch_or(BIT(31), &g->sleep_gate) < 0)
++		goto refuse_client;
+ 	deadline = ktime_get_ns() + 20 * NSEC_PER_MSEC;
+ 	while ((atomic_read(&g->sleep_gate) & INT_MAX) &&
+ 	       ktime_get_ns() < deadline)
+@@ -130,7 +161,6 @@ static int g5p_system_sleep_prepare(struct device *dev)
+ 		goto refuse;
+ 	if (!g5p_kq_lock(&c))
+ 		goto refuse;
+-	d = g->event_cookie;
+ 	b = g->boot;
+ 	if (g->sleep_failed || g5p_r8_admit_closed(&g5p_r8_state.admit) || !b ||
+ 	    !g->powered || !g->fender_ready || g->mmio_off || !b->released ||
+@@ -157,11 +187,16 @@ unlock:
+ 		return 0;
+ 	}
+ refuse:
+-	atomic_andnot(BIT(31), &g->sleep_gate);
+-	g5p_rsched_kick(g->event_cookie);
++	g5p_sleep_reopen(g);
+ 	dev_info(dev,
+ 		 "GPU-PM sleep refused: busy or no quiescent certificate\n");
+ 	return -EBUSY;
++refuse_client:
++	atomic_andnot(BIT(31), &d->client_gate);
++	smp_mb__after_atomic();
++	wake_up_all(&d->sleep_wq);
++	queue_work(system_unbound_wq, &d->sleep_close_work);
++	return -EBUSY;
+ }
+ 
+ /* The early caller reserves admission; PM complete releases it on abort/wake.

@@ -1,0 +1,102 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 00:37:37 +0100
+Subject: [PATCH] pmdomain: apple: retain the warm boot hold for the whole boot
+
+Releasing every inherited S8000 domain at sync_state was followed by
+whole-SoC locks after kexec. Keep the hold until reboot while retained
+hardware dependencies remain unresolved. System sleep is gated off for
+the J71t release.
+
+Keep the hold-status API for consumers and the existing cold-boot genpd
+sync_state path. The GPU AUTO-cycle handling and witnessed power-off
+policy remain unchanged.
+
+Assisted-by: LLM
+---
+ drivers/pmdomain/apple/pmgr-pwrstate.c  | 30 +++++++------------------
+ include/linux/soc/apple/pmgr-pwrstate.h |  4 ++--
+ 2 files changed, 10 insertions(+), 24 deletions(-)
+
+diff --git a/drivers/pmdomain/apple/pmgr-pwrstate.c b/drivers/pmdomain/apple/pmgr-pwrstate.c
+index 4f7086330..9994805a0 100644
+--- a/drivers/pmdomain/apple/pmgr-pwrstate.c
++++ b/drivers/pmdomain/apple/pmgr-pwrstate.c
+@@ -63,8 +63,7 @@ struct apple_pmgr_ps {
+ 	bool manual_pm;
+ 	bool warm;
+ 	/*
+-	 * Warm (kexec) boot only: hold the inherited state until this
+-	 * provider's sync_state, i.e. until every consumer has probed.
++	 * Warm (kexec) boot only: hold the inherited state for the whole boot.
+ 	 */
+ 	bool keep_on;
+ };
+@@ -184,7 +183,7 @@ static void apple_pmgr_clk_disable(struct clk_hw *hw)
+ 	unsigned long flags;
+ 	int ret;
+ 
+-	/* Held like the power domain until sync_state. */
++	/* Held like the power domain for the whole warm boot. */
+ 	if (READ_ONCE(ps->keep_on))
+ 		return;
+ 
+@@ -457,37 +456,24 @@ err_remove:
+ }
+ 
+ /*
+- * Every consumer of this provider has probed: end a warm boot's hold and
+- * leave the domain as a cold boot would have it, with auto-PM on if it is
+- * still powered, then let genpd power it off if nothing uses it.  From here
+- * on runtime PM and system sleep gate the domain as on a cold boot.
++ * Retained hardware can still depend on an unclaimed domain after all
++ * consumers have probed. Keep the warm hold for this entire boot: releasing
++ * all domains here was followed by whole-SoC locks after kexec on S8000.
++ * Cold boots retain the existing genpd sync_state path.
+  */
+ static void apple_pmgr_ps_sync_state(struct device *dev)
+ {
+ 	struct apple_pmgr_ps *ps = dev_get_drvdata(dev);
+-	unsigned long flags;
+-	u32 reg = 0;
+ 
+-	if (!ps)
++	if (!ps || READ_ONCE(ps->keep_on))
+ 		return;
+-	if (READ_ONCE(ps->keep_on)) {
+-		spin_lock_irqsave(&ps->lock, flags);
+-		WRITE_ONCE(ps->keep_on, false);
+-		if (!ps->manual_pm && apple_pmgr_ps_is_active(ps))
+-			regmap_update_bits(ps->regmap, ps->offset,
+-					   APPLE_PMGR_FLAGS | APPLE_PMGR_AUTO_ENABLE,
+-					   APPLE_PMGR_AUTO_ENABLE);
+-		regmap_read(ps->regmap, ps->offset, &reg);
+-		spin_unlock_irqrestore(&ps->lock, flags);
+-		dev_info(dev, "PS %s: warm hold released reg=%08x\n", ps->name, reg);
+-	}
+ 	if (ps->has_genpd)
+ 		of_genpd_sync_state(dev->of_node);
+ }
+ 
+ /*
+  * 1 while a warm boot still holds this provider's domain on (power-off
+- * returns -EBUSY), 0 once released or on a cold boot, -EPROBE_DEFER while
++ * returns -EBUSY), 0 on a cold boot, -EPROBE_DEFER while
+  * the provider is not bound.
+  */
+ int apple_pmgr_ps_power_held(struct device_node *np)
+diff --git a/include/linux/soc/apple/pmgr-pwrstate.h b/include/linux/soc/apple/pmgr-pwrstate.h
+index 8e56d0de0..41f52d614 100644
+--- a/include/linux/soc/apple/pmgr-pwrstate.h
++++ b/include/linux/soc/apple/pmgr-pwrstate.h
+@@ -8,8 +8,8 @@ struct device_node;
+ 
+ /*
+  * 1 while a warm (kexec) boot still holds the domain of this PMGR power-state
+- * node on, 0 when it does not (released at the provider's sync_state, or a
+- * cold boot), -EPROBE_DEFER while the provider is not bound.
++ * node on for the whole boot, 0 on a cold boot, -EPROBE_DEFER while the
++ * provider is not bound.
+  */
+ #if IS_ENABLED(CONFIG_APPLE_PMGR_PWRSTATE)
+ int apple_pmgr_ps_power_held(struct device_node *np);

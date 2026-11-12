@@ -1,0 +1,148 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 15:26:19 +0100
+Subject: [PATCH] PM: sleep: name every admission and precheck refusal in the
+ log
+
+enter_state() refused silently: a held system_transition_mutex, a
+provider's prepare and a precheck notifier all returned -EBUSY with no
+line, and suspend_stats records no step for them. A refused s2idle
+attempt then shows only "PM: suspend exit".
+
+Log each refusal with its errno: the held transition lock, the refusing
+provider by device name, and the refusing precheck notifier by symbol.
+The readiness query and the attempt now walk the precheck chain through
+one helper. During an attempt the notifiers get
+PM_SUSPEND_PRECHECK_ATTEMPT as their data (the readiness query still
+passes NULL), so a notifier can log its own reason for an attempt
+without logging on every poll of /sys/power/suspend_ready.
+
+Assisted-by: LLM
+---
+ include/linux/suspend.h |  6 ++++
+ kernel/power/suspend.c  | 62 ++++++++++++++++++++++++++++++-----------
+ 2 files changed, 51 insertions(+), 17 deletions(-)
+
+diff --git a/include/linux/suspend.h b/include/linux/suspend.h
+index 93082b990..782bbad59 100644
+--- a/include/linux/suspend.h
++++ b/include/linux/suspend.h
+@@ -150,6 +150,12 @@ static inline int register_pm_suspend_precheck_notifier(struct notifier_block *n
+ static inline int unregister_pm_suspend_precheck_notifier(struct notifier_block *nb) { return 0; }
+ #endif
+ #define PM_SUSPEND_PRECHECK_COMPLETE 0
++/*
++ * A precheck notifier's data: this cookie during a suspend attempt, NULL
++ * during a readiness query (/sys/power/suspend_ready). A notifier logs why it
++ * refuses only for an attempt, so polling the query stays quiet.
++ */
++#define PM_SUSPEND_PRECHECK_ATTEMPT ((void *)1)
+ 
+ #ifdef CONFIG_SUSPEND
+ extern suspend_state_t pm_suspend_target_state;
+diff --git a/kernel/power/suspend.c b/kernel/power/suspend.c
+index 8bb2c7730..cd5b6a703 100644
+--- a/kernel/power/suspend.c
++++ b/kernel/power/suspend.c
+@@ -634,6 +634,31 @@ int unregister_pm_suspend_precheck_notifier(struct notifier_block *nb)
+ }
+ EXPORT_SYMBOL_GPL(unregister_pm_suspend_precheck_notifier);
+ 
++/*
++ * Run the precheck chain for @state, stopping at the first refusal, and name
++ * the refusing notifier in *who. Shared by the readiness query and the attempt
++ * so that both walk exactly the same chain.
++ */
++static int suspend_precheck_run(suspend_state_t state, void *data,
++				struct notifier_block **who)
++{
++	struct notifier_block *nb;
++	int error = 0;
++
++	*who = NULL;
++	down_read(&suspend_precheck_chain.rwsem);
++	for (nb = rcu_dereference_raw(suspend_precheck_chain.head); nb;
++	     nb = rcu_dereference_raw(nb->next)) {
++		error = notifier_to_errno(nb->notifier_call(nb, state, data));
++		if (error) {
++			*who = nb;
++			break;
++		}
++	}
++	up_read(&suspend_precheck_chain.rwsem);
++	return error;
++}
++
+ /*
+  * The admission enter_state() would run, read only: each provider's check
+  * instead of its reservation, then each precheck notifier for the current
+@@ -672,18 +697,11 @@ static ssize_t suspend_ready_show(struct kobject *kobj,
+ 		}
+ 		a->checked = true;
+ 	}
+-	/* Walk the chain to name the refusing notifier, not only its errno. */
+-	down_read(&suspend_precheck_chain.rwsem);
+-	for (nb = rcu_dereference_raw(suspend_precheck_chain.head); nb;
+-	     nb = rcu_dereference_raw(nb->next)) {
+-		error = notifier_to_errno(nb->notifier_call(nb, state, NULL));
+-		if (error) {
+-			len = sysfs_emit(buf, "not-ready %ps %d\n",
+-					 nb->notifier_call, error);
+-			break;
+-		}
+-	}
+-	up_read(&suspend_precheck_chain.rwsem);
++	/* Name the refusing notifier, not only its errno. */
++	error = suspend_precheck_run(state, NULL, &nb);
++	if (error)
++		len = sysfs_emit(buf, "not-ready %ps %d\n", nb->notifier_call,
++				 error);
+ 	if (!len)
+ 		len = sysfs_emit(buf, "ready\n");
+ clear:
+@@ -705,6 +723,7 @@ late_initcall(suspend_ready_init);
+ static int enter_state(suspend_state_t state)
+ {
+ 	struct pm_suspend_admission *admission;
++	struct notifier_block *nb;
+ 	int error;
+ 
+ 	trace_suspend_resume(TPS("suspend_enter"), state, true);
+@@ -718,23 +737,32 @@ static int enter_state(suspend_state_t state)
+ 	} else if (!valid_state(state)) {
+ 		return -EINVAL;
+ 	}
+-	if (!mutex_trylock(&system_transition_mutex))
++	if (!mutex_trylock(&system_transition_mutex)) {
++		pr_info("suspend refused: another system transition holds the lock %d\n",
++			-EBUSY);
+ 		return -EBUSY;
++	}
+ 
+ 	if (state == PM_SUSPEND_TO_IDLE)
+ 		s2idle_begin();
+ 
++	/* Every admission refusal is named: no silent -EBUSY before the sync. */
+ 	list_for_each_entry(admission, &suspend_admissions, node) {
+ 		/* Also release a provider whose prepare returned an error. */
+ 		admission->reserved = true;
+ 		error = admission->prepare(admission->dev);
+-		if (error)
++		if (error) {
++			pr_info("suspend refused: admission %s %d\n",
++				dev_name(admission->dev), error);
+ 			goto Unlock;
++		}
+ 	}
+-	error = notifier_to_errno(blocking_notifier_call_chain(
+-		&suspend_precheck_chain, state, NULL));
+-	if (error)
++	error = suspend_precheck_run(state, PM_SUSPEND_PRECHECK_ATTEMPT, &nb);
++	if (error) {
++		pr_info("suspend refused: precheck %ps %d\n", nb->notifier_call,
++			error);
+ 		goto Unlock;
++	}
+ 
+ 	if (sync_on_suspend_enabled) {
+ 		trace_suspend_resume(TPS("sync_filesystems"), 0, true);

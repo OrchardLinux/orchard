@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 15:41:54 +0100
+Subject: [PATCH] drm/apple-g5p: refuse system sleep while a kexec boot holds
+ GPU power
+
+On a kexec boot pmgr-pwrstate keeps every S8000 power state on for the
+whole boot (keep_on), so genpd never powers gfx off. A system sleep
+there would stop the firmware without the platform off, and resume would
+boot it over a GPU that was never power-cycled: a dirty start, which the
+dirty-start gate admits only through its one bounded reset at probe.
+Apple's wake is platform-on plus a firmware boot.
+
+Refuse such a sleep before any gate is shut, named "warm-gfx-power-held"
+in the log and in /sys/power/suspend_ready, until a warm boot can power
+the GPU off as a cold one does. Cold boots are unchanged.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/apple-g5p/system-sleep.inc | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/drivers/gpu/drm/apple-g5p/system-sleep.inc b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+index 6e3ab71c5..e93d1b02c 100644
+--- a/drivers/gpu/drm/apple-g5p/system-sleep.inc
++++ b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+@@ -95,6 +95,20 @@ static void g5p_sleep_sample(struct g5p_diag *g, u32 *state, u32 *mode, u32 *r8)
+ 		*r8 = readl(g->window[1] + 8);
+ }
+ 
++/*
++ * A kexec boot (DS108 mode 3) keeps every S8000 PMGR power state on for the
++ * whole boot (pmgr-pwrstate keep_on, "retain the tethered warm boot state"):
++ * genpd power-off of gfx returns -EBUSY. Sleep would then stop the firmware
++ * without the platform off, and resume would boot it over a GPU that was
++ * never power-cycled: a dirty start, which DS108 admits only through its one
++ * bounded reset at probe. Refuse before anything is shut, until the warm boot
++ * can power the GPU off like a cold one. RAM only.
++ */
++static bool g5p_sleep_gfx_power_held(void)
++{
++	return g5p_ds_mode() >= 3;
++}
++
+ /* R1 only, as Apple's isQuiescent/isStableOff. Never infer bus retirement
+  * from a completed userspace fence or GPC=0 alone.
+  */
+@@ -217,6 +231,10 @@ static int g5p_system_sleep_prepare(struct device *dev)
+ 		return -EBUSY;
+ 	}
+ 	d = g->event_cookie;
++	if (g5p_sleep_gfx_power_held()) {
++		dev_info(dev, "GPU-PM sleep refused: stage=entry why=warm-gfx-power-held\n");
++		return -EBUSY;
++	}
+ 	if (READ_ONCE(g->sleep_reserved)) {
+ 		if (!g->sleep_failed)
+ 			return 0;
+@@ -404,6 +422,8 @@ static int g5p_system_sleep_check(struct device *dev)
+ 	if (!READ_ONCE(b->alive) || READ_ONCE(b->stopped) || !b->released ||
+ 	    !b->irq_ready)
+ 		return g5p_sleep_why(d, -ENODEV, "not-booted");
++	if (g5p_sleep_gfx_power_held())
++		return g5p_sleep_why(d, -EBUSY, "warm-gfx-power-held");
+ 	never_park = g5p_sleep_never_park(b);
+ 	if (!mutex_trylock(&g->lock))
+ 		return never_park ? g5p_sleep_why(d, -EBUSY, "never-park/locked") :

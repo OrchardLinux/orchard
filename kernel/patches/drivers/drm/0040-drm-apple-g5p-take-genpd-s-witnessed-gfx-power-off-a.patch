@@ -1,0 +1,374 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 16:11:42 +0100
+Subject: [PATCH] drm/apple-g5p: take genpd's witnessed gfx power-off as the
+ clean start
+
+The incoming dirty-start machine trusted a kexec boot's GPU only after
+its own bounded gate cycle, or when apple_pmgr.kexec_gpu_cycle=1 was on
+the command line and the sticky was_pwrgated bit was set. That bit can
+predate the boot, and no code in this tree performs the cycle the token
+names, so the token turned a stale history bit into trust.
+
+Now that a warm boot gates idle domains like a cold one, genpd powers
+gfx off once the GPU has probed, long before the first wake, exactly as
+on a cold boot. Record genpd's own transitions with a power notifier
+(OFF and ON are sent only after a successful transition) and treat a gfx
+power-off held for at least the reset's hold in this boot as the clean
+start a cold boot has. Without such a witness the bounded cycle runs as
+before. The command-line token is no longer read.
+
+System sleep gets the same witness: genpd gates gfx in suspend_noirq and
+ignores a refused power-off, so a successful runtime put proves nothing.
+If no power-off of the reset's hold was witnessed since the sleep's put,
+resume spends one bounded gate cycle before the firmware boot instead of
+starting it over a GPU that kept power.
+
+genpd's PRE_OFF notification also closes the MMIO licence, as before
+every other gfx gate.
+
+Assisted-by: LLM
+---
+ drivers/gpu/apple-g5p/core.inc             | 62 ++++++++++++++++++++++
+ drivers/gpu/apple-g5p/dirtystart108.h      | 39 +++++++-------
+ drivers/gpu/apple-g5p/dirtystart108.inc    | 32 ++---------
+ drivers/gpu/drm/apple-g5p/system-sleep.inc | 18 +++++++
+ 4 files changed, 102 insertions(+), 49 deletions(-)
+
+diff --git a/drivers/gpu/apple-g5p/core.inc b/drivers/gpu/apple-g5p/core.inc
+index 9177065d4..20eb5594f 100644
+--- a/drivers/gpu/apple-g5p/core.inc
++++ b/drivers/gpu/apple-g5p/core.inc
+@@ -17,6 +17,7 @@
+ #include <linux/mfd/syscon.h>
+ #include <linux/regmap.h>
+ #include <linux/platform_device.h>
++#include <linux/pm_domain.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/hrtimer.h>
+ #include <linux/workqueue.h>
+@@ -78,10 +79,15 @@ struct g5p_diag {
+ 	void __iomem *window[2];
+ 	void __iomem *rgx;
+ 	struct regmap *pmgr;
++	struct device_node *gfx_np; /* the gfx PMGR power-state node, or NULL */
++	/* genpd notifier on gfx: when genpd last powered it off and on (0: never). */
++	struct notifier_block gfx_nb;
++	u64 gfx_off_ns, gfx_on_ns; /* CLOCK_BOOTTIME */
+ 	/* Serializes commands and all hardware access. */
+ 	struct mutex lock;
+ 	atomic_t sleep_gate; /* closed bit plus active host operations */
+ 	bool sleep_reserved, sleep_off, sleep_boot, sleep_failed, sleep_irq_off;
++	u64 sleep_off_ns; /* when this sleep released gfx power (resume's witness window) */
+ 	bool powered;
+ 	bool loaded;
+ 
+@@ -162,6 +168,11 @@ static u32 g5p_ds_gen(void);
+ /* The GPU ADT clock/power gate124 resolves to ps-regs[4]+index8*8.
+  * Read via its existing syscon, sharing the provider mapping without writes.
+  */
++static void g5p_gfx_np_put(void *np)
++{
++	of_node_put(np);
++}
++
+ static void g5p_power_observer_init(struct g5p_diag *g)
+ {
+ 	struct device_node *domain, *parent;
+@@ -178,6 +189,9 @@ static void g5p_power_observer_init(struct g5p_diag *g)
+ 		g->pmgr = syscon_node_to_regmap(parent);
+ 		if (IS_ERR(g->pmgr))
+ 			g->pmgr = NULL;
++		else if (!devm_add_action_or_reset(g->dev, g5p_gfx_np_put,
++						   of_node_get(domain)))
++			g->gfx_np = domain;
+ 	}
+ 	of_node_put(parent);
+ 	of_node_put(domain);
+@@ -217,6 +231,47 @@ static void g5p_power_snapshot(struct g5p_diag *g, const char *stage)
+ 		stage, (raw >> 9) & 1, (raw >> 8) & 1);
+ }
+ 
++/* The bounded reset's hold (DS108 RESET, the sleep fallback): also the shortest genpd off
++ * accepted in its place.
++ */
++#define G5P_GFX_RESET_MS 10U
++
++/*
++ * genpd's own record of gfx power, cold and warm alike.  PRE_OFF closes the MMIO licence
++ * as before every PMGR gfx gate; OFF and ON are sent only after the transition succeeded.
++ * Atomic context (IRQ-safe genpd lock): RAM only.  Boot time, not monotonic: s2idle stops the
++ * monotonic clock, and the off/on of a system sleep land on either side of it.
++ */
++static int g5p_gfx_notify(struct notifier_block *nb, unsigned long action, void *data)
++{
++	struct g5p_diag *g = container_of(nb, struct g5p_diag, gfx_nb);
++
++	if (action == GENPD_NOTIFY_PRE_OFF)
++		g5p_mmio_gate(g);
++	else if (action == GENPD_NOTIFY_OFF)
++		WRITE_ONCE(g->gfx_off_ns, ktime_get_boottime_ns());
++	else if (action == GENPD_NOTIFY_ON)
++		WRITE_ONCE(g->gfx_on_ns, ktime_get_boottime_ns());
++	return NOTIFY_OK;
++}
++
++static void g5p_gfx_notify_remove(void *dev)
++{
++	dev_pm_genpd_remove_notifier(dev);
++}
++
++/* genpd powered gfx off after @since and held it off for at least the reset's hold. */
++static bool g5p_gfx_gated_since(struct g5p_diag *g, u64 since)
++{
++	u64 off = READ_ONCE(g->gfx_off_ns), on = READ_ONCE(g->gfx_on_ns);
++
++	if (!off || off < since)
++		return false;
++	if (on < off)
++		on = ktime_get_boottime_ns(); /* still off */
++	return on - off >= (u64)G5P_GFX_RESET_MS * NSEC_PER_MSEC;
++}
++
+ static int g5p_power(struct g5p_diag *g)
+ {
+ 	int ret;
+@@ -583,6 +638,13 @@ static int g5p_probe(struct platform_device *pdev)
+ 	if (dma_set_mask_and_coherent(dev, DMA_BIT_MASK(40)))
+ 		return -ENODEV;
+ 	pm_runtime_enable(dev);
++	/* Before the provider's sync_state can gate gfx: no witness is lost.  devm: the
++	 * notifier never outlives g, on a failed probe or after remove.
++	 */
++	g->gfx_nb.notifier_call = g5p_gfx_notify;
++	if (dev_pm_genpd_add_notifier(dev, &g->gfx_nb) ||
++	    devm_add_action_or_reset(dev, g5p_gfx_notify_remove, dev))
++		dev_info(dev, "gfx genpd notifier unavailable: no power-off witness\n");
+ 	g5p_td_attach(g);
+ 	g5p_ds_hook_probe(g);
+ 	;
+diff --git a/drivers/gpu/apple-g5p/dirtystart108.h b/drivers/gpu/apple-g5p/dirtystart108.h
+index fcf7432fa..99b7aabd8 100644
+--- a/drivers/gpu/apple-g5p/dirtystart108.h
++++ b/drivers/gpu/apple-g5p/dirtystart108.h
+@@ -18,11 +18,13 @@
+  * one event per driver step with the step's result and RAM-only inputs, and
+  * asks the machine at two gates (before release, at the DRM claim).  It
+  * assumes nothing pristine: the origin of the power state is classified from
+- * the kexec flag, the requested incoming PMGR cycle and the PMGR word, and
++ * the kexec flag, whether this boot saw gfx gated off and the PMGR word, and
+  * every step's own result is evidence.
+  *
+- *   PROBE    origin inputs: booted from kexec, kexec_gpu_cycle requested
+- *   POWER    the PMGR gfx word, read once after the PM reference (PMGR read)
++ *   PROBE    origin input: booted from kexec
++ *   POWER    the PMGR gfx word, read once after the PM reference (PMGR read),
++ *            and whether genpd held gfx powered off for at least the reset's
++ *            hold in this boot (RAM: the glue's genpd notifier)
+  *   RESET    the bounded incoming power cycle (g5p_r33_gfx_off(), one attempt
+  *            per boot, only in mode 3, only before the first wrapper wake)
+  *   WAKE     the Fender wake result
+@@ -42,7 +44,7 @@
+  *      proven in the current reset generation.  Equal to combined107 on every
+  *      bootstrap that succeeds.
+  *   2  strict: also refuse release and claim for an origin that is not cold
+- *      and not a witnessed cycle (warm-unproven, warm-uncycled, unknown),
++ *      and not a witnessed power-off (warm-uncycled, unknown),
+  *      unless a reset succeeded in this generation
+  *   3  strict + reset: as 2, and the glue may spend the one RESET attempt
+  *      on such an origin before the wrapper wake (destructive: PMGR write)
+@@ -77,9 +79,10 @@ static const char *const g5p_ds_ev_name[G5P_DSE_N] = {
+ enum g5p_ds_origin {
+ 	G5P_DSO_UNKNOWN, /* not probed, or the PMGR word could not be read */
+ 	G5P_DSO_COLD, /* not booted from kexec */
+-	G5P_DSO_WARM_CYCLED, /* kexec, incoming cycle requested and witnessed (was_pwrgated) */
+-	G5P_DSO_WARM_UNPROVEN, /* kexec, cycle requested, no witness in the PMGR word */
+-	G5P_DSO_WARM_UNCYCLED, /* kexec, no incoming cycle requested */
++	G5P_DSO_WARM_CYCLED, /* kexec, gfx witnessed gated off in this boot */
++	/* Never produced: the sticky was_pwrgated bit can predate this boot. */
++	G5P_DSO_WARM_UNPROVEN,
++	G5P_DSO_WARM_UNCYCLED, /* kexec, no power-off witnessed in this boot */
+ 	G5P_DSO_N,
+ };
+ 
+@@ -122,8 +125,6 @@ static const char *const g5p_ds_gate_name[G5P_DSG_N] = {
+ 
+ #define G5P_DS_MODE_MAX 3
+ #define G5P_DS_GPC_ON 0x01u
+-#define G5P_DS_PMGR_PWRGATED \
+-	BIT(8) /* sticky was_pwrgated history bit of 0x80340 */
+ 
+ #define G5P_DSF_RINGS_BUSY \
+ 	BIT(0) /* a ring not empty at map (data, not a failure) */
+@@ -140,7 +141,7 @@ static const char *const g5p_ds_gate_name[G5P_DSG_N] = {
+ /* One flat input record; each event reads only its own fields (RAM or step results). */
+ struct g5p_ds_in {
+ 	bool kexec; /* PROBE: chosen linux,booted-from-kexec */
+-	bool cycle_requested; /* PROBE: apple_pmgr.kexec_gpu_cycle=1 on the cmdline */
++	bool gated; /* POWER: gfx held off by genpd in this boot, for >= the reset hold */
+ 	bool pmgr_ok; /* POWER: the PMGR read succeeded */
+ 	u32 pmgr_raw; /* POWER: the gfx word */
+ 	int ret; /* RESET/WAKE/MAPS/LOAD/RELEASE/ALIVE: the step's return */
+@@ -160,7 +161,7 @@ struct g5p_ds {
+ 	u32 seen, ok; /* event bitmasks, current generation */
+ 	u32 flags;
+ 	enum g5p_ds_origin origin;
+-	bool kexec, cycle; /* PROBE inputs, kept for POWER */
++	bool kexec; /* PROBE input, kept for POWER */
+ 	u32 pmgr_raw;
+ 	u32 resets; /* RESET attempts this boot (at most one runs) */
+ 	u32 reset_ok_gen; /* gen in which a RESET succeeded, 0 never */
+@@ -184,17 +185,15 @@ static inline void g5p_ds_fail(struct g5p_ds *d, enum g5p_ds_why why)
+ 	d->failed = true;
+ }
+ 
+-static inline enum g5p_ds_origin g5p_ds_origin_of(bool kexec, bool cycle,
+-						  bool pmgr_ok, u32 raw)
++static inline enum g5p_ds_origin g5p_ds_origin_of(bool kexec, bool gated,
++						  bool pmgr_ok)
+ {
+ 	if (!pmgr_ok)
+ 		return G5P_DSO_UNKNOWN;
+ 	if (!kexec)
+ 		return G5P_DSO_COLD;
+-	if (!cycle)
+-		return G5P_DSO_WARM_UNCYCLED;
+-	return (raw & G5P_DS_PMGR_PWRGATED) ? G5P_DSO_WARM_CYCLED :
+-					      G5P_DSO_WARM_UNPROVEN;
++	/* Powered off for the reset's hold in this boot: the state a cold boot starts from. */
++	return gated ? G5P_DSO_WARM_CYCLED : G5P_DSO_WARM_UNCYCLED;
+ }
+ 
+ /* The origin is trusted (cold, witnessed cycle) or a reset succeeded in this generation. */
+@@ -269,9 +268,7 @@ static inline int g5p_ds_event(struct g5p_ds *d, enum g5p_ds_ev e,
+ 			d->gen = 1;
+ 		d->origin = G5P_DSO_UNKNOWN;
+ 		a = in->kexec;
+-		b = in->cycle_requested;
+ 		d->kexec = in->kexec;
+-		d->cycle = in->cycle_requested;
+ 		d->seen |= bit;
+ 		d->ok |= bit;
+ 		break;
+@@ -280,12 +277,12 @@ static inline int g5p_ds_event(struct g5p_ds *d, enum g5p_ds_ev e,
+ 			g5p_ds_fail(d, G5P_DSW_PROTOCOL);
+ 			break;
+ 		}
+-		d->origin = g5p_ds_origin_of(d->kexec, d->cycle, in->pmgr_ok,
+-					     in->pmgr_raw);
++		d->origin = g5p_ds_origin_of(d->kexec, in->gated, in->pmgr_ok);
+ 		if (!in->pmgr_ok)
+ 			d->flags |= G5P_DSF_PMGR_UNREAD;
+ 		d->pmgr_raw = in->pmgr_ok ? in->pmgr_raw : 0;
+ 		a = in->pmgr_ok;
++		b = in->gated;
+ 		d->seen |= bit;
+ 		d->ok |= bit;
+ 		break;
+diff --git a/drivers/gpu/apple-g5p/dirtystart108.inc b/drivers/gpu/apple-g5p/dirtystart108.inc
+index be023e7e7..5a1e226d8 100644
+--- a/drivers/gpu/apple-g5p/dirtystart108.inc
++++ b/drivers/gpu/apple-g5p/dirtystart108.inc
+@@ -10,7 +10,8 @@
+  * Register access added by this file: one PMGR read of the gfx word after the
+  * PM reference (POWER, the same read g5p_power_snapshot() makes), and in mode 3
+  * only one bounded PMGR cycle through g5p_r33_gfx_off() before the first
+- * wrapper wake.  Every other input is RAM or a step's own return value.
++ * wrapper wake, unless genpd already held gfx off for as long in this boot.
++ * Every other input is RAM or a step's own return value.
+  */
+ #include <linux/of.h>
+ #include "dirtystart108.h"
+@@ -54,31 +55,6 @@ static u32 g5p_ds_gen(void)
+ 	return gen;
+ }
+ 
+-/* The last apple_pmgr.kexec_gpu_cycle= token of the chosen bootargs (the one the kernel obeys). */
+-static bool g5p_ds_cycle_requested(struct device_node *chosen)
+-{
+-	static const char key[] = "apple_pmgr.kexec_gpu_cycle=";
+-	const char *args, *p, *last = NULL;
+-	char tok[8];
+-	bool v = false;
+-	size_t n;
+-
+-	if (!chosen || of_property_read_string(chosen, "bootargs", &args))
+-		return false;
+-	for (p = strstr(args, key); p; p = strstr(p + 1, key))
+-		if (p == args || p[-1] == ' ')
+-			last = p;
+-	if (!last)
+-		return false;
+-	last += sizeof(key) - 1;
+-	n = strcspn(last, " ");
+-	if (!n || n >= sizeof(tok))
+-		return false;
+-	memcpy(tok, last, n);
+-	tok[n] = 0;
+-	return !kstrtobool(tok, &v) && v;
+-}
+-
+ static void g5p_ds_hook_probe(struct g5p_diag *g)
+ {
+ 	struct device_node *chosen = of_find_node_by_path("/chosen");
+@@ -86,7 +62,6 @@ static void g5p_ds_hook_probe(struct g5p_diag *g)
+ 
+ 	in.kexec = chosen &&
+ 		   of_property_read_bool(chosen, "linux,booted-from-kexec");
+-	in.cycle_requested = g5p_ds_cycle_requested(chosen);
+ 	of_node_put(chosen);
+ 	/* Retained warm state needs strict origin checks and the bounded reset. */
+ 	WRITE_ONCE(g5p_ds_boot_mode, in.kexec ? 3 : 1);
+@@ -101,6 +76,7 @@ static void g5p_ds_hook_power(struct g5p_diag *g)
+ 	struct g5p_ds_in in = {};
+ 	u32 raw = 0;
+ 
++	in.gated = g5p_gfx_gated_since(g, 0);
+ 	in.pmgr_ok = g->pmgr && !regmap_read(g->pmgr, 0x80340, &raw);
+ 	in.pmgr_raw = raw;
+ 	g5p_ds_feed(g, G5P_DSE_POWER, &in);
+@@ -112,7 +88,7 @@ static void g5p_ds_hook_power(struct g5p_diag *g)
+  */
+ static int g5p_ds_hook_reset(struct g5p_diag *g)
+ {
+-	u32 ms = clamp_t(u32, (10), 1, G5P_R33_GFX_OFF_MAX_MS);
++	u32 ms = clamp_t(u32, G5P_GFX_RESET_MS, 1, G5P_R33_GFX_OFF_MAX_MS);
+ 	struct g5p_ds_in in = {};
+ 	unsigned long flags;
+ 	bool want;
+diff --git a/drivers/gpu/drm/apple-g5p/system-sleep.inc b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+index 40cf32e4f..64bb87905 100644
+--- a/drivers/gpu/drm/apple-g5p/system-sleep.inc
++++ b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+@@ -648,6 +648,7 @@ static int g5p_system_suspend(struct device *dev)
+ 	g5p_mmio_gate(g);
+ 	g->fender_ready = false;
+ 	step = "platform-off";
++	g->sleep_off_ns = ktime_get_boottime_ns(); /* the notifier's clock */
+ 	ret = pm_runtime_put_sync_suspend(dev);
+ 	g->powered = false; /* put consumed our reference, including on error */
+ 	if (ret < 0)
+@@ -691,6 +692,23 @@ static int g5p_system_resume(struct device *dev)
+ 		goto failed;
+ 	g->powered = true;
+ 	g->sleep_boot = true;
++	/* genpd gates gfx in suspend_noirq and ignores a refused power-off, so the PM calls'
++	 * return proves nothing.  Its notifier does: without a witnessed off of the reset's
++	 * hold since this sleep's put, spend one bounded gate cycle before the boot instead,
++	 * so the firmware never starts over a GPU that kept power.  MMIO is still gated.
++	 */
++	step = "platform-cycle";
++	if (g5p_gfx_gated_since(g, g->sleep_off_ns)) {
++		dev_info(dev, "GPU-PM platform off witnessed ms=%llu\n",
++			 (READ_ONCE(g->gfx_on_ns) - READ_ONCE(g->gfx_off_ns)) /
++				 NSEC_PER_MSEC);
++	} else {
++		dev_info(dev, "GPU-PM platform off not witnessed: one bounded gate cycle\n");
++		g5p_mmio_gate(g);
++		ret = g5p_r33_gfx_off(dev, g->pmgr, G5P_GFX_RESET_MS);
++		if (ret)
++			goto failed;
++	}
+ 	/* A witnessed platform off/on invalidates DS108's old ALIVE generation.
+   * Retained maps/image are validated, never allocated or reinitialised.
+   */

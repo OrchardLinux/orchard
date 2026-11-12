@@ -1,0 +1,94 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 17:30:18 +0000
+Subject: [PATCH] drm/apple-g5p: register the sleep reservation as suspend
+ admission
+
+The early suspend precheck admits a bound GPU only when the GPU holds a
+reserved suspend admission; without a provider every sleep with the GPU
+bound is refused before sync. Register the existing reservation as that
+provider: prepare is the device prepare callback, which reserves the
+host gate and the quiescence certificate without changing hardware state
+and refuses with -EBUSY otherwise, and complete is the release that
+already runs after resume and every abort. Both are idempotent within
+one transition, so device PM prepare/complete keep working as before.
+
+Register before the render node exists and unregister before any
+teardown. The refusal, the certificate and the never-park firmware
+behaviour are unchanged.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/apple-g5p/a9-gpu-drm.c | 22 +++++++++++++++++++++-
+ 1 file changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+index 5aec0de6c..6802578ff 100644
+--- a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
++++ b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+@@ -5,6 +5,7 @@
+ #include "../../apple-g5p/render-user-evwait.h"
+ #include "../../apple-g5p/render-user-sync.h"
+ #include <linux/apple-g5p-pm.h>
++#include <linux/pm-suspend-admission.h>
+ #include <linux/dma-buf.h>
+ #include <linux/dma-fence-chain.h>
+ #include <linux/dma-fence-unwrap.h>
+@@ -116,6 +117,8 @@ module_param_named(job_time_log, g5p_jt_log, bool, 0600);
+ struct g5p_drm {
+ 	struct drm_device drm;
+ 	struct g5p_diag *core;
++	/* Reserves the system-sleep certificate before sync, through complete. */
++	struct pm_suspend_admission sleep_admission;
+ 	/* Protects cached IRQ event/status fields; never held for hardware IO. */
+ 	spinlock_t status_lock;
+ 	struct g5p_jt jt_ring[G5P_JT_RING];
+@@ -903,6 +906,8 @@ static void g5p_autoboot_work(struct work_struct *work)
+ 	g5p_idle_queue(d);
+ }
+ 
++static int g5p_system_sleep_prepare(struct device *dev);
++
+ static int g5p_drm_probe(struct platform_device *pdev)
+ {
+ 	struct g5p_drm *d;
+@@ -951,9 +956,20 @@ static int g5p_drm_probe(struct platform_device *pdev)
+ 	drm_debugfs_add_file(&d->drm, "g5p_fwclock", g5p_fwclock_show, NULL);
+ 	drm_debugfs_add_file(&d->drm, "g5p_cache_receipts", g5p_cache_show, NULL);
+ 	INIT_DELAYED_WORK(&d->idle_work, g5p_idle_work);
+-	ret = drm_dev_register(&d->drm, 0);
++	/*
++	 * Before the render node exists. The early suspend precheck admits a
++	 * bound GPU only through this reservation; prepare and complete are the
++	 * device PM callbacks, which are idempotent for the same transition.
++	 */
++	d->sleep_admission.dev = &pdev->dev;
++	d->sleep_admission.prepare = g5p_system_sleep_prepare;
++	d->sleep_admission.complete = apple_g5p_system_sleep_complete;
++	ret = register_pm_suspend_admission(&d->sleep_admission);
+ 	if (ret)
+ 		goto err_pm;
++	ret = drm_dev_register(&d->drm, 0);
++	if (ret)
++		goto err_admission;
+ 	g5p_r8_register_epoch(g5p_drm_r8_epoch, d);
+ 	g5p_td_register_detach(g5p_drm_td_detach, d);
+ 	g5p_kq_register(&g5p_kq_drm, d);
+@@ -965,6 +981,8 @@ static int g5p_drm_probe(struct platform_device *pdev)
+ 		queue_delayed_work(system_unbound_wq, &d->autoboot, 0);
+ 	}
+ 	return 0;
++err_admission:
++	unregister_pm_suspend_admission(&d->sleep_admission);
+ err_pm:
+ 	g->event_notify = NULL;
+ 	pm_runtime_disable(&pdev->dev);
+@@ -976,6 +994,8 @@ static void g5p_drm_remove(struct platform_device *pdev)
+ 	struct g5p_diag *g = platform_get_drvdata(pdev);
+ 	struct g5p_drm *d = g->event_cookie;
+ 
++	/* Before any teardown; waits out a transition that holds it. */
++	unregister_pm_suspend_admission(&d->sleep_admission);
+ 	cancel_delayed_work_sync(&d->autoboot);
+ 	cancel_delayed_work_sync(&d->idle_work);
+ 	drm_dev_unplug(&d->drm);
