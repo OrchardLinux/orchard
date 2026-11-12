@@ -1,0 +1,129 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Wed, 11 Nov 2026 01:48:19 +0800
+Subject: [PATCH] payload: Draw a boot splash from the payload in place of the
+ logo
+
+A distribution chooses the picture shown while its system loads. m1n1's
+custom logo payload holds only 256x256 and 128x128 pictures, so an
+installer showed a smaller mark than the same distribution's installed
+boot, which paints its boot splash (orchard's OSPL format, any size).
+
+Accept that splash at the start of the payload as well: its pixels are
+converted once to the logo's byte order and it is drawn centred, in
+place of the logo, when it fits the screen. A payload chain skips it
+like a custom logo.
+
+Assisted-by: LLM
+---
+ src/fb.c      |  9 ++++++++-
+ src/payload.c | 49 +++++++++++++++++++++++++++++++++++++++++++++++++
+ src/payload.h |  1 +
+ 3 files changed, 58 insertions(+), 1 deletion(-)
+
+diff --git a/src/fb.c b/src/fb.c
+index 2b85d9a..ba606b2 100644
+--- a/src/fb.c
++++ b/src/fb.c
+@@ -464,7 +464,14 @@ void fb_init(bool clear)
+                         &orig_logo);
+     }
+ 
+-    if (payload_logo(&custom_128, &custom_256)) {
++    u32 *splash, splash_w, splash_h;
++    if (payload_splash(&splash, &splash_w, &splash_h) && splash_w <= fb.width &&
++        splash_h <= fb.height) {
++        custom_logo.ptr = splash;
++        custom_logo.width = splash_w;
++        custom_logo.height = splash_h;
++        logo = &custom_logo;
++    } else if (payload_logo(&custom_128, &custom_256)) {
+         custom_logo = *logo;
+         if (custom_logo.width == 256) {
+             custom_logo.ptr = custom_256;
+diff --git a/src/payload.c b/src/payload.c
+index 5b1547f..802b369 100644
+--- a/src/payload.c
++++ b/src/payload.c
+@@ -35,6 +35,14 @@ static const u8 initramfs_magic[] = {
+ static const u8 empty[] = {0, 0, 0, 0};
+ 
+ // custom logo is RGBA with 256x256 retina logo followed by half resolution
++/*
++ * A boot splash (orchard's format: "OSPL", width and height as little-endian
++ * u32, then the pixels as b, g, r, 0). In place of a custom logo, it lets a
++ * distribution choose the size of the picture drawn while it loads.
++ */
++static const u8 splash_magic[] = {'O', 'S', 'P', 'L'};
++#define SPLASH_MAX_SIDE 4096
++
+ static const u8 custom_logo_magic[] = {'m', '1', 'n', '1', '_', 'l', 'o', 'g',
+                                        'o', '_', '2', '5', '6', '1', '2', '8'};
+ #define CUSTOM_LOGO_SIZE (4 * ((256 * 256) + (128 * 128)))
+@@ -246,6 +254,12 @@ static void *load_one_payload(void *start, size_t size)
+         printf("Found a m1n1 initramfs payload at %p, 0x%x bytes\n", p, size);
+         p += sizeof(initramfs_magic) + 4;
+         return load_cpio(p, size);
++    } else if (!memcmp(p, splash_magic, sizeof(splash_magic))) {
++        u32 w, h;
++        memcpy(&w, p + 4, 4);
++        memcpy(&h, p + 8, 4);
++        printf("Found a boot splash payload at %p (%ux%u), skipping it\n", p, w, h);
++        return p + 12 + (size_t)w * h * 4;
+     } else if (!memcmp(p, custom_logo_magic, sizeof(custom_logo_magic))) {
+         printf("Found a m1n1 custom logo payload at %p, skipping 0x%lx bytes\n", p,
+                sizeof(custom_logo_magic) + CUSTOM_LOGO_SIZE);
+@@ -288,6 +302,41 @@ bool payload_logo(void **custom_128, void **custom_256)
+     return false;
+ }
+ 
++/*
++ * The boot splash at the start of the payload, if there is one, as pixels
++ * in the logo's byte order (r, g, b, 0): converted in place, once.
++ */
++bool payload_splash(u32 **pixels, u32 *width, u32 *height)
++{
++    static bool converted;
++    u8 *p = _payload_start;
++    u32 w, h;
++
++    if (memcmp(p, splash_magic, sizeof(splash_magic)))
++        return false;
++    memcpy(&w, p + 4, 4);
++    memcpy(&h, p + 8, 4);
++    if (!w || !h || w > SPLASH_MAX_SIDE || h > SPLASH_MAX_SIDE) {
++        printf("Ignoring a boot splash of %ux%u\n", w, h);
++        return false;
++    }
++
++    u8 *px = p + 12;
++    if (!converted) {
++        for (size_t i = 0; i < (size_t)w * h; i++) {
++            u8 b = px[i * 4];
++            px[i * 4] = px[i * 4 + 2];
++            px[i * 4 + 2] = b;
++        }
++        converted = true;
++    }
++    printf("Found a boot splash payload at %p (%ux%u)\n", p, w, h);
++    *pixels = (u32 *)px;
++    *width = w;
++    *height = h;
++    return true;
++}
++
+ int payload_run(void)
+ {
+     const char *target = adt_getprop(adt, 0, "target-type", NULL);
+diff --git a/src/payload.h b/src/payload.h
+index b24a939..05c7c2f 100644
+--- a/src/payload.h
++++ b/src/payload.h
+@@ -6,6 +6,7 @@
+ #include "types.h"
+ 
+ bool payload_logo(void **custom_128, void **custom_256);
++bool payload_splash(u32 **pixels, u32 *width, u32 *height);
+ 
+ int payload_run(void);
+ 

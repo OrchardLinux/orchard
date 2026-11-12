@@ -108,7 +108,11 @@ the picture, never the boot.
 The format is `OSPL`, then width and height as little-endian u32, then
 width × height pixels as the bytes b, g, r, 0 (the framebuffer's XRGB8888), top row first. Distributions
 write it from the same artwork their own m1n1 draws, so install and launch
-show the same picture.
+show the same picture: a release's install picture (its `logo`, the file
+after m1n1 in the install payload) may be this splash, which m1n1 then
+draws centred at its own size in place of m1n1's fixed 256 px custom logo
+(boot/m1n1 patch 0014). Each distribution picks the size that suits its
+mark.
 
 ## Selection
 

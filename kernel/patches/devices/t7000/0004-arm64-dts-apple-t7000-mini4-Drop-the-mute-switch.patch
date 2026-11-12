@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tom Ballard <tom.ballard08@googlemail.com>
+Date: Thu, 5 Nov 2026 19:31:58 +0000
+Subject: [PATCH] arm64: dts: apple: t7000-mini4: Drop the mute switch
+
+The iPad mini 4 has no side switch. The J96 ADT's buttons node lists
+none; its other interrupts there are PMU hall-effect inputs. Drop the
+gpio-keys entry on GPIO 36.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t7000-mini4.dtsi | 6 ------
+ 1 file changed, 6 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t7000-mini4.dtsi b/arch/arm64/boot/dts/apple/t7000-mini4.dtsi
+index a4e1ad2db..51021bdad 100644
+--- a/arch/arm64/boot/dts/apple/t7000-mini4.dtsi
++++ b/arch/arm64/boot/dts/apple/t7000-mini4.dtsi
+@@ -41,12 +41,6 @@ button-voldown {
+ 			gpios = <&pinctrl 46 GPIO_ACTIVE_LOW>;
+ 			linux,code = <KEY_VOLUMEDOWN>;
+ 		};
+-
+-		switch-mute {
+-			label = "Mute Switch";
+-			gpios = <&pinctrl 36 GPIO_ACTIVE_LOW>;
+-			linux,code = <KEY_MUTE>;
+-		};
+ 	};
+ };
+ 
