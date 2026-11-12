@@ -5,7 +5,7 @@ import subprocess
 import sys
 import uuid
 
-from .linux_usb import MODES, M1N1, devices as linux_devices, m1n1_ports as linux_m1n1_ports, serial_tags, stable_id
+from .linux_usb import MODES, M1N1, devices as linux_devices, m1n1_ports as linux_m1n1_ports, serial_tags, stable_id, mode as usb_mode
 from orchard.state import EndpointUnavailable
 
 
@@ -48,7 +48,7 @@ def devices():
                     ports.append(port)
         if len(ports) > 1:
             raise DeviceError('Ambiguous USB serial ports on the selected device')
-        found.append({'location': location, 'mode': MODES.get(node.get('idProduct'), 'other'),
+        found.append({'location': location, 'mode': usb_mode(node.get('idProduct'), serial),
                       'ecid': int(fields[0].group(1), 16) if fields[0] else None,
                       'boot_id': str(uuid.UUID(boot.group(1))) if boot else None,
                       'usb_id': usb_id,
