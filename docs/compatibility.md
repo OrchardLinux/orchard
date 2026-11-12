@@ -174,8 +174,8 @@ Boards Orchard builds for. States: working, untested, missing, none (no such har
 | `d101` | untested | untested | untested | missing | untested | untested | untested | missing | missing | untested | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `d11` | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `d111` | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `j171` | working | untested | working | working | working | untested | untested | untested | missing | working | working | working | missing | missing | none | working | untested | missing | untested | untested | untested | untested | missing | working | missing | missing | untested |
-| `j172` | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | missing | untested | missing | missing | untested |
+| `j171` | working | untested | working | working | working | untested | untested | untested | missing | working | working | working | missing | missing | none | working | untested | missing | untested | untested | untested | untested | untested | working | missing | missing | untested |
+| `j172` | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | untested | untested | missing | missing | untested |
 | `j71b` | working | working | working | working | working | working | untested | untested | missing | working | working | working | working | working | none | working | working | working | working | working | working | working | untested | working | missing | missing | untested |
 | `j72b` | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | missing | untested |
 | `j120` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
@@ -262,8 +262,10 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `d111` | Bluetooth audio | missing, but a driver binds |
 | `j171` | Bluetooth input devices | missing, but a driver binds |
 | `j171` | Bluetooth audio | missing, but a driver binds |
+| `j171` | USB host | untested, but no driver binds |
 | `j172` | Bluetooth input devices | missing, but a driver binds |
 | `j172` | Bluetooth audio | missing, but a driver binds |
+| `j172` | USB host | untested, but no driver binds |
 | `j71b` | USB host | untested, but no driver binds |
 | `j72b` | Bluetooth input devices | missing, but a driver binds |
 | `j72b` | Bluetooth audio | missing, but a driver binds |
