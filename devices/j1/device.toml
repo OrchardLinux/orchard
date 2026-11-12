@@ -59,3 +59,4 @@ usb_network = "untested" # CDC Ethernet, pinged both ways.
 audio_output = "missing"
 audio_input = "missing"
 camera = "missing"
+video_decode_hevc = "missing"

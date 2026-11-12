@@ -361,6 +361,14 @@
             "missing",
             "none"
           ]
+        },
+        "video_decode_hevc": {
+          "enum": [
+            "working",
+            "untested",
+            "missing",
+            "none"
+          ]
         }
       },
       "required": [
@@ -388,7 +396,8 @@
         "usb_network",
         "audio_output",
         "audio_input",
-        "camera"
+        "camera",
+        "video_decode_hevc"
       ],
       "additionalProperties": false
     },
