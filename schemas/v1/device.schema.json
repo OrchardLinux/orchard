@@ -338,6 +338,14 @@
             "none"
           ]
         },
+        "usb_host": {
+          "enum": [
+            "working",
+            "untested",
+            "missing",
+            "none"
+          ]
+        },
         "audio_output": {
           "enum": [
             "working",
@@ -394,6 +402,7 @@
         "resume",
         "usb_serial",
         "usb_network",
+        "usb_host",
         "audio_output",
         "audio_input",
         "camera",
