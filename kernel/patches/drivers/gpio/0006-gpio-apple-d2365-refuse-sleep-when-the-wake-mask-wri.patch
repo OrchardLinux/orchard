@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 16:18:38 +0000
+Subject: [PATCH] gpio: apple-d2365: refuse sleep when the wake mask write
+ fails
+
+apple_pmic_gpio_suspend() warned and went on when writing the event wake
+mask failed. The system then slept with wake sources the PMIC would not
+report, and could not be woken by them. Return the error so that the
+suspend is aborted, and drop the IRQ lock on that path.
+
+Assisted-by: LLM
+---
+ drivers/gpio/gpio-apple-d2365.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpio/gpio-apple-d2365.c b/drivers/gpio/gpio-apple-d2365.c
+index ba66e8eab..c516dfe30 100644
+--- a/drivers/gpio/gpio-apple-d2365.c
++++ b/drivers/gpio/gpio-apple-d2365.c
+@@ -588,8 +588,10 @@ static int apple_pmic_gpio_suspend(struct device *dev)
+ 	mutex_lock(&gpio->irq_lock);
+ 	/* Only wake-enabled events may pull the line while asleep. */
+ 	ret = apple_pmic_event_sync(gpio, gpio->wake);
+-	if (ret)
+-		dev_warn(dev, "event wake mask write failed: %d\n", ret);
++	if (ret) {
++		mutex_unlock(&gpio->irq_lock);
++		return ret;
++	}
+ 	gpio->suspended = true;
+ 	mutex_unlock(&gpio->irq_lock);
+ 	/* A thread that passed the gate before it closed has finished now. */

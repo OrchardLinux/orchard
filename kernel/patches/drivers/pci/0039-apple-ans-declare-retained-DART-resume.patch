@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 00:00:00 +0100
+Subject: [PATCH] apple-ans: declare retained DART resume after handoff API
+
+Declare the retained DART resume operation after the ANS interface has
+been introduced, so the paired sleep consumer can call it.
+
+Assisted-by: LLM
+---
+ include/linux/apple-ans.h |    2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/include/linux/apple-ans.h b/include/linux/apple-ans.h
+index 10be3ddef..a312a683c 100644
+--- a/include/linux/apple-ans.h
++++ b/include/linux/apple-ans.h
+@@ -19,7 +19,9 @@ struct device;
+  */
+ #if IS_REACHABLE(CONFIG_APPLE_DART)
+ int apple_ans_dart_stop(struct device *dev);
++int apple_ans_dart_start(struct device *dev);
+ #else
++static inline int apple_ans_dart_start(struct device *dev) { return -EOPNOTSUPP; }
+ static inline int apple_ans_dart_stop(struct device *dev)
+ {
+ 	return -EOPNOTSUPP;

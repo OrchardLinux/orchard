@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 16:18:38 +0000
+Subject: [PATCH] power: supply: apple-tristar: select J71t USB wake event
+ from match data
+
+The charger treats one TriStar event as the plug event that may wake the
+system. J71t reports plug changes on event 0x49 instead of the default
+one. Take the plug event from the match data and give
+apple,j71t-tristar-charger 0x49.
+
+Assisted-by: LLM
+---
+ drivers/power/supply/apple_tristar_charger.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/power/supply/apple_tristar_charger.c b/drivers/power/supply/apple_tristar_charger.c
+index a953cedcb..8a869725d 100644
+--- a/drivers/power/supply/apple_tristar_charger.c
++++ b/drivers/power/supply/apple_tristar_charger.c
+@@ -124,6 +124,7 @@ struct tristar_charger {
+ 	struct completion adc_done;
+ 	int irqs[TRISTAR_IRQS_MAX];
+ 	unsigned int nirqs;
++	unsigned int plug_event;
+ 	int plug_irq;			/* wakes the system, 0 without one */
+ 	u32 status_base;
+ 	u32 control_base;
+@@ -1321,13 +1322,15 @@ static int tristar_probe(struct platform_device *pdev)
+ 	if (ret <= TRISTAR_IRQ_SOURCE || ret > TRISTAR_IRQS_MAX)
+ 		return dev_err_probe(dev, -EINVAL,
+ 				     "expected PMU line, ADC and source event interrupts\n");
++	chg->plug_event = device_get_match_data(dev) ?
++		*(const unsigned int *)device_get_match_data(dev) : TRISTAR_EVENT_PLUG;
+ 	chg->nirqs = ret;
+ 	for (i = 0; i < chg->nirqs; i++) {
+ 		chg->irqs[i] = platform_get_irq(pdev, i);
+ 		if (chg->irqs[i] < 0)
+ 			return chg->irqs[i];
+ 		if (i >= TRISTAR_IRQ_SOURCE &&
+-		    irqd_to_hwirq(irq_get_irq_data(chg->irqs[i])) == TRISTAR_EVENT_PLUG)
++		    irqd_to_hwirq(irq_get_irq_data(chg->irqs[i])) == chg->plug_event)
+ 			chg->plug_irq = chg->irqs[i];
+ 	}
+ 
+@@ -1454,7 +1457,10 @@ static int tristar_resume(struct device *dev)
+ 
+ static DEFINE_SIMPLE_DEV_PM_OPS(tristar_pm_ops, tristar_suspend, tristar_resume);
+ 
++static const unsigned int j71t_plug_event = 0x49;
++
+ static const struct of_device_id tristar_of_match[] = {
++	{ .compatible = "apple,j71t-tristar-charger", .data = &j71t_plug_event },
+ 	{ .compatible = "apple,tristar-charger" },
+ 	{ }
+ };

@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 16:18:38 +0000
+Subject: [PATCH] dt-bindings: usb: describe board-selected s2idle gadget
+ retention
+
+Document apple,retain-gadget-in-s2idle: the board keeps the peripheral
+controller and its PHY powered during suspend to idle, so the gadget
+stays connected.
+
+Assisted-by: LLM
+---
+ Documentation/devicetree/bindings/usb/dwc2.yaml | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/usb/dwc2.yaml b/Documentation/devicetree/bindings/usb/dwc2.yaml
+index b1f66a663..81df7017a 100644
+--- a/Documentation/devicetree/bindings/usb/dwc2.yaml
++++ b/Documentation/devicetree/bindings/usb/dwc2.yaml
+@@ -172,6 +172,11 @@ properties:
+     description: If present indicates that we need to reset the PHY when we
+       detect a wakeup. This is due to a hardware errata.
+ 
++  apple,retain-gadget-in-s2idle:
++    type: boolean
++    description:
++      Keep the peripheral controller and PHY powered during suspend to idle.
++
+   usb-psy-name:
+     $ref: /schemas/types.yaml#/definitions/string
+     description:

@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 11:15:39 +0100
+Subject: [PATCH] PCI: apple-h9p: hand off S8003 ports on restart and power off
+ Wi-Fi
+
+On a restart that re-enters the boot loader the S8003 host's shutdown did
+nothing, so the Wi-Fi function kept its link and bus mastering. Its
+firmware can keep writing into memory that the boot loader and the next
+kernel reuse, and the boot loader does not touch ports other than storage.
+
+Run the kexec handoff on restart as well: block root routing, assert PERST,
+stop the LTSSM and disable the NVMMU SART, with the same certificate and
+cold-reset fallback. The storage port then ends powered with PERST held,
+as for kexec. Ports other than storage are additionally powered off with
+the iOS port power-down, the state the boot loader leaves them in and from
+which probe restarts them. The kexec handoff itself is unchanged.
+
+Assisted-by: LLM
+---
+ drivers/pci/controller/pcie-apple-h9p.c | 17 +++++++++++++++--
+ 1 file changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/pci/controller/pcie-apple-h9p.c b/drivers/pci/controller/pcie-apple-h9p.c
+index 5d6e717ee..90491965d 100644
+--- a/drivers/pci/controller/pcie-apple-h9p.c
++++ b/drivers/pci/controller/pcie-apple-h9p.c
+@@ -3891,12 +3891,20 @@ static const struct dev_pm_ops apple_h9p_sleep_ops = {
+ 	.resume_noirq = apple_h9p_sleep_resume,
+ };
+ 
++/*
++ * A kexec and a restart take the same handoff. After a restart the boot
++ * loader starts the storage port again from this state, as it does from
++ * iBoot's, but it does not stop an endpoint left on any other port: Wi-Fi
++ * would keep DMAing into memory the next kernel reuses. Those ports are
++ * therefore powered off after the isolation, as the boot loader leaves them.
++ */
+ static void apple_h9p_s8003_shutdown(struct platform_device *pdev)
+ {
+ 	struct apple_h9p_pcie *pcie = apple_h9p_pcie_lookup(&pdev->dev);
++	bool restart = !kexec_in_progress && system_state == SYSTEM_RESTART;
+ 	unsigned int port;
+ 
+-	if (!kexec_in_progress || !pcie ||
++	if ((!kexec_in_progress && !restart) || !pcie ||
+ 	    !of_device_is_compatible(pdev->dev.of_node, "apple,s8003-pcie"))
+ 		return;
+ 	cancel_delayed_work_sync(&pcie->late_work);
+@@ -3938,6 +3946,8 @@ static void apple_h9p_s8003_shutdown(struct platform_device *pdev)
+ 		if (!port && !of_property_read_bool(pcie->dev->of_node,
+ 						   "apple,ans-kexec-handoff"))
+ 			apple_s8003_port_off(pcie, port);
++		if (port && restart)
++			apple_s8003_port_off(pcie, port);
+ 		if (!port && of_property_read_bool(pcie->dev->of_node, "apple,ans-kexec-handoff") &&
+ 		    (!apple_s8003_port_powered(pcie) ||
+ 		     gpiod_get_value_cansleep(pcie->perst[0]) != 1)) {
+@@ -3946,7 +3956,10 @@ static void apple_h9p_s8003_shutdown(struct platform_device *pdev)
+ 		}
+ 		pcie->enabled_ports &= ~BIT(port);
+ 	}
+-	dev_info(pcie->dev, "kexec: PCIe PERST asserted, LTSSM stopped, ports powered; NVMMU SART disabled\n");
++	if (restart)
++		dev_info(pcie->dev, "restart: PCIe PERST asserted, LTSSM stopped, ports 1+ powered off; NVMMU SART disabled\n");
++	else
++		dev_info(pcie->dev, "kexec: PCIe PERST asserted, LTSSM stopped, ports powered; NVMMU SART disabled\n");
+ }
+ 
+ static void apple_h9p_capture_park(struct apple_h9p_pcie *pcie)

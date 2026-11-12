@@ -192,7 +192,7 @@ class D2365Poweroff(unittest.TestCase):
 
 class D2365EventQuiesce(unittest.TestCase):
     def test_shutdown_drains_irq_and_retry_after_closing_gate(self):
-        post = patched_source('drivers/gpio/gpio-apple-d2365.c')
+        post = patched_source('drivers/gpio/gpio-apple-d2365.c', every=True)
         start = post.index('void apple_d2365_gpio_quiesce(')
         shutdown = post[start:post.index('\n}', start) + 2]
         self.assertNotIn('.shutdown = apple_pmic_gpio_shutdown', post)

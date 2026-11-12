@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 16:18:38 +0000
+Subject: [PATCH] arm64: dts: apple: j71t: enable paired sleep and the s2idle
+ gadget
+
+Mark the J71t ANS port for paired system sleep and keep the USB gadget
+connected over suspend to idle.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/s8003-j71t.dts | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/s8003-j71t.dts b/arch/arm64/boot/dts/apple/s8003-j71t.dts
+index 3ee634e79..d03bc4ff6 100644
+--- a/arch/arm64/boot/dts/apple/s8003-j71t.dts
++++ b/arch/arm64/boot/dts/apple/s8003-j71t.dts
+@@ -75,3 +75,11 @@
+ &wdt {
+ 	apple,tethered-boot;
+ };
++
++&pcie0 {
++	apple,paired-system-sleep;
++};
++
++&usbdev {
++	apple,retain-gadget-in-s2idle;
++};
