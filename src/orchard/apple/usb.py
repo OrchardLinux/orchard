@@ -5,7 +5,7 @@ import subprocess
 import sys
 import uuid
 
-from .linux_usb import MODES, M1N1, devices as linux_devices, m1n1_ports as linux_m1n1_ports, serial_tags
+from .linux_usb import MODES, M1N1, devices as linux_devices, m1n1_ports as linux_m1n1_ports, serial_tags, stable_id
 from orchard.state import EndpointUnavailable
 
 
@@ -33,7 +33,12 @@ def devices():
             continue
         serial = node.get('USB Serial Number') or ''
         boot = re.search(r'\bBOOT:([0-9a-fA-F-]{36})\b', serial)
+        usb_id = stable_id(serial)
         profile = re.search(r'\bBOARD:([a-z0-9]+)\b', serial)
+        # A compatibility PID also belongs to real Apple hardware. Only our
+        # existing boot/profile identity makes it an Orchard system.
+        mac_current = (node.get('idProduct') == 0x1014 and (boot is not None or usb_id is not None) and
+                       profile is not None and profile.group(1) == 'j71t')
         fields = [re.search(r'\b' + label + r':([0-9a-fA-F]+)\b', serial)
                   for label in ('ECID', 'CPID', 'BDID')]
         descendants = list(node.get('IORegistryEntryChildren', []))
@@ -47,9 +52,10 @@ def devices():
                     ports.append(port)
         if len(ports) > 1:
             raise DeviceError('Ambiguous USB serial ports on the selected device')
-        found.append({'location': location, 'mode': MODES.get(node.get('idProduct'), 'other'),
+        found.append({'location': location, 'mode': 'system' if mac_current else MODES.get(node.get('idProduct'), 'other'),
                       'ecid': int(fields[0].group(1), 16) if fields[0] else None,
                       'boot_id': str(uuid.UUID(boot.group(1))) if boot else None,
+                      'usb_id': usb_id,
                       'chip': int(fields[1].group(1), 16) if fields[1] else None,
                       'board': int(fields[2].group(1), 16) if fields[2] else None,
                       'profile': profile.group(1) if profile else None,
