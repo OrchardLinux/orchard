@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 15:26:20 +0100
+Subject: [PATCH] drm/apple-g5p: admit system sleep with a deferred close
+ pending
+
+A context that closes while the PM may still write its free list back
+stays bound until a job of a third context runs (render-user-pmset.h).
+With one compositor running that never happens: a client that ran at
+boot and exited stays the PM's previous context for good, and system
+sleep refused on it at every attempt. On J71t with labwc idle and the
+firmware parked, every s2idle attempt drained for 1 s and then refused
+("close-defer slots=8/7 ... pm=last" at boot, no "close-deferred"
+after).
+
+The hazard is a write-back on a later job. No job runs between the sleep
+reservation and platform off: the client and host gates are shut, the
+sleep detach unbinds every slot the firmware holds, and the resumed
+firmware's PM starts with no last or previous context
+(g5p_rv3_rebuild_host() clears both and every context's retained
+binding). The pending close then releases after the next job with a
+release plan, as after an in-boot recovery, never an unbind of old-epoch
+slots.
+
+Drop the deferred close from the sleep busy states. The R1 quiescent
+certificate, the ring and stamp checks and every other busy state are
+unchanged.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/apple-g5p/system-sleep.inc | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/apple-g5p/system-sleep.inc b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+index 6a89e5f48..6e3ab71c5 100644
+--- a/drivers/gpu/drm/apple-g5p/system-sleep.inc
++++ b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+@@ -8,6 +8,16 @@
+  * when idle. *drains is set when the client drain in prepare can clear it
+  * (work in flight); otherwise nothing at idle clears it and only a refusal is
+  * honest.
++ *
++ * A deferred close (render-user-pmset.h) is not a reason: it keeps a closed
++ * context's slots bound while the PM may still write its free list back on a
++ * LATER job of the context that followed. No job runs between this
++ * reservation and platform off, the sleep detach unbinds every held slot, and
++ * the resumed firmware's PM starts with no last or previous context
++ * (g5p_rv3_rebuild_host()), so the pending close releases after resume like
++ * after an in-boot recovery. With one compositor running, a context that
++ * closed earlier stays "previous" for good, so refusing on it refused every
++ * sleep.
+  */
+ static const char *g5p_sleep_busy(struct g5p_drm *d, bool *drains)
+ {
+@@ -26,9 +36,6 @@ static const char *g5p_sleep_busy(struct g5p_drm *d, bool *drains)
+ 	/* A bind's DC3 pair the firmware never consumed; only a later DC op clears it. */
+ 	if (rd->dc_pending)
+ 		return "dc-pending";
+-	/* Released only after a job of a third context (render-user-pmset.h). */
+-	if (rd->close_deferred[0] || rd->close_deferred[1])
+-		return "close-deferred";
+ 	*drains = true;
+ 	/* A lost-job drain or recovery may finish inside the client drain bound. */
+ 	if (rd->stuck)

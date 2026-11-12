@@ -1,0 +1,379 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 15:07:46 +0000
+Subject: [PATCH] drm/apple-g5p: reduce serial render job overhead
+
+[Orchard: from brkosebay/linux 9a0a283e51dabf45af303fbae67a43568b2681bc;
+fixed source defaults, no production module controls.] Preserve the
+measured opt1 chain in dependency order.
+
+Assisted-by: LLM
+---
+ drivers/gpu/apple-g5p/render-user-evwait.h   |   2 +-
+ drivers/gpu/drm/apple-g5p/a9-gpu-drm.c       |   2 +-
+ drivers/gpu/drm/apple-g5p/drm-compute-v1.inc |   2 +-
+ drivers/gpu/drm/apple-g5p/drm-latency123.inc |   2 +-
+ drivers/gpu/drm/apple-g5p/drm-render-v3.h    |   1 +
+ drivers/gpu/drm/apple-g5p/drm-render-v3.inc  | 155 ++++++++++++++-----
+ 6 files changed, 122 insertions(+), 42 deletions(-)
+
+diff --git a/drivers/gpu/apple-g5p/render-user-evwait.h b/drivers/gpu/apple-g5p/render-user-evwait.h
+index ccb7d2c8f..5a14b32db 100644
+--- a/drivers/gpu/apple-g5p/render-user-evwait.h
++++ b/drivers/gpu/apple-g5p/render-user-evwait.h
+@@ -17,7 +17,7 @@
+ #define G5P_RENDER_USER_EVWAIT_H
+ 
+ #define G5P_EW_POST_US \
+-	100U /* after the phase's own event: completion is imminent */
++	50U /* after the phase's own event: completion is imminent */
+ #define G5P_EW_MAX_US 20000U /* safety timeout ceiling */
+ 
+ enum g5p_ew_act {
+diff --git a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+index cf4248bc4..46231b477 100644
+--- a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
++++ b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+@@ -762,7 +762,7 @@ static int g5p_drm_probe(struct platform_device *pdev)
+ 	init_waitqueue_head(&d->ev_wq);
+ 	atomic_set(&d->accepted, 0);
+ 	atomic64_set(&d->job_sequence, 0);
+-	d->render_wq = drmm_alloc_ordered_workqueue(&d->drm, "g5p-render", 0);
++	d->render_wq = drmm_alloc_ordered_workqueue(&d->drm, "g5p-render", WQ_HIGHPRI);
+ 	if (IS_ERR_OR_NULL(d->render_wq)) {
+ 		ret = d->render_wq ? PTR_ERR(d->render_wq) : -ENOMEM;
+ 		goto err_pm;
+diff --git a/drivers/gpu/drm/apple-g5p/drm-compute-v1.inc b/drivers/gpu/drm/apple-g5p/drm-compute-v1.inc
+index 559546358..d09e56c37 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-compute-v1.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-compute-v1.inc
+@@ -60,7 +60,7 @@ static void g5p_cu_sample(struct g5p_diag *g, u32 seq, u32 target,
+ 	u8 *p = g5p_cu_page(b), *global = g5p_ru_global(b, G5P_CU_ENGINE);
+ 	u32 *ring = (u32 *)g5p_boot_shared(b, 0x68);
+ 
+-	g5p_rv3_fw_touch(b);
++	g5p_rv3_fw_touch(b, NULL);
+ 	memset(s, 0, sizeof(*s));
+ 	dma_rmb();
+ 	s->ns = ktime_get_ns();
+diff --git a/drivers/gpu/drm/apple-g5p/drm-latency123.inc b/drivers/gpu/drm/apple-g5p/drm-latency123.inc
+index 018e83a5b..1d3c42192 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-latency123.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-latency123.inc
+@@ -55,7 +55,7 @@ MODULE_PARM_DESC(
+ 	render_user_event_wake,
+ 	"perf60 default0 (release8: sleep 1-2 ms between completion samples); N: sleep "
+ 	"until the next firmware event (the IRQ thread's decode wakes the waiter), at "
+-	"most N us (100..20000) as the safety net, and poll every 100 us once the "
++	"most N us (100..20000) as the safety net, and poll every 50 us once the "
+ 	"phase's own completion event is latched; read live");
+ 
+ /* A word of a firmware object; objects may straddle the region's 16 KiB pages. */
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-v3.h b/drivers/gpu/drm/apple-g5p/drm-render-v3.h
+index ac4dd841e..22a63accf 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-v3.h
++++ b/drivers/gpu/drm/apple-g5p/drm-render-v3.h
+@@ -48,6 +48,7 @@ struct g5p_rv3 {
+ 	u32 wk_did[2], wk_power[2], wk_fence[2], wk_gpc[2], wk_cons[2],
+ 		wk_t1_pub[2], wk_t1_end[2];
+ 	u64 wk_start_ns[2], wk_done_ns[2], wk_first_ns[2];
++	bool joint; /* latched at execute entry; attach stays serial */
+ 	bool touched; /* the DC3 pair was published: the firmware may reference the job's memory */
+ 	/* The bind of this job's context published its DC3 pair and then failed: that context is
+ 	 * lost, the device and the contexts already bound are not.
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+index 0fd86d8e4..761b3015f 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+@@ -249,7 +249,10 @@ static int g5p_rv3_errno(struct g5p_diag *g, int ret)
+  * 64-byte line, before every RAM sample of an in-flight phase.  RAM only, and an idle GPU
+  * has no sampler, so it costs nothing then.
+  */
+-static void g5p_rv3_fw_touch(struct g5p_boot *b)
++static const bool render_user_joint;
++static const unsigned int render_user_fw_ready_mode = 2;
++
++static void g5p_rv3_fw_touch(struct g5p_boot *b, const struct g5p_render *render)
+ {
+ 	struct g5p_dma_page *const regions[] = { b->root, b->shared };
+ 	u32 counts[] = { ARRAY_SIZE(b->root), ARRAY_SIZE(b->shared) };
+@@ -259,10 +262,13 @@ static void g5p_rv3_fw_touch(struct g5p_boot *b)
+ 			for (u32 at = 0; at < G5P_GPU_PAGE; at += 64)
+ 				(void)READ_ONCE(
+ 					*(const u32 *)(regions[r][i].cpu + at));
+-	/* perf60 stage 4: the per-context PM sets are firmware pages like the shared ones */
+-	for (u32 i = 0; i < b->pm_sets * G5P_PMSET_PAGES; i++)
+-		for (u32 at = 0; at < G5P_GPU_PAGE; at += 64)
+-			(void)READ_ONCE(*(const u32 *)(b->pm_set[i].cpu + at));
++	/* DC callers retain the full sweep. Root and shared are always whole. */
++	for (u32 set = 0; set < b->pm_sets; set++) {
++		for (u32 i = 0; i < G5P_PMSET_PAGES; i++)
++			for (u32 at = 0; at < G5P_GPU_PAGE; at += 64)
++				(void)READ_ONCE(*(const u32 *)(
++					b->pm_set[set * G5P_PMSET_PAGES + i].cpu + at));
++	}
+ }
+ 
+ /* perf60 bell gates, A/B knobs for the multi-context 3D fault on the bell path (render_user_wake=2 only;
+@@ -309,7 +315,7 @@ static u32 g5p_rv3_js(const struct g5p_rdev *rd, u32 seq)
+ 
+ 
+ /* RAM only. */
+-static void g5p_rv3_sample(struct g5p_diag *g, struct g5p_render *r, u32 e,
++static void g5p_rv3_sample_ram(struct g5p_diag *g, struct g5p_render *r, u32 e,
+ 			   u32 seq, struct g5p_rv3_ev *s)
+ {
+ 	struct g5p_boot *b = g->boot;
+@@ -317,18 +323,6 @@ static void g5p_rv3_sample(struct g5p_diag *g, struct g5p_render *r, u32 e,
+ 	   *pm = g5p_rv3_pm_cpu(b, r);
+ 	u32 *ring = (u32 *)g5p_boot_shared(b, e ? 0x64 : 0x60);
+ 
+-	{
+-		struct g5p_jt *jt = r->ctx->gpu->jt_active;
+-		u64 start = ktime_get_ns();
+-		g5p_rv3_fw_touch(b);
+-		if (jt) {
+-			jt->touch_ns += ktime_get_ns() - start;
+-			if (e)
+-				jt->td_samples++;
+-			else
+-				jt->ta_samples++;
+-		}
+-	}
+ 	memset(s, 0, sizeof(*s));
+ 	dma_rmb();
+ 	s->ns = ktime_get_ns();
+@@ -356,6 +350,25 @@ static void g5p_rv3_sample(struct g5p_diag *g, struct g5p_render *r, u32 e,
+ 			  READ_ONCE(r->ctx->gpu->ta_hit_ns));
+ }
+ 
++/* Full qualified visibility sweep for fallback, observation and DC-independent callers. */
++static void g5p_rv3_sample(struct g5p_diag *g, struct g5p_render *r, u32 e,
++			   u32 seq, struct g5p_rv3_ev *s)
++{
++	struct g5p_jt *jt = r->ctx->gpu->jt_active;
++	u64 start = ktime_get_ns();
++
++	g5p_rv3_fw_touch(g->boot, r);
++	if (jt)
++		jt->touch_ns += ktime_get_ns() - start;
++	g5p_rv3_sample_ram(g, r, e, seq, s);
++	if (jt) {
++		if (e)
++			jt->td_samples++;
++		else
++			jt->ta_samples++;
++	}
++}
++
+ /* TA: one step of render-user-retire.h's TA rules when ta is given, else the flown r74b
+  * predicate.  3D: one step of its 3D rules when rt is given, else the r96 predicate.
+  */
+@@ -373,6 +386,52 @@ static bool g5p_rv3_done(u32 e, const struct g5p_rv3_ev *s,
+ 	return s->consumed && s->idle_ok && s->retired && (e || s->pm_ok);
+ }
+ 
++/* Test on copies: probing must not advance the real coherent-run clocks,
++ * count a second sample, or change the authoritative decision state. A matching
++ * event is mandatory even where the legacy idle-clear/hold rule could finish.
++ */
++static bool g5p_rv3_probe_done(u32 e, const struct g5p_rv3_ev *s,
++			       const struct g5p_ru_retire *rt, const struct g5p_ru_ta *ta)
++{
++	struct g5p_ru_retire rt_copy;
++	struct g5p_ru_ta ta_copy;
++
++	if (!s->event || s->failed || s->proto)
++		return false;
++	if (rt)
++		rt_copy = *rt;
++	if (ta)
++		ta_copy = *ta;
++	return g5p_rv3_done(e, s, rt ? &rt_copy : NULL, ta ? &ta_copy : NULL);
++}
++
++/* This changes only scan timing; live-PM coverage is controlled separately.
++ * Pending/stale/invalid samples always run the selected sweep and resample. TA retains every sweep to keep its
++ * PM hand-off unchanged. Even a pre-completed 3D retains its first full sweep.
++ */
++static void g5p_rv3_wait_sample(struct g5p_diag *g, struct g5p_render *r,
++			       u32 e, u32 seq, struct g5p_rv3_ev *s,
++			       const struct g5p_ru_retire *rt, const struct g5p_ru_ta *ta,
++			       bool sampled, bool drain_failed)
++{
++	u32 mode = READ_ONCE(render_user_fw_ready_mode);
++	bool ready = false;
++
++	if ((mode == 1 || mode == 2) && !drain_failed) {
++		g5p_rv3_sample_ram(g, r, e, seq, s);
++		ready = g5p_rv3_probe_done(e, s, rt, ta);
++
++		if (mode == 2 && e == 1 && sampled && ready) {
++			struct g5p_jt *jt = r->ctx->gpu->jt_active;
++
++			if (jt)
++				jt->td_samples++;
++			return;
++		}
++	}
++	g5p_rv3_sample(g, r, e, seq, s);
++}
++
+ /* The TA clauses in the bits of render-user-retire.h, for the receipt. */
+ static u32 g5p_rv3_ta_unsat(const struct g5p_rv3_ev *s)
+ {
+@@ -513,7 +572,7 @@ static u32 g5p_rv3_wait(struct g5p_diag *g, struct g5p_render *r, u32 e,
+ 			struct g5p_rv3_ev *s, u64 *consumed_ns, int *err)
+ {
+ 	struct g5p_drm *d = r->ctx->gpu;
+-	bool closing = false, slow = false;
++	bool closing = false, slow = false, sampled = false;
+ 
+ 	for (;;) {
+ 		int drain = g5p_boot_drain(g);
+@@ -521,7 +580,8 @@ static u32 g5p_rv3_wait(struct g5p_diag *g, struct g5p_render *r, u32 e,
+ 			d->event_serial); /* after the drain, before the sample */
+ 		bool fault, silent, done;
+ 
+-		g5p_rv3_sample(g, r, e, seq, s);
++		g5p_rv3_wait_sample(g, r, e, seq, s, rt, ta, sampled, drain != 0);
++		sampled = true;
+ 		/* latency101: a silent event stream during the phase is a dead firmware (never off). */
+ 		silent =
+ 			g5p_ru_wait_grace(w, s->ns, READ_ONCE(g->boot->events));
+@@ -978,7 +1038,7 @@ static int g5p_rv3_dc_wait(struct g5p_diag *g, u32 target, u64 *consumed_ns)
+ 			return ret;
+ 		if (READ_ONCE(b->failed))
+ 			return -EIO;
+-		g5p_rv3_fw_touch(b);
++		g5p_rv3_fw_touch(b, NULL);
+ 		dma_rmb();
+ 		switch (g5p_ru_bind_step(READ_ONCE(ctl[0]), READ_ONCE(ctl[4]),
+ 					 target, expired)) {
+@@ -1401,11 +1461,12 @@ static int g5p_rv3_publish_ta(struct g5p_diag *g, struct g5p_render *r,
+  *  10 3D stamp words != seq - 1 (job N leaves N; 0 before the first)
+  */
+ static u32 g5p_rv3_td_why(const struct g5p_render *r, const u8 *p,
+-			  const u32 *ring, u32 start, u32 previous, u32 seq)
++			  const u32 *ring, u32 start, u32 previous, u32 seq, bool joint)
+ {
+ 	const u8 *cmd = p + g5p_ru_cmd_at(g5p_rv3_js(r->ctx->gpu->rdev, seq));
+ 
+-	return (u32)!r->retired[0] | (u32)!r->consumed[0] << 1 |
++	return (u32)(!joint && !r->retired[0]) |
++	       (u32)(!joint && !r->consumed[0]) << 1 |
+ 	       (u32)r->submitted[1] << 2 | (u32)(start > 255) << 3 |
+ 	       (u32)(READ_ONCE(ring[0]) != start) << 4 |
+ 	       (u32)(g5p_le32(p + G5P_WORK_CTL) != previous) << 5 |
+@@ -1419,7 +1480,7 @@ static u32 g5p_rv3_td_why(const struct g5p_render *r, const u8 *p,
+ 		       << 10;
+ }
+ 
+-/* The 3D after the TA retired: record, WORK_CTL, producer, and NO doorbell. */
++/* 3D publication: tag4 orders it after TA, including joint publication. */
+ static int g5p_rv3_publish_3d(struct g5p_diag *g, struct g5p_render *r,
+ 			      struct g5p_rv3 *v, u32 seq)
+ {
+@@ -1433,7 +1494,7 @@ static int g5p_rv3_publish_3d(struct g5p_diag *g, struct g5p_render *r,
+ 	/* RAM preconditions of r96's admit (g5p_rv3_td_why()).  Nothing has been written when one
+ 	 * fails, and the refusal names the clauses and the raw values it read.
+ 	 */
+-	why = g5p_rv3_td_why(r, p, ring, start, previous, seq);
++	why = g5p_rv3_td_why(r, p, ring, start, previous, seq, v->joint);
+ 	if (why) {
+ 		dev_emerg(
+ 			g->dev,
+@@ -1615,12 +1676,12 @@ static void g5p_rv3_receipt(struct g5p_diag *g, struct g5p_render *r,
+ 		return;
+ 	g5p_rv3_receipt_printk(
+ 		g, ret,
+-		"RENDER-V3 end seq=%u ret=%d phase=%s ta=%s/%lld td=%s/%lld bound_ms=%u "
++		"RENDER-V3 end seq=%u ret=%d joint=%u phase=%s ta=%s/%lld td=%s/%lld bound_ms=%u "
+ 		"cap_ms=%u ta_consumed_ms=%lld td_consumed_ms=%lld late_gap=%u/%u "
+ 		"late_after=%u/%u grace=%u bells=%d ta_ring=%u/%u td_ring=%u/%u "
+ 		"ta_stamp=%08x/%08x td_stamp=%08x/%08x pm80=%08x r0_after_ta_publish=bell-only "
+ 		"end=v3\n",
+-		v->seq, ret,
++		v->seq, ret, v->joint,
+ 		g5p_rv3_phase_names[min_t(u32, v->phase, G5P_RV3_PHASES - 1)],
+ 		g5p_rv3_results[v->ta.result],
+ 		v->ta.end_ns ?
+@@ -2513,7 +2574,9 @@ static int g5p_rv3_execute(struct g5p_drm *d, struct g5p_render *r,
+ 	u32 seq, res;
+ 
+ 	job->jt.exec_ns = ktime_get_ns();
+-	job->jt.flags = (first ? 1 : 0) | (!bound_before ? 2 : 0);
++	v->joint = !job->compute && !first && READ_ONCE(render_user_joint);
++	job->jt.flags = (first ? 1 : 0) | (!bound_before ? 2 : 0) |
++			(v->joint ? BIT(2) : 0);
+ 	if (job->compute)
+ 		return g5p_cu_execute(d, r, job);
+ 	if (r->stage_done)
+@@ -2613,10 +2676,22 @@ static int g5p_rv3_execute(struct g5p_drm *d, struct g5p_render *r,
+ 	r->jobs++;
+ 	v->phase = G5P_RV3_TA_PUBLISH;
+ 	g5p_rv3_event_arm(d, 0, 0);
++	if (v->joint)
++		g5p_rv3_event_arm(d, 1, g5p_ru_endpoint(seq));
+ 	g5p_rv3_wake_mark(d, r, v, 0);
++	if (v->joint)
++		g5p_rv3_wake_mark(d, r, v, 1);
+ 	ret = g5p_rv3_publish_ta(g, r, v, seq);
+ 	if (ret)
+ 		goto out;
++	if (v->joint) {
++		v->phase = G5P_RV3_TD_PUBLISH;
++		ret = g5p_rv3_publish_3d(g, r, v, seq);
++		if (ret) {
++			g5p_rv3_sample(g, r, 1, seq, &v->last[1]);
++			goto out;
++		}
++	}
+ 	v->phase = G5P_RV3_TA_WAIT;
+ 	if (r->stall_job && r->jobs == r->stall_job && !first) {
+ 		/* render_user_test_stall_job: the host gives up, the firmware runs on */
+@@ -2683,15 +2758,17 @@ static int g5p_rv3_execute(struct g5p_drm *d, struct g5p_render *r,
+ 		g5p_r74_mark(g, G5P_R74_TA_RAM_COMPLETE,
+ 			     g5p_le32(g5p_ru_page(b, 0) + G5P_R22_STAMP + 4));
+ 	;
+-	v->phase = G5P_RV3_TD_PUBLISH;
+-	g5p_rv3_event_arm(d, 1, g5p_ru_endpoint(seq));
+-	g5p_rv3_wake_mark(d, r, v, 1);
+-	ret = g5p_rv3_publish_3d(g, r, v, seq);
+-	if (ret) {
+-		g5p_rv3_sample(
+-			g, r, 1, seq,
+-			&v->last[1]); /* RAM only: the receipt prints the real 3D ring and stamps */
+-		goto out;
++	if (!v->joint) {
++		v->phase = G5P_RV3_TD_PUBLISH;
++		g5p_rv3_event_arm(d, 1, g5p_ru_endpoint(seq));
++		g5p_rv3_wake_mark(d, r, v, 1);
++		ret = g5p_rv3_publish_3d(g, r, v, seq);
++		if (ret) {
++			g5p_rv3_sample(
++				g, r, 1, seq,
++				&v->last[1]); /* RAM only: the receipt prints the real 3D ring and stamps */
++			goto out;
++		}
+ 	}
+ 	v->phase = G5P_RV3_TD_WAIT;
+ 	g5p_rv3_wait_start(g, r, &v->td, v->td_pub_ns, v->job_deadline_ns);
+@@ -2757,7 +2834,7 @@ static int g5p_rv3_execute(struct g5p_drm *d, struct g5p_render *r,
+ out:
+ 	if (v->phase >= G5P_RV3_TA_PUBLISH)
+ 		v->ta_event_ns = g5p_rv3_event_disarm(d, 0);
+-	if (v->phase >= G5P_RV3_TD_PUBLISH)
++	if (v->joint || v->phase >= G5P_RV3_TD_PUBLISH)
+ 		v->td_event_ns = g5p_rv3_event_disarm(d, 1);
+ 	job->jt.ta_pub_ns = v->ta_pub_ns;
+ 	job->jt.td_pub_ns = v->td_pub_ns;
+@@ -2872,6 +2949,8 @@ static bool g5p_rv3_drain(struct g5p_drm *d)
+ 		if (act != G5P_RU_DRAIN_PUBLISH_TD)
+ 			break;
+ 		r->retired[0] = true;
++		if (r->submitted[1])
++			continue;
+ 		g5p_rv3_event_arm(d, 1, g5p_ru_endpoint(s->seq));
+ 		armed = true;
+ 		if (g5p_rv3_publish_3d(g, r, v, s->seq)) {

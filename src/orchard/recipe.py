@@ -8,7 +8,7 @@ import hashlib
 import json
 import plistlib
 
-from orchard.apple import agx_g5p, bluetool, d5500, sgx, smartio, trx, z2fw, z2packet
+from orchard.apple import agx, agx_g5p, bluetool, d5500, sgx, smartio, trx, z2fw, z2packet
 from orchard.apple.osserialize import apple_xml, binary
 
 
@@ -39,12 +39,16 @@ def _smartio_kext(step, data, expected):
     return smartio.extract(data, step['kext'])[0]
 
 
+def _vxd(step, data, expected):
+    return d5500.extract(data)[0]
+
+
 def _agx_g5p(step, data, expected):
     return agx_g5p.extract(data)
 
 
-def _vxd(step, data, expected):
-    return d5500.extract(data)[0]
+def _agx(step, data, expected):
+    return agx.extract(data)
 
 
 def _im4p_payload(step, data, expected):
@@ -111,6 +115,8 @@ STEPS = {
     'smartio-from-kernelcache@2': (_smartio_kext, {'kext': str}),
     # VXD (DEVA) video-decoder firmware from AppleD5500.
     'vxd-firmware-from-kernelcache@1': (_vxd, {}),
+    # A10 GPU firmware from AGXFirmwareKextG9PRTBuddy.
+    'agx-g9p-firmware-from-kernelcache@1': (_agx, {}),
     'im4p-payload@1': (_im4p_payload, {}),
     # One image of an AOP firmware container (IPSW Firmware/AOP/aopfw-*.im4p payload).
     'aop-image@1': (_aop_image, {'coprocessor': str}),

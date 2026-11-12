@@ -1,0 +1,1193 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 15:07:46 +0000
+Subject: [PATCH] drm/apple-g5p: pipeline render jobs two deep
+ (render_user_pipeline_depth)
+
+[Orchard: from brkosebay/linux 2be3fbe5f3c5908b604dd29002b01d1acf1b99ba;
+fixed source defaults, no production module controls.] Preserve the
+measured opt1 chain in dependency order.
+
+Assisted-by: LLM
+---
+ drivers/gpu/apple-g5p/render-user-jobtime.h   |   3 +-
+ drivers/gpu/apple-g5p/render-user-layout.h    |  38 ++
+ drivers/gpu/drm/apple-g5p/a9-gpu-drm.c        |  30 +-
+ .../gpu/drm/apple-g5p/drm-render-sched.inc    |  16 +-
+ drivers/gpu/drm/apple-g5p/drm-render-v3.h     |  12 +
+ drivers/gpu/drm/apple-g5p/drm-render-v3.inc   | 556 ++++++++++++++++--
+ drivers/gpu/drm/apple-g5p/drm-render.inc      |  96 ++-
+ 7 files changed, 697 insertions(+), 54 deletions(-)
+
+diff --git a/drivers/gpu/apple-g5p/render-user-jobtime.h b/drivers/gpu/apple-g5p/render-user-jobtime.h
+index 7eacc4b40..61e2de97f 100644
+--- a/drivers/gpu/apple-g5p/render-user-jobtime.h
++++ b/drivers/gpu/apple-g5p/render-user-jobtime.h
+@@ -22,7 +22,7 @@ struct g5p_jt {
+ 	bool abs_enabled;
+ };
+ struct g5p_jt_stats {
+-	u64 jobs, failed, joint, ta_ticks, td_ticks;
++	u64 jobs, failed, joint, ahead, ta_ticks, td_ticks;
+ 	u64 ioctl_ns, queue_ns, prep_ns, ta_wait_ns, gap_ns, td_wait_ns;
+ 	u64 tail_ns, touch_ns, bell_ns, samples;
+ 	s64 ovh_ns;
+@@ -54,6 +54,7 @@ static inline void g5p_jt_fold(struct g5p_jt_stats *s, const struct g5p_jt *j)
+ 	s->jobs++;
+ 	s->failed += j->ret != 0;
+ 	s->joint += !!(j->flags & 4);
++	s->ahead += !!(j->flags & 8); /* F5: started while the previous job's 3D ran */
+ 	if (j->ta_ticks != ~0ULL)
+ 		s->ta_ticks += j->ta_ticks;
+ 	if (j->td_ticks != ~0ULL)
+diff --git a/drivers/gpu/apple-g5p/render-user-layout.h b/drivers/gpu/apple-g5p/render-user-layout.h
+index 624a56a11..675e9fbe6 100644
+--- a/drivers/gpu/apple-g5p/render-user-layout.h
++++ b/drivers/gpu/apple-g5p/render-user-layout.h
+@@ -18,6 +18,11 @@
+  */
+ #define G5P_RU_PRIVATE_VA G5P_R22_AUX
+ #define G5P_RU_PRIVATE_SIZE 0x1000000ULL
++/* F5: the second PM set's aux window, at the top of the private window (render targets are
++ * allocated from its bottom, so their VAs do not move).
++ */
++#define G5P_RU_AUX2_VA \
++	(G5P_RU_PRIVATE_VA + G5P_RU_PRIVATE_SIZE - 0x20000ULL)
+ #define G5P_RU_USER_VA_MIN 0x40000000ULL
+ /* Catalogue entry of the firmware GiB, borrowed from the boot tables. */
+ #define G5P_RU_FIRMWARE_CI ((G5P_IMAGE_VA >> 30) & 1023)
+@@ -642,6 +647,39 @@ static inline bool g5p_ru_retired_at(const u8 *p, u32 meta, bool td, u32 seq,
+ 	return true;
+ }
+ 
++/* F5 (render_user_pipeline_depth 2): retirement of job `seq` while the later job `latest`
++ * (seq + 1) is already published on the same channel.  The firmware's tag4 dependency test is
++ * signed `(required - *stamp) <= 0` (META 0x80001a38 / 0x80000a54; kext 6c8a808 builds the
++ * record against one stamp word per identity), so a stamp only moves forward and job seq is
++ * done once both stamp words are at or past seq.  The W pointers and W sequence of seq's own
++ * slot must still be ours, and every channel watermark must lie between seq's endpoint and
++ * latest's (latest's entries may already be consumed).  latest == seq: g5p_ru_retired_at().
++ */
++static inline bool g5p_ru_retired_pl(const u8 *p, u32 meta, bool td, u32 seq,
++				     u32 js, u32 latest)
++{
++	const u8 *w = p + g5p_ru_w_at(js);
++	u32 endpoint = g5p_ru_endpoint(seq);
++	u32 span = (2 * (latest - seq)) % G5P_WORK_SLOTS;
++
++	if (latest == seq)
++		return g5p_ru_retired_at(p, meta, td, seq, js);
++	if (g5p_le32(w + (td ? 0x888 : 0x52c)) != meta + G5P_R22_STAMP ||
++	    g5p_le32(w + (td ? 0x88c : 0x530)) != meta + G5P_R22_STAMP + 4 ||
++	    g5p_le32(w + (td ? 0x890 : 0x534)) != seq ||
++	    (s32)(g5p_le32(p + G5P_R22_STAMP) - seq) < 0 ||
++	    (s32)(g5p_le32(p + G5P_R22_STAMP + 4) - seq) < 0)
++		return false;
++	for (u32 off = 0; off <= 0x40; off += 0x10) {
++		u32 ctl = g5p_le32(p + G5P_WORK_CTL + off);
++
++		if (ctl >= G5P_WORK_SLOTS ||
++		    (ctl + G5P_WORK_SLOTS - endpoint) % G5P_WORK_SLOTS > span)
++			return false;
++	}
++	return true;
++}
++
+ /* A stamp beyond the published target, or a watermark not on the even
+  * two-entry grid, is a protocol error rather than "not yet retired".
+  */
+diff --git a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+index 1e285cdd5..f9ed3aad0 100644
+--- a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
++++ b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+@@ -132,12 +132,14 @@ struct g5p_drm {
+ 	u32 autoboot_phase;
+ 	/* render_user_event_wake: the phase waiter sleeps here until event_serial moves */
+ 	wait_queue_head_t ev_wq;
+-	/* TYPED_V3 3D completion-event latch (render-user-retire.h): G5P_RV3_TD_WANT | endpoint
+-	 * while a 3D phase waits, else 0; td_hit_ns: decode time of the first matching event.
++	/* TYPED_V3 3D completion-event latches (render-user-retire.h): G5P_RV3_TD_WANT | endpoint
++	 * while a 3D phase is published, else 0; td_hit_ns: decode time of the first matching event.
++	 * Two, indexed by the job's sequence parity (g5p_rv3_td_latch()): with
++	 * render_user_pipeline_depth 2 job N+1's 3D is armed while job N's 3D still waits.
+ 	 */
+-	u32 td_want;
+-	u64 td_hit_ns, td_hit_cyc, td_hard_cyc;
+-	u8 td_src;
++	u32 td_want[2];
++	u64 td_hit_ns[2], td_hit_cyc[2], td_hard_cyc[2];
++	u8 td_src[2];
+ 	/* The TA's latch: armed while a TA phase is published; ta_hit_ns as td_hit_ns. */
+ 	bool ta_want;
+ 	u64 ta_hit_ns, ta_hit_cyc, ta_hard_cyc;
+@@ -280,12 +282,12 @@ static int g5p_gpu_stats_show(struct seq_file *m, void *unused)
+ 	spin_unlock_irqrestore(&d->status_lock, flags);
+ 	seq_printf(
+ 		m,
+-		"now_ns=%llu since_ns=%llu jobs=%llu failed=%llu ta_ticks=%llu td_ticks=%llu ioctl_ns=%llu queue_ns=%llu prep_ns=%llu ta_wait_ns=%llu gap_ns=%llu td_wait_ns=%llu tail_ns=%llu touch_ns=%llu bell_ns=%llu samples=%llu ta_irq_ns=%llu td_irq_ns=%llu ta_decide_ns=%llu td_decide_ns=%llu joint=%llu ovh_ns=%lld\n",
++		"now_ns=%llu since_ns=%llu jobs=%llu failed=%llu ta_ticks=%llu td_ticks=%llu ioctl_ns=%llu queue_ns=%llu prep_ns=%llu ta_wait_ns=%llu gap_ns=%llu td_wait_ns=%llu tail_ns=%llu touch_ns=%llu bell_ns=%llu samples=%llu ta_irq_ns=%llu td_irq_ns=%llu ta_decide_ns=%llu td_decide_ns=%llu joint=%llu ovh_ns=%lld ahead=%llu\n",
+ 		now, s.since_ns, s.jobs, s.failed, s.ta_ticks, s.td_ticks,
+ 		s.ioctl_ns, s.queue_ns, s.prep_ns, s.ta_wait_ns, s.gap_ns,
+ 		s.td_wait_ns, s.tail_ns, s.touch_ns, s.bell_ns, s.samples,
+ 		s.ta_irq_ns, s.td_irq_ns, s.ta_decide_ns, s.td_decide_ns,
+-		s.joint, s.ovh_ns);
++		s.joint, s.ovh_ns, s.ahead);
+ 	return 0;
+ }
+ static int g5p_gpu_stats_open(struct inode *inode, struct file *file)
+@@ -599,12 +601,14 @@ static void g5p_drm_event(void *cookie, const u32 words[11])
+ 	if (words[0] == 1)
+ 		for (u32 i = 0; i < 4; i++)
+ 			d->notifications[i] |= words[i + 1];
+-	if (d->td_want && !d->td_hit_ns &&
+-	    g5p_ru_rt_event_match(words, d->td_want & 0xff)) {
+-		WRITE_ONCE(d->td_hit_ns, ktime_get_ns());
+-		d->td_hit_cyc = arch_timer_read_counter();
+-		d->td_hard_cyc = READ_ONCE(d->core->boot->hard_cyc);
+-		d->td_src = current == READ_ONCE(d->core->boot->irq_task) ? 1 : 2;
++	for (u32 k = 0; k < 2; k++) {
++		if (!d->td_want[k] || d->td_hit_ns[k] ||
++		    !g5p_ru_rt_event_match(words, d->td_want[k] & 0xff))
++			continue;
++		WRITE_ONCE(d->td_hit_ns[k], ktime_get_ns());
++		d->td_hit_cyc[k] = arch_timer_read_counter();
++		d->td_hard_cyc[k] = READ_ONCE(d->core->boot->hard_cyc);
++		d->td_src[k] = current == READ_ONCE(d->core->boot->irq_task) ? 1 : 2;
+ 	}
+ 	if (d->ta_want && !d->ta_hit_ns && g5p_ru_ta_event_match(words)) {
+ 		WRITE_ONCE(d->ta_hit_ns, ktime_get_ns());
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-sched.inc b/drivers/gpu/drm/apple-g5p/drm-render-sched.inc
+index 21dc64d89..3b3ce4b17 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-sched.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render-sched.inc
+@@ -162,6 +162,19 @@ static void g5p_rsched_work(struct work_struct *work)
+ 		bool has_wake;
+ 		int what;
+ 
++		/* F5: the job the previous one started ahead runs first, before any drain, recovery
++		 * or pick: it is on the hardware (or fails at once with its lost context).
++		 */
++		if (rd->ahead) {
++			struct g5p_rjob *next = rd->ahead;
++
++			rd->ahead = NULL;
++			g5p_render_run(next);
++			/* not while the core lock is kept for a further ahead job */
++			if (!rd->ahead)
++				g5p_render_close_deferred(d);
++			continue;
++		}
+ 		/* A lost job blocks the channel: hold every job until the drain is decided, and
+ 		 * until a recovery the drain or the executor asked for has run.
+ 		 */
+@@ -186,7 +199,8 @@ static void g5p_rsched_work(struct work_struct *work)
+ 		if (what == G5P_RS_JOB) {
+ 			g5p_render_run(
+ 				container_of(node, struct g5p_rjob, node));
+-			g5p_render_close_deferred(d);
++			if (!rd->ahead)
++				g5p_render_close_deferred(d);
+ 			continue;
+ 		}
+ 		r = container_of(e, struct g5p_render, entity);
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-v3.h b/drivers/gpu/drm/apple-g5p/drm-render-v3.h
+index 67870e050..db2af8af7 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-v3.h
++++ b/drivers/gpu/drm/apple-g5p/drm-render-v3.h
+@@ -51,6 +51,18 @@ struct g5p_rv3 {
+ 	bool abs;
+ 	u64 bell_cyc[2];
+ 	bool joint; /* latched at execute entry; attach stays serial */
++	/* F5 (render_user_pipeline_depth 2, latched at execute entry): this job may start its
++	 * context's next job once its own TA completed (g5p_rv3_ahead()).
++	 */
++	bool depth2;
++	/* F5: this job was prepared and published by the previous job's executor, while that
++	 * job's 3D ran (core lock held throughout); ahead_ret is that start's result.  Its own
++	 * execute resumes at the TA wait.
++	 */
++	bool ahead;
++	int ahead_ret;
++	bool ta_disarmed; /* F5: the TA latch was disarmed at the TA decision */
++	bool pm2; /* F5: the job's PM is its context's second set */
+ 	bool touched; /* the DC3 pair was published: the firmware may reference the job's memory */
+ 	/* The bind of this job's context published its DC3 pair and then failed: that context is
+ 	 * lost, the device and the contexts already bound are not.
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+index 20c350eb4..18b33b2e5 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+@@ -53,6 +53,32 @@
+ 
+ static const bool render_user_abs_stamps;
+ 
++/*
++ * F5, depth-2 job pipelining (docs/gpu/lane-a2-ta-done-latency-spec.md §4.3; latched per job at
++ * execute entry).  1: today's serial executor.  2: once job N's TA completed, and while its 3D
++ * runs, the executor prepares and publishes (TA and 3D, joint) the next job of the *same* context
++ * if it is queued with every input signalled, then waits and retires N, and the worker resumes
++ * N+1 at its TA wait.  Apple's model: iOS kicks TA and 3D of each submission without waiting for
++ * the previous one's retire (AGXChannelQueue_submitBlockInvoke cbb948) and takes a ParamBuffer
++ * per prepare (6cb9afc).  The 3D's tag4 wait on the shared TA-finish stamp compares signed
++ * (required - *stamp) <= 0 (firmware META 0x80001a38 / 0x80000a54, kext 6c8a808), so TA N+1
++ * writing N+1 into that word never blocks N's 3D.  Never across contexts: the core lock stays
++ * held from N's TA publish to N+1's 3D retire (Henrik's 0004: TA and 3D of one job adjacent,
++ * no other context's phase between them).
++ */
++static const uint render_user_pipeline_depth = 1;
++
++/* F5: consecutive ahead starts before the executor lets one job end with the core lock released,
++ * so a VM bind or an idle step waiting for that lock is never starved by a busy context.
++ */
++#define G5P_RV3_AHEAD_CHAIN 8U
++
++/* drm-render.inc / drm-render-sched.inc, included after this file */
++static void g5p_render_cache(struct g5p_drm *d, struct g5p_rjob *job,
++			     bool to_cpu);
++static bool g5p_rsched_ready(struct g5p_rs_job *node, void *cookie,
++			     unsigned long *deadline);
++
+ static const char *const g5p_rv3_phase_names[G5P_RV3_PHASES] = {
+ 	"idle",	   "attach",	 "bind",    "ta-publish",
+ 	"ta-wait", "3d-publish", "3d-wait", "done",
+@@ -101,6 +127,40 @@ static struct g5p_dma_page *g5p_rv3_pm_aux(struct g5p_rdev *rd,
+ 	return r->pm_aux_mapped ? r->pm_aux : rd->aux;
+ }
+ 
++/* F5: the PM of one job (pm2: its context's second set), for its records and its waits. */
++static u8 *g5p_rv3_pm_cpu_of(struct g5p_boot *b, const struct g5p_render *r,
++			     bool pm2)
++{
++	if (pm2 && r->pm2_set >= 0)
++		return b->pm_set[r->pm2_set * G5P_PMSET_PAGES + G5P_PMSET_CONTROL]
++			.cpu;
++	return g5p_rv3_pm_cpu(b, r);
++}
++
++static u32 g5p_rv3_pm_meta_of(const struct g5p_render *r, bool pm2)
++{
++	if (pm2 && r->pm2_set >= 0)
++		return g5p_meta_address(
++			g5p_pmset_va(r->pm2_set, G5P_PMSET_CONTROL));
++	return g5p_rv3_pm_meta(r);
++}
++
++static u32 g5p_rv3_pm_id_of(const struct g5p_rdev *rd,
++			    const struct g5p_render *r, bool pm2)
++{
++	if (pm2 && r->pm2_set >= 0)
++		return rd->pm_ctx >= 2 ? g5p_pmset_id(r->pm2_set) : 0;
++	return g5p_rv3_pm_id(rd, r);
++}
++
++/* F5: the 3D event latch of job seq (g5p_drm.td_want[]): its endpoint's parity, so jobs N and
++ * N + 1 never share one.
++ */
++static u32 g5p_rv3_td_latch(u32 endpoint)
++{
++	return (endpoint >> 1) & 1;
++}
++
+ /* The boot tuple the V3 path is proven under (r96 params.txt), minus the instrumentation:
+  * r73b/r73c/r73e/r73f, r74 with the raised IRQ cap, r74f, r74g, r87b self-drain; no r74h,
+  * no r80..r96 (their IRQ banks read registers), no r75/r79 firmware control, and no fixed
+@@ -321,10 +381,23 @@ static void g5p_rv3_sample_ram(struct g5p_diag *g, struct g5p_render *r, u32 e,
+ 			   u32 seq, struct g5p_rv3_ev *s)
+ {
+ 	struct g5p_boot *b = g->boot;
++	struct g5p_rdev *rd = r->ctx->gpu->rdev;
++	u32 js = g5p_rv3_js(rd, seq);
+ 	u8 *p = g5p_ru_page(b, e), *global = g5p_ru_global(b, e),
+-	   *pm = g5p_rv3_pm_cpu(b, r);
++	   *pm = g5p_rv3_pm_cpu_of(b, r, r->js_pm2[js]);
+ 	u32 *ring = (u32 *)g5p_boot_shared(b, e ? 0x64 : 0x60);
++	/* F5: the device's latest published job; seq + 1 when the next job was started ahead.
++	 * Then this job's ring entry is the one before the producer, its stamps may already be
++	 * past seq, and its watermarks may already be on the next job's entries, once that job's
++	 * phase on this engine is published (r->submitted[e] is the next job's).  Otherwise
++	 * latest == seq: exactly the serial predicates.
++	 */
++	u32 latest = rd->sequence, target = r->target[e];
+ 
++	if (latest - seq == 1 && r->submitted[e])
++		target = (target - 1) & 255;
++	else
++		latest = seq;
+ 	memset(s, 0, sizeof(*s));
+ 	dma_rmb();
+ 	s->ns = ktime_get_ns();
+@@ -339,16 +412,18 @@ static void g5p_rv3_sample_ram(struct g5p_diag *g, struct g5p_render *r, u32 e,
+ 	s->pm80 = g5p_le32(pm + 0x80);
+ 	s->failed = READ_ONCE(b->failed) || READ_ONCE(b->event_failed);
+ 	s->proto = s->prod != r->target[e] || s->cons > 255 ||
+-		   !g5p_ru_stamp_sane(p, seq);
+-	s->consumed = s->cons == r->target[e];
++		   !g5p_ru_stamp_sane(p, latest);
++	/* consumed: the consumer reached this job's entry (serial: == the producer) */
++	s->consumed = s->cons <= 255 &&
++		      ((s->cons - target) & 255) <= ((s->prod - target) & 255);
+ 	/* The predicates of the flown r74b (TA) and r96 (3D) waits; the 3D's PM serial is a receipt. */
+ 	s->idle_ok = !s->idle[0] && !s->idle[1] && !s->idle[2] &&
+ 		     (!e || (!s->idle[4] && !s->idle[5]));
+-	s->retired = g5p_ru_retired_at(p, g5p_ru_meta(e), e, seq,
+-				       g5p_rv3_js(r->ctx->gpu->rdev, seq));
+-	s->pm_ok = e ? s->pm80 == r->ctx->gpu->rdev->pm_serial + 1 :
++	s->retired = g5p_ru_retired_pl(p, g5p_ru_meta(e), e, seq, js, latest);
++	s->pm_ok = e ? s->pm80 == rd->pm_serial + 1 :
+ 		       g5p_r22_pm_saved(pm + 0x80);
+-	s->event = !!(e ? READ_ONCE(r->ctx->gpu->td_hit_ns) :
++	s->event = !!(e ? READ_ONCE(r->ctx->gpu->td_hit_ns[g5p_rv3_td_latch(
++				  g5p_ru_endpoint(seq))]) :
+ 			  READ_ONCE(r->ctx->gpu->ta_hit_ns));
+ }
+ 
+@@ -453,12 +528,14 @@ static void g5p_rv3_event_arm(struct g5p_drm *d, u32 e, u32 endpoint)
+ 	unsigned long flags;
+ 
+ 	BUILD_BUG_ON(G5P_RU_RT_GRID != G5P_WORK_SLOTS);
++	u32 k = g5p_rv3_td_latch(endpoint);
++
+ 	spin_lock_irqsave(&d->status_lock, flags);
+ 	if (e) {
+-		d->td_want = G5P_RV3_TD_WANT | endpoint;
+-		WRITE_ONCE(d->td_hit_ns, 0);
+-		d->td_hit_cyc = d->td_hard_cyc = 0;
+-		d->td_src = 0;
++		d->td_want[k] = G5P_RV3_TD_WANT | endpoint;
++		WRITE_ONCE(d->td_hit_ns[k], 0);
++		d->td_hit_cyc[k] = d->td_hard_cyc[k] = 0;
++		d->td_src[k] = 0;
+ 	} else {
+ 		d->ta_want = true;
+ 		WRITE_ONCE(d->ta_hit_ns, 0);
+@@ -468,24 +545,28 @@ static void g5p_rv3_event_arm(struct g5p_drm *d, u32 e, u32 endpoint)
+ 	spin_unlock_irqrestore(&d->status_lock, flags);
+ }
+ 
+-/* Disarm engine e's latch and return the decode time of the matching event (0 = none). */
+-static u64 g5p_rv3_event_disarm(struct g5p_drm *d, u32 e, struct g5p_jt *jt)
++/* Disarm engine e's latch (3D: job seq's) and return the decode time of the matching event
++ * (0 = none).
++ */
++static u64 g5p_rv3_event_disarm(struct g5p_drm *d, u32 e, u32 seq,
++				struct g5p_jt *jt)
+ {
++	u32 k = g5p_rv3_td_latch(g5p_ru_endpoint(seq));
+ 	unsigned long flags;
+ 	u64 hit;
+ 
+ 	spin_lock_irqsave(&d->status_lock, flags);
+ 	if (e) {
+-		d->td_want = 0;
+-		hit = d->td_hit_ns;
++		d->td_want[k] = 0;
++		hit = d->td_hit_ns[k];
+ 	} else {
+ 		d->ta_want = false;
+ 		hit = d->ta_hit_ns;
+ 	}
+ 	if (jt) {
+-		jt->hit_cyc[e] = e ? d->td_hit_cyc : d->ta_hit_cyc;
+-		jt->hard_cyc[e] = e ? d->td_hard_cyc : d->ta_hard_cyc;
+-		jt->src[e] = e ? d->td_src : d->ta_src;
++		jt->hit_cyc[e] = e ? d->td_hit_cyc[k] : d->ta_hit_cyc;
++		jt->hard_cyc[e] = e ? d->td_hard_cyc[k] : d->ta_hard_cyc;
++		jt->src[e] = e ? d->td_src[k] : d->ta_src;
+ 	}
+ 	spin_unlock_irqrestore(&d->status_lock, flags);
+ 	return hit;
+@@ -628,7 +709,8 @@ static u32 g5p_rv3_wait(struct g5p_diag *g, struct g5p_render *r, u32 e,
+ 				     rt ? rt->unsat :
+ 				     ta ? ta->unsat :
+ 					  0,
+-				     e ? READ_ONCE(d->td_hit_ns) :
++				     e ? READ_ONCE(d->td_hit_ns[g5p_rv3_td_latch(
++						 g5p_ru_endpoint(seq))]) :
+ 					 READ_ONCE(d->ta_hit_ns));
+ 		}
+ 		if (w->expired) {
+@@ -1471,12 +1553,40 @@ static int g5p_rv3_publish_ta(struct g5p_diag *g, struct g5p_render *r,
+  *   0 TA not retired   1 TA not consumed   2 3D already submitted   3 producer > 255   4 consumer != producer
+  *   5 WORK_CTL         6 WORK_CTL+0x40     7 command tag != 4       8 dependency word  9 dependency value
+  *  10 3D stamp words != seq - 1 (job N leaves N; 0 before the first)
++ * F5 (ahead: job seq is published while job seq - 1's 3D runs): clause 5 admits WORK_CTL anywhere
++ * on the previous job's own entries (not yet consumed, half or wholly), clause 10 the stamps at
++ * seq - 2 or seq - 1 (g5p_rv3_ahead_why() checked both before anything was staged).
+  */
++static bool g5p_rv3_ctl_behind(u32 ctl, u32 previous)
++{
++	return ctl < G5P_WORK_SLOTS &&
++	       (previous + G5P_WORK_SLOTS - ctl) % G5P_WORK_SLOTS <= 2;
++}
++
++static bool g5p_rv3_stamp_behind(u32 stamp, u32 seq)
++{
++	return stamp == seq - 1 || stamp == seq - 2;
++}
++
+ static u32 g5p_rv3_td_why(const struct g5p_render *r, const u8 *p,
+-			  const u32 *ring, u32 start, u32 previous, u32 seq, bool joint)
++			  const u32 *ring, u32 start, u32 previous, u32 seq, bool joint,
++			  bool ahead)
+ {
+ 	const u8 *cmd = p + g5p_ru_cmd_at(g5p_rv3_js(r->ctx->gpu->rdev, seq));
+ 
++	if (ahead)
++		return (u32)r->submitted[1] << 2 | (u32)(start > 255) << 3 |
++		       (u32)(READ_ONCE(ring[0]) != start) << 4 |
++		       (u32)!g5p_rv3_ctl_behind(g5p_le32(p + G5P_WORK_CTL),
++						previous) << 5 |
++		       (u32)(g5p_le32(p + G5P_WORK_CTL + 0x40) != previous) << 6 |
++		       (u32)(g5p_le32(cmd) != 4) << 7 |
++		       (u32)(g5p_le32(cmd + 4) !=
++			     g5p_ru_meta(0) + G5P_R22_STAMP + 4) << 8 |
++		       (u32)(g5p_le32(cmd + 8) != seq) << 9 |
++		       (u32)(!g5p_rv3_stamp_behind(g5p_le32(p + G5P_R22_STAMP), seq) ||
++			     !g5p_rv3_stamp_behind(g5p_le32(p + G5P_R22_STAMP + 4),
++						   seq)) << 10;
+ 	return (u32)(!joint && !r->retired[0]) |
+ 	       (u32)(!joint && !r->consumed[0]) << 1 |
+ 	       (u32)r->submitted[1] << 2 | (u32)(start > 255) << 3 |
+@@ -1506,7 +1616,8 @@ static int g5p_rv3_publish_3d(struct g5p_diag *g, struct g5p_render *r,
+ 	/* RAM preconditions of r96's admit (g5p_rv3_td_why()).  Nothing has been written when one
+ 	 * fails, and the refusal names the clauses and the raw values it read.
+ 	 */
+-	why = g5p_rv3_td_why(r, p, ring, start, previous, seq, v->joint);
++	why = g5p_rv3_td_why(r, p, ring, start, previous, seq, v->joint,
++			     v->ahead);
+ 	if (why) {
+ 		dev_emerg(
+ 			g->dev,
+@@ -1862,14 +1973,22 @@ static int g5p_rv3_lose(struct g5p_drm *d, struct g5p_render *r,
+ 	s->engine = e;
+ 	s->drain_ms = (45000);
+ 	s->lost_ns = ktime_get_ns();
++	/* F5: the context's next job, already published behind this one (its TA at least), is
++	 * on the channel too: the drain waits for it after this one.  Its own run fails at once
++	 * (the context is lost).
++	 */
++	if (d->rdev->ahead && d->rdev->ahead->ctx == r->ctx &&
++	    d->rdev->sequence == seq + 1 && r->submitted[0])
++		s->ahead_seq = seq + 1;
+ 	kref_get(&r->ctx->ref);
+ 	d->rdev->stuck = s;
+ 	dev_emerg(
+ 		d->core->dev,
+-		"RENDER-V3 lost seq=%u engine=%u slots=%u/%u phase_ms=%lld drain_ms=%u: context "
+-		"lost, device kept, channel blocked end=v3\n",
++		"RENDER-V3 lost seq=%u engine=%u slots=%u/%u phase_ms=%lld drain_ms=%u ahead=%u: "
++		"context lost, device kept, channel blocked end=v3\n",
+ 		seq, e, r->slot[0], r->slot[1],
+-		g5p_rv3_us(w->start_ns, w->end_ns) / 1000, s->drain_ms);
++		g5p_rv3_us(w->start_ns, w->end_ns) / 1000, s->drain_ms,
++		s->ahead_seq);
+ 	return 0;
+ }
+ 
+@@ -2209,6 +2328,110 @@ static void g5p_rv3_pmctx_take(struct g5p_drm *d, struct g5p_render *r, u32 seq)
+ 	rd->pm_set_next = (set + 1) % b->pm_sets;
+ }
+ 
++/* F5: the context's second PM set (render_user_pipeline_depth 2), built for this epoch at the
++ * device's block count the way g5p_rv3_pmctx_build() builds the first: taken from the boot sets
++ * with its own pool at the context's first pipelined job, rebuilt (RAM only) when the epoch or
++ * the device pool changed.  Its aux pages are the context's own, mapped at G5P_RU_AUX2_VA at
++ * creation, so no live VM is edited.  Core lock held; the job in flight uses the other set.
++ * false: the context stays serial (no set or no memory; not retried).
++ */
++static bool g5p_rv3_pm2_ready(struct g5p_drm *d, struct g5p_render *r,
++			      u32 seq)
++{
++	struct g5p_rdev *rd = d->rdev;
++	struct g5p_diag *g = d->core;
++	struct g5p_boot *b = g->boot;
++	struct g5p_dma_page *page;
++	u64 *physical = NULL;
++	bool fresh = r->pm2_set < 0;
++	int set = r->pm2_set, ret = 0;
++
++	if (r->pm2_failed || !r->aux2_mapped || r->pm_set < 0)
++		return false;
++	if (!fresh && r->pm2_epoch == rd->recoveries + 1 &&
++	    r->pm2_blocks >= rd->blocks)
++		return true;
++	if (fresh)
++		set = g5p_pmset_pick(rd->pm_set_used, b->pm_sets,
++				     rd->pm_set_next);
++	if (set < 0) {
++		r->pm2_failed = true;
++		dev_warn(
++			g->dev,
++			"RENDER-V3 pm2 seq=%u slots=%u/%u set=none: no free PM set, the context stays "
++			"serial end=v3\n",
++			seq, r->slot[0], r->slot[1]);
++		return false;
++	}
++	page = &b->pm_set[set * G5P_PMSET_PAGES];
++	mutex_lock(&rd->lock);
++	if (rd->blocks > r->pm2_blocks) {
++		u32 blocks = rd->blocks;
++		struct g5p_dma_page *pool =
++			kvcalloc(blocks * 8, sizeof(*pool), GFP_KERNEL);
++
++		ret = pool ? 0 : -ENOMEM;
++		if (pool && r->pm2_pool)
++			memcpy(pool, r->pm2_pool,
++			       r->pm2_blocks * 8 * sizeof(*pool));
++		for (u32 i = r->pm2_blocks * 8; !ret && i < blocks * 8; i++)
++			ret = g5p_vm_alloc_page(d->drm.dev, &pool[i]);
++		if (ret && pool) {
++			for (u32 i = r->pm2_blocks * 8; i < blocks * 8; i++)
++				g5p_ru_free_page(d->drm.dev, &pool[i]);
++			kvfree(pool);
++		} else if (!ret) {
++			kvfree(r->pm2_pool);
++			r->pm2_pool = pool;
++			r->pm2_blocks = blocks;
++		}
++	}
++	if (!ret) {
++		physical = kvcalloc(r->pm2_blocks * 8, sizeof(*physical),
++				    GFP_KERNEL);
++		ret = physical ? 0 : -ENOMEM;
++	}
++	for (u32 i = 0; !ret && i < r->pm2_blocks * 8; i++) {
++		physical[i] = r->pm2_pool[i].dma;
++		memset(r->pm2_pool[i].cpu, 0, G5P_GPU_PAGE);
++		g5p_table_clean_page(g, &r->pm2_pool[i]);
++	}
++	for (u32 i = 0; !ret && i < G5P_RU_AUX_PAGES; i++) {
++		memset(r->pm2_aux[i].cpu, 0, G5P_GPU_PAGE);
++		g5p_table_clean_page(g, &r->pm2_aux[i]);
++	}
++	if (!ret)
++		ret = g5p_ru_pm(page[G5P_PMSET_CONTROL].cpu,
++				page[G5P_PMSET_LIST].cpu,
++				page[G5P_PMSET_FREE].cpu,
++				g5p_pmset_va(set, G5P_PMSET_LIST),
++				g5p_pmset_va(set, G5P_PMSET_FREE), physical,
++				r->pm2_blocks, G5P_RU_AUX2_VA);
++	kvfree(physical);
++	if (!ret) {
++		for (u32 k = 0; k < G5P_PMSET_PAGES; k++)
++			g5p_table_clean_page(g, &page[k]);
++		dma_wmb();
++	}
++	mutex_unlock(&rd->lock);
++	dev_info(
++		g->dev,
++		"RENDER-V3 pm2 seq=%u slots=%u/%u how=%s set=%d id=%u blocks=%u ret=%d end=v3\n",
++		seq, r->slot[0], r->slot[1], fresh ? "new" : "rebuild", set,
++		rd->pm_ctx >= 2 ? g5p_pmset_id(set) : 0, r->pm2_blocks, ret);
++	if (ret) {
++		r->pm2_failed = true;
++		return false;
++	}
++	if (fresh) {
++		r->pm2_set = set;
++		rd->pm_set_used[set] = true;
++		rd->pm_set_next = (set + 1) % b->pm_sets;
++	}
++	r->pm2_epoch = rd->recoveries + 1;
++	return true;
++}
++
+ /* perf60 stage 4 diagnostics (render_user_fault_read): whose page each PM lane in S points at
+  * after the TA saved them: the device pool or aux, a set page, a context's pool or aux.
+  */
+@@ -2235,6 +2458,17 @@ static void g5p_rv3_pmctx_release(struct g5p_drm *d, struct g5p_render *r)
+ 	r->pm_blocks = 0;
+ 	for (u32 i = 0; i < G5P_RU_AUX_PAGES; i++)
+ 		g5p_ru_free_page(d->drm.dev, &r->pm_aux[i]);
++	/* F5: the second set the same way */
++	if (r->pm2_set >= 0)
++		rd->pm_set_used[r->pm2_set] = false;
++	r->pm2_set = -1;
++	for (u32 i = 0; r->pm2_pool && i < r->pm2_blocks * 8; i++)
++		g5p_ru_free_page(d->drm.dev, &r->pm2_pool[i]);
++	kvfree(r->pm2_pool);
++	r->pm2_pool = NULL;
++	r->pm2_blocks = 0;
++	for (u32 i = 0; i < G5P_RU_AUX_PAGES; i++)
++		g5p_ru_free_page(d->drm.dev, &r->pm2_aux[i]);
+ }
+ 
+ #define G5P_RV3_PM_S 0x80U
+@@ -2573,6 +2807,212 @@ static void g5p_oc_work(struct work_struct *work)
+ 
+ 
+ 
++/* F5: a depth-2 job's region headers in slice js of its target's main ring (TA.W28, 3D.W20;
++ * 6cb3d68 sizes the ring for sixteen slices, the r25 RT variant uses the next one the same way),
++ * so consecutive jobs alternate slices and a job started ahead never writes what the previous
++ * job's 3D reads.  The secondary buffer is the TA's alone (the 3D W has no pointer to it).  RAM
++ * edit of the job's own W images, before they are staged.
++ */
++static void g5p_rv3_rt_slice(struct g5p_rjob *job, u32 js)
++{
++	u64 ta = g5p_le32(job->ta_w + 0x28) |
++		 (u64)g5p_le32(job->ta_w + 0x2c) << 32;
++	u64 td = g5p_le32(job->td_w + 0x20) |
++		 (u64)g5p_le32(job->td_w + 0x24) << 32;
++
++	if (!js)
++		return;
++	g5p_put64(job->ta_w + 0x28, ta + job->rt_slice);
++	g5p_put64(job->td_w + 0x20, td + job->rt_slice);
++}
++
++/* F5: why job `cur` (its TA complete, its 3D published and running) may not start its context's
++ * next job now.  RAM reads only; 0 = it may.  Never printed per job: counted in ahead_skipped.
++ */
++static u32 g5p_rv3_ahead_why(struct g5p_drm *d, struct g5p_render *r,
++			     struct g5p_rjob *cur)
++{
++	struct g5p_rdev *rd = d->rdev;
++	struct g5p_diag *g = d->core;
++	struct g5p_boot *b = g->boot;
++	struct g5p_rv3 *v = &cur->rv3;
++	struct g5p_ru_v3_state st = g5p_rv3_state(g, r);
++	u32 seq = v->seq, prev = g5p_ru_endpoint(seq);
++	u32 *ta_ring = (u32 *)g5p_boot_shared(b, 0x60),
++	    *td_ring = (u32 *)g5p_boot_shared(b, 0x64);
++	u8 *ta = g5p_ru_page(b, 0), *td = g5p_ru_page(b, 1);
++	u32 ta_start, td_start;
++
++	if (!v->depth2 || !v->joint || v->ahead_ret)
++		return 1;
++	if (rd->job_slots != 2 || !rd->pm_ctx || r->pm_set < 0 ||
++	    r->pm2_failed || !r->aux2_mapped)
++		return 2;
++	if (!r->bound || r->stage_done || r->stall_job || r->fault_job ||
++	    r->touch_ms)
++		return 3;
++	if (rd->ahead || rd->stuck || READ_ONCE(rd->recovering) ||
++	    READ_ONCE(cur->ctx->bad))
++		return 4;
++	if (READ_ONCE(b->failed) || READ_ONCE(b->event_failed) ||
++	    READ_ONCE(b->stopped) || g5p_ru_term_failed(&g5p_rv3_term) ||
++	    g5p_r8_admit_closed(&g5p_r8_state.admit) ||
++	    g5p_ru_v3_admit(&st, true))
++		return 5;
++	if (rd->ahead_chain >= G5P_RV3_AHEAD_CHAIN)
++		return 6;
++	dma_rmb();
++	/* the TA channel at rest on cur's entries (g5p_rv3_publish_ta()'s own admission) */
++	ta_start = READ_ONCE(ta_ring[4]);
++	if (ta_start > 255 || READ_ONCE(ta_ring[0]) != ta_start ||
++	    ta_start != r->target[0] ||
++	    g5p_le32(ta + G5P_WORK_CTL) != prev ||
++	    g5p_le32(ta + G5P_WORK_CTL + 0x40) != prev)
++		return 7;
++	/* the 3D channel on cur's entries, its notification consumed, cur not overtaken */
++	td_start = READ_ONCE(td_ring[4]);
++	if (td_start > 255 || READ_ONCE(td_ring[0]) != td_start ||
++	    td_start != r->target[1] ||
++	    g5p_le32(td + G5P_WORK_CTL + 0x40) != prev ||
++	    !g5p_rv3_ctl_behind(g5p_le32(td + G5P_WORK_CTL), prev) ||
++	    !g5p_rv3_stamp_behind(g5p_le32(td + G5P_R22_STAMP), seq + 1) ||
++	    !g5p_rv3_stamp_behind(g5p_le32(td + G5P_R22_STAMP + 4), seq + 1))
++		return 8;
++	return 0;
++}
++
++/* F5: the head job of r's entity if it may run now (a typed render job, every input signalled,
++ * no error).  pop: taken off the entity the way g5p_rs_pick() takes a picked job.  An input not
++ * yet signalled gets the scheduler's callback, as at a pick.  NULL: none.
++ */
++static struct g5p_rjob *g5p_rv3_ahead_next(struct g5p_drm *d,
++					   struct g5p_render *r, bool pop)
++{
++	struct g5p_rdev *rd = d->rdev;
++	struct g5p_rs_entity *e = &r->entity;
++	struct g5p_rjob *next = NULL;
++	unsigned long flags, deadline = 0;
++
++	spin_lock_irqsave(&rd->sched_lock, flags);
++	if (e->in_run && !list_empty(&e->jobs)) {
++		struct g5p_rs_job *head =
++			list_first_entry(&e->jobs, struct g5p_rs_job, link);
++		struct g5p_rjob *j = container_of(head, struct g5p_rjob, node);
++
++		if (j->v3 && !j->compute && !j->setup_error && !j->dep_error &&
++		    g5p_rsched_ready(head, d, &deadline) && !j->dep_error)
++			next = j;
++		if (next && pop) {
++			list_del_init(&head->link);
++			if (list_empty(&e->jobs) && !e->close_pending) {
++				list_del_init(&e->link);
++				e->in_run = false;
++			}
++		}
++	}
++	spin_unlock_irqrestore(&rd->sched_lock, flags);
++	return next;
++}
++
++/* F5: start `job`, the next job of context r, while job `cur`'s 3D runs (core lock held, cur's TA
++ * complete): g5p_rv3_execute()'s preparation and joint publication for a bound context's job, on
++ * the other W slot, the other PM set and the other slice of its target's ring.  Its result is
++ * job->rv3.ahead_ret; the worker runs it next (rd->ahead) and its execute resumes at the TA wait.
++ */
++static void g5p_rv3_ahead_start(struct g5p_drm *d, struct g5p_render *r,
++				struct g5p_rjob *cur, struct g5p_rjob *job)
++{
++	struct g5p_rdev *rd = d->rdev;
++	struct g5p_diag *g = d->core;
++	struct g5p_boot *b = g->boot;
++	struct g5p_rv3 *v = &job->rv3;
++	u32 seq = rd->sequence + 1, js = g5p_rv3_js(rd, seq);
++	bool pm2 = !r->js_pm2[g5p_rv3_js(rd, cur->rv3.seq)];
++	int ret;
++
++	job->jt.exec_ns = ktime_get_ns();
++	job->jt.exec_cyc = arch_timer_read_counter();
++	job->jt.prev_signal_cyc = d->jt_last_signal_cyc;
++	v->abs = READ_ONCE(render_user_abs_stamps);
++	job->jt.abs_enabled = v->abs;
++	v->joint = true;
++	v->depth2 = READ_ONCE(render_user_pipeline_depth) == 2; /* latched per job */
++	v->ahead = true;
++	v->pm2 = pm2;
++	job->jt.flags = BIT(2) | BIT(3);
++	rd->ahead = job;
++	rd->ahead_started++;
++	rd->ahead_chain++;
++	/* before the hardware may read them, as g5p_render_run() does for a picked job */
++	job->cache.enabled = READ_ONCE(render_user_cache_receipts);
++	job->cache.policy = READ_ONCE(render_user_cache_private_wc);
++	job->cache.import_policy = READ_ONCE(render_user_cache_import_wc);
++	g5p_render_cache(d, job, false);
++	v->touched = true;
++	ret = pm2 ? 0 : g5p_rv3_pmctx_job(d, r, seq);
++	if (ret)
++		goto out;
++	g5p_rv3_pmsnap(d, r, seq, G5P_PMSNAP_START);
++	rd->pm_serial = g5p_le32(g5p_rv3_pm_cpu_of(b, r, pm2) + 0x80);
++	r->js_pm2[js] = pm2;
++	g5p_rv3_rt_slice(job, js);
++	for (u32 e = 0; e < 2; e++) {
++		g5p_ru_job_at(
++			g5p_ru_page(b, e), g5p_ru_meta(e),
++			g5p_meta_address(g5p_object_va(&b->layout, 0x51 + e)),
++			g5p_rv3_pm_meta_of(r, pm2), r->slot[e], e, seq,
++			e ? job->td_w : job->ta_w,
++			g5p_ru_meta(0) + G5P_R22_STAMP + 4, 0, js,
++			g5p_rv3_pm_id_of(rd, r, pm2), v->abs);
++		r->submitted[e] = false;
++		r->consumed[e] = false;
++		r->retired[e] = false;
++	}
++	g5p_l123_job_prepare(d, job);
++	g5p_render_clean_job(g);
++	rd->sequence = seq;
++	v->seq = seq;
++	r->jobs++;
++	v->phase = G5P_RV3_TA_PUBLISH;
++	g5p_rv3_event_arm(d, 0, 0);
++	g5p_rv3_event_arm(d, 1, g5p_ru_endpoint(seq));
++	g5p_rv3_wake_mark(d, r, v, 0);
++	g5p_rv3_wake_mark(d, r, v, 1);
++	ret = g5p_rv3_publish_ta(g, r, v, seq);
++	if (ret)
++		goto out;
++	v->phase = G5P_RV3_TD_PUBLISH;
++	ret = g5p_rv3_publish_3d(g, r, v, seq);
++	if (ret)
++		g5p_rv3_sample(g, r, 1, seq, &v->last[1]);
++out:
++	v->ahead_ret = ret;
++}
++
++/* F5: after job `cur`'s TA completed, start its context's next job if it may (core lock held).
++ * The second PM set is made ready (taken and built at the context's first pipelined job) only
++ * when there is a next job to use it.
++ */
++static void g5p_rv3_ahead(struct g5p_drm *d, struct g5p_render *r,
++			  struct g5p_rjob *cur)
++{
++	struct g5p_rdev *rd = d->rdev;
++	bool pm2 = !r->js_pm2[g5p_rv3_js(rd, cur->rv3.seq)];
++	struct g5p_rjob *next;
++
++	if (g5p_rv3_ahead_why(d, r, cur) || !g5p_rv3_ahead_next(d, r, false) ||
++	    (pm2 && !g5p_rv3_pm2_ready(d, r, cur->rv3.seq + 1))) {
++		rd->ahead_skipped++;
++		return;
++	}
++	next = g5p_rv3_ahead_next(d, r, true);
++	if (!next) {
++		rd->ahead_skipped++;
++		return;
++	}
++	g5p_rv3_ahead_start(d, r, cur, next);
++}
++
+ static int g5p_rv3_execute(struct g5p_drm *d, struct g5p_render *r,
+ 			   struct g5p_rjob *job)
+ {
+@@ -2585,12 +3025,26 @@ static int g5p_rv3_execute(struct g5p_drm *d, struct g5p_render *r,
+ 	int err = -EIO, ret, why, loss;
+ 	u32 seq, res;
+ 
++	if (v->ahead) {
++		/* F5: prepared and published by the previous job's executor, which kept the core
++		 * lock (g5p_rv3_ahead_start()): wait for it from its TA on, or end with that start's
++		 * result.
++		 */
++		seq = v->seq;
++		if (v->ahead_ret) {
++			ret = v->ahead_ret;
++			goto out;
++		}
++		g5p_l123_job_reset(g);
++		goto ta_wait;
++	}
+ 	job->jt.exec_ns = ktime_get_ns();
+ 	job->jt.exec_cyc = arch_timer_read_counter();
+ 	job->jt.prev_signal_cyc = d->jt_last_signal_cyc;
+ 	v->abs = READ_ONCE(render_user_abs_stamps);
+ 	job->jt.abs_enabled = v->abs;
+ 	v->joint = !job->compute && !first && READ_ONCE(render_user_joint);
++	v->depth2 = v->joint && READ_ONCE(render_user_pipeline_depth) == 2;
+ 	job->jt.flags = (first ? 1 : 0) | (!bound_before ? 2 : 0) |
+ 			(v->joint ? BIT(2) : 0);
+ 	if (job->compute)
+@@ -2673,6 +3127,13 @@ static int g5p_rv3_execute(struct g5p_drm *d, struct g5p_render *r,
+ 	rd->pm_serial = g5p_le32(g5p_rv3_pm_cpu(b, r) + 0x80);
+ 	if (g5p_ru_fault_due(r->fault_job, r->jobs, first))
+ 		g5p_rv3_test_fault(g, r, job, seq);
++	/* F5: a job started with nothing in flight uses the first PM set; with depth 2 its region
++	 * headers go to its W slot's slice of the target ring, so the job started behind it uses
++	 * the other set and slice.
++	 */
++	r->js_pm2[g5p_rv3_js(rd, seq)] = false;
++	if (v->depth2)
++		g5p_rv3_rt_slice(job, g5p_rv3_js(rd, seq));
+ 	for (u32 e = 0; e < 2; e++) {
+ 		g5p_ru_job_at(
+ 			g5p_ru_page(b, e), g5p_ru_meta(e),
+@@ -2708,6 +3169,7 @@ static int g5p_rv3_execute(struct g5p_drm *d, struct g5p_render *r,
+ 			goto out;
+ 		}
+ 	}
++ta_wait:
+ 	v->phase = G5P_RV3_TA_WAIT;
+ 	if (r->stall_job && r->jobs == r->stall_job && !first) {
+ 		/* render_user_test_stall_job: the host gives up, the firmware runs on */
+@@ -2773,7 +3235,14 @@ static int g5p_rv3_execute(struct g5p_drm *d, struct g5p_render *r,
+ 	if (first)
+ 		g5p_r74_mark(g, G5P_R74_TA_RAM_COMPLETE,
+ 			     g5p_le32(g5p_ru_page(b, 0) + G5P_R22_STAMP + 4));
+-	;
++	if (v->depth2) {
++		/* F5: the TA latch is the next job's from here; then start that job while this
++		 * job's 3D (published with the TA) runs.
++		 */
++		v->ta_event_ns = g5p_rv3_event_disarm(d, 0, seq, &job->jt);
++		v->ta_disarmed = true;
++		g5p_rv3_ahead(d, r, job);
++	}
+ 	if (!v->joint) {
+ 		v->phase = G5P_RV3_TD_PUBLISH;
+ 		g5p_rv3_event_arm(d, 1, g5p_ru_endpoint(seq));
+@@ -2792,7 +3261,9 @@ static int g5p_rv3_execute(struct g5p_drm *d, struct g5p_render *r,
+ 	g5p_ru_rt_start(&v->rt, r->settle_ms);
+ 	res = g5p_rv3_wait(g, r, 1, seq, &v->td, &v->touch[1], &v->rt, NULL,
+ 			   &v->last[1], &v->td_consumed_ns, &err);
+-	r->consumed[1] = v->td_consumed_ns != 0;
++	/* F5: once a later job is prepared, the context's flags are that job's */
++	if (rd->sequence == seq)
++		r->consumed[1] = v->td_consumed_ns != 0;
+ 	/* mmio_selftest bit 2 (rung 5, DFU-risk on a park tuple): one licensed ticket at the 3D
+ 	 * completion decision; always: the idle clock of bit 3.
+ 	 */
+@@ -2842,16 +3313,17 @@ static int g5p_rv3_execute(struct g5p_drm *d, struct g5p_render *r,
+ 			v->last[1].idle[4], v->last[1].idle[5],
+ 			g5p_ru_rt_ms(v->td_pub_ns, v->rt.coherent_ns),
+ 			g5p_ru_rt_ms(v->td_pub_ns, v->td.end_ns));
+-	r->retired[1] = true;
++	if (rd->sequence == seq)
++		r->retired[1] = true;
+ 	v->phase = G5P_RV3_DONE;
+ 	rd->recover_streak =
+ 		0; /* a job finished: a later fault starts a new streak */
+ 	ret = 0;
+ out:
+-	if (v->phase >= G5P_RV3_TA_PUBLISH)
+-		v->ta_event_ns = g5p_rv3_event_disarm(d, 0, &job->jt);
++	if (v->phase >= G5P_RV3_TA_PUBLISH && !v->ta_disarmed)
++		v->ta_event_ns = g5p_rv3_event_disarm(d, 0, seq, &job->jt);
+ 	if (v->joint || v->phase >= G5P_RV3_TD_PUBLISH)
+-		v->td_event_ns = g5p_rv3_event_disarm(d, 1, &job->jt);
++		v->td_event_ns = g5p_rv3_event_disarm(d, 1, seq, &job->jt);
+ 	memcpy(job->jt.bell_cyc, v->bell_cyc, sizeof(v->bell_cyc));
+ 	job->jt.ta_pub_ns = v->ta_pub_ns;
+ 	job->jt.td_pub_ns = v->td_pub_ns;
+@@ -2909,6 +3381,9 @@ out:
+ 	/* perf60 bell gates: the next job's gap and context switch are measured from here. */
+ 	d->bell_prev_end_ns = ktime_get_ns();
+ 	d->bell_prev_ctx = r->ctx;
++	/* F5: a job that started none ends the chain (its run releases the core lock) */
++	if (!rd->ahead)
++		rd->ahead_chain = 0;
+ 	return ret;
+ }
+ 
+@@ -2946,6 +3421,7 @@ static bool g5p_rv3_drain(struct g5p_drm *d)
+ 		msleep(5);
+ 	}
+ 	WRITE_ONCE(rd->executing, true);
++again:
+ 	for (;;) {
+ 		u32 e = st == G5P_RU_DRAIN_TA ? 0 : 1;
+ 		u64 now = ktime_get_ns();
+@@ -2961,7 +3437,7 @@ static bool g5p_rv3_drain(struct g5p_drm *d)
+ 			res = g5p_rv3_wait(g, r, 0, s->seq, &w, &v->touch[0],
+ 					   NULL, &v->tr, &v->last[0],
+ 					   &v->ta_consumed_ns, &err);
+-			v->ta_event_ns = g5p_rv3_event_disarm(d, 0, NULL);
++			v->ta_event_ns = g5p_rv3_event_disarm(d, 0, s->seq, NULL);
+ 		} else {
+ 			if (!armed)
+ 				g5p_rv3_event_arm(d, 1,
+@@ -2970,7 +3446,7 @@ static bool g5p_rv3_drain(struct g5p_drm *d)
+ 			res = g5p_rv3_wait(g, r, 1, s->seq, &w, &v->touch[1],
+ 					   &v->rt, NULL, &v->last[1],
+ 					   &v->td_consumed_ns, &err);
+-			v->td_event_ns = g5p_rv3_event_disarm(d, 1, NULL);
++			v->td_event_ns = g5p_rv3_event_disarm(d, 1, s->seq, NULL);
+ 		}
+ 		act = g5p_ru_drain_step(&st, res);
+ 		if (act != G5P_RU_DRAIN_PUBLISH_TD)
+@@ -2981,12 +3457,26 @@ static bool g5p_rv3_drain(struct g5p_drm *d)
+ 		g5p_rv3_event_arm(d, 1, g5p_ru_endpoint(s->seq));
+ 		armed = true;
+ 		if (g5p_rv3_publish_3d(g, r, v, s->seq)) {
+-			g5p_rv3_event_disarm(d, 1, NULL);
++			g5p_rv3_event_disarm(d, 1, s->seq, NULL);
+ 			res = G5P_RU_WAIT_FAULT;
+ 			act = g5p_ru_drain_step(&st, res);
+ 			break;
+ 		}
+ 	}
++	if (act == G5P_RU_DRAIN_UNBLOCK && s->ahead_seq) {
++		/* F5: the next job, published behind the stuck one, drains the same way */
++		dev_emerg(
++			g->dev,
++			"RENDER-V3 drained seq=%u engine=%u slots=%u/%u: the job started behind it "
++			"(seq=%u) drains next end=v3\n",
++			s->seq, s->engine, r->slot[0], r->slot[1], s->ahead_seq);
++		s->seq = s->ahead_seq;
++		s->ahead_seq = 0;
++		st = G5P_RU_DRAIN_TA;
++		res = G5P_RU_WAIT_PENDING;
++		armed = false;
++		goto again;
++	}
+ 	if (act == G5P_RU_DRAIN_UNBLOCK) {
+ 		r->retired[1] = true;
+ 		r->lost_drained = true;
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render.inc b/drivers/gpu/drm/apple-g5p/drm-render.inc
+index e4291417d..2cd6737d1 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render.inc
+@@ -232,6 +232,16 @@ struct g5p_rdev {
+ 	u32 recover_streak; /* recoveries since a job completed (core lock) */
+ 	struct list_head
+ 		contexts; /* every render context (lock), for the recovery */
++	/* F5 (render_user_pipeline_depth 2): the job its context's previous job started ahead
++	 * (prepared and published while that job's 3D ran).  The worker runs it next, before any
++	 * pick, drain or recovery; ahead_held: the previous run kept the core lock for it, so the
++	 * lock stays held from one job's TA publish to the next job's 3D retire (Henrik 0004: no
++	 * other context's phase is published in between).  Worker only.
++	 */
++	struct g5p_rjob *ahead;
++	bool ahead_held;
++	u32 ahead_chain; /* consecutive ahead starts (G5P_RV3_AHEAD_CHAIN) */
++	u64 ahead_started, ahead_skipped;
+ };
+ 
+ /* render-user-fault.h's ruling window on the device state: a failure noted while a TYPED_V3 job or
+@@ -306,6 +316,20 @@ struct g5p_render {
+ 	struct g5p_dma_page pm_aux[G5P_RU_AUX_PAGES];
+ 	bool pm_aux_mapped;
+ 	bool pm_first; /* it brought the epoch up (attach): the device aux is its own */
++	/* F5 (render_user_pipeline_depth 2): the second PM set, the parameter buffer of a job
++	 * started while the previous job's 3D still reads the first (iOS takes a ParamBuffer ID
++	 * per prepare, 6cb9afc).  Its aux pages are allocated and mapped at aux2_node (the top of
++	 * the private window) at creation; the set and its pool are taken at the first pipelined
++	 * job and kept for the context's life, like the first.  js_pm2[js]: the job in W slot js
++	 * uses it.  pm2_failed: no set or memory; the context stays serial.
++	 */
++	int pm2_set;
++	u32 pm2_blocks, pm2_epoch;
++	struct g5p_dma_page *pm2_pool;
++	struct g5p_dma_page pm2_aux[G5P_RU_AUX_PAGES];
++	struct drm_mm_node aux2_node;
++	bool aux2_mapped, pm2_failed;
++	bool js_pm2[2];
+ 	bool close_defer_run; /* render_user_close_defer: its deferred close is running */
+ };
+ 
+@@ -316,6 +340,7 @@ struct g5p_rstuck {
+ 	struct g5p_render *r;
+ 	struct g5p_rv3 v;
+ 	u32 seq, engine, drain_ms;
++	u32 ahead_seq; /* F5: the context's next job, already published behind it; 0 = none */
+ 	u64 lost_ns;
+ };
+ 
+@@ -358,6 +383,11 @@ struct g5p_rjob {
+ 	struct g5p_cu_regs cu;
+ 	struct g5p_rv3 rv3;
+ 	u64 submit_ns; /* latency123: the submit ioctl */
++	/* F5: the slice of its target's main ring (6cb3d68: sixteen slices).  With
++	 * render_user_pipeline_depth 2 a job's TA.W28/3D.W20 move js slices into the ring, so a
++	 * job started ahead never writes the region headers the previous job's 3D reads.
++	 */
++	u64 rt_slice;
+ 	struct g5p_jt jt;
+ };
+ 
+@@ -985,8 +1015,13 @@ static void g5p_render_run(struct g5p_rjob *job)
+ 	struct g5p_render *r = job->ctx->render;
+ 	unsigned long lock_deadline, flags;
+ 	bool hardware = false;
++	/* F5: a job started ahead is on the hardware already, under the core lock the previous
++	 * run kept for it (rdev->ahead_held).
++	 */
++	bool ahead = job->rv3.ahead, held = ahead && d->rdev->ahead_held;
+ 	int ret;
+ 
++	d->rdev->ahead_held = false;
+ 	job->cache.enabled = READ_ONCE(render_user_cache_receipts);
+ 	job->cache.policy = READ_ONCE(render_user_cache_private_wc);
+ 	job->cache.import_policy = READ_ONCE(render_user_cache_import_wc);
+@@ -999,13 +1034,31 @@ static void g5p_render_run(struct g5p_rjob *job)
+ 	 * that fails here, without waiting for its inputs and without competing for the command
+ 	 * lock.
+ 	 */
+-	if (g5p_r8_admit_closed(&g5p_r8_state.admit))
++	if (ahead) {
++		/* Admitted at its start.  Its fate is now its context's: a lost previous job lost the
++		 * context, and the drain or the recovery covers this job's hardware too; a failed
++		 * device fails it.  Otherwise it is waited for whatever admission says now, because
++		 * the firmware holds its memory.
++		 */
++		hardware = true;
++		ret = 0;
++		if (job->ctx->bad) {
++			job->rv3.lost = true;
++			ret = -EIO;
++		} else if (READ_ONCE(g->boot->failed)) {
++			ret = -EIO;
++		}
++		if (ret && held) {
++			mutex_unlock(&g->lock);
++			held = false;
++		}
++	} else if (g5p_r8_admit_closed(&g5p_r8_state.admit))
+ 		ret = -ESHUTDOWN;
+ 	else
+ 		ret = job->setup_error ?: job->dep_error;
+-	if (!ret && (job->ctx->bad || READ_ONCE(g->boot->failed)))
++	if (!ret && !ahead && (job->ctx->bad || READ_ONCE(g->boot->failed)))
+ 		ret = -EIO;
+-	if (!ret) {
++	if (!ret && !held) {
+ 		/* Bounded: never queue forever behind a command stuck in MMIO. */
+ 		lock_deadline = jiffies + 2 * HZ;
+ 		while (!mutex_trylock(&g->lock)) {
+@@ -1026,14 +1079,16 @@ static void g5p_render_run(struct g5p_rjob *job)
+ 			/* RAM-only from the DC3 attach on: no snapshot (it reads R0), no
+ 			 * export, no register access of any kind after a timeout.
+ 			 */
+-			g5p_render_cache(d, job, false);
++			if (!ahead) /* an ahead job was cleaned at its start */
++				g5p_render_cache(d, job, false);
+ 			WRITE_ONCE(d->rdev->executing, true);
+ 			d->jt_active = &job->jt;
+ 			ret = g5p_rv3_execute(d, r, job);
+ 			d->jt_active = NULL;
+ 			/* after `recovering`, if the executor set it (g5p_rdev_ruling()) */
+ 			smp_store_release(&d->rdev->executing, false);
+-			hardware = job->rv3.touched || job->rv3.bind_failed;
++			hardware = ahead || job->rv3.touched ||
++				   job->rv3.bind_failed;
+ 			if (!ret || ret == -ECANCELED)
+ 				g5p_render_cache(
+ 					d, job,
+@@ -1042,7 +1097,14 @@ static void g5p_render_run(struct g5p_rjob *job)
+ 				WRITE_ONCE(r->live_maps, true);
+ 		}
+ 		g->last_result = ret;
+-		mutex_unlock(&g->lock);
++		/* F5: this job completed and started its context's next one: the core lock stays
++		 * held for it (the worker runs it next).  A failed job releases the lock; its
++		 * context is lost, and the next job fails without waiting.
++		 */
++		if (!ret && d->rdev->ahead)
++			d->rdev->ahead_held = true;
++		else
++			mutex_unlock(&g->lock);
+ 	}
+ 	spin_lock_irqsave(&d->status_lock, flags);
+ 	/* A failed device fails every later job; one context's lost job or failed bind does not. */
+@@ -1248,6 +1310,9 @@ static void g5p_render_unhook(struct g5p_context *c)
+ 	if (r->aux_mapped)
+ 		g5p_vm_clear(c->vm, dev, G5P_RU_PRIVATE_VA,
+ 			     G5P_RU_AUX_PAGES * G5P_GPU_PAGE);
++	if (r->aux2_mapped)
++		g5p_vm_clear(c->vm, dev, G5P_RU_AUX2_VA,
++			     G5P_RU_AUX_PAGES * G5P_GPU_PAGE);
+ 	for (u32 i = 0; i < 4; i++) {
+ 		struct drm_mm_node *n = i == 0 ? &r->low_node :
+ 					i == 1 ? &r->firmware_node :
+@@ -1287,6 +1352,8 @@ static void g5p_render_release(struct g5p_context *c)
+ 	}
+ 	if (drm_mm_node_allocated(&r->aux_node))
+ 		drm_mm_remove_node(&r->aux_node);
++	if (drm_mm_node_allocated(&r->aux2_node))
++		drm_mm_remove_node(&r->aux2_node);
+ 	drm_mm_takedown(&r->private_mm);
+ 	spin_lock_irqsave(&d->core->slot_lock, flags);
+ 	for (u32 e = 0; e < 2; e++)
+@@ -1368,6 +1435,7 @@ static int g5p_render_create_context(struct drm_device *drm,
+ 		return -ENOMEM;
+ 	}
+ 	r->pm_set = -1;
++	r->pm2_set = -1;
+ 	c->gpu = d;
+ 	c->render = r;
+ 	r->ctx = c;
+@@ -1475,6 +1543,21 @@ static int g5p_render_create_context(struct drm_device *drm,
+ 					  &d->rdev->aux[i]);
+ 		r->aux_mapped = true;
+ 	}
++	/* F5: the second PM set's own aux pages, mapped once here (file lock, before any job), so
++	 * a pipelined job never edits a live VM.  Unused while render_user_pipeline_depth is 1.
++	 */
++	r->aux2_node.start = G5P_RU_AUX2_VA;
++	r->aux2_node.size = G5P_RU_AUX_PAGES * G5P_GPU_PAGE;
++	if (!ret)
++		ret = drm_mm_reserve_node(&r->private_mm, &r->aux2_node);
++	for (u32 i = 0; !ret && i < G5P_RU_AUX_PAGES; i++) {
++		ret = g5p_vm_alloc_page(d->drm.dev, &r->pm2_aux[i]);
++		if (!ret)
++			ret = g5p_render_map_page(d, r,
++						  G5P_RU_AUX2_VA + i * G5P_GPU_PAGE,
++						  &r->pm2_aux[i]);
++		r->aux2_mapped = true;
++	}
+ 	if (ret)
+ 		goto err_unlock;
+ 	ret = xa_alloc(&f->contexts, &id, c, XA_LIMIT(1, G5P_MAX_CONTEXTS),
+@@ -2170,6 +2253,7 @@ static int g5p_render_submit_admitted(struct drm_device *drm,
+ 	g5p_ru_rt_fill(job->ta_w, job->td_w, &rt->geometry,
+ 		       rt->node.start + (r->v.rt == 1 ? rt->sizes.slice : 0),
+ 		       rt->node.start + rt->sizes.main);
++	job->rt_slice = rt->sizes.slice;
+ 	{
+ 		g5p_ru_fill_msaa(job->ta_w, job->td_w, &msaa, &rt->geometry);
+ 	};

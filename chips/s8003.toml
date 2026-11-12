@@ -15,6 +15,3 @@ stages = ["iBSS", "iBEC"]
 page_size = "xnu-6153.141.1 osfmk/arm/proc_reg.h"
 platform = "J71t on hardware"
 stages = "remote_boot two-stage CPID list"
-
-# J71t integration: AOP sensors and PSCI CPU1 hotplug/SMP warm hops observed
-# 2026-11-08; see devices/j71t/README.md. No other board qualification.

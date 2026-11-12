@@ -1,0 +1,104 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 09:49:32 +0000
+Subject: [PATCH] soc: apple: pmgr-misc: Run the S8000's SoC and memory states
+ high
+
+The S8000 and S8003 (A9) boot with SoC and memory in their low
+performance state: memory at 800 of 1200 MHz. Nothing on Linux raises
+it, so CPU and GPU run on two thirds of the memory bandwidth. On a J71t
+the high state takes CPU read bandwidth from 8.8 to 15.1 GB/s and
+glmark2 scenes 13-64 % faster at the same GPU clock.
+
+The register, the two states (0xd low, 0xc high) and the pending bit are
+the T8010's, so add an S8000 variant that sets the high state at probe
+and the low state on suspend, as the T8010 variant does. iOS's PMGR
+driver waits up to 8 ms for the change; it takes 0.5-0.7 ms on the J71t,
+close to the T8010's 1 ms timeout, so let a chip give its own timeout
+and use iOS's for the S8000.
+
+Assisted-by: LLM
+---
+ drivers/soc/apple/Kconfig           |  2 +-
+ drivers/soc/apple/apple-pmgr-misc.c | 30 +++++++++++++++++++++++++----
+ 2 files changed, 27 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/soc/apple/Kconfig b/drivers/soc/apple/Kconfig
+index e68a49f1b..ade72a51f 100644
+--- a/drivers/soc/apple/Kconfig
++++ b/drivers/soc/apple/Kconfig
+@@ -24,7 +24,7 @@ config APPLE_PMGR_MISC
+ 	  controls for SoC devices. This driver manages miscellaneous
+ 	  power controls.
+ 
+-	  Say 'y' here if you have a Pro/Max/Ultra Apple SoC or an A10.
++	  Say 'y' here if you have a Pro/Max/Ultra Apple SoC, an A9 or an A10.
+ 
+ config APPLE_RTKIT
+ 	tristate "Apple RTKit co-processor IPC protocol"
+diff --git a/drivers/soc/apple/apple-pmgr-misc.c b/drivers/soc/apple/apple-pmgr-misc.c
+index f00dcebe3..6d51295ad 100644
+--- a/drivers/soc/apple/apple-pmgr-misc.c
++++ b/drivers/soc/apple/apple-pmgr-misc.c
+@@ -29,6 +29,15 @@
+ #define T8010_SOC_PSTATE_LOW 0xd
+ #define T8010_SOC_PSTATE_HIGH 0xc
+ 
++/*
++ * S8000/S8003 SoC/memory states: the same register and values. iOS's PMGR
++ * driver accepts only these two for its SoC domain and waits up to 8 ms
++ * for a change to complete; one takes about 0.5-0.7 ms
++ */
++#define S8000_SOC_PSTATE_LOW 0xd
++#define S8000_SOC_PSTATE_HIGH 0xc
++#define S8000_SOC_PSTATE_TIMEOUT_US 8000
++
+ enum sys_device {
+ 	DEV_FABRIC,
+ 	DEV_DCS,
+@@ -52,7 +61,7 @@ struct apple_pmgr_misc_hw {
+ 	unsigned long devices;		/* BIT(enum sys_device) */
+ 	u32 dev_min_ps[DEV_MAX];
+ 	u32 dev_active_ps[DEV_MAX];	/* 0: keep the state the system booted with */
+-	bool wait_pending;		/* wait for a state change to complete */
++	u32 pending_timeout_us;		/* wait for a state change to complete; 0: don't */
+ };
+ 
+ struct apple_pmgr_misc {
+@@ -81,9 +90,10 @@ static void apple_pmgr_sys_dev_set_pstate(struct apple_pmgr_misc *misc,
+ 	FIELD_MODIFY(APPLE_CLKGEN_PSTATE_DESIRED, &val, pstate);
+ 	writel_relaxed(val, misc->devices[dev].base + APPLE_CLKGEN_PSTATE);
+ 
+-	if (misc->hw->wait_pending &&
++	if (misc->hw->pending_timeout_us &&
+ 	    readl_relaxed_poll_timeout_atomic(misc->devices[dev].base + APPLE_CLKGEN_PSTATE, val,
+-					      !(val & APPLE_CLKGEN_PSTATE_PENDING), 1, 1000))
++					      !(val & APPLE_CLKGEN_PSTATE_PENDING), 1,
++					      misc->hw->pending_timeout_us))
+ 		dev_warn(misc->dev, "%s state change to %u did not complete\n",
+ 			 sys_device_names[dev], pstate);
+ }
+@@ -194,10 +204,22 @@ static const struct apple_pmgr_misc_hw apple_pmgr_misc_hw_t8010 = {
+ 	.devices = BIT(DEV_SOC),
+ 	.dev_min_ps = { [DEV_SOC] = T8010_SOC_PSTATE_LOW },
+ 	.dev_active_ps = { [DEV_SOC] = T8010_SOC_PSTATE_HIGH },
+-	.wait_pending = true,
++	.pending_timeout_us = 1000,
++};
++
++/*
++ * The S8000/S8003 boot with SoC and memory in their low state too (memory
++ * at 800 of 1200 MHz): run both high while active, as on the T8010
++ */
++static const struct apple_pmgr_misc_hw apple_pmgr_misc_hw_s8000 = {
++	.devices = BIT(DEV_SOC),
++	.dev_min_ps = { [DEV_SOC] = S8000_SOC_PSTATE_LOW },
++	.dev_active_ps = { [DEV_SOC] = S8000_SOC_PSTATE_HIGH },
++	.pending_timeout_us = S8000_SOC_PSTATE_TIMEOUT_US,
+ };
+ 
+ static const struct of_device_id apple_pmgr_misc_of_match[] = {
++	{ .compatible = "apple,s8000-pmgr-misc", .data = &apple_pmgr_misc_hw_s8000 },
+ 	{ .compatible = "apple,t6000-pmgr-misc", .data = &apple_pmgr_misc_hw_t600x },
+ 	{ .compatible = "apple,t6020-pmgr-misc", .data = &apple_pmgr_misc_hw_t602x },
+ 	{ .compatible = "apple,t8010-pmgr-misc", .data = &apple_pmgr_misc_hw_t8010 },

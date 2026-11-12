@@ -85,16 +85,20 @@
       "usb_serial"
     ],
     "d22": [
+      "backlight",
       "battery",
       "storage_read",
       "storage_write",
+      "touch",
       "usb_network",
       "usb_serial"
     ],
     "d221": [
+      "backlight",
       "battery",
       "storage_read",
       "storage_write",
+      "touch",
       "usb_network",
       "usb_serial",
       "wifi"
@@ -125,6 +129,7 @@
     ],
     "j171": [
       "accelerometer",
+      "audio_output",
       "backlight",
       "battery",
       "bluetooth_audio",
@@ -141,6 +146,7 @@
     ],
     "j172": [
       "accelerometer",
+      "audio_output",
       "backlight",
       "battery",
       "bluetooth_audio",
@@ -187,6 +193,7 @@
       "touch",
       "usb_network",
       "usb_serial",
+      "video_decode_hevc",
       "wifi"
     ],
     "j71s": [
@@ -200,7 +207,8 @@
       "light_sensor",
       "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "video_decode_hevc"
     ],
     "j71t": [
       "audio_output",
@@ -216,10 +224,12 @@
       "touch",
       "usb_network",
       "usb_serial",
+      "video_decode_hevc",
       "wifi"
     ],
     "j72b": [
       "accelerometer",
+      "audio_output",
       "backlight",
       "battery",
       "bluetooth_audio",
@@ -231,6 +241,7 @@
       "touch",
       "usb_network",
       "usb_serial",
+      "video_decode_hevc",
       "wifi"
     ],
     "j72s": [
@@ -244,7 +255,8 @@
       "light_sensor",
       "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "video_decode_hevc"
     ],
     "j72t": [
       "audio_output",
@@ -260,6 +272,7 @@
       "touch",
       "usb_network",
       "usb_serial",
+      "video_decode_hevc",
       "wifi"
     ],
     "j73": [
@@ -328,15 +341,21 @@
     ],
     "j96": [
       "backlight",
+      "battery",
       "buttons",
+      "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "wifi"
     ],
     "j97": [
       "backlight",
+      "battery",
       "buttons",
+      "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "wifi"
     ],
     "j98a": [
       "backlight",
@@ -364,12 +383,14 @@
     ],
     "n56": [
       "backlight",
+      "battery",
       "buttons",
       "usb_network",
       "usb_serial"
     ],
     "n61": [
       "backlight",
+      "battery",
       "buttons",
       "touch",
       "usb_network",

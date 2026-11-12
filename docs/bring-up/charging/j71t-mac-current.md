@@ -58,7 +58,7 @@ values, suspend, board caps, ramp/revoke, attachment and stale epochs.
 The other tests run the initrd gadget function in a mock filesystem and test
 both host discovery implementations. They do not contact USB hardware.
 
-## Device acceptance gate (orchestrator only)
+## Device acceptance check
 
 Boot the new Image, DTB, matching initrd and modules together, with the
 Omarchy A opt-in present. Do not rebind a live gadget to edit its identity.

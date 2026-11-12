@@ -1,0 +1,100 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 16:02:37 +0000
+Subject: [PATCH] drm/apple-g5p: refuse system sleep without retained resume
+
+The shutdown quiesce is one-shot and restores platform power. It cannot
+safely stand in for a normal sleep callback. Refuse system sleep before
+device suspension until a stable-off and retained firmware resume
+contract is available. Expose a fail-closed readiness query for the
+platform pre-sync veto; a positive query will require a reservation
+protocol.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/apple-g5p/a9-gpu-drm.c | 25 +++++++++++++++++++++++++
+ include/linux/apple-g5p-pm.h           | 25 +++++++++++++++++++++++++
+ 2 files changed, 50 insertions(+)
+ create mode 100644 include/linux/apple-g5p-pm.h
+
+diff --git a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+index f184afb68..6ee3990b2 100644
+--- a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
++++ b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+@@ -4,6 +4,7 @@
+ #include "../../apple-g5p/drm-validate.h"
+ #include "../../apple-g5p/render-user-evwait.h"
+ #include "../../apple-g5p/render-user-sync.h"
++#include <linux/apple-g5p-pm.h>
+ #include <linux/dma-buf.h>
+ #include <linux/dma-fence-chain.h>
+ #include <linux/dma-fence-unwrap.h>
+@@ -950,6 +951,29 @@ static const struct of_device_id g5p_drm_match[] = {
+ };
+ MODULE_DEVICE_TABLE(of, g5p_drm_match);
+ 
++/*
++ * Normal Apple power-off requires quiescent firmware and a stable-off
++ * certificate before removing platform power. The pinned firmware epoch does
++ * not yet supply that contract. Do not use the one-shot kexec cycle here:
++ * it reopens platform power and permanently closes submission admission.
++ */
++bool apple_g5p_system_sleep_ready(struct device *dev)
++{
++	/* Fail closed, including callers that cannot identify a bound device. */
++	return false;
++}
++EXPORT_SYMBOL_GPL(apple_g5p_system_sleep_ready);
++
++static int g5p_system_sleep_prepare(struct device *dev)
++{
++	dev_warn(dev, "GPU-PM sleep refused: retained firmware resume unavailable\n");
++	return -EBUSY;
++}
++
++static const struct dev_pm_ops g5p_system_sleep_pm_ops = {
++	.prepare = g5p_system_sleep_prepare,
++};
++
+ static struct platform_driver g5p_drm_platform = {
+ 	.probe = g5p_drm_probe,
+ 	.remove = g5p_drm_remove,
+@@ -958,6 +982,7 @@ static struct platform_driver g5p_drm_platform = {
+ 		.name = "apple-g5p-drm",
+ 		.of_match_table = g5p_drm_match,
+ 		.dev_groups = g5p_groups,
++		.pm = pm_sleep_ptr(&g5p_system_sleep_pm_ops),
+ 		.suppress_bind_attrs = true,
+ 	},
+ };
+diff --git a/include/linux/apple-g5p-pm.h b/include/linux/apple-g5p-pm.h
+new file mode 100644
+index 000000000..5b152b8fd
+--- /dev/null
++++ b/include/linux/apple-g5p-pm.h
+@@ -0,0 +1,25 @@
++/* SPDX-License-Identifier: GPL-2.0-only OR MIT */
++#ifndef _LINUX_APPLE_G5P_PM_H
++#define _LINUX_APPLE_G5P_PM_H
++
++#include <linux/kconfig.h>
++#include <linux/types.h>
++
++struct device;
++
++/*
++ * For the platform pre-sync sleep veto. Missing support is never a promise
++ * that a bound GPU can sleep. Currently all bound G5P devices must be vetoed.
++ * A future positive result requires an admission reservation through abort
++ * or resume; a snapshot alone cannot authorize power removal.
++ */
++#if IS_REACHABLE(CONFIG_DRM_APPLE_G5P)
++bool apple_g5p_system_sleep_ready(struct device *dev);
++#else
++static inline bool apple_g5p_system_sleep_ready(struct device *dev)
++{
++	return false;
++}
++#endif
++
++#endif /* _LINUX_APPLE_G5P_PM_H */

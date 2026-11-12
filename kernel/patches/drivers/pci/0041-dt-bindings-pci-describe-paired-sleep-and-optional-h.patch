@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 16:18:38 +0000
+Subject: [PATCH] dt-bindings: pci: describe paired sleep and optional
+ handoff link flush
+
+Document two boolean properties of the S8003 H9P controller.
+apple,paired-system-sleep marks an ANS controller whose port keeps power
+across system sleep and is stopped and restarted together with it.
+apple,ans-kexec-link-flush makes a warm handoff consume a stale link-up
+status under PERST before the link is stopped.
+
+Assisted-by: LLM
+---
+ .../devicetree/bindings/pci/apple,t8010-pcie.yaml     | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/pci/apple,t8010-pcie.yaml b/Documentation/devicetree/bindings/pci/apple,t8010-pcie.yaml
+index f9b72ce26..cebf60d8a 100644
+--- a/Documentation/devicetree/bindings/pci/apple,t8010-pcie.yaml
++++ b/Documentation/devicetree/bindings/pci/apple,t8010-pcie.yaml
+@@ -231,6 +231,17 @@ properties:
+       without exposing a root bridge. This is used when an enabled port shares
+       PHY state with a firmware-enabled sibling port.
+ 
++  apple,ans-kexec-link-flush:
++    type: boolean
++    description:
++      Consume stale ANS link status under PERST during warm handoff.
++
++  apple,paired-system-sleep:
++    type: boolean
++    description:
++      The ANS controller is paired with retained-power port reset over system
++      sleep.
++
+   interrupt-controller: true
+ 
+   '#interrupt-cells':

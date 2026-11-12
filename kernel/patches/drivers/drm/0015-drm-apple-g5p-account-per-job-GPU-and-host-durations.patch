@@ -1,0 +1,411 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 15:07:46 +0000
+Subject: [PATCH] drm/apple-g5p: account per-job GPU and host durations
+
+[Orchard: from brkosebay/linux 9102dab8891e83f71f36ce9aa0d49b79849ab8de;
+fixed source defaults, no production module controls.] Preserve the
+measured opt1 chain in dependency order.
+
+Assisted-by: LLM
+---
+ drivers/gpu/apple-g5p/compute-user-layout.h  |   1 +
+ drivers/gpu/apple-g5p/render-user-jobtime.h  |  52 +++++++++
+ drivers/gpu/apple-g5p/render-user-layout.h   |   2 +
+ drivers/gpu/drm/apple-g5p/a9-gpu-drm.c       | 116 +++++++++++++++++++
+ drivers/gpu/drm/apple-g5p/drm-compute-v1.inc |   5 +
+ drivers/gpu/drm/apple-g5p/drm-render-v3.inc  |  37 +++++-
+ drivers/gpu/drm/apple-g5p/drm-render.inc     |  22 ++++
+ 7 files changed, 234 insertions(+), 1 deletion(-)
+ create mode 100644 drivers/gpu/apple-g5p/render-user-jobtime.h
+
+diff --git a/drivers/gpu/apple-g5p/compute-user-layout.h b/drivers/gpu/apple-g5p/compute-user-layout.h
+index 78b459832..bf8382fc8 100644
+--- a/drivers/gpu/apple-g5p/compute-user-layout.h
++++ b/drivers/gpu/apple-g5p/compute-user-layout.h
+@@ -142,6 +142,7 @@ static inline void g5p_cu_job(u8 *p, u32 meta, u32 global, u32 slot, u32 seq,
+ 	u8 *w = p + G5P_CU_W;
+ 
+ 	memset(w, 0, G5P_CU_W_BYTES);
++	g5p_put64(w + 0x278, 0);
+ 	g5p_put32(w, G5P_CU_TAG);
+ 	g5p_put32(w + 8, slot);
+ 	g5p_put32(w + 0xc, meta + G5P_CU_DEP);
+diff --git a/drivers/gpu/apple-g5p/render-user-jobtime.h b/drivers/gpu/apple-g5p/render-user-jobtime.h
+new file mode 100644
+index 000000000..39fd70488
+--- /dev/null
++++ b/drivers/gpu/apple-g5p/render-user-jobtime.h
+@@ -0,0 +1,52 @@
++/* SPDX-License-Identifier: GPL-2.0-only OR MIT */
++#ifndef G5P_RENDER_USER_JOBTIME_H
++#define G5P_RENDER_USER_JOBTIME_H
++#define G5P_JT_RING 256U
++#define G5P_JT_TICKS_PER_US 24U
++struct g5p_jt {
++	u64 id;
++	u32 ctx, seq;
++	s32 ret;
++	u32 flags;
++	u64 submit_ns, accept_ns, exec_ns;
++	u64 ta_pub_ns, ta_ev_ns, ta_done_ns;
++	u64 td_pub_ns, td_ev_ns, td_done_ns, signal_ns;
++	u64 ta_ticks, td_ticks;
++	u32 ta_samples, td_samples;
++	u64 touch_ns, bell_ns;
++};
++struct g5p_jt_stats {
++	u64 jobs, failed, joint, ta_ticks, td_ticks;
++	u64 ioctl_ns, queue_ns, prep_ns, ta_wait_ns, gap_ns, td_wait_ns;
++	u64 tail_ns, touch_ns, bell_ns, samples;
++	u64 ta_irq_ns, td_irq_ns, ta_decide_ns, td_decide_ns, since_ns;
++};
++static inline u64 g5p_jt_delta(u64 a, u64 b)
++{
++	return a && b && b >= a ? b - a : 0;
++}
++static inline void g5p_jt_fold(struct g5p_jt_stats *s, const struct g5p_jt *j)
++{
++	s->jobs++;
++	s->failed += j->ret != 0;
++	s->joint += !!(j->flags & 4);
++	if (j->ta_ticks != ~0ULL)
++		s->ta_ticks += j->ta_ticks;
++	if (j->td_ticks != ~0ULL)
++		s->td_ticks += j->td_ticks;
++	s->ioctl_ns += g5p_jt_delta(j->submit_ns, j->accept_ns);
++	s->queue_ns += g5p_jt_delta(j->accept_ns, j->exec_ns);
++	s->prep_ns += g5p_jt_delta(j->exec_ns, j->ta_pub_ns);
++	s->ta_wait_ns += g5p_jt_delta(j->ta_pub_ns, j->ta_done_ns);
++	s->gap_ns += g5p_jt_delta(j->ta_done_ns, j->td_pub_ns);
++	s->td_wait_ns += g5p_jt_delta(j->td_pub_ns, j->td_done_ns);
++	s->tail_ns += g5p_jt_delta(j->td_done_ns, j->signal_ns);
++	s->ta_irq_ns += g5p_jt_delta(j->ta_pub_ns, j->ta_ev_ns);
++	s->td_irq_ns += g5p_jt_delta(j->td_pub_ns, j->td_ev_ns);
++	s->ta_decide_ns += g5p_jt_delta(j->ta_ev_ns, j->ta_done_ns);
++	s->td_decide_ns += g5p_jt_delta(j->td_ev_ns, j->td_done_ns);
++	s->touch_ns += j->touch_ns;
++	s->bell_ns += j->bell_ns;
++	s->samples += (u64)j->ta_samples + j->td_samples;
++}
++#endif
+diff --git a/drivers/gpu/apple-g5p/render-user-layout.h b/drivers/gpu/apple-g5p/render-user-layout.h
+index 822709ed8..77f704102 100644
+--- a/drivers/gpu/apple-g5p/render-user-layout.h
++++ b/drivers/gpu/apple-g5p/render-user-layout.h
+@@ -478,6 +478,8 @@ static inline void g5p_ru_job_at(u8 *p, u32 meta, u32 global, u32 pm, u32 slot,
+ 	u32 cursor = sku, starts, finishes;
+ 
+ 	memcpy(work, image, td ? G5P_RU_3D_W_BYTES : G5P_RU_TA_W_BYTES);
++	g5p_put32(work + (td ? 0x8ac : 0x550), 0);
++	g5p_put32(work + (td ? 0x8b0 : 0x554), 0);
+ 	memset(p + sku, 0, td ? 0x180 : 0xc0);
+ 	g5p_put32(work, td ? 1 : 0);
+ 	g5p_put32(work + 4, slot);
+diff --git a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+index f2fb4bf2d..cf4248bc4 100644
+--- a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
++++ b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+@@ -15,6 +15,8 @@
+ #include <linux/uaccess.h>
+ #include <linux/workqueue.h>
+ #include <linux/seq_file.h>
++#include <linux/debugfs.h>
++#include "../../apple-g5p/render-user-jobtime.h"
+ #include <drm/drm_debugfs.h>
+ #include <drm/drm_drv.h>
+ #include <drm/drm_file.h>
+@@ -106,11 +108,19 @@ struct g5p_file {
+ 	u64 job_id;
+ };
+ 
++static bool g5p_jt_log;
++module_param_named(job_time_log, g5p_jt_log, bool, 0600);
++
+ struct g5p_drm {
+ 	struct drm_device drm;
+ 	struct g5p_diag *core;
+ 	/* Protects cached IRQ event/status fields; never held for hardware IO. */
+ 	spinlock_t status_lock;
++	struct g5p_jt jt_ring[G5P_JT_RING];
++	u32 jt_head, jt_count;
++	struct g5p_jt_stats jt_stats;
++	/* Core lock: only samples within the current execute are charged. */
++	struct g5p_jt *jt_active;
+ 	u32 last_event[11], notifications[4], first_fault[11];
+ 	u64 event_serial, fault_serial;
+ 	struct delayed_work idle_work;
+@@ -166,6 +176,109 @@ static inline struct g5p_drm *to_g5p(struct drm_device *drm)
+ 	return container_of(drm, struct g5p_drm, drm);
+ }
+ 
++static s64 g5p_jt_us(u64 a, u64 b)
++{
++	return a && b ? div_s64((s64)b - (s64)a, 1000) : -1;
++}
++static void g5p_jt_line(char *buf, size_t size, const struct g5p_jt *j)
++{
++	scnprintf(
++		buf, size,
++		"G5P-JT job=%llu ctx=%u seq=%u ret=%d f=%x sub=%llu q=%llu prep=%llu ta=%lld/%lld/%lld gap=%lld td=%lld/%lld/%lld tail=%llu total=%llu gta_us=%lld gtd_us=%lld ns=%u/%u touch_us=%llu bell_us=%llu\n",
++		j->id, j->ctx, j->seq, j->ret, j->flags,
++		g5p_jt_delta(j->submit_ns, j->accept_ns) / 1000,
++		g5p_jt_delta(j->accept_ns, j->exec_ns) / 1000,
++		g5p_jt_delta(j->exec_ns, j->ta_pub_ns) / 1000,
++		g5p_jt_us(j->ta_pub_ns, j->ta_ev_ns),
++		g5p_jt_us(j->ta_ev_ns, j->ta_done_ns),
++		g5p_jt_us(j->ta_pub_ns, j->ta_done_ns),
++		g5p_jt_us(j->ta_done_ns, j->td_pub_ns),
++		g5p_jt_us(j->td_pub_ns, j->td_ev_ns),
++		g5p_jt_us(j->td_ev_ns, j->td_done_ns),
++		g5p_jt_us(j->td_pub_ns, j->td_done_ns),
++		g5p_jt_delta(j->td_done_ns, j->signal_ns) / 1000,
++		g5p_jt_delta(j->submit_ns, j->signal_ns) / 1000,
++		j->ta_ticks == ~0ULL ? -1LL : (s64)(j->ta_ticks / 24),
++		j->td_ticks == ~0ULL ? -1LL : (s64)(j->td_ticks / 24),
++		j->ta_samples, j->td_samples, j->touch_ns / 1000,
++		j->bell_ns / 1000);
++}
++static int g5p_jobtimes_show(struct seq_file *m, void *unused)
++{
++	struct drm_debugfs_entry *entry = m->private;
++	struct g5p_drm *d = to_g5p(entry->dev);
++	struct g5p_jt *snapshot;
++	unsigned long flags;
++	u32 count, head;
++	char line[768];
++
++	snapshot = kvmalloc_array(G5P_JT_RING, sizeof(*snapshot), GFP_KERNEL);
++	if (!snapshot)
++		return -ENOMEM;
++	spin_lock_irqsave(&d->status_lock, flags);
++	count = d->jt_count;
++	head = d->jt_head;
++	memcpy(snapshot, d->jt_ring, sizeof(d->jt_ring));
++	spin_unlock_irqrestore(&d->status_lock, flags);
++	for (u32 i = 0; i < count; i++) {
++		g5p_jt_line(line, sizeof(line),
++			    &snapshot[(head - count + i) % G5P_JT_RING]);
++		seq_puts(m, line);
++	}
++	kvfree(snapshot);
++	return 0;
++}
++static int g5p_gpu_stats_show(struct seq_file *m, void *unused)
++{
++	struct g5p_drm *d = m->private;
++	struct g5p_jt_stats s;
++	unsigned long flags;
++	u64 now;
++	spin_lock_irqsave(&d->status_lock, flags);
++	s = d->jt_stats;
++	now = ktime_get_ns();
++	spin_unlock_irqrestore(&d->status_lock, flags);
++	seq_printf(
++		m,
++		"now_ns=%llu since_ns=%llu jobs=%llu failed=%llu ta_ticks=%llu td_ticks=%llu ioctl_ns=%llu queue_ns=%llu prep_ns=%llu ta_wait_ns=%llu gap_ns=%llu td_wait_ns=%llu tail_ns=%llu touch_ns=%llu bell_ns=%llu samples=%llu ta_irq_ns=%llu td_irq_ns=%llu ta_decide_ns=%llu td_decide_ns=%llu joint=%llu\n",
++		now, s.since_ns, s.jobs, s.failed, s.ta_ticks, s.td_ticks,
++		s.ioctl_ns, s.queue_ns, s.prep_ns, s.ta_wait_ns, s.gap_ns,
++		s.td_wait_ns, s.tail_ns, s.touch_ns, s.bell_ns, s.samples,
++		s.ta_irq_ns, s.td_irq_ns, s.ta_decide_ns, s.td_decide_ns,
++		s.joint);
++	return 0;
++}
++static int g5p_gpu_stats_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, g5p_gpu_stats_show, inode->i_private);
++}
++static ssize_t g5p_gpu_stats_write(struct file *file, const char __user *buf,
++				   size_t len, loff_t *pos)
++{
++	struct seq_file *m = file->private_data;
++	struct g5p_drm *d = m->private;
++	unsigned long flags;
++	spin_lock_irqsave(&d->status_lock, flags);
++	memset(&d->jt_stats, 0, sizeof(d->jt_stats));
++	d->jt_stats.since_ns = ktime_get_ns();
++	spin_unlock_irqrestore(&d->status_lock, flags);
++	return len;
++}
++static const struct file_operations g5p_gpu_stats_fops = {
++	.owner = THIS_MODULE,
++	.open = g5p_gpu_stats_open,
++	.read = seq_read,
++	.write = g5p_gpu_stats_write,
++	.llseek = seq_lseek,
++	.release = single_release,
++};
++static void g5p_jt_debugfs_init(struct drm_minor *minor)
++{
++	struct g5p_drm *d = to_g5p(minor->dev);
++	debugfs_create_file("g5p_gpu_stats", 0600, d->drm.debugfs_root, d,
++			    &g5p_gpu_stats_fops);
++}
++
+ static inline struct g5p_bo *to_g5p_bo(struct drm_gem_object *obj)
+ {
+ 	return container_of(obj, struct g5p_bo, shmem.base);
+@@ -535,6 +648,7 @@ static const struct drm_ioctl_desc g5p_ioctls[] = {
+ DEFINE_DRM_GEM_FOPS(g5p_drm_fops);
+ 
+ static const struct drm_driver g5p_drm_driver = {
++	.debugfs_init = g5p_jt_debugfs_init,
+ 	.driver_features = DRIVER_GEM | DRIVER_RENDER | DRIVER_SYNCOBJ |
+ 			   DRIVER_SYNCOBJ_TIMELINE,
+ 	.open = g5p_drm_open,
+@@ -644,6 +758,7 @@ static int g5p_drm_probe(struct platform_device *pdev)
+ 	d->core = g;
+ 	d->fence_context = dma_fence_context_alloc(1);
+ 	spin_lock_init(&d->status_lock);
++	d->jt_stats.since_ns = ktime_get_ns();
+ 	init_waitqueue_head(&d->ev_wq);
+ 	atomic_set(&d->accepted, 0);
+ 	atomic64_set(&d->job_sequence, 0);
+@@ -665,6 +780,7 @@ static int g5p_drm_probe(struct platform_device *pdev)
+ 	atomic_set(&d->open_files, 0);
+ 	atomic_set(&d->r8_queued, 0);
+ 	drm_debugfs_add_file(&d->drm, "g5p_bos", g5p_bos_show, NULL);
++	drm_debugfs_add_file(&d->drm, "g5p_jobtimes", g5p_jobtimes_show, NULL);
+ 	drm_debugfs_add_file(&d->drm, "g5p_cache_receipts", g5p_cache_show, NULL);
+ 	INIT_DELAYED_WORK(&d->idle_work, g5p_idle_work);
+ 	ret = drm_dev_register(&d->drm, 0);
+diff --git a/drivers/gpu/drm/apple-g5p/drm-compute-v1.inc b/drivers/gpu/drm/apple-g5p/drm-compute-v1.inc
+index dcbe34c0b..559546358 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-compute-v1.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-compute-v1.inc
+@@ -393,6 +393,11 @@ out:
+ 	if (ret < 0 && ret != -ECANCELED && v->touched && !v->lost &&
+ 	    !g5p_ru_term_failed(&g5p_rv3_term))
+ 		g5p_rv3_terminal(g, g5p_ru_term_from_ret(ret), "cdm");
++	if (!ret) {
++		u8 *p = g5p_cu_page(b) + G5P_CU_W + 0x278;
++		dma_rmb();
++		job->jt.ta_ticks = g5p_le32(p) | ((u64)g5p_le32(p + 4) << 32);
++	}
+ 	g5p_cu_receipt(g, r, job, ret);
+ 	return ret;
+ }
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+index 1d0a0a76d..0fd86d8e4 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+@@ -317,7 +317,18 @@ static void g5p_rv3_sample(struct g5p_diag *g, struct g5p_render *r, u32 e,
+ 	   *pm = g5p_rv3_pm_cpu(b, r);
+ 	u32 *ring = (u32 *)g5p_boot_shared(b, e ? 0x64 : 0x60);
+ 
+-	g5p_rv3_fw_touch(b);
++	{
++		struct g5p_jt *jt = r->ctx->gpu->jt_active;
++		u64 start = ktime_get_ns();
++		g5p_rv3_fw_touch(b);
++		if (jt) {
++			jt->touch_ns += ktime_get_ns() - start;
++			if (e)
++				jt->td_samples++;
++			else
++				jt->ta_samples++;
++		}
++	}
+ 	memset(s, 0, sizeof(*s));
+ 	dma_rmb();
+ 	s->ns = ktime_get_ns();
+@@ -2501,6 +2512,8 @@ static int g5p_rv3_execute(struct g5p_drm *d, struct g5p_render *r,
+ 	int err = -EIO, ret, why, loss;
+ 	u32 seq, res;
+ 
++	job->jt.exec_ns = ktime_get_ns();
++	job->jt.flags = (first ? 1 : 0) | (!bound_before ? 2 : 0);
+ 	if (job->compute)
+ 		return g5p_cu_execute(d, r, job);
+ 	if (r->stage_done)
+@@ -2746,6 +2759,28 @@ out:
+ 		v->ta_event_ns = g5p_rv3_event_disarm(d, 0);
+ 	if (v->phase >= G5P_RV3_TD_PUBLISH)
+ 		v->td_event_ns = g5p_rv3_event_disarm(d, 1);
++	job->jt.ta_pub_ns = v->ta_pub_ns;
++	job->jt.td_pub_ns = v->td_pub_ns;
++	job->jt.ta_ev_ns = v->ta_event_ns;
++	job->jt.td_ev_ns = v->td_event_ns;
++	job->jt.ta_done_ns = v->ta.end_ns;
++	job->jt.td_done_ns = v->td.end_ns;
++	for (u32 e = 0; e < 2; e++)
++		job->jt.bell_ns +=
++			g5p_jt_delta(v->wk_start_ns[e], v->wk_done_ns[e]);
++	if (!ret) {
++		dma_rmb();
++		for (u32 e = 0; e < 2; e++) {
++			u8 *p = g5p_ru_page(b, e) +
++				g5p_ru_w_at(g5p_rv3_js(rd, seq)) +
++				(e ? 0x8ac : 0x550);
++			u64 ticks = g5p_le32(p) | ((u64)g5p_le32(p + 4) << 32);
++			if (e)
++				job->jt.td_ticks = ticks;
++			else
++				job->jt.ta_ticks = ticks;
++		}
++	}
+ 	g5p_rv3_wake_end(d, r, v);
+ 	/* Any other failure after the hardware was touched (attach, publish, drain, protocol): the same
+ 	 * criterion g5p_render_run() quarantines the context by.  A stage stop (-ECANCELED) is not one.
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render.inc b/drivers/gpu/drm/apple-g5p/drm-render.inc
+index bd86d7dff..851a6a115 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render.inc
+@@ -358,6 +358,7 @@ struct g5p_rjob {
+ 	struct g5p_cu_regs cu;
+ 	struct g5p_rv3 rv3;
+ 	u64 submit_ns; /* latency123: the submit ioctl */
++	struct g5p_jt jt;
+ };
+ 
+ static u8 *g5p_ru_page(struct g5p_boot *b, u32 engine)
+@@ -1027,7 +1028,9 @@ static void g5p_render_run(struct g5p_rjob *job)
+ 			 */
+ 			g5p_render_cache(d, job, false);
+ 			WRITE_ONCE(d->rdev->executing, true);
++			d->jt_active = &job->jt;
+ 			ret = g5p_rv3_execute(d, r, job);
++			d->jt_active = NULL;
+ 			/* after `recovering`, if the executor set it (g5p_rdev_ruling()) */
+ 			smp_store_release(&d->rdev->executing, false);
+ 			hardware = job->rv3.touched || job->rv3.bind_failed;
+@@ -1072,6 +1075,20 @@ static void g5p_render_run(struct g5p_rjob *job)
+ 	atomic_dec(&r->queued);
+ 	atomic_dec(&d->r8_queued);
+ 	dma_fence_signal(&job->fence->base);
++	job->jt.signal_ns = ktime_get_ns();
++	job->jt.ret = ret;
++	job->jt.seq = job->rv3.seq;
++	spin_lock_irqsave(&d->status_lock, flags);
++	d->jt_ring[d->jt_head++ % G5P_JT_RING] = job->jt;
++	if (d->jt_count < G5P_JT_RING)
++		d->jt_count++;
++	g5p_jt_fold(&d->jt_stats, &job->jt);
++	spin_unlock_irqrestore(&d->status_lock, flags);
++	if (g5p_jt_log) {
++		char line[768];
++		g5p_jt_line(line, sizeof(line), &job->jt);
++		dev_info(g->dev, "%s", line);
++	}
+ 	/* A job that may still run on the hardware (a bad context) keeps what it might use. */
+ 	if (!READ_ONCE(job->ctx->bad))
+ 		g5p_render_reap(r, job->fence->base.seqno, false);
+@@ -2045,6 +2062,8 @@ static int g5p_render_submit_admitted(struct drm_device *drm,
+ 	job = kzalloc(sizeof(*job), GFP_KERNEL);
+ 	if (job) {
+ 		job->submit_ns = ktime_get_ns();
++		job->jt.submit_ns = job->submit_ns;
++		job->jt.ta_ticks = job->jt.td_ticks = ~0ULL;
+ 		job->objs = kvcalloc(res_count, sizeof(*job->objs), GFP_KERNEL);
+ 	}
+ 	if (!ranges || !job || !job->objs) {
+@@ -2196,6 +2215,9 @@ static int g5p_render_submit_admitted(struct drm_device *drm,
+ 	job->deadline = jiffies + msecs_to_jiffies(G5P_RU_INPUT_MS);
+ 	job->setup_error = g5p_render_implicit(job, r->fence_context);
+ 	drm_dev_get(drm);
++	job->jt.id = job->id;
++	job->jt.ctx = context;
++	job->jt.accept_ns = ktime_get_ns();
+ 	g5p_rsched_push(d, r, job);
+ 	mutex_unlock(&d->render_submit_lock);
+ 	job = NULL;

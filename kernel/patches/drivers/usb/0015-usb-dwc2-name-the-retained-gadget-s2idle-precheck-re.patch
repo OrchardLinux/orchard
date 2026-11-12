@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 15:26:19 +0100
+Subject: [PATCH] usb: dwc2: name the retained-gadget s2idle precheck refusal
+
+Log why the retained-gadget precheck refused (not-s2idle or
+gadget-not-peripheral, with op_state), only during a suspend attempt.
+The decision is unchanged.
+
+Assisted-by: LLM
+---
+ drivers/usb/dwc2/platform.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/usb/dwc2/platform.c b/drivers/usb/dwc2/platform.c
+index fabee8363..0a2aa1058 100644
+--- a/drivers/usb/dwc2/platform.c
++++ b/drivers/usb/dwc2/platform.c
+@@ -689,8 +689,15 @@ static int dwc2_sleep_precheck(struct notifier_block *nb, unsigned long action,
+ 	if (device_property_read_bool(dwc2->dev, "apple,retain-gadget-in-s2idle") &&
+ 	    (action != PM_SUSPEND_TO_IDLE ||
+ 	     (dwc2->op_state != OTG_STATE_B_PERIPHERAL &&
+-	      dwc2->op_state != OTG_STATE_B_IDLE)))
++	      dwc2->op_state != OTG_STATE_B_IDLE))) {
++		/* Only for an attempt: the readiness query polls this. */
++		if (data == PM_SUSPEND_PRECHECK_ATTEMPT)
++			dev_info(dwc2->dev, "system sleep refused: %s op_state=%d\n",
++				 action != PM_SUSPEND_TO_IDLE ? "not-s2idle" :
++								"gadget-not-peripheral",
++				 dwc2->op_state);
+ 		return notifier_from_errno(-EBUSY);
++	}
+ 	return NOTIFY_OK;
+ }
+ 

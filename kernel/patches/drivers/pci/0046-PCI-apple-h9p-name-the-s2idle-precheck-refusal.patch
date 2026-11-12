@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 15:26:19 +0100
+Subject: [PATCH] PCI: apple-h9p: name the s2idle precheck refusal
+
+The S8003 sleep precheck refused for six different reasons with the same
+silent -EBUSY. Name the first one that applies (nbd-root, late-ports,
+late-work, no-power-domain, storage-port-not-powered,
+unreserved-accelerator or not-s2idle) in one line, only during a suspend
+attempt, so the readiness query stays quiet.
+
+The decision itself is unchanged.
+
+Assisted-by: LLM
+---
+ drivers/pci/controller/pcie-apple-h9p.c | 28 ++++++++++++++++++-------
+ 1 file changed, 21 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/pci/controller/pcie-apple-h9p.c b/drivers/pci/controller/pcie-apple-h9p.c
+index 79b69fdbe..f81e1b166 100644
+--- a/drivers/pci/controller/pcie-apple-h9p.c
++++ b/drivers/pci/controller/pcie-apple-h9p.c
+@@ -3846,6 +3846,7 @@ static int apple_h9p_sleep_stack(struct device *dev, void *data)
+ static int apple_h9p_sleep_precheck(struct notifier_block *nb, unsigned long action, void *data)
+ {
+ 	struct apple_h9p_pcie *pcie = container_of(nb, struct apple_h9p_pcie, sleep_precheck);
++	const char *why = NULL;
+ 	bool nbd = false;
+ 
+ 	if (action == PM_SUSPEND_PRECHECK_COMPLETE)
+@@ -3853,13 +3854,26 @@ static int apple_h9p_sleep_precheck(struct notifier_block *nb, unsigned long act
+ 	if (!apple_h9p_sleep_enabled(pcie))
+ 		return NOTIFY_DONE;
+ 	if (action != PM_SUSPEND_TO_IDLE)
+-		return notifier_from_errno(-EBUSY);
+-	iterate_supers(apple_h9p_sleep_nbd, &nbd);
+-	if (nbd || pcie->late_ports || work_busy(&pcie->late_work.work) ||
+-	    !pcie->pd_dev || !apple_s8003_port_powered(pcie) ||
+-	    bus_for_each_dev(&platform_bus_type, NULL, NULL, apple_h9p_sleep_stack))
+-		return notifier_from_errno(-EBUSY);
+-	return NOTIFY_OK;
++		why = "not-s2idle";
++	else if (iterate_supers(apple_h9p_sleep_nbd, &nbd), nbd)
++		why = "nbd-root";
++	else if (pcie->late_ports)
++		why = "late-ports";
++	else if (work_busy(&pcie->late_work.work))
++		why = "late-work";
++	else if (!pcie->pd_dev)
++		why = "no-power-domain";
++	else if (!apple_s8003_port_powered(pcie))
++		why = "storage-port-not-powered";
++	else if (bus_for_each_dev(&platform_bus_type, NULL, NULL, apple_h9p_sleep_stack))
++		why = "unreserved-accelerator";
++	if (!why)
++		return NOTIFY_OK;
++	/* Only for an attempt: the readiness query polls this. */
++	if (data == PM_SUSPEND_PRECHECK_ATTEMPT)
++		dev_info(pcie->dev, "system sleep refused: %s late_ports=%#x\n", why,
++			 pcie->late_ports);
++	return notifier_from_errno(-EBUSY);
+ }
+ 
+ static void apple_h9p_sleep_unregister(void *data)

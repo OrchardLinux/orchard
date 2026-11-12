@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 16:00:00 +0100
+Subject: [PATCH] Input: apple-z2: stop the touch controller on shutdown
+
+A kexec hands the next kernel an S8000 SPI bus that the touch controller
+may still be using: its interrupt thread can run and the SPI core can
+still hold its messages.
+
+Add a shutdown callback that stops the controller and waits for its
+interrupt, also when the threaded handler has already masked itself. SPI
+children shut down before their controller, so the SPI driver can then
+drain its queue.
+
+Assisted-by: LLM
+---
+ drivers/input/touchscreen/apple_z2.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index 92a04edcd..5dcf3579d 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -4599,6 +4599,16 @@ static struct spi_device_id apple_z2_of_id[] = {
+ };
+ MODULE_DEVICE_TABLE(spi, apple_z2_of_id);
+ 
++/* Children stop before the SPI controller drains its core queue. */
++static void apple_z2_shutdown(struct spi_device *spi)
++{
++	struct apple_z2 *z2 = spi_get_drvdata(spi);
++
++	apple_z2_stop(z2);
++	/* Also wait when the IRQ thread already masked itself. */
++	synchronize_irq(spi->irq);
++}
++
+ static struct spi_driver apple_z2_driver = {
+ 	.driver = {
+ 		.name	= "apple-z2",
+@@ -4609,6 +4619,7 @@ static struct spi_driver apple_z2_driver = {
+ 	.id_table = apple_z2_of_id,
+ 	.probe    = apple_z2_probe,
+ 	.remove   = apple_z2_remove,
++	.shutdown = apple_z2_shutdown,
+ };
+ 
+ module_spi_driver(apple_z2_driver);

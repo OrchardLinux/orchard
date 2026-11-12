@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 23:30:21 +0100
+Subject: [PATCH] watchdog: apple: prioritize cold reset and delegate guarded
+ warm reset
+
+Tethered cold reset must beat PSCI priority 129: register at priority
+255. On warm/soft modes do not program WD1, but return success so
+watchdog_restart_notifier returns NOTIFY_DONE and PSCI can run; an error
+would stop the chain. Other devices retain priority 128.
+
+Assisted-by: LLM
+---
+ drivers/watchdog/apple_wdt.c | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/watchdog/apple_wdt.c b/drivers/watchdog/apple_wdt.c
+index f53395329..04e287fe8 100644
+--- a/drivers/watchdog/apple_wdt.c
++++ b/drivers/watchdog/apple_wdt.c
+@@ -14,6 +14,7 @@
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
++#include <linux/reboot.h>
+ #include <linux/watchdog.h>
+ 
+ /*
+@@ -123,6 +124,12 @@ static int apple_wdt_restart(struct watchdog_device *wdd, unsigned long mode,
+ {
+ 	struct apple_wdt *wdt = to_apple_wdt(wdd);
+ 
++	if (of_property_read_bool(wdd->parent->of_node, "apple,tethered-boot") &&
++	    (mode == REBOOT_WARM || mode == REBOOT_SOFT)) {
++		pr_emerg("apple-wdt: warm/soft reset delegated to PSCI on tethered boot\n");
++		return 0; /* Continue the restart chain; NOTIFY_BAD would stop PSCI. */
++	}
++
+ 	writel_relaxed(APPLE_WDT_CTRL_RESET_EN, wdt->regs + APPLE_WDT_WD1_CTRL);
+ 	writel_relaxed(0, wdt->regs + APPLE_WDT_WD1_BITE_TIME);
+ 	writel_relaxed(0, wdt->regs + APPLE_WDT_WD1_CUR_TIME);
+@@ -190,7 +197,11 @@ static int apple_wdt_probe(struct platform_device *pdev)
+ 	watchdog_init_timeout(&wdt->wdd, 0, dev);
+ 	apple_wdt_set_timeout(&wdt->wdd, wdt->wdd.timeout);
+ 	watchdog_stop_on_unregister(&wdt->wdd);
+-	watchdog_set_restart_priority(&wdt->wdd, 128);
++	/* The tethered cold escape must beat PSCI (priority 129). Warm/soft
++	 * still refuse above, allowing the PSCI handler to run next.
++	 */
++	watchdog_set_restart_priority(&wdt->wdd,
++		of_property_read_bool(dev->of_node, "apple,tethered-boot") ? 255 : 128);
+ 
+ 	return devm_watchdog_register_device(dev, &wdt->wdd);
+ }

@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 19:57:26 +0000
+Subject: [PATCH] PM: sleep: let an admission provider name its refusal in
+ suspend_ready
+
+/sys/power/suspend_ready names the refusing provider and its errno only.
+-EBUSY from a GPU admission check can mean an unquiescent firmware, a
+ring that has not drained or a reservation that is in use, and the
+reader cannot tell them apart without a kernel log.
+
+Add an optional reason callback to struct pm_suspend_admission. It is
+called only right after the provider's check refused, under
+system_transition_mutex, and returns a short token. The token is joined
+to the device name, "not-ready <device>:<reason> <errno>", so the line
+keeps its three fields and existing parsers keep working. A token that
+contains white space or a colon is dropped and the old line is printed.
+
+Assisted-by: LLM
+---
+ Documentation/ABI/testing/sysfs-power |  5 +++++
+ include/linux/pm-suspend-admission.h  |  3 +++
+ kernel/power/suspend.c                | 12 ++++++++++--
+ 3 files changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/ABI/testing/sysfs-power b/Documentation/ABI/testing/sysfs-power
+index 98cc5c2b5..e53150e75 100644
+--- a/Documentation/ABI/testing/sysfs-power
++++ b/Documentation/ABI/testing/sysfs-power
+@@ -488,3 +488,8 @@ Description:
+ 		"transition" while a system transition is in progress, or
+ 		"state" when the mem_sleep state is not available.
+ 		<errno> is a negative decimal errno value.
++
++		A provider may name its reason: <who> is then
++		"<device>:<reason>", where <reason> contains no white
++		space or colon, e.g.
++		"not-ready 201000000.gpu:never-park/gpc=04 -16".
+diff --git a/include/linux/pm-suspend-admission.h b/include/linux/pm-suspend-admission.h
+index 0b1a1c57b..c1996d2e5 100644
+--- a/include/linux/pm-suspend-admission.h
++++ b/include/linux/pm-suspend-admission.h
+@@ -11,6 +11,8 @@
+  * check, optional, answers /sys/power/suspend_ready: whether prepare would
+  * admit now, without reserving or any side effect. Work prepare would drain
+  * is not a refusal. A provider without check reports not ready.
++ * reason, optional, is called only right after check refused, under the same
++ * lock: a short token naming why (no white space or colon), or NULL.
+  */
+ struct pm_suspend_admission {
+ 	struct list_head node;
+@@ -18,6 +20,7 @@ struct pm_suspend_admission {
+ 	int (*prepare)(struct device *dev);
+ 	void (*complete)(struct device *dev);
+ 	int (*check)(struct device *dev);
++	const char *(*reason)(struct device *dev);
+ 	bool reserved;
+ 	bool checked; /* check passed during a readiness query */
+ };
+diff --git a/kernel/power/suspend.c b/kernel/power/suspend.c
+index 670f50ad8..8bb2c7730 100644
+--- a/kernel/power/suspend.c
++++ b/kernel/power/suspend.c
+@@ -658,8 +658,16 @@ static ssize_t suspend_ready_show(struct kobject *kobj,
+ 	list_for_each_entry(a, &suspend_admissions, node) {
+ 		error = a->check ? a->check(a->dev) : -EOPNOTSUPP;
+ 		if (error) {
+-			len = sysfs_emit(buf, "not-ready %s %d\n",
+-					 dev_name(a->dev), error);
++			const char *why = a->check && a->reason ?
++						  a->reason(a->dev) : NULL;
++
++			/* One token: "<device>:<reason>" keeps three fields. */
++			if (why && *why && !strpbrk(why, " \t\n:"))
++				len = sysfs_emit(buf, "not-ready %s:%s %d\n",
++						 dev_name(a->dev), why, error);
++			else
++				len = sysfs_emit(buf, "not-ready %s %d\n",
++						 dev_name(a->dev), error);
+ 			goto clear;
+ 		}
+ 		a->checked = true;

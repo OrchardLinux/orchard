@@ -1,0 +1,86 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 16:12:17 +0100
+Subject: [PATCH] drm/apple-g5p: refuse system sleep only while pmgr still
+ holds gfx
+
+The refusal added for kexec boots keyed on the dirty-start mode: every
+warm boot refused GPU sleep. pmgr-pwrstate now ends a warm boot's hold
+at the gfx provider's sync_state, after which genpd gates gfx in sleep
+as on a cold boot, and the resume witnesses that power-off.
+
+Ask pmgr-pwrstate instead. The refusal remains, under the reason
+"gfx-power-held", for the one case where the hold is still in place: a
+consumer of the gfx domain that never probed. Cold boots never hold, so
+they never refuse for it.
+
+Assisted-by: LLM
+---
+ drivers/gpu/apple-g5p/core.inc             |  1 +
+ drivers/gpu/drm/apple-g5p/system-sleep.inc | 25 +++++++++++-----------
+ 2 files changed, 13 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/gpu/apple-g5p/core.inc b/drivers/gpu/apple-g5p/core.inc
+index 20eb5594f..72fc1ff4c 100644
+--- a/drivers/gpu/apple-g5p/core.inc
++++ b/drivers/gpu/apple-g5p/core.inc
+@@ -18,6 +18,7 @@
+ #include <linux/regmap.h>
+ #include <linux/platform_device.h>
+ #include <linux/pm_domain.h>
++#include <linux/soc/apple/pmgr-pwrstate.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/hrtimer.h>
+ #include <linux/workqueue.h>
+diff --git a/drivers/gpu/drm/apple-g5p/system-sleep.inc b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+index 64bb87905..10c68dbc2 100644
+--- a/drivers/gpu/drm/apple-g5p/system-sleep.inc
++++ b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+@@ -150,17 +150,16 @@ static void g5p_sleep_sample(struct g5p_diag *g, u32 *state, u32 *mode, u32 *r8)
+ }
+ 
+ /*
+- * A kexec boot (DS108 mode 3) keeps every S8000 PMGR power state on for the
+- * whole boot (pmgr-pwrstate keep_on, "retain the tethered warm boot state"):
+- * genpd power-off of gfx returns -EBUSY. Sleep would then stop the firmware
+- * without the platform off, and resume would boot it over a GPU that was
+- * never power-cycled: a dirty start, which DS108 admits only through its one
+- * bounded reset at probe. Refuse before anything is shut, until the warm boot
+- * can power the GPU off like a cold one. RAM only.
++ * pmgr-pwrstate holds a kexec boot's domains on until the provider's
++ * sync_state, i.e. until every consumer has probed; after that gfx is gated
++ * in sleep as on a cold boot. While the hold is still in place (a consumer of
++ * gfx never probed) genpd's power-off would return -EBUSY and the GPU would
++ * sleep powered: refuse before anything is shut. Cold boots never hold. No
++ * GPU or PMGR register access.
+  */
+-static bool g5p_sleep_gfx_power_held(void)
++static bool g5p_sleep_gfx_power_held(struct g5p_diag *g)
+ {
+-	return g5p_ds_mode() >= 3;
++	return g->gfx_np && apple_pmgr_ps_power_held(g->gfx_np) != 0;
+ }
+ 
+ /* R1 only, as Apple's isQuiescent/isStableOff. Never infer bus retirement
+@@ -284,8 +283,8 @@ static int g5p_system_sleep_prepare(struct device *dev)
+ 		return -EBUSY;
+ 	}
+ 	d = g->event_cookie;
+-	if (g5p_sleep_gfx_power_held()) {
+-		dev_info(dev, "GPU-PM sleep refused: stage=entry why=warm-gfx-power-held\n");
++	if (g5p_sleep_gfx_power_held(g)) {
++		dev_info(dev, "GPU-PM sleep refused: stage=entry why=gfx-power-held\n");
+ 		return -EBUSY;
+ 	}
+ 	if (READ_ONCE(g->sleep_reserved)) {
+@@ -481,8 +480,8 @@ static int g5p_system_sleep_check(struct device *dev)
+ 	if (!READ_ONCE(b->alive) || READ_ONCE(b->stopped) || !b->released ||
+ 	    !b->irq_ready)
+ 		return g5p_sleep_why(d, -ENODEV, "not-booted");
+-	if (g5p_sleep_gfx_power_held())
+-		return g5p_sleep_why(d, -EBUSY, "warm-gfx-power-held");
++	if (g5p_sleep_gfx_power_held(g))
++		return g5p_sleep_why(d, -EBUSY, "gfx-power-held");
+ 	never_park = g5p_sleep_never_park(b);
+ 	if (!mutex_trylock(&g->lock))
+ 		return never_park ? g5p_sleep_why(d, -EBUSY, "never-park/locked") :

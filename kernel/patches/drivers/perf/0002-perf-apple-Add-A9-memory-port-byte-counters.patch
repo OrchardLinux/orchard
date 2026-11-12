@@ -1,0 +1,437 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 10:22:55 +0000
+Subject: [PATCH] perf: apple: Add A9 memory port byte counters
+
+Assisted-by: LLM
+---
+ drivers/perf/Kconfig         |   9 +
+ drivers/perf/Makefile        |   1 +
+ drivers/perf/apple_amc_pmu.c | 391 +++++++++++++++++++++++++++++++++++
+ 3 files changed, 401 insertions(+)
+ create mode 100644 drivers/perf/apple_amc_pmu.c
+
+diff --git a/drivers/perf/Kconfig b/drivers/perf/Kconfig
+index 245e7bb76..5f324b8bb 100644
+--- a/drivers/perf/Kconfig
++++ b/drivers/perf/Kconfig
+@@ -325,4 +325,13 @@ config NVIDIA_TEGRA410_C2C_PMU
+ 	  Enable perf support for counters in NVIDIA C2C interface of NVIDIA
+ 	  Tegra410 SoC.
+ 
++config APPLE_AMC_PMU
++	tristate "Apple A9 memory controller bandwidth PMU"
++	depends on ARM64 && (ARCH_APPLE || COMPILE_TEST)
++	depends on PERF_EVENTS
++	help
++	  Count system-wide CPU and GPU memory traffic on Apple A9 SoCs.
++	  The PMU exposes four fixed byte events through perf and does not
++	  support task filtering or sampling interrupts.
++
+ endmenu
+diff --git a/drivers/perf/Makefile b/drivers/perf/Makefile
+index eb8a022da..3652b87ed 100644
+--- a/drivers/perf/Makefile
++++ b/drivers/perf/Makefile
+@@ -37,3 +37,4 @@ obj-$(CONFIG_MESON_DDR_PMU) += amlogic/
+ obj-$(CONFIG_CXL_PMU) += cxl_pmu.o
+ obj-$(CONFIG_NVIDIA_TEGRA410_CMEM_LATENCY_PMU) += nvidia_t410_cmem_latency_pmu.o
+ obj-$(CONFIG_NVIDIA_TEGRA410_C2C_PMU) += nvidia_t410_c2c_pmu.o
++obj-$(CONFIG_APPLE_AMC_PMU) += apple_amc_pmu.o
+diff --git a/drivers/perf/apple_amc_pmu.c b/drivers/perf/apple_amc_pmu.c
+new file mode 100644
+index 000000000..82fc6b95c
+--- /dev/null
++++ b/drivers/perf/apple_amc_pmu.c
+@@ -0,0 +1,391 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* Apple A9 memory-cache-controller port bandwidth PMU. */
++#include <linux/cpuhotplug.h>
++#include <linux/hrtimer.h>
++#include <linux/io.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/perf_event.h>
++#include <linux/platform_device.h>
++
++#define AMC_CONTROL	0x00
++#define AMC_ENABLE	0x04
++#define AMC_CONFIG(n, w)	(0x08 + (n) * 0x1c + (w) * 4)
++#define AMC_COUNT(n)	(0x20 + (n) * 0x1c)
++#define AMC_PORT_MASK	GENMASK(4, 0)
++#define AMC_EVENTS	4
++/* At 2 bytes/tick a 32-bit counter wraps after 8 GiB, not 4 GiB. */
++#define AMC_POLL_NS	(10 * NSEC_PER_MSEC)
++
++struct apple_amc_data {
++	u32 port_filter[2];
++	u32 request_filter[2];
++	u32 byte_filter;
++	u32 line_filter;
++	u32 control;
++};
++
++struct apple_amc {
++	struct pmu pmu;
++	void __iomem *base;
++	const struct apple_amc_data *data;
++	raw_spinlock_t lock;
++	struct hrtimer timer;
++	struct perf_event *events[AMC_EVENTS];
++	unsigned long running;
++	struct hlist_node node;
++	int cpu;
++	bool suspended;
++};
++
++static int amc_hp_state;
++
++#define to_amc(p) container_of(p, struct apple_amc, pmu)
++#define AMC_EVENT(name, id) PMU_EVENT_ATTR_STRING(name, amc_##name, "event=" #id)
++AMC_EVENT(cpu_read, 0);
++AMC_EVENT(cpu_write, 1);
++AMC_EVENT(gfx_read, 2);
++AMC_EVENT(gfx_write, 3);
++PMU_FORMAT_ATTR(event, "config:0-1");
++
++static struct attribute *amc_event_attrs[] = {
++	&amc_cpu_read.attr.attr, &amc_cpu_write.attr.attr,
++	&amc_gfx_read.attr.attr, &amc_gfx_write.attr.attr, NULL,
++};
++static struct attribute *amc_format_attrs[] = { &format_attr_event.attr, NULL };
++static const struct attribute_group amc_events = {
++	.name = "events", .attrs = amc_event_attrs,
++};
++static const struct attribute_group amc_format = {
++	.name = "format", .attrs = amc_format_attrs,
++};
++
++static ssize_t cpumask_show(struct device *dev, struct device_attribute *attr,
++			    char *buf)
++{
++	struct apple_amc *amc = to_amc(dev_get_drvdata(dev));
++
++	return sysfs_emit(buf, "%*pbl\n", cpumask_pr_args(cpumask_of(amc->cpu)));
++}
++static DEVICE_ATTR_RO(cpumask);
++static struct attribute *amc_cpu_attrs[] = { &dev_attr_cpumask.attr, NULL };
++static const struct attribute_group amc_cpus = { .attrs = amc_cpu_attrs };
++static const struct attribute_group *amc_groups[] = {
++	&amc_events, &amc_format, &amc_cpus, NULL,
++};
++
++/* Match Apple's read, disable, zero, restore sequence for each physical slot. */
++static u32 amc_drain(struct apple_amc *amc, int slot)
++{
++	u32 count = readl(amc->base + AMC_COUNT(slot));
++	u32 enable = readl(amc->base + AMC_ENABLE);
++
++	writel(enable & ~BIT(slot), amc->base + AMC_ENABLE);
++	writel(0, amc->base + AMC_COUNT(slot));
++	writel(enable, amc->base + AMC_ENABLE);
++	return count;
++}
++
++/* lock held; widen before scaling (Apple's intermediate is only 32 bits). */
++static void amc_update(struct apple_amc *amc)
++{
++	u64 bytes[AMC_EVENTS];
++	int i;
++
++	if (!amc->running || amc->suspended)
++		return;
++	bytes[0] = (u64)amc_drain(amc, 0) * 128;
++	bytes[0] += (u64)amc_drain(amc, 4) * 2;
++	for (i = 1; i < AMC_EVENTS; i++)
++		bytes[i] = (u64)amc_drain(amc, i) * 2;
++	for_each_set_bit(i, &amc->running, AMC_EVENTS)
++		local64_add(bytes[i], &amc->events[i]->count);
++}
++
++static void amc_enable(struct apple_amc *amc)
++{
++	u32 mask = readl(amc->base + AMC_ENABLE) & ~AMC_PORT_MASK;
++
++	if (amc->running && !amc->suspended)
++		mask |= AMC_PORT_MASK;
++	writel(mask, amc->base + AMC_ENABLE);
++}
++
++static void amc_program(struct apple_amc *amc)
++{
++	const struct apple_amc_data *d = amc->data;
++	int n;
++
++	writel(readl(amc->base + AMC_ENABLE) & ~AMC_PORT_MASK,
++	       amc->base + AMC_ENABLE);
++	for (n = 0; n < 5; n++) {
++		writel(n == 0 ? d->line_filter : d->byte_filter,
++		       amc->base + AMC_CONFIG(n, 0));
++		writel(0, amc->base + AMC_CONFIG(n, 1));
++		writel(d->request_filter[n == 1 || n == 3],
++		       amc->base + AMC_CONFIG(n, 2));
++		writel(d->port_filter[n == 2 || n == 3],
++		       amc->base + AMC_CONFIG(n, 3));
++		writel(0, amc->base + AMC_CONFIG(n, 4));
++		writel(0, amc->base + AMC_CONFIG(n, 5));
++		writel(0, amc->base + AMC_COUNT(n));
++	}
++	writel(d->control, amc->base + AMC_CONTROL);
++	amc_enable(amc);
++}
++
++static enum hrtimer_restart amc_poll(struct hrtimer *timer)
++{
++	struct apple_amc *amc = container_of(timer, struct apple_amc, timer);
++	unsigned long flags;
++
++	raw_spin_lock_irqsave(&amc->lock, flags);
++	amc_update(amc);
++	if (!amc->running || amc->suspended) {
++		raw_spin_unlock_irqrestore(&amc->lock, flags);
++		return HRTIMER_NORESTART;
++	}
++	hrtimer_forward_now(timer, ns_to_ktime(AMC_POLL_NS));
++	raw_spin_unlock_irqrestore(&amc->lock, flags);
++	return HRTIMER_RESTART;
++}
++
++static int amc_event_init(struct perf_event *event)
++{
++	struct apple_amc *amc = to_amc(event->pmu);
++	struct perf_event *sibling;
++	unsigned long used = 0;
++
++	if (event->attr.type != event->pmu->type)
++		return -ENOENT;
++	if (is_sampling_event(event) || event->attach_state & PERF_ATTACH_TASK)
++		return -EOPNOTSUPP;
++	if (event->cpu < 0 || event->attr.config >= AMC_EVENTS ||
++	    event->attr.config1 || event->attr.config2)
++		return -EINVAL;
++	if (event->group_leader != event && !is_software_event(event->group_leader)) {
++		if (event->group_leader->pmu != event->pmu)
++			return -EINVAL;
++		used |= BIT(event->group_leader->attr.config);
++	}
++	for_each_sibling_event(sibling, event->group_leader) {
++		if (sibling == event || is_software_event(sibling))
++			continue;
++		if (sibling->pmu != event->pmu)
++			return -EINVAL;
++		used |= BIT(sibling->attr.config);
++	}
++	if (used & BIT(event->attr.config))
++		return -EINVAL;
++	event->cpu = amc->cpu;
++	event->hw.idx = event->attr.config;
++	return 0;
++}
++
++static void amc_start(struct perf_event *event, int flags)
++{
++	struct apple_amc *amc = to_amc(event->pmu);
++	unsigned long irqflags;
++
++	raw_spin_lock_irqsave(&amc->lock, irqflags);
++	amc_update(amc);
++	/* Clear stale samples before the first active event. */
++	if (!amc->running && !amc->suspended) {
++		amc_program(amc);
++		hrtimer_start(&amc->timer, ns_to_ktime(AMC_POLL_NS), HRTIMER_MODE_REL);
++	}
++	set_bit(event->hw.idx, &amc->running);
++	event->hw.state = 0;
++	amc_enable(amc);
++	raw_spin_unlock_irqrestore(&amc->lock, irqflags);
++}
++
++static void amc_stop(struct perf_event *event, int flags)
++{
++	struct apple_amc *amc = to_amc(event->pmu);
++	unsigned long irqflags;
++
++	raw_spin_lock_irqsave(&amc->lock, irqflags);
++	amc_update(amc);
++	clear_bit(event->hw.idx, &amc->running);
++	event->hw.state = PERF_HES_STOPPED | PERF_HES_UPTODATE;
++	amc_enable(amc);
++	raw_spin_unlock_irqrestore(&amc->lock, irqflags);
++}
++
++static int amc_add(struct perf_event *event, int flags)
++{
++	struct apple_amc *amc = to_amc(event->pmu);
++	unsigned long irqflags;
++	int idx = event->hw.idx;
++
++	raw_spin_lock_irqsave(&amc->lock, irqflags);
++	if (amc->events[idx]) {
++		raw_spin_unlock_irqrestore(&amc->lock, irqflags);
++		return -EAGAIN;
++	}
++	amc->events[idx] = event;
++	event->hw.state = PERF_HES_STOPPED | PERF_HES_UPTODATE;
++	raw_spin_unlock_irqrestore(&amc->lock, irqflags);
++	if (flags & PERF_EF_START)
++		amc_start(event, flags);
++	return 0;
++}
++
++static void amc_del(struct perf_event *event, int flags)
++{
++	struct apple_amc *amc = to_amc(event->pmu);
++	unsigned long irqflags;
++
++	amc_stop(event, PERF_EF_UPDATE);
++	raw_spin_lock_irqsave(&amc->lock, irqflags);
++	amc->events[event->hw.idx] = NULL;
++	raw_spin_unlock_irqrestore(&amc->lock, irqflags);
++}
++
++static void amc_read(struct perf_event *event)
++{
++	struct apple_amc *amc = to_amc(event->pmu);
++	unsigned long flags;
++
++	raw_spin_lock_irqsave(&amc->lock, flags);
++	amc_update(amc);
++	raw_spin_unlock_irqrestore(&amc->lock, flags);
++}
++
++static int amc_offline(unsigned int cpu, struct hlist_node *node)
++{
++	struct apple_amc *amc = hlist_entry(node, struct apple_amc, node);
++	unsigned int target;
++
++	if (cpu != amc->cpu)
++		return 0;
++	target = cpumask_any_but(cpu_online_mask, cpu);
++	if (target >= nr_cpu_ids)
++		return 0;
++	perf_pmu_migrate_context(&amc->pmu, cpu, target);
++	amc->cpu = target;
++	return 0;
++}
++
++static int amc_suspend(struct device *dev)
++{
++	struct apple_amc *amc = dev_get_drvdata(dev);
++	unsigned long flags;
++
++	hrtimer_cancel(&amc->timer);
++	raw_spin_lock_irqsave(&amc->lock, flags);
++	amc_update(amc);
++	amc->suspended = true;
++	amc_enable(amc);
++	raw_spin_unlock_irqrestore(&amc->lock, flags);
++	return 0;
++}
++
++static int amc_resume(struct device *dev)
++{
++	struct apple_amc *amc = dev_get_drvdata(dev);
++	unsigned long flags;
++
++	raw_spin_lock_irqsave(&amc->lock, flags);
++	amc->suspended = false;
++	amc_program(amc);
++	raw_spin_unlock_irqrestore(&amc->lock, flags);
++	if (amc->running)
++		hrtimer_start(&amc->timer, ns_to_ktime(AMC_POLL_NS), HRTIMER_MODE_REL);
++	return 0;
++}
++static DEFINE_SIMPLE_DEV_PM_OPS(amc_pm_ops, amc_suspend, amc_resume);
++
++static int amc_probe(struct platform_device *pdev)
++{
++	struct apple_amc *amc;
++	struct resource *res;
++	int ret;
++
++	amc = devm_kzalloc(&pdev->dev, sizeof(*amc), GFP_KERNEL);
++	if (!amc)
++		return -ENOMEM;
++	amc->data = of_device_get_match_data(&pdev->dev);
++	amc->base = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
++	if (IS_ERR(amc->base))
++		return PTR_ERR(amc->base);
++	if (resource_size(res) < AMC_COUNT(4) + sizeof(u32))
++		return -EINVAL;
++	amc->cpu = raw_smp_processor_id();
++	raw_spin_lock_init(&amc->lock);
++	hrtimer_setup(&amc->timer, amc_poll, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
++	platform_set_drvdata(pdev, amc);
++	amc->pmu = (struct pmu) {
++		.module = THIS_MODULE, .parent = &pdev->dev,
++		.task_ctx_nr = perf_invalid_context,
++		.capabilities = PERF_PMU_CAP_NO_EXCLUDE,
++		.attr_groups = amc_groups, .event_init = amc_event_init,
++		.add = amc_add, .del = amc_del, .start = amc_start,
++		.stop = amc_stop, .read = amc_read,
++	};
++	ret = cpuhp_state_add_instance_nocalls(amc_hp_state, &amc->node);
++	if (ret)
++		return ret;
++	ret = perf_pmu_register(&amc->pmu, "apple_amc", -1);
++	if (ret) {
++		cpuhp_state_remove_instance_nocalls(amc_hp_state, &amc->node);
++		return ret;
++	}
++	/* First event starts polling and programs the hardware. */
++	return 0;
++}
++
++static void amc_remove(struct platform_device *pdev)
++{
++	struct apple_amc *amc = platform_get_drvdata(pdev);
++
++	perf_pmu_unregister(&amc->pmu);
++	hrtimer_cancel(&amc->timer);
++	cpuhp_state_remove_instance_nocalls(amc_hp_state, &amc->node);
++	amc->running = 0;
++	amc_enable(amc);
++}
++
++static const struct apple_amc_data s8000_data = {
++	.port_filter = { 0xf20, 0xf40 },
++	.request_filter = { 0x20031, 0x20032 },
++	.byte_filter = 0x7ff0060, .line_filter = 0x7ff0070,
++	.control = 0x11,
++};
++static const struct of_device_id amc_of_match[] = {
++	{ .compatible = "apple,s8000-amc-pmu", .data = &s8000_data },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, amc_of_match);
++static struct platform_driver amc_driver = {
++	.probe = amc_probe, .remove = amc_remove,
++	.driver = {
++		.name = "apple-amc-pmu", .of_match_table = amc_of_match,
++		.pm = pm_sleep_ptr(&amc_pm_ops),
++	},
++};
++
++static int __init amc_init(void)
++{
++	int ret;
++
++	amc_hp_state = cpuhp_setup_state_multi(CPUHP_AP_ONLINE_DYN,
++				"perf/apple-amc:offline", NULL, amc_offline);
++	if (amc_hp_state < 0)
++		return amc_hp_state;
++	ret = platform_driver_register(&amc_driver);
++	if (ret)
++		cpuhp_remove_multi_state(amc_hp_state);
++	return ret;
++}
++module_init(amc_init);
++
++static void __exit amc_exit(void)
++{
++	platform_driver_unregister(&amc_driver);
++	cpuhp_remove_multi_state(amc_hp_state);
++}
++module_exit(amc_exit);
++MODULE_DESCRIPTION("Apple A9 memory controller bandwidth PMU");
++MODULE_LICENSE("GPL");
