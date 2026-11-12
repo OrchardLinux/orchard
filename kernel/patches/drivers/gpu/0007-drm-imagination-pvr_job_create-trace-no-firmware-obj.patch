@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sun, 8 Nov 2026 06:58:52 +0800
+Subject: [PATCH] drm/imagination: pvr_job_create trace: no firmware object on
+ Apple contexts
+
+Apple A10 contexts submit through Apple's firmware and have no IMG
+firmware object; the tracepoint dereferenced it and oopsed in the
+submit ioctl when the pvr trace events were enabled.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_trace.h | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_trace.h b/drivers/gpu/drm/imagination/pvr_trace.h
+index 943d6b2418cb..bc8f977f1b55 100644
+--- a/drivers/gpu/drm/imagination/pvr_trace.h
++++ b/drivers/gpu/drm/imagination/pvr_trace.h
+@@ -46,7 +46,7 @@ TRACE_EVENT(pvr_job_submit_ioctl,
+ 		struct pvr_job *_job = (job);                                          \
+ 		u32 _hwrt_fw_addr = 0;                                                 \
+ 										       \
+-		if (_job && _job->hwrt)                                                \
++		if (_job && _job->hwrt && _job->hwrt->fw_obj)                         \
+ 			pvr_fw_object_get_fw_addr(_job->hwrt->fw_obj, &_hwrt_fw_addr); \
+ 										       \
+ 		_hwrt_fw_addr;                                                         \
+@@ -74,7 +74,10 @@ TRACE_EVENT(pvr_job_create,
+ 	    TP_fast_assign(__entry->pvr_dev = pvr_dev;
+ 			   __entry->ctx = job->ctx;
+ 			   __entry->fw_obj = job->ctx->fw_obj;
+-			   pvr_fw_object_get_fw_addr(job->ctx->fw_obj, &__entry->fw_addr);
++			   /* Apple contexts have no IMG firmware object */
++			   __entry->fw_addr = 0;
++			   if (job->ctx->fw_obj)
++				   pvr_fw_object_get_fw_addr(job->ctx->fw_obj, &__entry->fw_addr);
+ 			   __entry->hwrt_addr = PVR_JOB_GET_HWRT_FW_ADDR(job);
+ 			   __entry->job = job;
+ 			   __entry->job_type = job->type;

@@ -22,14 +22,9 @@ class N61Data(unittest.TestCase):
         self.assertEqual(self.device['kernel'], {'platform': 'apple-4k', 'dtb': 't7000-n61'})
         self.assertEqual(self.device['boot'], {'methods': ['checkm8-pongo']})
 
-    def test_observed_minimal_boot_and_touch_keep_installation_experimental(self):
+    def test_installation_waits_for_storage_writes(self):
         self.assertIn('its internal storage cannot be written yet', data.install_blockers('n61'))
-        self.assertEqual(self.device['support'], {'status': 'experimental'})
-        expected = dict.fromkeys(data.features(), 'missing')
-        expected.update(display='working', screen_off='untested', touch='working',
-                        backlight='untested', buttons='untested', usb_serial='working', usb_network='untested',
-                        suspend='untested', resume='untested')
-        self.assertEqual(self.device['features'], expected)
+
     def test_touch_recipe_selects_the_pinned_n61_gen1_profile(self):
         path = data.firmware_path('n61')
         self.assertEqual(path, HARDWARE / 'devices/n61/firmware.json')

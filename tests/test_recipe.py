@@ -76,6 +76,9 @@ class RecipeTests(unittest.TestCase):
     def test_vxd_firmware_step_is_known(self):
         recipe.check(sample([{'step': 'vxd-firmware-from-kernelcache@1', 'input': 'blob'}]))
 
+    def test_a10_gpu_firmware_step_is_known(self):
+        recipe.check(sample([{'step': 'agx-g9p-firmware-from-kernelcache@1', 'input': 'blob'}]))
+
     def test_inputs_and_outputs_are_hash_checked(self):
         document = recipe.check(sample([{'step': 'copy@1', 'input': 'blob'}]))
         self.assertEqual(recipe.run(document, lambda name: b'firmware'),

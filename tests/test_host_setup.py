@@ -46,8 +46,18 @@ class HostSetup(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(download.call_count, 1)
         self.assertEqual(commands.call_count, 2)  # install rules, reload; never palera/device commands.
-        self.assertEqual(rule.read_text().count('MODE="0660"'), 4)
+        self.assertEqual(rule.read_text().count('MODE="0660"'), 12)
+        for pid in ('4142', '4144', '4145', '4146'):
+            self.assertIn(f'SUBSYSTEM=="tty", ATTRS{{idVendor}}=="05ac", ATTRS{{idProduct}}=="{pid}"',
+                          rule.read_text())
         self.assertEqual(first['tools']['palera1n'], '/cache/palera1n')
+
+    def test_bootloader_usb_and_proxy_serial_have_matching_access_rules(self):
+        rules = host_setup.usb_rules('developers')
+        for subsystem, attribute in (('usb', 'ATTR'), ('tty', 'ATTRS')):
+            self.assertIn(f'SUBSYSTEM=="{subsystem}", {attribute}{{idVendor}}=="1209", '
+                          f'{attribute}{{idProduct}}=="316d", MODE="0660", GROUP="developers", '
+                          'TAG+="uaccess"', rules)
 
     def test_macos_keeps_existing_tools_and_never_uses_sudo(self):
         with patch.object(host_setup.platform, 'system', return_value='Darwin'), \

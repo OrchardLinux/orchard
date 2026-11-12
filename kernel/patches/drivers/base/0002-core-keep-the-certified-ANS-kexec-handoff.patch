@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 17:15:00 +0100
+Subject: [PATCH] core: keep the certified ANS kexec handoff
+
+Resetting the ANS host or its translations destroys the state required
+by the next kernel. Retain the stopped-DMA handoff only where the device
+tree requests it.
+
+Assisted-by: LLM
+---
+ kernel/kexec_core.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/kernel/kexec_core.c b/kernel/kexec_core.c
+index dc770b9a6..819650bcd 100644
+--- a/kernel/kexec_core.c
++++ b/kernel/kexec_core.c
+@@ -53,6 +53,7 @@ atomic_t __kexec_lock = ATOMIC_INIT(0);
+ 
+ /* Flag to indicate we are going to kexec a new kernel */
+ bool kexec_in_progress = false;
++EXPORT_SYMBOL_GPL(kexec_in_progress);
+ 
+ bool kexec_file_dbg_print;
+ 

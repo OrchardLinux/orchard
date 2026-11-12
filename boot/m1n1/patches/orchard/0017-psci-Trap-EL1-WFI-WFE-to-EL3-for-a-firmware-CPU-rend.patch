@@ -1,0 +1,286 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 15:58:57 +0100
+Subject: [PATCH] psci: Trap EL1 WFI/WFE to EL3 for a firmware CPU rendezvous
+
+An ordinary arm64 reboot or power-off does not offline the secondaries
+with CPU_OFF: smp_send_stop() leaves them spinning in "wfe; wfi" at EL1
+with interrupts masked, still ON as far as the monitor knows. A9 has no
+way to reset a core from another one (Apple and m1n1 power cores down
+from the core itself), so SYSTEM_RESET and SYSTEM_OFF need those CPUs to
+come to EL3 on their own.
+
+Give the monitor that hook: a private SiP call, made by m1n1 on the boot
+CPU right before it starts a kernel, sets SCR_EL3.TWI and TWE there and
+on every CPU that later leaves the pen, and records the AIC and watchdog
+bases for later EL3 use. A trapped WFE returns at once (a spurious
+wake-up is architectural, and the exception return may have cleared the
+exclusive monitor whose event the caller waits for); a trapped WFI waits
+at EL3 with IRQ/FIQ routed there only around the wfi, so an interrupt
+meant for EL1 still wakes it. While a rendezvous is pending, a trapped
+CPU instead parks itself in the pen exactly as CPU_OFF would, cleaning
+its L1D on the way.
+
+The trap enable has no user yet. The CPUs that have been in the pen are
+recorded, so a rendezvous knows which ones the kernel was given.
+
+Assisted-by: LLM
+---
+ src/psci.c     | 56 ++++++++++++++++++++++++++++++++++++++
+ src/psci.h     | 20 ++++++++++++++
+ src/psci_asm.S | 73 ++++++++++++++++++++++++++++++++++++++++++++++++--
+ 3 files changed, 147 insertions(+), 2 deletions(-)
+
+diff --git a/src/psci.c b/src/psci.c
+index 25e2a4f..af4f325 100644
+--- a/src/psci.c
++++ b/src/psci.c
+@@ -28,6 +28,24 @@ struct {
+     u64 boot_el3;
+ } psci_persist __attribute__((section(".data"), aligned(PSCI_CPU_SIZE)));
+ 
++/*
++ * Rendezvous state, one line, only accessed at EL3 with the MMU off. A CPU
++ * that wants all others in the pen (SYSTEM_RESET/SYSTEM_OFF) sets pending;
++ * every other CPU then parks itself at its next trapped WFI/WFE.
++ */
++struct psci_rdv {
++    volatile u64 pending;
++    volatile u64 traps; /* SCR_EL3.TWI|TWE for CPUs leaving the pen */
++    volatile u64 cpus;  /* MPIDR indices that have been in the pen: handed to the kernel */
++    u64 aic;
++    u64 wdt;
++    u64 pad[PSCI_CPU_SIZE / 8 - 5];
++} psci_rdv __attribute__((section(".data"), aligned(PSCI_CPU_SIZE)));
++
++_Static_assert(sizeof(struct psci_rdv) == PSCI_CPU_SIZE, "psci_rdv layout");
++_Static_assert(offsetof(struct psci_rdv, pending) == PSCI_RDV_PENDING, "psci_rdv layout");
++_Static_assert(offsetof(struct psci_rdv, traps) == PSCI_RDV_TRAPS, "psci_rdv layout");
++
+ /* On unless the payload says psci=0; kept across a re-entry */
+ static u32 psci_mode __attribute__((section(".data"))) = 1;
+ 
+@@ -62,6 +80,10 @@ static s64 psci_cpu_off(void)
+     if (idx < 0)
+         return PSCI_RET_DENIED;
+ 
++    psci_line_sync(&psci_rdv);
++    psci_rdv.cpus |= BIT(idx);
++    psci_line_sync(&psci_rdv);
++
+     psci_pen(&psci_cpus[idx], (u64)&psci_stacks[idx][PSCI_STACK_SIZE]);
+ }
+ 
+@@ -128,6 +150,32 @@ static s64 psci_features(u32 fid)
+     }
+ }
+ 
++/* Arms (or disarms) the WFx traps on this CPU and on every CPU leaving the pen */
++static s64 psci_m1n1_handoff(u64 traps, u64 aic, u64 wdt)
++{
++    u64 bits = traps ? (SCR_EL3_TWI | SCR_EL3_TWE) : 0;
++
++    psci_rdv.pending = 0;
++    psci_rdv.traps = bits;
++    psci_rdv.aic = aic;
++    psci_rdv.wdt = wdt;
++    psci_line_sync(&psci_rdv);
++
++    msr(SCR_EL3, (mrs(SCR_EL3) & ~(u64)(SCR_EL3_TWI | SCR_EL3_TWE)) | bits);
++    sysop("isb");
++
++    return PSCI_RET_SUCCESS;
++}
++
++/* A trapped WFI/WFE saw the rendezvous flag: become CPU_OFF right here */
++void psci_rendezvous_off(void)
++{
++    psci_cpu_off();
++    /* Not a CPU we know (can't happen after the pen saw it): stay out of the way */
++    for (;;)
++        sysop("wfe");
++}
++
+ u64 psci_handle(u64 fid, u64 a1, u64 a2, u64 a3)
+ {
+     u32 fn = fid;
+@@ -154,6 +202,8 @@ u64 psci_handle(u64 fid, u64 a1, u64 a2, u64 a3)
+             return 2; /* no trusted OS, nothing to migrate */
+         case PSCI_1_0_FN_PSCI_FEATURES:
+             return psci_features(a1);
++        case PSCI_M1N1_SIP_HANDOFF:
++            return psci_m1n1_handoff(a1, a2, a3);
+         default:
+             /* SYSTEM_RESET/SYSTEM_OFF too: the caller falls back to its own */
+             return PSCI_RET_NOT_SUPPORTED;
+@@ -190,6 +240,12 @@ bool psci_reentered(void)
+     return reentered;
+ }
+ 
++void psci_handoff(bool wfx_traps, u64 aic_base, u64 wdt_base)
++{
++    if (psci_active())
++        psci_smc(PSCI_M1N1_SIP_HANDOFF, wfx_traps, aic_base, wdt_base);
++}
++
+ int psci_affinity_info(u64 mpidr)
+ {
+     return psci_smc(PSCI_0_2_FN64_AFFINITY_INFO, mpidr, 0, 0);
+diff --git a/src/psci.h b/src/psci.h
+index 9a213af..1d3a88e 100644
+--- a/src/psci.h
++++ b/src/psci.h
+@@ -27,6 +27,13 @@
+ #define PSCI_0_2_FN64_CPU_ON          0xc4000003
+ #define PSCI_0_2_FN64_AFFINITY_INFO   0xc4000004
+ 
++/*
++ * m1n1-private SiP call, made by m1n1 itself on the boot CPU right before it
++ * starts a kernel: x1 = 1 to trap EL1 WFI/WFE to EL3 on this and every CPU
++ * that later leaves the pen, x2 = AIC base, x3 = primary watchdog base.
++ */
++#define PSCI_M1N1_SIP_HANDOFF 0xc200ff00
++
+ #define PSCI_RET_SUCCESS            0
+ #define PSCI_RET_NOT_SUPPORTED      -1
+ #define PSCI_RET_INVALID_PARAMS     -2
+@@ -48,6 +55,15 @@
+ #define PSCI_CPU_CONTEXT 0x10
+ #define PSCI_CPU_SIZE    0x80
+ 
++/* struct psci_rdv, one line, EL3 only (MMU off) */
++#define PSCI_RDV_PENDING 0x00
++#define PSCI_RDV_TRAPS   0x08
++
++#define SCR_EL3_IRQ (1 << 1)
++#define SCR_EL3_FIQ (1 << 2)
++#define SCR_EL3_TWI (1 << 12)
++#define SCR_EL3_TWE (1 << 13)
++
+ #ifndef __ASSEMBLER__
+ 
+ /* Payload variable psci=0 turns PSCI off; anything else (psci=1) leaves it on */
+@@ -67,9 +83,13 @@ int psci_park_cpu(int cpu, u64 mpidr);
+ /* Bring a parked CPU back into m1n1 (re-entry); returns 0 if it was parked */
+ int psci_unpark_cpu(int index, u64 mpidr, void *stack_top);
+ 
++/* EL1, boot CPU, last thing before the kernel: see PSCI_M1N1_SIP_HANDOFF */
++void psci_handoff(bool wfx_traps, u64 aic_base, u64 wdt_base);
++
+ /* EL3 side */
+ u64 psci_handle(u64 fid, u64 a1, u64 a2, u64 a3);
+ void psci_pen(void *cpu, u64 stack_top) __attribute__((noreturn));
++void psci_rendezvous_off(void) __attribute__((noreturn));
+ void psci_secondary_entry(void);
+ void _reentry(void);
+ 
+diff --git a/src/psci_asm.S b/src/psci_asm.S
+index 14f842f..ff31f3a 100644
+--- a/src/psci_asm.S
++++ b/src/psci_asm.S
+@@ -9,13 +9,16 @@
+ .extern _cpu_reset_c
+ .extern psci_handle
+ .extern psci_persist
++.extern psci_rdv
++.extern psci_rendezvous_off
+ 
+ .text
+ 
+ /*
+  * Lower-EL synchronous exceptions. At EL3, an SMCCC call (smc #0 from EL1)
+- * goes to the PSCI dispatcher; everything else, and every exception taken
+- * at EL1/EL2, takes the usual path.
++ * goes to the PSCI dispatcher and a trapped WFI/WFE to psci_wfx_entry;
++ * everything else, and every exception taken at EL1/EL2, takes the usual
++ * path.
+  */
+ .globl _v_lower_sync
+ .type _v_lower_sync, @function
+@@ -26,6 +29,8 @@ _v_lower_sync:
+     b.ne 1f
+     mrs x16, esr_el3
+     lsr x17, x16, #26
++    cmp x17, #0x01 // EC: trapped WFI/WFE
++    b.eq 2f
+     cmp x17, #0x17 // EC: SMC from AArch64
+     b.ne 1f
+     tst x16, #0xffff // imm16 == 0: SMCCC
+@@ -35,6 +40,59 @@ _v_lower_sync:
+ 1:
+     ldp x16, x17, [sp], #16
+     b _v_sp0_sync
++2:
++    ldp x16, x17, [sp], #16
++    b psci_wfx_entry
++
++/*
++ * WFI/WFE from EL1/EL0, trapped by SCR_EL3.TWI/TWE (see PSCI_M1N1_SIP_HANDOFF).
++ * This is how firmware gets hold of a CPU that the kernel stopped with an
++ * IPI and left spinning in "wfe; wfi" with interrupts masked (an ordinary
++ * reboot does that; only kexec and hotplug use CPU_OFF): while a
++ * SYSTEM_RESET/SYSTEM_OFF rendezvous is pending, the CPU parks itself as if
++ * it had called CPU_OFF. Otherwise:
++ *  - WFE completes at once. A spurious WFE wake-up is architectural, and
++ *    waiting here could miss the event the caller waits for (the exception
++ *    return may clear its exclusive monitor).
++ *  - WFI waits here, with IRQ/FIQ routed to EL3 only around the wfi so that
++ *    an interrupt for EL1 wakes it (DAIF is masked at EL3, nothing is taken).
++ * Both then return past the instruction. Only x0-x3 are used.
++ */
++.type psci_wfx_entry, @function
++psci_wfx_entry:
++    stp x0, x1, [sp, #-16]!
++    stp x2, x3, [sp, #-16]!
++    adrp x0, psci_rdv
++    add x0, x0, :lo12:psci_rdv
++    dc civac, x0
++    dsb sy
++    ldr x1, [x0, #PSCI_RDV_PENDING]
++    cbnz x1, 3f
++    mrs x1, esr_el3
++    tbnz x1, #0, 2f // ISS.TI bit 0 set: WFE (or WFET)
++    mrs x2, scr_el3
++    orr x3, x2, #(SCR_EL3_IRQ | SCR_EL3_FIQ)
++    msr scr_el3, x3
++    isb
++    dsb sy
++    wfi
++    msr scr_el3, x2
++    isb
++    dc civac, x0
++    dsb sy
++    ldr x1, [x0, #PSCI_RDV_PENDING]
++    cbnz x1, 3f
++2:
++    mrs x1, elr_el3
++    add x1, x1, #4
++    msr elr_el3, x1
++    ldp x2, x3, [sp], #16
++    ldp x0, x1, [sp], #16
++    eret
++3:
++    add sp, sp, #32
++    bl psci_rendezvous_off
++    b .
+ 
+ /*
+  * SMCCC 1.0: x0-x17 may be clobbered, x18-x30 and SP_EL1 belong to the
+@@ -106,6 +164,17 @@ psci_pen:
+     ic iallu
+     tlbi alle1
+     dsb sy
++
++    // WFI/WFE traps as the boot CPU set them for the kernel (psci_rdv.traps)
++    adrp x3, psci_rdv
++    add x3, x3, :lo12:psci_rdv
++    dc civac, x3
++    dsb sy
++    ldr x4, [x3, #PSCI_RDV_TRAPS]
++    mrs x1, scr_el3
++    bic x1, x1, #(SCR_EL3_TWI | SCR_EL3_TWE)
++    orr x1, x1, x4
++    msr scr_el3, x1
+     mov x1, #0x0800 // SCTLR_EL1: RES1 bits only, MMU and caches off
+     movk x1, #0x30d0, lsl #16
+     msr sctlr_el1, x1

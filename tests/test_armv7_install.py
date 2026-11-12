@@ -119,6 +119,11 @@ class DiskDiscovery(unittest.TestCase):
             with self.subTest(names=names), FakeDevice(disks=names):
                 self.assertEqual(direct.find_disk(None), expected)
 
+    def test_the_disk_is_the_first_nvme_namespace(self):
+        # An iPad 6 lists seven namespaces; only the first is the storage.
+        with FakeDevice(disks=[f'nvme0n{n}' for n in range(1, 8)]):
+            self.assertEqual(direct.find_disk(None), '/dev/nvme0n1')
+
     def test_two_internal_disks_stop_the_install(self):
         with FakeDevice(disks=['nvme0n1', 'applesftl0']), self.assertRaisesRegex(D.InstallError, 'More than one'):
             direct.find_disk(None)
@@ -429,7 +434,7 @@ class UsbListing(unittest.TestCase):
 
 class Flow(unittest.TestCase):
     """service.install_direct end to end with the device mocked: LwVM writes the root only, GPT as before."""
-    def run_flow(self, layout, plan_boot):
+    def run_flow(self, layout, plan_boot, **overrides):
         from orchard.progress import Clock, Progress
         work = tempfile.TemporaryDirectory()
         self.addCleanup(work.cleanup)
@@ -460,6 +465,7 @@ class Flow(unittest.TestCase):
                      mount_new_root=mock.Mock(), unmount_new_root=mock.Mock(),
                      shell=mock.Mock(return_value=b''), installed_bundle=mock.Mock(return_value=b'BUNDLE'),
                      link_local_interfaces=mock.Mock(return_value=set()))
+        calls.update(overrides)
         with mock.patch.multiple(direct, **calls), \
                 mock.patch.object(service.remote, 'put'), mock.patch.object(service.remote, 'run', return_value=[]), \
                 mock.patch.object(service, 'private_directory', side_effect=lambda p: Path(p).mkdir(parents=True, exist_ok=True) or Path(p)), \
@@ -486,6 +492,16 @@ class Flow(unittest.TestCase):
         self.assertEqual(Path(report['boot_bundle']).read_bytes(), b'BUNDLE')
         # The device's serial number reaches the install payload's tree.
         self.assertEqual(calls['boot_image'].call_args.args[3]['serial_number'], 'F4KESER1AL00')
+
+    def test_an_error_says_whether_anything_was_written(self):
+        layout = {'disk': {'path': '/dev/nvme0n1', 'sector': 4096, 'first': 6, 'last': 1 << 22, 'table_sha256': 'h'},
+                  'partitions': [], 'free': [{'start': 256, 'blocks': 1 << 22}]}
+        before = mock.Mock(side_effect=D.InstallError('disks', 'More than one internal disk: nvme0n1, applesftl0'))
+        with self.assertRaisesRegex(D.InstallError, 'More than one internal disk.*\nNothing was written to the iPad'):
+            self.run_flow(layout, True, find_disk=before)
+        during = mock.Mock(side_effect=RuntimeError('dd failed on the device'))
+        with self.assertRaisesRegex(RuntimeError, 'dd failed.*\nThe install stopped after it began writing'):
+            self.run_flow(layout, True, stream_image=during)
 
     def test_gpt_installs_as_before(self):
         layout = {'disk': {'path': '/dev/nvme0n1', 'sector': 4096, 'first': 6, 'last': 1 << 22, 'table_sha256': 'h'},

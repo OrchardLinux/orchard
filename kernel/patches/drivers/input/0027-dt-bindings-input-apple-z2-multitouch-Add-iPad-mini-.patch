@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tom Ballard <tom.ballard08@googlemail.com>
+Date: Thu, 5 Nov 2026 19:34:14 +0000
+Subject: [PATCH] dt-bindings: input: apple,z2-multitouch: Add iPad mini 4
+
+The iPad mini 4 (J96) has the N1 touchscreen controller of the iPad 5
+and iPad Air 2, with the same kind of supplies and clock: an LDO enable
+GPIO, a PMIC analog supply and the PMGR touch clock. Like the Air 2, it
+leaves display sync as iBoot set it, so it describes no display-sync pin
+states.
+
+Assisted-by: LLM
+---
+ .../bindings/input/touchscreen/apple,z2-multitouch.yaml         | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml b/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml
+index 0d508131f..b9d5dce04 100644
+--- a/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml
++++ b/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml
+@@ -20,6 +20,7 @@ properties:
+       - apple,j71b-touchscreen
+       - apple,j71t-touchscreen
+       - apple,j81-touchscreen
++      - apple,j96-touchscreen
+       - apple,j172-touchscreen
+       - apple,d11-touchscreen
+       - apple,d111-touchscreen
+@@ -183,6 +184,7 @@ allOf:
+           enum:
+             - apple,j71t-touchscreen
+             - apple,j81-touchscreen
++            - apple,j96-touchscreen
+     then:
+       properties:
+         pinctrl-names:
