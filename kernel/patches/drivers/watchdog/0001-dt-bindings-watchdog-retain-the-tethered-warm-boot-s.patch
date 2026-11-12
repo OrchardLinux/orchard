@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 17:15:00 +0100
+Subject: [PATCH] dt-bindings: watchdog: retain the tethered warm boot state
+
+A tethered kernel inherits initialized hardware rather than power-on
+state. Retain the board-selected warm handoff state so probe and
+shutdown do not discard resources needed by the incoming kernel.
+
+Assisted-by: LLM
+---
+ Documentation/devicetree/bindings/watchdog/apple,wdt.yaml | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/watchdog/apple,wdt.yaml b/Documentation/devicetree/bindings/watchdog/apple,wdt.yaml
+index ca4cf01db..a8179c208 100644
+--- a/Documentation/devicetree/bindings/watchdog/apple,wdt.yaml
++++ b/Documentation/devicetree/bindings/watchdog/apple,wdt.yaml
+@@ -13,6 +13,12 @@ allOf:
+   - $ref: watchdog.yaml#
+ 
+ properties:
++  apple,tethered-boot:
++    type: boolean
++    description: |
++      A SoC reset leaves the tethered OS. The restart handler refuses warm
++      and soft reboot modes; cold reboot retains the normal SoC reset.
++
+   compatible:
+     oneOf:
+       - items:
