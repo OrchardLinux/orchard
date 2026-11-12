@@ -113,6 +113,12 @@
       },
       "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/feara.txcb",
       "sha256": "f67d8e62cbc876904c87ae0cd890b15f056bf6a4856e3f4ca4bdcb5689c3543b"
+    },
+    "aop.im4p": {
+      "ipsw": {
+        "zip": "Firmware/AOP/aopfw-ipad6faop.im4p"
+      },
+      "sha256": "5a4d8378bb83e175fc589cc1cf978430639d7ffcef07b2d94e9d6a4801124efa"
     }
   },
   "outputs": [
@@ -277,6 +283,34 @@
           "profile": "C1F15,1",
           "calibration_address": 268472320,
           "calibration_size": 1024
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/aop-ipad6f.bin",
+      "sha256": "af5d51a368ceb89dc5c359e7c84e54cb6082e308956be742c17622eb4a6047c8",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "aop.im4p"
+        },
+        {
+          "step": "aop-image@1",
+          "coprocessor": "AOP"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/aop-ipad6f-ext.bin",
+      "sha256": "2528d2686ed1262de9910c2d60e45b68137e50aa601a0f8d54ea7d1347b9de22",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "aop.im4p"
+        },
+        {
+          "step": "aop-image@1",
+          "coprocessor": "AOP_ext"
         }
       ]
     }
