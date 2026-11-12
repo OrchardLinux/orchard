@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 10:20:00 +0100
+Subject: [PATCH] power: supply: apple_tristar_charger: Run the poll on an
+ unbound queue
+
+The charger's own queue asked for neither WQ_PERCPU nor WQ_UNBOUND, so
+every boot warned in alloc_workqueue(). The poll sleeps on I2C and the
+HDQ gauge and keeps no per-CPU state: make the queue unbound.
+
+Assisted-by: LLM
+---
+ drivers/power/supply/apple_tristar_charger.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/power/supply/apple_tristar_charger.c b/drivers/power/supply/apple_tristar_charger.c
+index 6e8e8368a..63168f8cb 100644
+--- a/drivers/power/supply/apple_tristar_charger.c
++++ b/drivers/power/supply/apple_tristar_charger.c
+@@ -1446,7 +1446,8 @@ static int tristar_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		return ret;
+ 	init_completion(&chg->adc_done);
+-	chg->wq = devm_alloc_workqueue(dev, "tristar-charger", WQ_HIGHPRI | WQ_FREEZABLE, 1);
++	chg->wq = devm_alloc_workqueue(dev, "tristar-charger",
++				       WQ_UNBOUND | WQ_HIGHPRI | WQ_FREEZABLE, 1);
+ 	if (!chg->wq)
+ 		return -ENOMEM;
+ 	INIT_DELAYED_WORK(&chg->poll_work, tristar_poll);

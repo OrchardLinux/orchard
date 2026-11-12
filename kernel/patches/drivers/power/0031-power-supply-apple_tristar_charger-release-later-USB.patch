@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 00:08:20 +0000
+Subject: [PATCH] power: supply: apple_tristar_charger: release later USB holds
+
+Track each successful data hold and release a transitional attachment
+after the existing deadline. Keep fallback charging limits and let the
+role switch preserve accessory ownership.
+
+Assisted-by: LLM
+---
+ drivers/power/supply/apple_tristar_charger.c | 24 +++++++++++++++++++-
+ 1 file changed, 23 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/power/supply/apple_tristar_charger.c b/drivers/power/supply/apple_tristar_charger.c
+index 2467752a1..86215a4c8 100644
+--- a/drivers/power/supply/apple_tristar_charger.c
++++ b/drivers/power/supply/apple_tristar_charger.c
+@@ -156,6 +156,7 @@ struct tristar_charger {
+ 	unsigned int source_ma;
+ 	/* USB data is on for this attachment: the mux must stay untouched. */
+ 	bool usb_on;
++	u64 usb_off_ns;		/* USB data last held off */
+ 	bool source_seen;	/* an attachment since probe */
+ 	/* What the USB host allows (vbus_draw), valid for usb_epoch only. */
+ 	unsigned int usb_ma;
+@@ -670,8 +671,28 @@ static void tristar_set_usb(struct tristar_charger *chg, bool on)
+ 	if (ret)
+ 		dev_err(chg->dev, "cannot turn USB data %s (%d)\n", on ? "on" : "off", ret);
+ 	chg->usb_on = on || ret;
+-	if (!chg->usb_on)
++	if (!chg->usb_on) {
+ 		chg->usb_ma = 0;
++		chg->usb_off_ns = ktime_get_ns();
++	}
++}
++
++/*
++ * An attachment already seen can leave the PMIC transitional (e.g. 0x62).
++ * Main's no-source-since-probe fallback deliberately excludes that case.
++ * Do not hold USB data forever: release after the last hold's deadline,
++ * leaving the charging allowance at fallback. The role setter still honors
++ * an accessory's ownership of the port. Caller holds lock.
++ */
++static void tristar_release_usb(struct tristar_charger *chg, u64 now,
++				unsigned int status)
++{
++	if (chg->usb_on ||
++	    (s64)(now - chg->usb_off_ns) < (s64)TRISTAR_HOLD_MS * NSEC_PER_MSEC)
++		return;
++	dev_info(chg->dev, "PMIC status %#04x, no source identified: USB data on\n",
++		 status);
++	tristar_set_usb(chg, true);
+ }
+ 
+ /* The highest grant the source allows, up to the board maximum. */
+@@ -965,6 +986,7 @@ static void tristar_poll(struct work_struct *work)
+ 		if (chg->code > TRISTAR_CHG_FALLBACK_CODE)
+ 			tristar_withdraw(chg, TRISTAR_CHG_FALLBACK_CODE);
+ 		tristar_no_source(chg, status, now);
++		tristar_release_usb(chg, now, status);
+ 		goto again;
+ 	}
+ 	if (!chg->present) {

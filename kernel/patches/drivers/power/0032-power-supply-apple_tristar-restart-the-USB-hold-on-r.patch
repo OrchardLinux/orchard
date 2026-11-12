@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 02:11:48 +0100
+Subject: [PATCH] power: supply: apple_tristar: restart the USB hold on
+ reconnect
+
+Refresh the USB hold timestamp on every empty-input observation. A cable
+reinserted after a long unplug must finish identification before data is
+enabled. Keep the bounded fallback for persistent transitional states.
+This applies to every board using the charger, including iPad 6.
+
+Assisted-by: LLM
+---
+ drivers/power/supply/apple_tristar_charger.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/power/supply/apple_tristar_charger.c b/drivers/power/supply/apple_tristar_charger.c
+index 6a9842eba..6e8e8368a 100644
+--- a/drivers/power/supply/apple_tristar_charger.c
++++ b/drivers/power/supply/apple_tristar_charger.c
+@@ -1031,6 +1031,8 @@ static void tristar_poll(struct work_struct *work)
+ 	}
+ 	chg->online = status != 0;
+ 	if (!status) {
++		/* Identification starts after the empty period, not at unplug. */
++		chg->usb_off_ns = now;
+ 		if (chg->present) {
+ 			tristar_set_usb(chg, false);
+ 			chg->present = false;
