@@ -1,0 +1,81 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Fri, 13 Nov 2026 12:00:00 +0100
+Subject: [PATCH] arm64: dts: apple: t8010: Add the USB role switch and
+ EHCI/OHCI
+
+The A10 USB complex is the A9's: the Apple device trees of the iPad 6
+(J71b, J72b) and iPad 7 (J171) describe a device-only usb-device with
+usb-ehci0 and its usb-ohci0 companion at the same offsets as the iPad 5
+(J71t), interrupts 242 and 243, otgphyctrl with the USB_CTL bank at
+0x20e0d8000 and the same host and device PHY tunables, and the same
+usb-complex remap words for EHCI0 and OHCI0.
+
+Add the role switch to the USB complex, disabled, with the EHCI and OHCI
+it creates in the host role as its children, as on the A9. The EHCI and
+OHCI nodes move out of the disabled block into the switch.
+
+[Orchard: harmonizes orchard PR #126, commit 864b4971, onto the A10]
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8010.dtsi | 44 ++++++++++++++++++++--------
+ 1 file changed, 31 insertions(+), 13 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8010.dtsi b/arch/arm64/boot/dts/apple/t8010.dtsi
+index 64fdf4dbb..e08ce0d60 100644
+--- a/arch/arm64/boot/dts/apple/t8010.dtsi
++++ b/arch/arm64/boot/dts/apple/t8010.dtsi
+@@ -436,21 +436,39 @@ usbdev: usbdev@20c100000 {
+ 				resets = <&ps_usbotg>;
+ 				dr_mode = "peripheral";
+ 			};
+-#if 0
+-			ehci0: usb-ehci@20c200000 {
+-				compatible = "apple,t8010-ehci", "generic-ehci";
+-				reg = <0x2 0x0c200000 0x0 0x10000>;
+-				interrupts = <AIC_IRQ 242 IRQ_TYPE_LEVEL_HIGH>;
+-				power-domains = <&ps_usb2host0>;
+-			};
+ 
+-			ohci0: usb-ohci@20c300000 {
+-				compatible = "apple,t8010-ohci", "generic-ohci";
+-				reg = <0x2 0x0c300000 0x0 0x10000>;
+-				interrupts = <AIC_IRQ 243 IRQ_TYPE_LEVEL_HIGH>;
+-				power-domains = <&ps_usb2host0_ohci>;
++			/* Moves the PHY between usbdev and the EHCI/OHCI pair. */
++			usb_role: usb-role-switch@20e0d8000 {
++				compatible = "apple,t8010-usb-role-switch",
++					     "apple,s8000-usb-role-switch";
++				reg = <0x2 0x0e0d8000 0x0 0x1000>;
++				#address-cells = <2>;
++				#size-cells = <2>;
++				ranges;
++				/* The usb-complex dma-ranges apply to the host pair. */
++				dma-ranges;
++				nonposted-mmio;
++				phys = <&ausbphy0 PHY_TYPE_USB2>;
++				phy-names = "usb2-phy";
++				apple,usb-device = <&usbdev>;
++				status = "disabled";
++
++				/* Created by the switch in the host role only. */
++				usb@20c200000 {
++					compatible = "apple,t8010-ehci", "generic-ehci";
++					reg = <0x2 0x0c200000 0x0 0x10000>;
++					interrupts = <AIC_IRQ 242 IRQ_TYPE_LEVEL_HIGH>;
++					power-domains = <&ps_usb2host0>;
++				};
++
++				usb@20c300000 {
++					compatible = "apple,t8010-ohci", "generic-ohci";
++					reg = <0x2 0x0c300000 0x0 0x10000>;
++					interrupts = <AIC_IRQ 243 IRQ_TYPE_LEVEL_HIGH>;
++					power-domains = <&ps_usb2host0_ohci>;
++				};
+ 			};
+-
++#if 0
+ 			ehci1: usb-ehci@20c400000 {
+ 				compatible = "apple,t8010-ehci", "generic-ehci";
+ 				reg = <0x2 0x0c400000 0x0 0x10000>;

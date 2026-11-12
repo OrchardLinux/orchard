@@ -49,6 +49,7 @@ suspend = "working"
 resume = "working"
 usb_serial = "working"
 usb_network = "working"
+usb_host = "untested" # Same Tristar, PMU rail and USB complex as J71t in the Apple device tree.
 audio_output = "working"
 audio_input = "missing"
 camera = "missing"
