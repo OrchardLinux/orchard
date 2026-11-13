@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Fri, 13 Nov 2026 06:40:00 +0800
+Subject: [PATCH] soc: apple: aop: Wait for the firmware's hello at start
+
+The AOP driver loads its firmware and starts the coprocessor itself,
+then called apple_rtkit_wake(), which first sends the firmware an IOP
+power state request: the call for firmware that is already running and
+asleep. A firmware that was just started reaches its mailbox only after
+it has initialised, so the request can arrive first. On the iPad 6 the
+AOP crashed 1 ms after start in about one boot in six ("co-processor
+has crashed", then "firmware did not boot: -62"), leaving the device
+without accelerometer and rotation.
+
+Use apple_rtkit_boot(), which waits for the firmware's hello, endpoint
+map and power state report, as the Apple NVMe and the T8010 GPU
+(pvr_apple) drivers do for a coprocessor they start from scratch.
+
+Assisted-by: LLM
+---
+diff --git a/drivers/soc/apple/aop.c b/drivers/soc/apple/aop.c
+index 6d94720..5c23317 100644
+--- a/drivers/soc/apple/aop.c
++++ b/drivers/soc/apple/aop.c
+@@ -1054,7 +1054,14 @@ static int apple_aop_probe(struct platform_device *pdev)
+ 	       aop->akf + APPLE_AOP_CPU_CONTROL);
+ 	writel(1, aop->control + APPLE_AOP_CONTROL_AUTO_BOOT);
+ 
+-	ret = apple_rtkit_wake(aop->rtk);
++	/*
++	 * The firmware was just loaded and starts from scratch: wait for its
++	 * hello and its own power state report, as for any freshly started
++	 * coprocessor. Asking for a power state first (apple_rtkit_wake(), for
++	 * firmware that is already running) reaches it before its mailbox is
++	 * up.
++	 */
++	ret = apple_rtkit_boot(aop->rtk);
+ 	if (ret) {
+ 		dev_err(dev, "firmware did not boot: %d\n", ret);
+ 		goto err_halt;
+-- 
+2.54.0

@@ -1,22 +1,32 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
-Date: Sun, 8 Nov 2026 17:15:00 +0100
-Subject: [PATCH] dt-bindings: soc-apple: select certified AOP reload through
- DT
+Date: Thu, 12 Nov 2026 09:00:00 +0100
+Subject: [PATCH] dt-bindings: soc: apple: apple,t8010-aop: Add the S8000
 
-A retained AOP must not be reset as though it were a fresh boot.
-Describe the compatible and retained-reload property.
+The A9 (S8000, S8003) has the same always-on processor as the A10, with
+the same register blocks and sensors. Its firmware takes three more
+boot arguments that the bootloader fills in from the Apple device tree:
+the AOP target number, the chip ID and the chip revision.
+
+Add the S8000 compatibles for the AOP and its accelerometer, gyroscope
+and pressure sensor, and the three bootloader properties. Describe the
+per-unit factory calibration blobs that the bootloader copies into the
+sensor nodes, which the sensor drivers hand to the firmware.
+
+[Orchard: from orchard PR #101, commit a54e2049; soc-apple/0014 without
+ apple,certified-reload, memory-region, apple,observe-domains and
+ apple,spi0-domain, and the calibration text not limited to the S8000]
 
 Assisted-by: LLM
 ---
- .../bindings/soc/apple/apple,t8010-aop.yaml   | 58 +++++++++++++++++--
- 1 file changed, 54 insertions(+), 4 deletions(-)
+ .../bindings/soc/apple/apple,t8010-aop.yaml   | 42 +++++++++++++++++--
+ 1 file changed, 38 insertions(+), 4 deletions(-)
 
 diff --git a/Documentation/devicetree/bindings/soc/apple/apple,t8010-aop.yaml b/Documentation/devicetree/bindings/soc/apple/apple,t8010-aop.yaml
-index 14726afa0..df6621d74 100644
+index 14726af..32788d1 100644
 --- a/Documentation/devicetree/bindings/soc/apple/apple,t8010-aop.yaml
 +++ b/Documentation/devicetree/bindings/soc/apple/apple,t8010-aop.yaml
-@@ -4,22 +4,28 @@
+@@ -4,14 +4,14 @@
  $id: http://devicetree.org/schemas/soc/apple/apple,t8010-aop.yaml#
  $schema: http://devicetree.org/meta-schemas/core.yaml#
  
@@ -34,13 +44,9 @@ index 14726afa0..df6621d74 100644
    gyroscope, compass, pressure) and the always-on microphones. It runs from
    local SRAM, with a further firmware segment in system memory, and talks
    to the application processor through an A7 IOP mailbox. Its firmware is
-   board-specific and is loaded by the operating system.
+@@ -19,7 +19,9 @@ description:
  
  properties:
-+  apple,certified-reload:
-+    type: boolean
-+    description: Firmware supports the retained shutdown certificate for warm reload.
-+
    compatible:
 -    const: apple,t8010-aop
 +    enum:
@@ -49,7 +55,7 @@ index 14726afa0..df6621d74 100644
  
    reg:
      items:
-@@ -50,6 +56,38 @@ properties:
+@@ -50,6 +52,24 @@ properties:
        The chip's unique ID (ECID), filled in by the bootloader. The
        firmware's boot arguments carry it.
  
@@ -71,24 +77,10 @@ index 14726afa0..df6621d74 100644
 +      The SoC's chip revision, filled in by the bootloader. The S8000
 +      firmware's boot arguments carry it.
 +
-+  memory-region:
-+    maxItems: 1
-+    description: Reserved 16 KiB shutdown transcript page for J71t warm reload.
-+
-+  apple,observe-domains:
-+    $ref: /schemas/types.yaml#/definitions/phandle-array
-+    minItems: 5
-+    maxItems: 5
-+    description: AOP GPIO, AOP, bus interface, CPU and filter in lock order.
-+
-+  apple,spi0-domain:
-+    $ref: /schemas/types.yaml#/definitions/phandle
-+    description: Read-only SPI0 power-state provider observation.
-+
  patternProperties:
    "^(accel|gyro|compass|pressure)$":
      type: object
-@@ -58,6 +96,9 @@ patternProperties:
+@@ -58,6 +78,9 @@ patternProperties:
      properties:
        compatible:
          enum:
@@ -98,7 +90,7 @@ index 14726afa0..df6621d74 100644
            - apple,t8010-aop-accel
            - apple,t8010-aop-gyro
            - apple,t8010-aop-compass
-@@ -65,6 +106,15 @@ patternProperties:
+@@ -65,6 +88,17 @@ patternProperties:
  
        mount-matrix:
          description: The sensor's mounting rotation in the device.
@@ -110,7 +102,12 @@ index 14726afa0..df6621d74 100644
 +        description:
 +          The unit's factory calibration of the sensor, copied by the
 +          bootloader from the property of the same name (without the
-+          prefix) in the Apple device tree. The S8000 firmware takes it.
++          prefix) in the Apple device tree. The driver hands it to the
++          firmware as a property of the sensor's service.
++
      required:
        - compatible
      additionalProperties: false
+-- 
+2.54.0 (Apple Git-157)
+

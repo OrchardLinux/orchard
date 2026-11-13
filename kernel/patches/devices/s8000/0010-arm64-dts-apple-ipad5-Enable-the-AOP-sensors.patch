@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 09:00:00 +0100
+Subject: [PATCH] arm64: dts: apple: ipad5: Enable the AOP sensors
+
+Enable the always-on processor and its mailbox on the iPad 5 with its
+AOP firmware, which brings up the accelerometer, gyroscope and pressure
+sensor. Apple's BuildManifest gives every iPad 5 model (J71s, J71t,
+J72s, J72t) the same AOP firmware, aopfw-ipad6faop, so this goes in the
+shared iPad 5 file.
+
+The A9's AOP firmware reports the accelerometer in its sensor frame:
+the device frame negated, so that flat, screen up reads z = -1 g and
+upright y = -1 g. Give the accelerometer the mount-matrix that maps it
+for desktops in the shared iPad 5 file, so every iPad 5 model has it
+once its AOP firmware is known.
+
+[Orchard: from orchard PR #101, commit a54e2049; the J71t part of
+ devices/s8000/0007 without the reserved shutdown page and the
+ apple,certified-reload, memory-region, apple,observe-domains and
+ apple,spi0-domain properties; the AOP enable and the mount-matrix moved
+ from the J71t board file to the shared iPad 5 file]
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/s800x-ipad5.dtsi | 12 ++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi b/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
+index fc06d53..8015872 100644
+--- a/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
++++ b/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
+@@ -139,6 +139,28 @@
+ 	};
+ };
+ 
++/* All iPad 5 models use the same AOP firmware (ipad6faop). */
++&aop {
++	firmware-name = "apple/aop-ipad6f.bin", "apple/aop-ipad6f-ext.bin";
++	status = "okay";
++};
++
++&aop_mbox {
++	status = "okay";
++};
++
++/*
++ * The AOP reports the accelerometer in its sensor frame, which is the
++ * device frame (x right, y up, z out of the screen) negated: flat, screen up
++ * reads z = -1 g, upright y = -1 g. iio-sensor-proxy takes upright as
++ * negative y and needs z flipped.
++ */
++&aop_accel {
++	mount-matrix = "1", "0", "0",
++		       "0", "1", "0",
++		       "0", "0", "-1";
++};
++
+ &framebuffer0 {
+ 	power-domains = <&ps_disp0 &ps_dp>;
+ };
+-- 
+2.54.0 (Apple Git-157)
+

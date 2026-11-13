@@ -1,0 +1,107 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Fri, 13 Nov 2026 12:00:00 +0100
+Subject: [PATCH] iio: apple-aop: Serve the T8010's gyroscope and pressure
+ sensor
+
+The A10's AOP firmware announces the same gyroscope and pressure
+services as the A9's, and Apple's device trees for the iPad 5 (S8003)
+and iPad 6 (T8010) describe both sensors with the same calibration
+properties; the A10's AOP node is even compatible with the A9's
+("iop,t8010", "iop,s8000"). The gyroscope and pressure drivers use only
+the AOP service protocol: set-property requests, the calibration state
+and the service's reports.
+
+Bind them to the T8010's sensor nodes, which the T8010 device tree
+already describes.
+
+Assisted-by: LLM
+---
+ drivers/iio/gyro/Kconfig                  | 2 +-
+ drivers/iio/gyro/apple_aop_gyro.c         | 7 ++++---
+ drivers/iio/pressure/Kconfig              | 3 ++-
+ drivers/iio/pressure/apple_aop_pressure.c | 9 +++++----
+ 4 files changed, 12 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/iio/gyro/Kconfig b/drivers/iio/gyro/Kconfig
+index 8f506a6..77f2180 100644
+--- a/drivers/iio/gyro/Kconfig
++++ b/drivers/iio/gyro/Kconfig
+@@ -70,7 +70,7 @@ config APPLE_AOP_GYRO
+ 	select IIO_KFIFO_BUF
+ 	help
+ 	  Say yes here to get support for the gyroscope that the Always-On
+-	  Processor (AOP) of Apple A9 iPads and iPhones serves.
++	  Processor (AOP) of Apple A9 and A10 iPads and iPhones serves.
+ 
+ 	  To compile this driver as a module, choose M here: the module will be
+ 	  called apple_aop_gyro.
+diff --git a/drivers/iio/gyro/apple_aop_gyro.c b/drivers/iio/gyro/apple_aop_gyro.c
+index edbda1f..3341164 100644
+--- a/drivers/iio/gyro/apple_aop_gyro.c
++++ b/drivers/iio/gyro/apple_aop_gyro.c
+@@ -2,9 +2,9 @@
+ /*
+  * Gyroscope served by the Apple Always-On Processor (AOP)
+  *
+- * The AOP firmware samples the gyroscope itself. Once it has the unit's
+- * factory calibration and its batch, raw and report intervals (EPIC
+- * set-property tags 0x16, 0x5c and 0), it sends one motion report (EPIC
++ * The AOP firmware of the A9 and A10 samples the gyroscope itself. Once it
++ * has the unit's factory calibration and its batch, raw and report intervals
++ * (EPIC set-property tags 0x16, 0x5c and 0), it sends one motion report (EPIC
+  * subtype 0xc1) per report interval, laid out like the accelerometer's:
+  *
+  *   0  u16 sequence
+@@ -273,6 +273,7 @@ static int apple_aop_gyro_probe(struct platform_device *pdev)
+ 
+ static const struct of_device_id apple_aop_gyro_of_match[] = {
+ 	{ .compatible = "apple,s8000-aop-gyro" },
++	{ .compatible = "apple,t8010-aop-gyro" },
+ 	{ }
+ };
+ MODULE_DEVICE_TABLE(of, apple_aop_gyro_of_match);
+diff --git a/drivers/iio/pressure/Kconfig b/drivers/iio/pressure/Kconfig
+index 18535ad..fcdb9e1 100644
+--- a/drivers/iio/pressure/Kconfig
++++ b/drivers/iio/pressure/Kconfig
+@@ -391,7 +391,8 @@ config APPLE_AOP_PRESSURE
+ 	select IIO_KFIFO_BUF
+ 	help
+ 	  Say yes here to get support for the barometric pressure sensor that
+-	  the Always-On Processor (AOP) of Apple A9 iPads and iPhones serves.
++	  the Always-On Processor (AOP) of Apple A9 and A10 iPads and iPhones
++	  serves.
+ 
+ 	  To compile this driver as a module, choose M here: the module will be
+ 	  called apple_aop_pressure.
+diff --git a/drivers/iio/pressure/apple_aop_pressure.c b/drivers/iio/pressure/apple_aop_pressure.c
+index 8cd983c..70b1257 100644
+--- a/drivers/iio/pressure/apple_aop_pressure.c
++++ b/drivers/iio/pressure/apple_aop_pressure.c
+@@ -2,10 +2,10 @@
+ /*
+  * Barometric pressure sensor served by the Apple Always-On Processor (AOP)
+  *
+- * The AOP firmware samples the pressure sensor itself. Once it has the unit's
+- * factory calibration and its batch, raw and report intervals (EPIC
+- * set-property tags 0x16, 0x5c and 0), it sends one report (EPIC subtype
+- * 0xc4) per report interval:
++ * The AOP firmware of the A9 and A10 samples the pressure sensor itself. Once
++ * it has the unit's factory calibration and its batch, raw and report
++ * intervals (EPIC set-property tags 0x16, 0x5c and 0), it sends one report
++ * (EPIC subtype 0xc4) per report interval:
+  *
+  *   0  u16 sequence
+  *   2  u32 pressure in 1/65536 kPa
+@@ -239,6 +239,7 @@ static int apple_aop_pressure_probe(struct platform_device *pdev)
+ 
+ static const struct of_device_id apple_aop_pressure_of_match[] = {
+ 	{ .compatible = "apple,s8000-aop-pressure" },
++	{ .compatible = "apple,t8010-aop-pressure" },
+ 	{ }
+ };
+ MODULE_DEVICE_TABLE(of, apple_aop_pressure_of_match);
+-- 
+2.54.0 (Apple Git-157)
+

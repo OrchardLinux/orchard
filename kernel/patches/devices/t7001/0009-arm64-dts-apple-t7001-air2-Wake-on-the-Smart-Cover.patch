@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Fri, 13 Nov 2026 05:53:54 +0800
+Subject: [PATCH] arm64: dts: apple: t7001-air2: Wake on the Smart Cover
+
+Make the D2207 GPIO node the PMU event controller, as on the iPad 5 and
+6. The PMU event line is SoC GPIO 86: Apple's device tree gives
+/arm-io/i2c0/pmu "interrupts" 0x56 with flags 1 and interrupt-parent
+/arm-io/gpio, on both the J81 and the J82, and the same flags on the
+iPad 6 are its active-low line.
+
+List the two Smart Cover hall sensors, GPIO 12 ("halleffect") and 10
+("halleffect1"), as wake-only events 0x24 and 0x22, so that opening the
+cover ends system sleep. While awake they stay polled.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t7001-air2.dtsi | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t7001-air2.dtsi b/arch/arm64/boot/dts/apple/t7001-air2.dtsi
+index 4deccfa..7cc35c4 100644
+--- a/arch/arm64/boot/dts/apple/t7001-air2.dtsi
++++ b/arch/arm64/boot/dts/apple/t7001-air2.dtsi
+@@ -152,6 +152,11 @@
+ 			/* Only Bluetooth (2) and Wi-Fi (3) REG_ON are used; the other lines stay as iBoot left them. */
+ 			gpio-reserved-ranges = <0 2>, <4 6>, <11 1>, <13 8>;
+ 			/* Lines 10 and 12 are the Smart Cover hall sensors. */
++			interrupt-controller;
++			#interrupt-cells = <2>;
++			interrupts-extended = <&pinctrl 86 IRQ_TYPE_LEVEL_LOW>;
++			/* Smart Cover hall sensors (lines 10 and 12): wake only. */
++			apple,wake-events = <0x22 0x24>;
+ 		};
+ 
+ 		rtc@5c0 {
+-- 
+2.54.0 (Apple Git-157)
+
