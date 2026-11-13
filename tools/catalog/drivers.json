@@ -6,6 +6,7 @@
       "bluetooth_audio",
       "bluetooth_input",
       "buttons",
+      "gyroscope",
       "storage_read",
       "storage_write",
       "usb_network",
@@ -17,6 +18,7 @@
       "bluetooth_audio",
       "bluetooth_input",
       "buttons",
+      "gyroscope",
       "storage_read",
       "storage_write",
       "usb_network",
@@ -29,6 +31,7 @@
       "bluetooth_audio",
       "bluetooth_input",
       "buttons",
+      "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
@@ -44,6 +47,7 @@
       "bluetooth_audio",
       "bluetooth_input",
       "buttons",
+      "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
@@ -136,12 +140,15 @@
       "bluetooth_input",
       "buttons",
       "charging",
+      "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
       "touch",
+      "usb_host",
       "usb_network",
       "usb_serial",
+      "video_decode_hevc",
       "wifi"
     ],
     "j172": [
@@ -153,12 +160,15 @@
       "bluetooth_input",
       "buttons",
       "charging",
+      "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
       "touch",
+      "usb_host",
       "usb_network",
       "usb_serial",
+      "video_decode_hevc",
       "wifi"
     ],
     "j207": [
@@ -188,14 +198,19 @@
       "bluetooth_input",
       "buttons",
       "charging",
+      "gyroscope",
+      "light_sensor",
       "storage_read",
       "storage_write",
       "touch",
+      "usb_host",
       "usb_network",
       "usb_serial",
+      "video_decode_hevc",
       "wifi"
     ],
     "j71s": [
+      "accelerometer",
       "audio_output",
       "backlight",
       "battery",
@@ -203,12 +218,16 @@
       "bluetooth_input",
       "buttons",
       "charging",
+      "gyroscope",
       "light_sensor",
       "touch",
+      "usb_host",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "video_decode_hevc"
     ],
     "j71t": [
+      "accelerometer",
       "audio_output",
       "backlight",
       "battery",
@@ -216,12 +235,15 @@
       "bluetooth_input",
       "buttons",
       "charging",
+      "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
       "touch",
+      "usb_host",
       "usb_network",
       "usb_serial",
+      "video_decode_hevc",
       "wifi"
     ],
     "j72b": [
@@ -233,14 +255,19 @@
       "bluetooth_input",
       "buttons",
       "charging",
+      "gyroscope",
+      "light_sensor",
       "storage_read",
       "storage_write",
       "touch",
+      "usb_host",
       "usb_network",
       "usb_serial",
+      "video_decode_hevc",
       "wifi"
     ],
     "j72s": [
+      "accelerometer",
       "audio_output",
       "backlight",
       "battery",
@@ -248,12 +275,16 @@
       "bluetooth_input",
       "buttons",
       "charging",
+      "gyroscope",
       "light_sensor",
       "touch",
+      "usb_host",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "video_decode_hevc"
     ],
     "j72t": [
+      "accelerometer",
       "audio_output",
       "backlight",
       "battery",
@@ -261,12 +292,15 @@
       "bluetooth_input",
       "buttons",
       "charging",
+      "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
       "touch",
+      "usb_host",
       "usb_network",
       "usb_serial",
+      "video_decode_hevc",
       "wifi"
     ],
     "j73": [
@@ -391,38 +425,50 @@
       "usb_serial"
     ],
     "n66": [
+      "accelerometer",
       "backlight",
       "buttons",
+      "gyroscope",
       "usb_network",
       "usb_serial"
     ],
     "n66m": [
+      "accelerometer",
       "backlight",
       "buttons",
+      "gyroscope",
       "usb_network",
       "usb_serial"
     ],
     "n69": [
+      "accelerometer",
       "backlight",
       "buttons",
+      "gyroscope",
       "usb_network",
       "usb_serial"
     ],
     "n69u": [
+      "accelerometer",
       "backlight",
       "buttons",
+      "gyroscope",
       "usb_network",
       "usb_serial"
     ],
     "n71": [
+      "accelerometer",
       "backlight",
       "buttons",
+      "gyroscope",
       "usb_network",
       "usb_serial"
     ],
     "n71m": [
+      "accelerometer",
       "backlight",
       "buttons",
+      "gyroscope",
       "usb_network",
       "usb_serial"
     ]

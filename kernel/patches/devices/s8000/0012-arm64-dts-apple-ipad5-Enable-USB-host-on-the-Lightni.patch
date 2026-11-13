@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 14:46:21 +0100
+Subject: [PATCH] arm64: dts: apple: ipad5: Enable USB host on the Lightning
+ port
+
+Enable the S8000 USB role switch on the iPad 5 with the D2365 PMIC
+(accessory power LDO) and the Tristar (ACC pin routing), and point the
+Lightning charger at it, so that its accessory policy can give the port
+to the host controllers while the camera adapter is attached. The
+charger keeps setting the device controller's role through its port.
+
+The Apple device tree gives the accessory rail as LDO5 of the PMU
+(dock: function-acc_pwr, function-acc_sw_en) and the Tristar as a
+CBTL1610 on i2c0.
+
+Tested on an iPad 5 (J71t) with the Lightning to USB camera adapter:
+attaching it switches the port to the host role with EHCI and OHCI up;
+USB mass storage transfers at about 36 MB/s; a powered USB-C hub
+enumerates with its hub, SD card reader and RTL8152 Ethernet; detaching
+the adapter returns the port to the device role and restores the USB
+gadget.
+
+[Orchard: from orchard PR #126, commit 864b4971; moved from the t8010
+ layer to the iPad 5 board layer]
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/s800x-ipad5.dtsi | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi b/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
+index 1b21643..5f54d10 100644
+--- a/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
++++ b/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
+@@ -383,6 +383,17 @@
+ 	status = "okay";
+ };
+ 
++/* Lightning host role: accessory power from LDO5, ACC routing by the Tristar. */
++&tristar_charger {
++	apple,usb-role-switch = <&usb_role>;
++};
++
++&usb_role {
++	apple,pmic = <&d2365_pmic>;
++	apple,tristar = <&tristar>;
++	status = "okay";
++};
++
+ &vxd {
+ 	status = "okay";
+ };

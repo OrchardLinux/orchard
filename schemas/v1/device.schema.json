@@ -338,6 +338,14 @@
             "none"
           ]
         },
+        "usb_host": {
+          "enum": [
+            "working",
+            "untested",
+            "missing",
+            "none"
+          ]
+        },
         "audio_output": {
           "enum": [
             "working",
@@ -355,6 +363,14 @@
           ]
         },
         "camera": {
+          "enum": [
+            "working",
+            "untested",
+            "missing",
+            "none"
+          ]
+        },
+        "video_decode_hevc": {
           "enum": [
             "working",
             "untested",
@@ -386,9 +402,11 @@
         "resume",
         "usb_serial",
         "usb_network",
+        "usb_host",
         "audio_output",
         "audio_input",
-        "camera"
+        "camera",
+        "video_decode_hevc"
       ],
       "additionalProperties": false
     },

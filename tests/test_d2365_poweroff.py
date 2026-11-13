@@ -16,6 +16,7 @@ import unittest
 DRIVER = 'drivers/power/reset/apple-d2365-poweroff.c'
 ROOT = Path(__file__).resolve().parents[1]
 J71B_DTS = 'arch/arm64/boot/dts/apple/t8010-j71b.dts'
+IPAD6_DTSI = 'arch/arm64/boot/dts/apple/t8010-ipad6.dtsi'
 J71B_UPSTREAM = 'cee9395acd8043be0644b25c34bfa86623f2b935'
 
 
@@ -45,7 +46,7 @@ def driver_source():
     return patched_source(DRIVER)
 
 
-def resolved_j71b_dts(extra_patches=()):
+def resolved_j71b_dts(extra_patches=(), path=J71B_DTS):
     """Apply the real platform series to a pinned upstream file, offline."""
     lock = dict(line.split('=', 1) for line in
                 (ROOT / 'kernel/upstream.lock').read_text().splitlines())
@@ -53,15 +54,15 @@ def resolved_j71b_dts(extra_patches=()):
         raise AssertionError('Refresh the J71b DTS fixture for kernel/upstream.lock')
     series = runpy.run_path(str(ROOT / 'kernel/series.py'))['patches']('j71b')
     with tempfile.TemporaryDirectory() as temporary:
-        source = Path(temporary) / J71B_DTS
+        source = Path(temporary) / path
         source.parent.mkdir(parents=True)
-        shutil.copyfile(ROOT / 'tests/fixtures/d2365/t8010-j71b.dts', source)
+        shutil.copyfile(ROOT / 'tests/fixtures/d2365' / Path(path).name, source)
         for patch in [*series, *extra_patches]:
             # Skip other files, but include deletions of this one as well.
             lines = patch.read_text().splitlines()
-            if not {f'--- a/{J71B_DTS}', f'+++ b/{J71B_DTS}'}.intersection(lines):
+            if not {f'--- a/{path}', f'+++ b/{path}'}.intersection(lines):
                 continue
-            result = subprocess.run(['git', 'apply', f'--include={J71B_DTS}', str(patch)],
+            result = subprocess.run(['git', 'apply', f'--include={path}', str(patch)],
                                     cwd=temporary, capture_output=True, text=True, timeout=10)
             if result.returncode:
                 raise AssertionError(f'{patch}: {result.stdout}{result.stderr}')
@@ -69,11 +70,12 @@ def resolved_j71b_dts(extra_patches=()):
 
 
 class D2365DeviceTree(unittest.TestCase):
-    def test_j71b_poweroff_node_has_supply(self):
-        source = resolved_j71b_dts()
+    def test_ipad6_poweroff_node_has_supply(self):
+        # Every iPad 6 and iPad 7 board includes the shared file with the node.
+        source = resolved_j71b_dts(path=IPAD6_DTSI)
         self.assertIn('compatible = "apple,d2365-poweroff";', source)
         self.assertIn('power-supplies = <&tristar_charger>;', source)
-        self.assertIn('simple-audio-card,name = "J71b Speakers";', source)
+        self.assertIn('simple-audio-card,name = "J71b Speakers";', resolved_j71b_dts())
 
     def test_ipad6_boards_share_the_tdm_speaker_link(self):
         # Several patches add to the iPad 6 boards' shared file; the speaker link is in one of them.
@@ -81,30 +83,30 @@ class D2365DeviceTree(unittest.TestCase):
         self.assertIn('maxim,tdm;', source)
         self.assertIn('simple-audio-card,format = "dsp_a";', source)
 
-    def with_later_patch(self, before, after):
+    def with_later_patch(self, before, after, path=J71B_DTS):
         with tempfile.TemporaryDirectory() as temporary:
             patch = Path(temporary) / '9999-later-j71b-change.patch'
             patch.write_text(''.join(difflib.unified_diff(
                 before.splitlines(keepends=True), after.splitlines(keepends=True),
-                fromfile='a/' + J71B_DTS, tofile='b/' + J71B_DTS)))
-            return resolved_j71b_dts([patch])
+                fromfile='a/' + path, tofile='b/' + path)))
+            return resolved_j71b_dts([patch], path=path)
 
-    def test_later_speaker_edit_preserves_poweroff_node(self):
-        before = resolved_j71b_dts()
-        after = before.replace('"J71b Speakers"', '"J71b Test Speakers"')
+    def test_later_unrelated_edit_preserves_poweroff_node(self):
+        before = resolved_j71b_dts(path=IPAD6_DTSI)
+        after = before.replace('apple/aop-ipad7b.bin', 'apple/aop-test.bin')
         self.assertNotEqual(before, after)
-        # The last patch has only sound-card hunks, not the poweroff node.
-        resolved = self.with_later_patch(before, after)
+        # The last patch has only firmware-name hunks, not the poweroff node.
+        resolved = self.with_later_patch(before, after, IPAD6_DTSI)
         self.assertEqual(resolved, after)
         self.assertIn('compatible = "apple,d2365-poweroff";', resolved)
         self.assertIn('power-supplies = <&tristar_charger>;', resolved)
 
     def test_later_deletion_is_not_hidden_by_earlier_added_lines(self):
-        before = resolved_j71b_dts()
+        before = resolved_j71b_dts(path=IPAD6_DTSI)
         supply = '\t\tpower-supplies = <&tristar_charger>;\n'
         self.assertIn(supply, before)
         after = before.replace(supply, '')
-        resolved = self.with_later_patch(before, after)
+        resolved = self.with_later_patch(before, after, IPAD6_DTSI)
         self.assertEqual(resolved, after)
         self.assertNotIn('power-supplies = <&tristar_charger>;', resolved)
 
@@ -192,7 +194,8 @@ class D2365Poweroff(unittest.TestCase):
 
 class D2365EventQuiesce(unittest.TestCase):
     def test_shutdown_drains_irq_and_retry_after_closing_gate(self):
-        post = patched_source('drivers/gpio/gpio-apple-d2365.c')
+        # Every patch of the driver: later ones (Smart Cover wake) change other parts.
+        post = patched_source('drivers/gpio/gpio-apple-d2365.c', every=True)
         start = post.index('void apple_d2365_gpio_quiesce(')
         shutdown = post[start:post.index('\n}', start) + 2]
         self.assertNotIn('.shutdown = apple_pmic_gpio_shutdown', post)
