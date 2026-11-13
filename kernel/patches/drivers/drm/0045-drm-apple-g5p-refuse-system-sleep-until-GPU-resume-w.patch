@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 11:47:48 +0100
+Subject: [PATCH] drm/apple-g5p: refuse system sleep until GPU resume works
+
+On J71t a completed suspend/resume cycle does not bring the GPU back,
+yet the sleep admission admits a parked, idle GPU and
+/sys/power/suspend_ready reads "ready", so userspace that follows the
+kernel's answer suspends into a GPU that does not come back.
+
+Add a read-only "suspend" module parameter, off by default. While it is
+off, the G5P sleep admission refuses before anything is shut: prepare
+logs why and how to opt in and returns -EOPNOTSUPP, and the readiness
+check answers "resume-unsupported", so /sys/power/suspend_ready reads
+"not-ready <gpu>:resume-unsupported -95". Booting with
+a9_gpu_drm.suspend=1 admits sleep exactly as before, for work on
+resume. Boards without the G5P driver are not affected.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/apple-g5p/system-sleep.inc | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/drivers/gpu/drm/apple-g5p/system-sleep.inc b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+index bb3ead784..5f96de133 100644
+--- a/drivers/gpu/drm/apple-g5p/system-sleep.inc
++++ b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+@@ -24,6 +24,18 @@
+  * render attachment per boot), so it says nothing about work in flight.
+  * Accepted jobs not yet signalled are r8_queued.
+  */
++
++/*
++ * GPU resume does not work yet: on J71t a completed suspend/resume cycle did
++ * not bring the GPU back. Until it does, system sleep is refused at admission,
++ * so /sys/power/suspend_ready and every suspend attempt name the GPU instead
++ * of suspending into a GPU that does not come back. suspend=1 admits sleep
++ * exactly as before, for work on resume.
++ */
++static bool g5p_suspend;
++module_param_named(suspend, g5p_suspend, bool, 0444);
++MODULE_PARM_DESC(suspend, "Admit system sleep although GPU resume does not work yet (default: off)");
++
+ enum {
+ 	G5P_SB_COMPUTE,		/* no CDM stamp certificate yet (lane GS) */
+ 	G5P_SB_TERMINAL,
+@@ -277,6 +289,11 @@ static int g5p_system_sleep_prepare(struct device *dev)
+ 	int ret = -EBUSY, users;
+ 
+ 	/* Every refusal below names its stage and reason: no silent -EBUSY. */
++	if (!g5p_suspend) {
++		dev_info(dev, "GPU-PM sleep refused: stage=entry why=resume-unsupported: GPU resume is not supported yet; boot with %s.suspend=1 to try it\n",
++			 KBUILD_MODNAME);
++		return -EOPNOTSUPP;
++	}
+ 	if (!g || !g->event_cookie || !g->boot) {
+ 		dev_info(dev, "GPU-PM sleep refused: stage=entry why=%s\n",
+ 			 !g ? "no-core" : !g->event_cookie ? "no-drm" : "no-boot");
+@@ -463,6 +480,8 @@ static int g5p_system_sleep_check(struct device *dev)
+ 		return -ENODEV;
+ 	d = g->event_cookie;
+ 	d->sleep_why[0] = 0;
++	if (!g5p_suspend)
++		return g5p_sleep_why(d, -EOPNOTSUPP, "resume-unsupported");
+ 	b = READ_ONCE(g->boot);
+ 	if (READ_ONCE(g->sleep_failed))
+ 		return g5p_sleep_why(d, -EIO, "sleep-failed");
