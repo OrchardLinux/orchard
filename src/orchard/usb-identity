@@ -8,8 +8,13 @@ serial=
 if [ -r "$tree/serial-number" ]; then
     serial=$(tr -d '\000' < "$tree/serial-number")
 fi
+id=
 if [ -n "$serial" ]; then
-    id=$(printf 'orchard-%s' "$serial" | sha256sum | cut -c1-12)
+    id=$(printf 'orchard-%s' "$serial" | sha256sum 2>/dev/null | cut -c1-12) || id=
+    case "$id" in *[!0-9a-f]* | '') id= ;; esac
+    [ ${#id} -eq 12 ] || id=
+fi
+if [ -n "$id" ]; then
     printf 'BOARD:%s ID:%s\n' "${board#apple,}" "$id"
 else
     # Keep rescue serial and SSH reachable on trees without a hardware ID.
