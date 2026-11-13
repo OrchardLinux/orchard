@@ -63,6 +63,8 @@ resume = "missing"
 # See docs/bring-up/p105-usb-handoff.md for observations and software checks.
 usb_serial = "untested"
 usb_network = "untested"
+usb_host = "missing"
 audio_output = "untested"
 audio_input = "untested"
 camera = "missing"
+video_decode_hevc = "missing"

@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 21:25:14 +0100
+Subject: [PATCH] media: apple-vxd: Add the HEVC command-stream builder
+
+AppleD5500 decodes HEVC with a register program of its own, distinct
+from the AVC one: per slice segment a chunk with the 0x90000000
+descriptor, the whole slice NAL by DMA ({0xb0000001, header bits, bytes}
+and {0xa.., address}), the 0x30xx/0x34xx command registers and a slice
+structure the core copies into the picture's slice parameter buffer
+(0xf), each with a kind-1 packet (mailbox 0x81); then one chunk of
+single register writes for the picture, the 0x50xx/0x54xx entropy and
+0x70xx/0x71xx render registers with the output and reference surfaces
+and the scaling lists, with a kind-4 packet (mailbox 0x88) that ends the
+job.  The layouts come from the iOS 16.7.10 kext (picture path
+0xfffffff0062960a0, per slice 0x62b37d4, per picture 0x62b7ab0) and are
+listed register by register in the comments.
+
+This builds that program from the V4L2 HEVC controls.  It is pure code,
+like the H.264 builder, so it also builds on the host: a harness feeds
+it x265 and VideoToolbox test streams and compares every command word,
+slice structure and packet against an independent generator written from
+the kext.
+
+Supported: 8-bit 4:2:0, I/P/B, multiple and dependent slice segments,
+tiles, WPP, long-term references, weighted prediction, PCM and scaling
+lists.  Refused: other chroma formats and bit depths (the Main 10 output
+layout is not established), more than 15 references.
+
+The 15 hardware reference slots are named by the V4L2 DPB index; the
+kext numbers them in its own DPB order, which never leaves the host.
+
+Nothing calls the builder yet.
+
+[Orchard: from orchard PR #121, commit 4016f5e2; unchanged]
+
+Assisted-by: LLM
+---
+diff --git a/drivers/media/platform/apple/vxd/Makefile b/drivers/media/platform/apple/vxd/Makefile
+index 7f692f8..0877a60 100644
+--- a/drivers/media/platform/apple/vxd/Makefile
++++ b/drivers/media/platform/apple/vxd/Makefile
+@@ -2,6 +2,6 @@
+ apple-vxd-y := apple-vxd-core.o apple-vxd-gart.o apple-vxd-fw.o \
+ 	       apple-vxd-mbox.o apple-vxd-cmd.o apple-vxd-cmdbuf.o \
+ 	       apple-vxd-v4l2.o apple-vxd-h264.o apple-vxd-h264-parse.o \
+-	       apple-vxd-h264-cmd.o
++	       apple-vxd-h264-cmd.o apple-vxd-hevc-cmd.o
+ 
+ obj-$(CONFIG_VIDEO_APPLE_VXD) += apple-vxd.o
+-- 
+2.54.0

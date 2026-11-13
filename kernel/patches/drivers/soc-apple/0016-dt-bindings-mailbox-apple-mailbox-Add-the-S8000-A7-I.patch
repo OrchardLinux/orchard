@@ -1,10 +1,15 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
-Date: Sun, 8 Nov 2026 17:15:00 +0100
-Subject: [PATCH] dt-bindings: mailbox: select certified AOP reload through DT
+Date: Thu, 12 Nov 2026 09:00:00 +0100
+Subject: [PATCH] dt-bindings: mailbox: apple,mailbox: Add the S8000 A7 IOP
+ mailbox
 
-A retained AOP must not be reset as though it were a fresh boot.
-Describe the compatible and retained-reload property.
+The A9's always-on processor talks to the application processor
+through the same A7 IOP mailbox as the A10's. Add its compatible, with
+the T8010's as the fallback.
+
+[Orchard: from orchard PR #101, commit a54e2049; drivers/mailbox/0001
+ without the reload wording, the entry placed after the T8010's]
 
 Assisted-by: LLM
 ---
@@ -12,19 +17,22 @@ Assisted-by: LLM
  1 file changed, 6 insertions(+)
 
 diff --git a/Documentation/devicetree/bindings/mailbox/apple,mailbox.yaml b/Documentation/devicetree/bindings/mailbox/apple,mailbox.yaml
-index ba035ff80..8821623d3 100644
+index ba035ff..ea414a8 100644
 --- a/Documentation/devicetree/bindings/mailbox/apple,mailbox.yaml
 +++ b/Documentation/devicetree/bindings/mailbox/apple,mailbox.yaml
-@@ -22,6 +22,12 @@ description:
- properties:
-   compatible:
-     oneOf:
+@@ -59,6 +59,12 @@ properties:
+         items:
+           - const: apple,t8010-a7iop-mailbox
+ 
 +      - description:
 +          The same A7 IOP mailbox on the A9.
 +        items:
 +          - const: apple,s8000-a7iop-mailbox
 +          - const: apple,t8010-a7iop-mailbox
 +
-       - description:
-           ASC mailboxes are the most common variant found on the M1 used
-           for example for the display controller, the system management
+   reg:
+     maxItems: 1
+ 
+-- 
+2.54.0 (Apple Git-157)
+
