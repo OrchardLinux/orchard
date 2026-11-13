@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 17:15:00 +0100
+Subject: [PATCH] dt-bindings: soc-apple: select certified AOP reload through
+ DT
+
+A retained AOP must not be reset as though it were a fresh boot.
+Describe the retained-reload properties: the certified-reload flag, the
+reserved shutdown page and the power domains the reload observes.
+
+Assisted-by: LLM
+---
+---
+ .../bindings/soc/apple/apple,t8010-aop.yaml    | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/soc/apple/apple,t8010-aop.yaml b/Documentation/devicetree/bindings/soc/apple/apple,t8010-aop.yaml
+index 32788d1c7..74586c6e0 100644
+--- a/Documentation/devicetree/bindings/soc/apple/apple,t8010-aop.yaml
++++ b/Documentation/devicetree/bindings/soc/apple/apple,t8010-aop.yaml
+@@ -18,6 +18,10 @@ description:
+   board-specific and is loaded by the operating system.
+ 
+ properties:
++  apple,certified-reload:
++    type: boolean
++    description: Firmware supports the retained shutdown certificate for warm reload.
++
+   compatible:
+     enum:
+       - apple,s8000-aop
+@@ -70,6 +74,20 @@ properties:
+       The SoC's chip revision, filled in by the bootloader. The S8000
+       firmware's boot arguments carry it.
+ 
++  memory-region:
++    maxItems: 1
++    description: Reserved 16 KiB shutdown transcript page for J71t warm reload.
++
++  apple,observe-domains:
++    $ref: /schemas/types.yaml#/definitions/phandle-array
++    minItems: 5
++    maxItems: 5
++    description: AOP GPIO, AOP, bus interface, CPU and filter in lock order.
++
++  apple,spi0-domain:
++    $ref: /schemas/types.yaml#/definitions/phandle
++    description: Read-only SPI0 power-state provider observation.
++
+ patternProperties:
+   "^(accel|gyro|compass|pressure)$":
+     type: object

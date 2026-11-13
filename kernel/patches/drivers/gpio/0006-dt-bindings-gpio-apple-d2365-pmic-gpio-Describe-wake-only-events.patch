@@ -1,24 +1,24 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
 Date: Tue, 10 Nov 2026 17:27:23 +0000
-Subject: [PATCH] dt-bindings: gpio: apple,d2365-pmic-gpio: describe wake-only
+Subject: [PATCH] dt-bindings: gpio: apple,d2365-pmic-gpio: Describe wake-only
  events
 
 Add apple,wake-events: GPIO events (0x30 plus the line) that end system
-sleep and have no interrupt consumer, such as the iPad 5 Smart Cover
-hall sensors on lines 0 and 10. A hall sensor that is unmasked while the
+sleep and have no interrupt consumer, such as the iPad Smart Cover hall
+sensors on lines 0 and 10. A hall sensor that is unmasked while the
 system is awake drives the PMU line on every change of the magnet field,
 so these events are unmasked only for the duration of a sleep and cannot
 be mapped as interrupts. Only the D2365 has the event controller they
 need.
 
+[Orchard: from orchard PR #118, commit e8b5e4b7; example text names
+ every iPad with the cover, not only the iPad 5]
+
 Assisted-by: LLM
 ---
- .../bindings/gpio/apple,d2365-pmic-gpio.yaml   | 18 ++++++++++++++++++
- 1 file changed, 18 insertions(+)
-
 diff --git a/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml b/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml
-index c1cae13ab..6241bfc50 100644
+index c1cae13..a962bb0 100644
 --- a/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml
 +++ b/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml
 @@ -54,6 +54,21 @@ properties:
@@ -34,7 +34,7 @@ index c1cae13ab..6241bfc50 100644
 +      maximum: 0x47
 +    description: |
 +      GPIO events (0x30 plus the line number) that end system sleep and have
-+      no interrupt consumer, such as the iPad 5 Smart Cover hall sensors on
++      no interrupt consumer, such as the iPad Smart Cover hall sensors on
 +      lines 0 and 10 (events 0x30 and 0x3a). They stay masked while the
 +      system is awake, where the line is read through the GPIO instead, and
 +      are unmasked only while it sleeps: a hall sensor drives the PMU line on
@@ -67,3 +67,5 @@ index c1cae13ab..6241bfc50 100644
          };
      };
  ...
+-- 
+2.54.0

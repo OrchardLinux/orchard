@@ -63,6 +63,12 @@
         "zip": "Firmware/J172_Multitouch.im4p"
       },
       "sha256": "159f75dbbbf694a47af0fa16d00f2cbf3cf9a3dd34bfdb8da5db1d167a3e9889"
+    },
+    "aop.im4p": {
+      "ipsw": {
+        "zip": "Firmware/AOP/aopfw-ipad7caop.RELEASE.im4p"
+      },
+      "sha256": "90daa7cd85aca3eb5f2b52967a5f9781a99fa72e5631b4c87c94da3a84061cae"
     }
   },
   "outputs": [
@@ -178,6 +184,34 @@
           "step": "z2fw-from-mtfw@1",
           "profile": "K1F19,6",
           "otp_preflight": true
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/aop-ipad7c.bin",
+      "sha256": "1d475fb6ac89cd9fb5abb942825371f1e2db225301832e3aca1a93722acbf34e",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "aop.im4p"
+        },
+        {
+          "step": "aop-image@1",
+          "coprocessor": "AOP"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/aop-ipad7c-ext.bin",
+      "sha256": "c5f01181d31ef64b409d350d5bac502bf395ef4814c855788a0f820ff9215606",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "aop.im4p"
+        },
+        {
+          "step": "aop-image@1",
+          "coprocessor": "AOP_ext"
         }
       ]
     }

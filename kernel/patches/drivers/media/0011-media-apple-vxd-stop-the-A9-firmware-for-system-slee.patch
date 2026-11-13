@@ -33,7 +33,7 @@ Assisted-by: LLM
  5 files changed, 164 insertions(+), 3 deletions(-)
 
 diff --git a/drivers/media/platform/apple/vxd/apple-vxd-core.c b/drivers/media/platform/apple/vxd/apple-vxd-core.c
-index ab7515fee..31a024233 100644
+index 2940978ff..16051e6c6 100644
 --- a/drivers/media/platform/apple/vxd/apple-vxd-core.c
 +++ b/drivers/media/platform/apple/vxd/apple-vxd-core.c
 @@ -245,7 +245,51 @@ static int apple_vxd_runtime_suspend(struct device *dev)
@@ -88,15 +88,15 @@ index ab7515fee..31a024233 100644
  	RUNTIME_PM_OPS(apple_vxd_runtime_suspend, apple_vxd_runtime_resume, NULL)
  };
  
-@@ -254,6 +298,7 @@ static const struct apple_vxd_variant s8000_vxd_variant = {
+@@ -260,6 +304,7 @@ static const struct apple_vxd_variant s8000_vxd_variant = {
  	.num_gart_pts	= 512,		/* "setting 2GB mapping" [E] */
  	/* HEVCSupported = ((rev - 7) < 4) && ((0xD >> (rev - 7)) & 1) [E] */
  	.hevc_supported	= true,
 +	.sleep_stop	= true,
- };
- 
- /* The T8010 core has two pixel pipes; it reports them in CORE_ID. */
-@@ -353,14 +398,27 @@ static int apple_vxd_probe(struct platform_device *pdev)
+ 	.hevc = {
+ 		.buf_mult	= 1,
+ 		.tail_7474	= true,
+@@ -369,16 +414,29 @@ static int apple_vxd_probe(struct platform_device *pdev)
  	if (ret)
  		goto err_disable_runtime_pm;
  
@@ -112,6 +112,8 @@ index ab7515fee..31a024233 100644
 +
  	ret = apple_vxd_h264_register(vxd);
  	if (!ret)
+ 		ret = apple_vxd_hevc_register(vxd);
+ 	if (!ret)
  		ret = apple_vxd_v4l2_init(vxd);
  	if (ret)
 -		goto err_gart_fini;
@@ -125,7 +127,7 @@ index ab7515fee..31a024233 100644
  err_gart_fini:
  	apple_vxd_gart_fini(vxd);
  err_disable_runtime_pm:
-@@ -373,6 +431,9 @@ static void apple_vxd_remove(struct platform_device *pdev)
+@@ -391,6 +449,9 @@ static void apple_vxd_remove(struct platform_device *pdev)
  {
  	struct apple_vxd_dev *vxd = platform_get_drvdata(pdev);
  
@@ -139,7 +141,7 @@ diff --git a/drivers/media/platform/apple/vxd/apple-vxd-fw.c b/drivers/media/pla
 index 753ca4944..ede737efd 100644
 --- a/drivers/media/platform/apple/vxd/apple-vxd-fw.c
 +++ b/drivers/media/platform/apple/vxd/apple-vxd-fw.c
-@@ -435,6 +435,83 @@ int apple_vxd_boot_firmware(struct apple_vxd_dev *vxd)
+@@ -435,6 +435,83 @@ out_put:
  	return ret;
  }
  
@@ -241,10 +243,10 @@ index edeccb8e0..fdbe48903 100644
  #define  VXD_VECT_CFG2_MSGS_MINUS1	0x000000c7	/* core[0xb4] - 1 */
  #define VXD_REG_ENTDEC_0_SIZE		0x0340
 diff --git a/drivers/media/platform/apple/vxd/apple-vxd-v4l2.c b/drivers/media/platform/apple/vxd/apple-vxd-v4l2.c
-index 23c051f1d..e9467232d 100644
+index 9664bb802..c5e429df7 100644
 --- a/drivers/media/platform/apple/vxd/apple-vxd-v4l2.c
 +++ b/drivers/media/platform/apple/vxd/apple-vxd-v4l2.c
-@@ -885,13 +885,15 @@ static int apple_vxd_open(struct file *filp)
+@@ -897,13 +897,15 @@ static int apple_vxd_open(struct file *filp)
  	 * can be read, and keeps running (and the block powered) until the
  	 * driver is unbound. Later opens find it running.
  	 */
@@ -262,7 +264,7 @@ index 23c051f1d..e9467232d 100644
  
  	ctx->vxd = vxd;
  	v4l2_fh_init(&ctx->fh, vdev);
-@@ -900,6 +902,7 @@ static int apple_vxd_open(struct file *filp)
+@@ -912,6 +914,7 @@ static int apple_vxd_open(struct file *filp)
  	if (ret) {
  		v4l2_fh_exit(&ctx->fh);
  		kfree(ctx);
@@ -270,7 +272,7 @@ index 23c051f1d..e9467232d 100644
  		return ret;
  	}
  
-@@ -910,11 +913,13 @@ static int apple_vxd_open(struct file *filp)
+@@ -922,11 +925,13 @@ static int apple_vxd_open(struct file *filp)
  static int apple_vxd_release(struct file *filp)
  {
  	struct apple_vxd_ctx *ctx = file_to_vxd_ctx(filp);
@@ -285,10 +287,10 @@ index 23c051f1d..e9467232d 100644
  	return 0;
  }
 diff --git a/drivers/media/platform/apple/vxd/apple-vxd.h b/drivers/media/platform/apple/vxd/apple-vxd.h
-index bba04f75a..81fef0f1a 100644
+index 1db55c1ca..7922ebb73 100644
 --- a/drivers/media/platform/apple/vxd/apple-vxd.h
 +++ b/drivers/media/platform/apple/vxd/apple-vxd.h
-@@ -25,6 +25,7 @@
+@@ -26,6 +26,7 @@
  #include <linux/io.h>
  #include <linux/mutex.h>
  #include <linux/platform_device.h>
@@ -296,7 +298,7 @@ index bba04f75a..81fef0f1a 100644
  #include <linux/sizes.h>
  #include <linux/spinlock.h>
  #include <linux/types.h>
-@@ -66,6 +67,11 @@ struct apple_vxd_variant {
+@@ -71,6 +72,11 @@ struct apple_vxd_variant {
  	u32 num_gart_pts;		/* mapped page tables (512 = 2 GiB) */
  	bool hevc_supported;
  	bool has_integration;		/* second reg range, see VXD_INTEG_CTRL */
@@ -305,10 +307,10 @@ index bba04f75a..81fef0f1a 100644
 +	 * last client closes, and boot it again on the next open.
 +	 */
 +	bool sleep_stop;
+ 	/* HEVC buffer multiplier and command quirks; zero leaves HEVC off. */
+ 	struct apple_vxd_hevc_caps hevc;
  };
- 
- /*
-@@ -284,6 +290,9 @@ struct apple_vxd_dev {
+@@ -294,6 +300,9 @@ struct apple_vxd_dev {
  	/* Core state. */
  	struct mutex power_lock;	/* boot vs. runtime suspend */
  	bool hw_ready;			/* firmware took its init message */
@@ -318,7 +320,7 @@ index bba04f75a..81fef0f1a 100644
  	u32 core_id;
  	u32 core_rev;
  	u32 num_entropy_pipes;
-@@ -448,6 +457,9 @@ void apple_vxd_dev_buf_free(struct apple_vxd_dev *vxd,
+@@ -459,6 +468,9 @@ void apple_vxd_dev_buf_free(struct apple_vxd_dev *vxd,
  
  /* fw.c */
  int apple_vxd_boot_firmware(struct apple_vxd_dev *vxd);

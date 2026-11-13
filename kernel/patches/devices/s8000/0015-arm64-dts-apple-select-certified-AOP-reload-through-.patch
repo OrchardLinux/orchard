@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 17:15:00 +0100
+Subject: [PATCH] arm64: dts: apple: select certified AOP reload through DT
+
+A retained AOP must not be reset as though it were a fresh boot. Select
+retained reload through device-tree data, preserving ordinary
+initialization for other hardware. The AOP itself, its firmware and
+mailbox are enabled for every iPad 5 in the shared file; J71t adds the
+reserved shutdown page and the power domains the reload observes.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/s8003-j71t.dts | 21 ++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/s8003-j71t.dts b/arch/arm64/boot/dts/apple/s8003-j71t.dts
+--- a/arch/arm64/boot/dts/apple/s8003-j71t.dts
++++ b/arch/arm64/boot/dts/apple/s8003-j71t.dts
+@@ -16,6 +16,27 @@
+ 	model = "Apple iPad 5 (Wi-Fi) (TSMC)";
+ };
+
++/ {
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++		/* A fixed tail page, never a firmware DMA grant. */
++		aop_shutdown: aop-shutdown@8583fc000 {
++			reg = <0x8 0x583fc000 0 0x4000>;
++			no-map;
++		};
++	};
++};
++
++&aop {
++	apple,certified-reload;
++	memory-region = <&aop_shutdown>;
++	apple,observe-domains = <&ps_aop_gpio &ps_aop &ps_aop_busif
++				 &ps_aop_cpu &ps_aop_filter>;
++	apple,spi0-domain = <&ps_spi0>;
++};
++
+ &touchscreen {
+ 	firmware-name = "apple/j71t-fwstart.z2fw";
+ };
+--
+2.54.0
