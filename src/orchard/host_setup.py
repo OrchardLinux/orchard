@@ -12,7 +12,7 @@ import tempfile
 from typing import Callable, Optional
 
 from . import tools
-from .apple.linux_usb import APPLE, M1N1, MODES, SERIAL_MODES
+from .apple.linux_usb import APPLE, M1N1, MODES, SERIAL_MODES, SYSTEM_MAC_CURRENT
 from .progress import Progress
 from .transports.pongo import GLU, library_path
 
@@ -24,7 +24,8 @@ def usb_rules(group):
         raise ValueError('Unsupported USB access group name')
     lines = ['# Orchard: every stage of the device and m1n1, with their serial consoles.']
     access = f'MODE="0660", GROUP="{group}", TAG+="uaccess"'
-    devices = [(APPLE, pid, mode in SERIAL_MODES) for pid, mode in MODES.items()] + [(*M1N1, True)]
+    devices = [(APPLE, pid, mode in SERIAL_MODES) for pid, mode in MODES.items()]
+    devices += [(APPLE, SYSTEM_MAC_CURRENT, True), (*M1N1, True)]
     for vendor, product, serial in devices:
         lines.append(f'SUBSYSTEM=="usb", ATTR{{idVendor}}=="{vendor:04x}", ATTR{{idProduct}}=="{product:04x}", {access}')
         if serial:

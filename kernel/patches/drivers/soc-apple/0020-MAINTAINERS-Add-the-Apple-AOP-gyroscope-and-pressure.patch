@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 09:00:00 +0100
+Subject: [PATCH] MAINTAINERS: Add the Apple AOP gyroscope and pressure drivers
+
+List the AOP's gyroscope and pressure sensor drivers with the AOP
+driver they are built on.
+
+[Orchard: from orchard PR #101, commit a54e2049; the MAINTAINERS part of
+ soc-apple/0015, split out because drivers/iio applies before
+ drivers/soc-apple, where the AOP entry is added]
+
+Assisted-by: LLM
+---
+ MAINTAINERS | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/MAINTAINERS b/MAINTAINERS
+index a4a6964..12c2928 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -2068,6 +2068,8 @@ APPLE T8010 ALWAYS-ON PROCESSOR
+ M:	Dalton Alexandre <alley.nightly_0b@icloud.com>
+ S:	Maintained
+ F:	Documentation/devicetree/bindings/soc/apple/apple,t8010-aop.yaml
++F:	drivers/iio/gyro/apple_aop_gyro.c
++F:	drivers/iio/pressure/apple_aop_pressure.c
+ F:	drivers/soc/apple/aop.c
+ F:	include/linux/soc/apple/aop.h
+ 
+-- 
+2.54.0 (Apple Git-157)
+

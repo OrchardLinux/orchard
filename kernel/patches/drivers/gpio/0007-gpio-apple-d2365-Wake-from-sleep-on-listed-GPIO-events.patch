@@ -1,12 +1,12 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
 Date: Tue, 10 Nov 2026 17:27:23 +0000
-Subject: [PATCH] gpio: apple-d2365: wake from sleep on listed GPIO events
+Subject: [PATCH] gpio: apple-d2365: Wake from sleep on listed GPIO events
 
-The Smart Cover halls cannot be interrupt consumers: unmasked while the
-system is awake, they keep the PMU line asserted (the 2026-11-07 storm
-with IRQ gpio-keys). The switches stay polled; make the halls wake-only
-instead.
+The Smart Cover hall sensors cannot be interrupt consumers: unmasked
+while the system is awake, they keep the PMU line asserted (an
+interrupt-driven gpio-keys caused an interrupt storm). The cover
+switches stay polled; make the halls wake-only instead.
 
 Events in apple,wake-events get no interrupt mapping and stay masked
 while awake. Every event latches whether masked or not, so ->suspend
@@ -15,24 +15,26 @@ the cover close that started the suspend would end it at once. Consumer
 events in that read are dispatched as the thread would have, and a wake
 source among them ends the transition. ->suspend then unmasks the wake
 and wake-only events and takes a wake reference on the PMU line, which
-no child interrupt holds for these events. Any failure there masks the
-halls again before returning, because ->resume will not run. ->resume
-masks them and, while the thread is still gated, reads the latched
-events and the line levels as the wake reason, then dispatches the
-consumers.
+no child interrupt holds for these events. ->resume masks them again
+and, while the thread is still gated, reads the latched events and
+dispatches the consumers.
+
+A failed write of the sleep mask now refuses the suspend instead of
+sleeping with the wrong events armed, and restores the awake mask
+first, because ->resume will not run.
 
 The read of the event block is factored out of the thread and shared;
 the line interrupt's consumers and the storm accounting stay in the
-thread. At probe, each wake line's boot configuration is logged next to
-the rule the iOS sleep path applies (config byte & 0xc1 == 1).
+thread. Without apple,wake-events nothing changes.
+
+[Orchard: from orchard PR #117 (gpio 0006, commit 40a8b18d) and PR #118
+ (gpio 0008, commit e8b5e4b7), folded into one patch; the boot-time and
+ per-sleep diagnostic logging is left out]
 
 Assisted-by: LLM
 ---
- drivers/gpio/gpio-apple-d2365.c | 258 +++++++++++++++++++++++++++++---
- 1 file changed, 235 insertions(+), 23 deletions(-)
-
 diff --git a/drivers/gpio/gpio-apple-d2365.c b/drivers/gpio/gpio-apple-d2365.c
-index c516dfe30..604d4cba3 100644
+index ba66e8e..39d6b79 100644
 --- a/drivers/gpio/gpio-apple-d2365.c
 +++ b/drivers/gpio/gpio-apple-d2365.c
 @@ -11,6 +11,12 @@
@@ -48,27 +50,15 @@ index c516dfe30..604d4cba3 100644
   */
  
  #include <linux/bitmap.h>
-@@ -72,6 +78,10 @@
- #define D2365_EVENT_MASK	0x1c0
- #define D2365_EVENT_BYTES	30
- #define D2365_GPIO_EVENT	0x30
-+/* iOS keeps a GPIO event unmasked in sleep if its config byte & 0xc1 == 1. */
-+#define D2365_GPIO_SLEEP_RULE_MASK	0xc1
-+#define D2365_GPIO_SLEEP_RULE_VALUE	0x01
-+#define APPLE_PMIC_INPUT_BYTES		3
- 
- #define APPLE_PMIC_EVENT_BYTES_MAX	30
- #define APPLE_PMIC_EVENTS_MAX		(APPLE_PMIC_EVENT_BYTES_MAX * 8)
-@@ -116,6 +126,8 @@ struct apple_pmic_gpio {
+@@ -116,6 +122,7 @@ struct apple_pmic_gpio {
  	struct delayed_work irq_retry;
  	DECLARE_BITMAP(enabled, APPLE_PMIC_IRQS_MAX);	/* unmasked while awake */
  	DECLARE_BITMAP(wake, APPLE_PMIC_EVENTS_MAX);	/* unmasked while asleep */
 +	DECLARE_BITMAP(wake_only, APPLE_PMIC_EVENTS_MAX); /* apple,wake-events */
-+	u8 armed_level[APPLE_PMIC_INPUT_BYTES];
  	u8 mask[APPLE_PMIC_EVENT_BYTES_MAX];		/* as last written */
  	u8 boot_mask[APPLE_PMIC_EVENT_BYTES_MAX];
  	int wake_delta;			/* parent wake references to apply */
-@@ -126,6 +138,8 @@ struct apple_pmic_gpio {
+@@ -126,6 +133,8 @@ struct apple_pmic_gpio {
  	bool irq_held;
  	bool removing;
  	bool shutting_down;
@@ -77,7 +67,7 @@ index c516dfe30..604d4cba3 100644
  };
  
  static unsigned int d2207_gpio_config_reg(unsigned int offset)
-@@ -285,6 +299,9 @@ static int apple_pmic_irq_map(struct irq_domain *domain, unsigned int irq,
+@@ -285,6 +294,9 @@ static int apple_pmic_irq_map(struct irq_domain *domain, unsigned int irq,
  
  	if (hwirq > gpio->nevents)
  		return -EINVAL;
@@ -87,7 +77,7 @@ index c516dfe30..604d4cba3 100644
  
  	irq_set_chip_data(irq, gpio);
  	irq_set_chip_and_handler(irq, &apple_pmic_irq_chip, handle_simple_irq);
-@@ -346,7 +363,8 @@ static bool apple_pmic_event_gate(struct apple_pmic_gpio *gpio)
+@@ -346,7 +358,8 @@ static bool apple_pmic_event_gate(struct apple_pmic_gpio *gpio)
  		 * suspend_device_irqs() must abort the transition, as the armed
  		 * interrupt does afterwards.
  		 */
@@ -97,7 +87,7 @@ index c516dfe30..604d4cba3 100644
  			pm_system_wakeup();
  		apple_pmic_irq_hold(gpio, false);
  		return false;
-@@ -363,6 +381,41 @@ static void apple_pmic_dispatch(struct apple_pmic_gpio *gpio,
+@@ -363,6 +376,41 @@ static void apple_pmic_dispatch(struct apple_pmic_gpio *gpio,
  		handle_nested_irq(child);
  }
  
@@ -139,7 +129,7 @@ index c516dfe30..604d4cba3 100644
  /*
   * Per assertion of the PMU line: first the consumers of the line itself,
   * then one read of the event block; every set event with a consumer is then
-@@ -377,10 +430,8 @@ static void apple_pmic_dispatch(struct apple_pmic_gpio *gpio,
+@@ -377,10 +425,8 @@ static void apple_pmic_dispatch(struct apple_pmic_gpio *gpio,
  static irqreturn_t apple_pmic_event_thread(int irq, void *data)
  {
  	struct apple_pmic_gpio *gpio = data;
@@ -151,7 +141,7 @@ index c516dfe30..604d4cba3 100644
  	int ret;
  
  	bitmap_zero(pending, APPLE_PMIC_EVENTS_MAX);
-@@ -408,15 +459,10 @@ static irqreturn_t apple_pmic_event_thread(int irq, void *data)
+@@ -408,15 +454,10 @@ static irqreturn_t apple_pmic_event_thread(int irq, void *data)
  	}
  
  	/* Reading the events clears them and releases the line. */
@@ -168,7 +158,7 @@ index c516dfe30..604d4cba3 100644
  	mutex_unlock(&gpio->irq_lock);
  	goto dispatch;
  
-@@ -429,9 +475,7 @@ static irqreturn_t apple_pmic_event_thread(int irq, void *data)
+@@ -429,9 +470,7 @@ hold:
  	mutex_unlock(&gpio->irq_lock);
  
  dispatch:
@@ -179,35 +169,10 @@ index c516dfe30..604d4cba3 100644
  	return IRQ_HANDLED;
  
  unlock:
-@@ -481,6 +525,59 @@ static void apple_pmic_event_stop(void *data)
+@@ -481,6 +520,34 @@ static void apple_pmic_event_stop(void *data)
  	free_irq(gpio->parent_irq, gpio);
  }
  
-+/* What the boot firmware left on a wake-only line, next to iOS's sleep rule. */
-+static void apple_pmic_wake_report(struct apple_pmic_gpio *gpio,
-+				   unsigned int event)
-+{
-+	const struct apple_pmic_gpio_info *info = gpio->info;
-+	struct device *dev = gpio->chip.parent;
-+	unsigned int line = event - info->events->gpio_event;
-+	unsigned int reg = info->config_reg(line);
-+	unsigned int cfg, cfg_hi, level;
-+
-+	if (regmap_read(gpio->regmap, reg, &cfg) ||
-+	    regmap_read(gpio->regmap, reg + 1, &cfg_hi) ||
-+	    regmap_read(gpio->regmap, info->input_base + line / 8, &level)) {
-+		dev_warn(dev, "wake event 0x%02x: cannot read line %u\n",
-+			 event, line);
-+		return;
-+	}
-+	dev_info(dev,
-+		 "wake event 0x%02x: line %u config 0x%02x/0x%02x level %u, mask at boot %s, iOS keeps it %s in sleep\n",
-+		 event, line, cfg, cfg_hi, !!(level & BIT(line % 8)),
-+		 gpio->boot_mask[event / 8] & BIT(event % 8) ? "masked" : "open",
-+		 (cfg & D2365_GPIO_SLEEP_RULE_MASK) == D2365_GPIO_SLEEP_RULE_VALUE ?
-+		 "unmasked" : "masked");
-+}
-+
 +static void apple_pmic_wake_only_parse(struct apple_pmic_gpio *gpio)
 +{
 +	const struct apple_pmic_event_info *ev = gpio->info->events;
@@ -239,7 +204,7 @@ index c516dfe30..604d4cba3 100644
  static int apple_pmic_event_probe(struct platform_device *pdev,
  				  struct apple_pmic_gpio *gpio)
  {
-@@ -496,6 +593,7 @@ static int apple_pmic_event_probe(struct platform_device *pdev,
+@@ -496,6 +563,7 @@ static int apple_pmic_event_probe(struct platform_device *pdev,
  	if (gpio->parent_irq < 0)
  		return gpio->parent_irq;
  	gpio->nevents = ev->bytes * 8;
@@ -247,28 +212,7 @@ index c516dfe30..604d4cba3 100644
  
  	ret = devm_mutex_init(dev, &gpio->irq_lock);
  	if (ret)
-@@ -540,7 +638,19 @@ static int apple_pmic_event_probe(struct platform_device *pdev,
- 	if (ret)
- 		return dev_err_probe(dev, ret,
- 				     "failed to request the PMU interrupt\n");
--	return devm_add_action_or_reset(dev, apple_pmic_event_stop, gpio);
-+	ret = devm_add_action_or_reset(dev, apple_pmic_event_stop, gpio);
-+	if (ret)
-+		return ret;
-+
-+	if (!bitmap_empty(gpio->wake_only, gpio->nevents)) {
-+		unsigned int event;
-+
-+		for_each_set_bit(event, gpio->wake_only, gpio->nevents)
-+			apple_pmic_wake_report(gpio, event);
-+		dev_info(dev, "wake-only events %*pbl on IRQ %d\n",
-+			 gpio->nevents, gpio->wake_only, gpio->parent_irq);
-+	}
-+	return 0;
- }
- 
- static struct platform_driver d2365_gpio_driver;
-@@ -576,32 +686,108 @@ void apple_d2365_gpio_quiesce(struct device *dev)
+@@ -576,30 +644,100 @@ void apple_d2365_gpio_quiesce(struct device *dev)
  }
  EXPORT_SYMBOL_GPL(apple_d2365_gpio_quiesce);
  
@@ -281,16 +225,12 @@ index c516dfe30..604d4cba3 100644
 +static void apple_pmic_wake_only_drop(struct apple_pmic_gpio *gpio)
 +{
 +	struct device *dev = gpio->chip.parent;
-+	const struct apple_pmic_gpio_info *info = gpio->info;
 +	DECLARE_BITMAP(latched, APPLE_PMIC_EVENTS_MAX);
 +	DECLARE_BITMAP(pending, APPLE_PMIC_EVENTS_MAX);
 +	int ret;
 +
 +	mutex_lock(&gpio->irq_lock);
 +	ret = apple_pmic_event_read(gpio, latched, pending);
-+	if (regmap_bulk_read(gpio->regmap, info->input_base, gpio->armed_level,
-+			     APPLE_PMIC_INPUT_BYTES))
-+		memset(gpio->armed_level, 0xff, sizeof(gpio->armed_level));
 +	mutex_unlock(&gpio->irq_lock);
 +	if (ret) {
 +		/* Unknown: as the thread does, every consumer may have an event. */
@@ -322,13 +262,10 @@ index c516dfe30..604d4cba3 100644
  	mutex_lock(&gpio->irq_lock);
  	/* Only wake-enabled events may pull the line while asleep. */
 -	ret = apple_pmic_event_sync(gpio, gpio->wake);
--	if (ret) {
--		mutex_unlock(&gpio->irq_lock);
--		return ret;
--	}
 +	bitmap_or(armed, gpio->wake, gpio->wake_only, gpio->nevents);
 +	ret = apple_pmic_event_sync(gpio, armed);
-+	if (ret)
+ 	if (ret)
+-		dev_warn(dev, "event wake mask write failed: %d\n", ret);
 +		goto unwind;
  	gpio->suspended = true;
 +	gpio->wake_only_armed = wake_only;
@@ -350,9 +287,6 @@ index c516dfe30..604d4cba3 100644
 +			goto unwind_enabled;
 +		}
 +		gpio->parent_wake_armed = true;
-+		dev_info(dev, "wake events %*pbl armed, GPIO levels %*phN\n",
-+			 gpio->nevents, gpio->wake_only, APPLE_PMIC_INPUT_BYTES,
-+			 gpio->armed_level);
 +	}
  	return 0;
 +
@@ -377,12 +311,11 @@ index c516dfe30..604d4cba3 100644
  	struct apple_pmic_gpio *gpio = dev_get_drvdata(dev);
 +	DECLARE_BITMAP(latched, APPLE_PMIC_EVENTS_MAX);
 +	DECLARE_BITMAP(pending, APPLE_PMIC_EVENTS_MAX);
-+	u8 level[APPLE_PMIC_INPUT_BYTES] = {};
 +	bool armed, read = false;
  	int ret;
  
  	if (!gpio->domain)
-@@ -609,17 +795,43 @@ static int apple_pmic_gpio_resume(struct device *dev)
+@@ -607,17 +745,36 @@ static int apple_pmic_gpio_resume(struct device *dev)
  
  	/* Our I2C ancestors have completed their resume callbacks. */
  	mutex_lock(&gpio->irq_lock);
@@ -397,8 +330,6 @@ index c516dfe30..604d4cba3 100644
 +	bitmap_zero(pending, APPLE_PMIC_EVENTS_MAX);
 +	if (armed) {
 +		/* Still gated: the thread cannot take the wake reason first. */
-+		regmap_bulk_read(gpio->regmap, gpio->info->input_base, level,
-+				 sizeof(level));
 +		read = !apple_pmic_event_read(gpio, latched, pending);
 +	}
 +	gpio->suspended = false;
@@ -411,12 +342,7 @@ index c516dfe30..604d4cba3 100644
  	mutex_unlock(&gpio->irq_lock);
 +
 +	if (armed) {
-+		if (read) {
-+			bitmap_and(latched, latched, gpio->wake_only, gpio->nevents);
-+			dev_info(dev, "wake events disarmed, latched %*pbl, GPIO levels %*phN (armed at %*phN)\n",
-+				 gpio->nevents, latched, APPLE_PMIC_INPUT_BYTES,
-+				 level, APPLE_PMIC_INPUT_BYTES, gpio->armed_level);
-+		} else {
++		if (!read) {
 +			/* Unknown: every consumer may have an event. */
 +			bitmap_copy(pending, gpio->enabled, gpio->nevents);
 +		}
@@ -429,7 +355,7 @@ index c516dfe30..604d4cba3 100644
  	return 0;
  }
  
-@@ -728,13 +940,13 @@ static int apple_pmic_gpio_probe(struct platform_device *pdev)
+@@ -726,13 +883,13 @@ static int apple_pmic_gpio_probe(struct platform_device *pdev)
  	gpio->regmap = dev_get_regmap(dev->parent, NULL);
  	if (!gpio->regmap)
  		return dev_err_probe(dev, -ENODEV, "parent regmap unavailable\n");
@@ -444,3 +370,5 @@ index c516dfe30..604d4cba3 100644
  	gpio->chip.owner = THIS_MODULE;
  	gpio->chip.base = -1;
  	gpio->chip.ngpio = gpio->info->ngpio;
+-- 
+2.54.0

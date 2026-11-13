@@ -10,6 +10,8 @@ suspended flag was cleared only at the end of composite_resume(). Skip
 the extra current while suspended and clear the flag before the
 configuration is applied again on resume.
 
+[Orchard: from orchard PR #108, commit 0674e1db; unchanged]
+
 Assisted-by: LLM
 ---
  drivers/usb/gadget/composite.c | 5 ++---

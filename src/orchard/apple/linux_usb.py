@@ -8,9 +8,13 @@ import uuid
 # Apple's vendor ID with the product ID of each stage: 0x1227 DFU, 0x4141
 # Pongo; Orchard's own USB gadget then uses 0x4142 for recovery, 0x4144 for
 # a RAM payload's session, 0x4145 for an installed system and 0x4146 for the
-# initrd with the install add-on (install_direct.py).
+# initrd with the install add-on (install_direct.py). Installed systems now
+# use 0x1014, a product ID macOS grants 2400 mA, so a Mac charges them at full
+# speed; that ID also belongs to real Apple hardware, so only an Orchard
+# serial (BOARD: with ID: or BOOT:) makes it an installed system.
 APPLE = 0x05ac
 MODES = {0x1227: 'dfu', 0x4141: 'pongo', 0x4142: 'linux', 0x4144: 'ram', 0x4145: 'system', 0x4146: 'install'}
+SYSTEM_MAC_CURRENT = 0x1014
 # The stages served by Orchard's gadget, which also has a serial console.
 SERIAL_MODES = ('linux', 'ram', 'system', 'install')
 # m1n1's USB proxy (vendor and product ID).
@@ -36,6 +40,15 @@ def stable_id(serial):
     return match.group(1).lower() if match else None
 
 
+def mode(pid, serial):
+    """The stage of an Apple-vendor USB device from its product ID and serial."""
+    if pid == SYSTEM_MAC_CURRENT:
+        orchard = re.search(r'\bBOARD:[a-z0-9]+\b', serial) and (
+            stable_id(serial) or re.search(r'\bBOOT:[0-9a-fA-F-]{36}\b', serial))
+        return 'system' if orchard else 'other'
+    return MODES.get(pid, 'other')
+
+
 def devices(root=Path('/sys/bus/usb/devices')):
     found = []
     for node in root.iterdir():
@@ -53,15 +66,11 @@ def devices(root=Path('/sys/bus/usb/devices')):
         board = re.search(r'\bBDID:([0-9a-fA-F]+)\b', serial)
         usb_id = stable_id(serial)
         profile = re.search(r'\bBOARD:([a-z0-9]+)\b', serial)
-        # A compatibility PID also belongs to real Apple hardware. Only our
-        # existing boot/profile identity makes it an Orchard system.
-        mac_current = (pid == 0x1014 and (boot is not None or usb_id is not None) and
-                       profile is not None and profile.group(1) == 'j71t')
         ports = {str(Path('/dev') / p.name) for p in node.glob('**/tty/ttyACM*')}
         if len(ports) > 1:
             raise ValueError('Ambiguous USB serial ports on a device')
         product = (node / 'product').read_text().strip() if (node / 'product').exists() else ''
-        found.append(dict(location=node.name, mode='system' if mac_current else MODES.get(pid, 'other'),
+        found.append(dict(location=node.name, mode=mode(pid, serial),
                           ecid=int(ecid.group(1), 16) if ecid else None,
                           boot_id=str(uuid.UUID(boot.group(1))) if boot else None,
                           usb_id=usb_id,
