@@ -1,0 +1,86 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 09:00:00 +0100
+Subject: [PATCH] arm64: dts: apple: s800-0-3: Add the Always-On Processor
+
+Describe the A9's always-on processor and its A7 IOP mailbox, with the
+accelerometer, gyroscope and pressure sensor that its firmware serves.
+The register blocks and interrupts are the ones Apple's device tree
+lists for /arm-io/aop; the SRAM is described up to the window the AOP
+is given onto it. Boards enable the AOP together with their firmware.
+
+The bootloader finds the node through the aop alias to fill in the
+ECID, the boot argument values and the sensors' factory calibration.
+
+[Orchard: from orchard PR #101, commit a54e2049; the SoC part of
+ devices/s8000/0007, unchanged]
+
+Assisted-by: LLM
+---
+ .../arm64/boot/dts/apple/s800-0-3-common.dtsi |  1 +
+ arch/arm64/boot/dts/apple/s800-0-3.dtsi       | 37 +++++++++++++++++++
+ 2 files changed, 38 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/s800-0-3-common.dtsi b/arch/arm64/boot/dts/apple/s800-0-3-common.dtsi
+index 354533f..338182c 100644
+--- a/arch/arm64/boot/dts/apple/s800-0-3-common.dtsi
++++ b/arch/arm64/boot/dts/apple/s800-0-3-common.dtsi
+@@ -11,6 +11,7 @@
+ 
+ / {
+ 	aliases {
++		aop = &aop; /* Used by loader */
+ 		ausbphy0 = &ausbphy0;
+ 		nvme-hmb = &nvme_hmb; /* Used by loader */
+ 		serial0 = &serial0;
+diff --git a/arch/arm64/boot/dts/apple/s800-0-3.dtsi b/arch/arm64/boot/dts/apple/s800-0-3.dtsi
+index 779118f..8973c43 100644
+--- a/arch/arm64/boot/dts/apple/s800-0-3.dtsi
++++ b/arch/arm64/boot/dts/apple/s800-0-3.dtsi
+@@ -421,6 +421,43 @@
+ 			interrupt-parent = <&aic>;
+ 			interrupts = <AIC_IRQ 4 IRQ_TYPE_LEVEL_HIGH>;
+ 		};
++
++		aop: aop@210800000 {
++			compatible = "apple,s8000-aop";
++			reg = <0x2 0x10800000 0x0 0x4000>,
++			      <0x2 0x10000600 0x0 0x4>,
++			      <0x2 0x10e00000 0x0 0x9b000>;
++			reg-names = "akf", "control", "sram";
++			mboxes = <&aop_mbox>;
++			mbox-names = "mbox";
++			status = "disabled";
++
++			aop_accel: accel {
++				compatible = "apple,s8000-aop-accel";
++			};
++
++			aop_gyro: gyro {
++				compatible = "apple,s8000-aop-gyro";
++			};
++
++			aop_pressure: pressure {
++				compatible = "apple,s8000-aop-pressure";
++			};
++		};
++
++		aop_mbox: mbox@210804000 {
++			compatible = "apple,s8000-a7iop-mailbox", "apple,t8010-a7iop-mailbox";
++			reg = <0x2 0x10804000 0x0 0x1000>;
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 130 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 131 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 132 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 133 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "send-empty", "send-not-empty",
++					  "recv-empty", "recv-not-empty";
++			#mbox-cells = <0>;
++			status = "disabled";
++		};
+ 	};
+ 
+ 	timer {
+-- 
+2.54.0 (Apple Git-157)
+

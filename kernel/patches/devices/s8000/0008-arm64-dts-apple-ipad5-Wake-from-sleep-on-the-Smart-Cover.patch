@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 17:27:23 +0000
+Subject: [PATCH] arm64: dts: apple: ipad5: Wake from sleep on the Smart Cover
+
+PMIC GPIO lines 0 and 10 are the Smart Cover hall sensors. Their events,
+0x30 and 0x3a, latch while the iPad sleeps; list them as wake-only so
+that opening the cover wakes the iPad. The polled switches are
+unchanged: lines 0 and 10 are already outside gpio-reserved-ranges.
+
+[Orchard: from orchard PR #118, commit e8b5e4b7; moved from the J71t
+ board file to the shared iPad 5 file, so every iPad 5 model has it]
+
+Assisted-by: LLM
+---
+diff --git a/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi b/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
+index 2ce40b4..fc06d53 100644
+--- a/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
++++ b/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
+@@ -182,6 +182,8 @@
+ 			interrupt-controller;
+ 			#interrupt-cells = <2>;
+ 			interrupts-extended = <&pinctrl_ap 76 IRQ_TYPE_LEVEL_LOW>;
++			/* Smart Cover hall sensors (lines 0 and 10): wake only. */
++			apple,wake-events = <0x30 0x3a>;
+ 		};
+ 
+ 		tristar_charger: charger@180 {
+-- 
+2.54.0
