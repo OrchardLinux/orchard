@@ -11,6 +11,8 @@ Follow AppleCS42L81Audio::updateRouting by assigning mb00 and mb01 to
 ASP RX slots 0 and 1 before enabling the playback path. Keep the
 existing stereo power and volume sequence unchanged.
 
+[Orchard: from orchard PR #124, commit bef17c42; unchanged]
+
 Assisted-by: LLM
 ---
  sound/soc/codecs/cs42l81.c | 11 +++++++++++

@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Fri, 13 Nov 2026 07:00:00 +0800
+Subject: [PATCH] arm64: dts: apple: ipad6: Power off through the PMIC on
+ every model
+
+The D2365 power-off node was in the J71b board file only. Move it to
+the shared iPad 6 file, so the J72b and the iPad 7 (J171, J172), which
+have the same PMIC and, now, the same Tristar charger, power off
+through the PMIC too. Untested on those three.
+
+Assisted-by: LLM
+---
+diff --git a/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi b/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
+index fa7b40a..214dfc4 100644
+--- a/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
++++ b/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
+@@ -271,6 +271,14 @@
+ 		       "0", "0", "1";
+ };
+ 
++/* The PMIC powers the iPad 6 and iPad 7 off; the charger can keep it on. */
++&d2365_pmic {
++	poweroff {
++		compatible = "apple,d2365-poweroff";
++		power-supplies = <&tristar_charger>;
++	};
++};
++
+ &i2s_switch {
+ 	status = "okay";
+ };
+diff --git a/arch/arm64/boot/dts/apple/t8010-j71b.dts b/arch/arm64/boot/dts/apple/t8010-j71b.dts
+index e6b9a30..28ada67 100644
+--- a/arch/arm64/boot/dts/apple/t8010-j71b.dts
++++ b/arch/arm64/boot/dts/apple/t8010-j71b.dts
+@@ -24,10 +24,3 @@
+ &touchscreen {
+ 	firmware-name = "apple/j71b-fwstart.z2fw";
+ };
+-
+-&d2365_pmic {
+-	poweroff {
+-		compatible = "apple,d2365-poweroff";
+-		power-supplies = <&tristar_charger>;
+-	};
+-};
+-- 
+2.54.0

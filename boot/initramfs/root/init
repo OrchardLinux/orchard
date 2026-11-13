@@ -10,7 +10,6 @@ mount -t devtmpfs -o mode=0755,nosuid dev /dev
 exec </dev/console >/dev/console 2>&1
 
 stop() {
-    echo "<3>orchard initrd: $1; rescue shell" > /dev/kmsg
     echo "orchard initrd: $1"
     echo 'Starting a shell on the console; the system did not start.'
     exec sh
@@ -32,11 +31,8 @@ done
 [ ! -e /etc/orchard/usb-modules ] || for module in $(cat /etc/orchard/usb-modules); do
     modprobe "$module" || echo "orchard initrd: could not load $module; no USB"
 done
-echo '<6>orchard initrd: storage load begin' > /dev/kmsg
 for module in $(cat /etc/orchard/modules); do
-    echo "<6>orchard initrd: modprobe $module begin" > /dev/kmsg
     modprobe "$module" || stop "could not load $module"
-    echo "<6>orchard initrd: modprobe $module complete" > /dev/kmsg
 done
 
 # An install boot: orchard's add-on, appended to this initrd by the CLI, writes the
@@ -91,7 +87,6 @@ done
 
 mkdir -p /newroot
 mount ${fstype:+-t "$fstype"} -o "$mode${flags:+,$flags}" "$device" /newroot || stop "could not mount $device"
-echo '<6>orchard initrd: root mounted' > /dev/kmsg
 [ -x "/newroot$init" ] || [ -L "/newroot$init" ] || stop "the root has no $init"
 
 # Preserve the running boot's *pristine* tree before any package update can
@@ -128,25 +123,21 @@ usb_gadget() {
     [ ! -e "$g" ] || return 0
     name=$(sed -n 's/^NAME=//p' /newroot/etc/os-release /newroot/usr/lib/os-release 2>/dev/null | head -1 | tr -d "\"'")
     board=$(tr '\000' '\n' < /proc/device-tree/compatible | head -1)
-    # Opt-in compatibility identity in macOS's 2400 mA capability table.
-    # This requests a host grant; it does not set a charger limit. Keep the
-    # generic composite personality (no iOS/usbmux or preferred-config API).
-    pid=0x4145
-    device_class=0x00 device_subclass=0x00 device_protocol=0x00
-    if [ "$board" = apple,j71t ] &&
-       [ "$(cat /newroot/etc/orchard/mac-usb-current 2>/dev/null)" = 1 ]; then
-        pid=0x1014
-        # Standard IAD device: macOS defers its CDC composite match here,
-        # allowing the generic composite driver to deliver the grant.
-        device_class=0xef device_subclass=0x02 device_protocol=0x01
-    fi
-    serial=$(sh /etc/orchard/usb-identity) || return 1
+    # One serial for every boot of this unit (docs/device-protocol.md), or
+    # the per-boot one if the helper fails: USB must always come up.
+    serial=$(sh /etc/orchard/usb-identity 2>/dev/null) ||
+        serial="BOOT:$(cat /proc/sys/kernel/random/boot_id) BOARD:${board#apple,}"
+    # Apple's vendor ID with a product ID macOS lists among the devices it
+    # grants 2400 mA (docs/device-protocol.md), so a Mac charges the tablet
+    # at full speed. As an interface-association composite (class 0xef/2/1)
+    # macOS binds its generic composite driver, which delivers the grant,
+    # and still the CDC network and serial drivers.
     mkdir "$g" &&
     echo 0x05ac > "$g/idVendor" &&
-    echo "$pid" > "$g/idProduct" &&
-    echo "$device_class" > "$g/bDeviceClass" &&
-    echo "$device_subclass" > "$g/bDeviceSubClass" &&
-    echo "$device_protocol" > "$g/bDeviceProtocol" &&
+    echo 0x1014 > "$g/idProduct" &&
+    echo 0xef > "$g/bDeviceClass" &&
+    echo 0x02 > "$g/bDeviceSubClass" &&
+    echo 0x01 > "$g/bDeviceProtocol" &&
     mkdir -p "$g/strings/0x409" "$g/configs/c.1/strings/0x409" &&
     echo 'Orchard Linux' > "$g/strings/0x409/manufacturer" &&
     echo "${name:-Linux}" > "$g/strings/0x409/product" &&
@@ -159,7 +150,6 @@ usb_gadget() {
     basename "$(ls -d /sys/class/udc/* | head -1)" > "$g/UDC"
 }
 usb_gadget || echo 'orchard initrd: no USB gadget; continuing without USB'
-echo '<6>orchard initrd: USB setup complete; switching root' > /dev/kmsg
 
 for name in dev proc sys; do
     mount --move "/$name" "/newroot/$name"

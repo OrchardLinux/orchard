@@ -46,7 +46,7 @@ class HostSetup(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(download.call_count, 1)
         self.assertEqual(commands.call_count, 2)  # install rules, reload; never palera/device commands.
-        self.assertEqual(rule.read_text().count('MODE="0660"'), 12)
+        self.assertEqual(rule.read_text().count('MODE="0660"'), 14)
         for pid in ('4142', '4144', '4145', '4146'):
             self.assertIn(f'SUBSYSTEM=="tty", ATTRS{{idVendor}}=="05ac", ATTRS{{idProduct}}=="{pid}"',
                           rule.read_text())

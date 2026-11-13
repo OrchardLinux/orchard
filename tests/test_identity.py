@@ -182,3 +182,24 @@ class GadgetIdentity(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class MacCurrentIdentity(unittest.TestCase):
+    def test_installed_systems_use_the_mac_current_product_id_only_with_an_orchard_serial(self):
+        from orchard.apple import linux_usb
+        self.assertEqual(linux_usb.mode(0x1014, 'BOARD:j71b ID:0123456789ab'), 'system')
+        self.assertEqual(linux_usb.mode(0x1014, 'BOOT:11111111-1111-4111-8111-111111111111 BOARD:j71b'), 'system')
+        self.assertEqual(linux_usb.mode(0x1014, 'DWH12345678'), 'other')
+        self.assertEqual(linux_usb.mode(0x1014, 'BOARD:j71b'), 'other')
+        self.assertEqual(linux_usb.mode(0x4145, 'BOARD:j71b ID:0123456789ab'), 'system')
+        self.assertEqual(linux_usb.mode(0x4144, ''), 'ram')
+
+    def test_the_installed_gadget_asks_for_the_mac_current_identity(self):
+        init = (ROOT / 'boot/initramfs/root/init').read_text()
+        gadget = init[init.index('usb_gadget() {'):init.index('\nusb_gadget ||')]
+        self.assertIn('echo 0x1014 > "$g/idProduct"', gadget)
+        self.assertIn('echo 0xef > "$g/bDeviceClass"', gadget)
+
+    def test_linux_hosts_get_access_to_the_mac_current_identity(self):
+        from orchard import host_setup
+        self.assertIn('ATTRS{idProduct}=="1014"', host_setup.usb_rules('plugdev'))

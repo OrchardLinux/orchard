@@ -30,7 +30,6 @@ status = "experimental"
 
 # States: working, untested, missing, none (features.toml).
 [features]
-warm_restart = "untested"
 display = "untested"
 screen_off = "untested"
 backlight = "untested"
@@ -53,6 +52,7 @@ suspend = "untested"
 resume = "untested"
 usb_serial = "untested"
 usb_network = "untested"
+usb_host = "missing"
 audio_output = "missing"
 audio_input = "missing"
 camera = "missing"

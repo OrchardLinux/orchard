@@ -27,15 +27,14 @@ status = "supported"
 
 # States: working, untested, missing, none (features.toml).
 [features]
-warm_restart = "untested"
 display = "working"
 screen_off = "working"
 backlight = "working"
 touch = "working"
 buttons = "working" # Power, Home and volume keys in daily use on the desktop.
 accelerometer = "working"
-gyroscope = "missing"
-light_sensor = "missing"
+gyroscope = "untested"
+light_sensor = "untested"
 touch_id = "missing"
 storage_read = "working"
 storage_write = "working"
@@ -50,6 +49,7 @@ suspend = "working"
 resume = "working"
 usb_serial = "working"
 usb_network = "working"
+usb_host = "untested" # Same Tristar, PMU rail and USB complex as J71t in the Apple device tree.
 audio_output = "working"
 audio_input = "missing"
 camera = "missing"

@@ -12,18 +12,15 @@ function as modules. RAM and recovery images can bind their configfs gadget at
 startup; users of the legacy composite gadget can load it when needed. FUSE
 remains a module.
 
+The USB host class drivers (storage, UAS, exFAT, USB Ethernet, USB audio)
+are the same as in `apple-16k`. The A9/A10 Lightning role switch and the
+charger's accessory policy (`USB_ROLES_APPLE_S8000`,
+`APPLE_TRISTAR_ACCESSORY`) are not built here, like the other drivers for
+A9/A10-only hardware.
+
 ## How the file is generated
 
 From `../apple-16k/config`, with `CONFIG_ARM64_4K_PAGES=y` and
 `CONFIG_ARM64_16K_PAGES` unset, resolved with `olddefconfig` on the pinned
 source as described in `../apple-16k/README.md`. Keep the two files in step: a
 change to `apple-16k` is made here too, then resolved again.
-
-## J71t system sleep preparation (0.4)
-
-Resolve with Orchard Clang 19. Enable KEYBOARD_GPIO_POLLED=y so the
-existing polled cover switches can probe; keep GPIO_APPLE_D2365=y and
-SUSPEND=y for PMU event wake and s2idle. Those latter options were already
-enabled. Disable DWARF debug information (DEBUG_INFO_NONE=y) to keep the
-local build footprint bounded. Kconfig also refreshes current derived options.
-These config choices do not qualify cover wake or suspend on hardware.

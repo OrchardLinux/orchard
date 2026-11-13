@@ -33,7 +33,6 @@ status = "experimental"
 # with GCC 11.4 and the boot kit's config (README.md), but orchard's own clang
 # build has not booted on a J1 yet.
 [features]
-warm_restart = "untested"
 display = "untested" # simplefb on iBoot's scanout; a userspace dashboard drew to fb0 on the LCD.
 screen_off = "missing"
 backlight = "missing"
@@ -57,6 +56,7 @@ resume = "missing"
 # The P105 USB topic preserves legacy tuning; its shared gate helper needs a J1 regression boot.
 usb_serial = "untested" # Root shell on ttyGS0.
 usb_network = "untested" # CDC Ethernet, pinged both ways.
+usb_host = "missing"
 audio_output = "missing"
 audio_input = "missing"
 camera = "missing"

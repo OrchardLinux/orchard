@@ -31,7 +31,6 @@ status = "experimental"
 
 # States: working, untested, missing, none (features.toml).
 [features]
-warm_restart = "untested"
 display = "working"
 screen_off = "working" # apple_dsi_bl: bl_power off sends DBV 0, the panel goes dark; on restores the level.
 backlight = "working" # apple_dsi_bl: DCS 0x51 to the OLED panel (docs/bring-up/d221-backlight.md).
@@ -54,6 +53,7 @@ suspend = "untested"
 resume = "untested"
 usb_serial = "working"
 usb_network = "untested"
+usb_host = "missing"
 audio_output = "missing"
 audio_input = "missing"
 camera = "missing"
