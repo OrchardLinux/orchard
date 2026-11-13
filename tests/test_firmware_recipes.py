@@ -39,6 +39,23 @@ class FirmwareRecipes(unittest.TestCase):
             with self.subTest(board=path.parent.name):
                 jsonschema.validate(json.loads(path.read_text()), schema, cls=jsonschema.Draft202012Validator)
 
+    def test_every_recipe_step_is_used_by_a_board(self):
+        # A step no board's output uses is dead code, or the trace of an output
+        # that was lost while the step stayed.
+        from orchard.recipe import STEPS
+        used = {step['step'] for path in RECIPES for output in json.loads(path.read_text())['outputs']
+                for step in output['steps']}
+        self.assertEqual(sorted(set(STEPS) - used), [])
+
+    def test_j71t_ships_the_g5p_firmware_loader(self):
+        # The G5P driver loads it at boot; without it the GPU never starts.
+        recipe = json.loads((ROOT / 'devices/j71t/firmware.json').read_text())
+        loader = [output for output in recipe['outputs']
+                  if output['destination'] == 'lib/firmware/apple/agx-g5p-c0.ldr']
+        self.assertEqual(len(loader), 1)
+        self.assertEqual(loader[0]['steps'], [{'step': 'agx-g5p-ldr-from-kernelcache@1', 'input': 'kernelcache'}])
+        self.assertIn('kernelcache', recipe['inputs'])
+
 
 if __name__ == '__main__':
     unittest.main()
