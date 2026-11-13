@@ -12,6 +12,12 @@ function as modules. RAM and recovery images can bind their configfs gadget at
 startup; users of the legacy composite gadget can load it when needed. FUSE
 remains a module.
 
+The USB host class drivers (storage, UAS, exFAT, USB Ethernet, USB audio)
+are the same as in `apple-16k`. The A9/A10 Lightning role switch and the
+charger's accessory policy (`USB_ROLES_APPLE_S8000`,
+`APPLE_TRISTAR_ACCESSORY`) are not built here, like the other drivers for
+A9/A10-only hardware.
+
 ## How the file is generated
 
 From `../apple-16k/config`, with `CONFIG_ARM64_4K_PAGES=y` and

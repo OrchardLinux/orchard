@@ -1,0 +1,110 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Fri, 13 Nov 2026 05:53:10 +0800
+Subject: [PATCH] gpio: apple-d2365: Add the D2207 event controller
+
+The D2207 of the iPad Air 2 and iPad mini 4 latches its PMU events the
+same way as the D2365, so the event interrupt controller works for it
+with only its register layout as match data:
+
+- 112 events in 14 bytes at 0x50, event n at byte n / 8, bit n % 8.
+  iOS AppleD2207PMU reads the 14 bytes in its interrupt handler and
+  dispatches every set bit to the matching interrupt vector (112 of
+  them) without writing anything back, and it drops the events before
+  standby ("cannot clear Events") with a plain read: they clear on read.
+- The interrupt mask at 0x70 (set = masked). At start iOS sets all 14
+  bytes to 0xff before unmasking one event; its per-event enable and
+  disable clear or set one bit in a shadow copy and write the byte to
+  0x70 + n / 8. Its interrupt handler masks an event that fires without
+  an enabled vector the same way.
+- GPIO line n is event 0x18 + n. The wake reason decoding names bit 0
+  of event byte 3 "gpio1" (Apple's GPIOs are numbered from 1) up to bit
+  4 of byte 5 "gpio21", and the function that tells whether an event
+  comes from a GPIO input maps events 0x18-0x2c to lines 0-20 and reads
+  that line's configuration register. The input levels at 0x63 + n / 8
+  sit at the same byte offset in the status block at 0x60 as the GPIO
+  events do in the event block, as on the D2365 (0x186 and 0x146).
+
+The D2365 values were re-derived the same way from the iPad 6 kernel
+cache (30 bytes at 0x140 and 0x1c0 there, "gpio1" at bit 0 of
+byte 6), and match the ones already in the driver.
+
+Without interrupt-controller in the node, nothing changes.
+
+[Orchard: register layout from the iPadOS 15.8 AppleD2207PMU (J81
+ kernelcache) and checked against AppleD2365PMU (J71b kernelcache); see
+ the findings notes for addresses]
+
+Assisted-by: LLM
+---
+ drivers/gpio/gpio-apple-d2365.c | 33 ++++++++++++++++++++++++++++-----
+ 1 file changed, 28 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/gpio/gpio-apple-d2365.c b/drivers/gpio/gpio-apple-d2365.c
+index 39d6b79..c1380c7 100644
+--- a/drivers/gpio/gpio-apple-d2365.c
++++ b/drivers/gpio/gpio-apple-d2365.c
+@@ -3,11 +3,12 @@
+  * GPIO and PMU event interrupt driver for Apple/Dialog PMICs used with the
+  * A8X, A9 and A10 SoCs.
+  *
+- * The D2365 latches 240 PMU events in a read-to-clear block. Any unmasked
+- * pending event pulls the PMU interrupt line to the AP low; reading the
+- * block acknowledges everything and releases the line. Every PMU client
+- * shares that block, so this driver owns it and hands each event to its
+- * consumer as an ordinary interrupt. PMIC GPIO line N is event 0x30 + N.
++ * The D2365 latches 240 PMU events and the D2207 112 in a read-to-clear
++ * block. Any unmasked pending event pulls the PMU interrupt line to the AP
++ * low; reading the block acknowledges everything and releases the line.
++ * Every PMU client shares that block, so this driver owns it and hands each
++ * event to its consumer as an ordinary interrupt. PMIC GPIO line N is event
++ * 0x30 + N on the D2365 and 0x18 + N on the D2207.
+  * One more interrupt, numbered after the last event, is the line itself: its
+  * consumers run before the block is read, for a consumer that must act
+  * within the shortest time after an assertion (charger withdrawal).
+@@ -55,6 +56,20 @@
+ #define D2207_GPIO_OUTPUT		0
+ #define D2207_GPIO_INPUT		(3 << 5)
+ 
++/*
++ * D2207 PMU events, laid out as on the D2365. iOS AppleD2207PMU reads all
++ * 14 bytes at 0x50 in its interrupt handler and dispatches every set bit
++ * (event n: byte n / 8, bit n % 8) without writing them back; dropping the
++ * events before standby is a plain read as well. 0x70 is the interrupt
++ * mask (set = masked): iOS sets it to all ones at start and masks or
++ * unmasks one event with a single byte write to 0x70 + n / 8. GPIO line n
++ * is event 0x18 + n, as its wake reason decoding names them.
++ */
++#define D2207_EVENTS		0x50
++#define D2207_EVENT_MASK	0x70
++#define D2207_EVENT_BYTES	14
++#define D2207_GPIO_EVENT	0x18
++
+ #define D2365_GPIO_SPLIT		18
+ #define D2365_GPIO_CFG_0_17	0x900
+ #define D2365_GPIO_CFG_18_23	0x8bd
+@@ -905,6 +920,13 @@ static int apple_pmic_gpio_probe(struct platform_device *pdev)
+ 	return devm_gpiochip_add_data(dev, &gpio->chip, gpio);
+ }
+ 
++static const struct apple_pmic_event_info d2207_event_info = {
++	.status_base = D2207_EVENTS,
++	.mask_base = D2207_EVENT_MASK,
++	.bytes = D2207_EVENT_BYTES,
++	.gpio_event = D2207_GPIO_EVENT,
++};
++
+ static const struct apple_pmic_gpio_info d2207_gpio_info = {
+ 	.label = "d2207-pmic-gpio",
+ 	.ngpio = 21,
+@@ -914,6 +936,7 @@ static const struct apple_pmic_gpio_info d2207_gpio_info = {
+ 	.input_mode = D2207_GPIO_INPUT,
+ 	.output_mode = D2207_GPIO_OUTPUT,
+ 	.config_reg = d2207_gpio_config_reg,
++	.events = &d2207_event_info,
+ };
+ 
+ static const struct apple_pmic_gpio_info d2333_gpio_info = {
+-- 
+2.54.0 (Apple Git-157)
+

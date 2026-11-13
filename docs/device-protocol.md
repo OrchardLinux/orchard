@@ -17,6 +17,14 @@ the host and device side of an install always come from the same CLI version.
 
 ## USB identity
 
+Installed systems present Apple's vendor ID 0x05ac with product ID
+0x1014, one macOS lists among the devices it grants 2400 mA, and the
+interface-association device class (0xef/2/1), so a Mac charges the tablet
+at full speed; the charger still caps any grant at the board's maximum. Hosts
+treat 0x1014 as an installed system only with an Orchard serial (below), since
+real Apple hardware uses that ID too. Older installed systems use 0x4145; RAM
+payloads keep 0x4144.
+
 Installed-system and standard RAM gadgets use `BOARD:<profile> ID:<hash>` as
 their USB serial number. The ID is the first 12 hex characters of SHA-256 over
 `orchard-` followed by the device-tree `serial-number` without NUL
