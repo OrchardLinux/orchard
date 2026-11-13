@@ -1,0 +1,120 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 00:43:51 +0100
+Subject: [PATCH] media: apple-vxd: require a proven firmware stop before kexec
+
+release has no shutdown callback and no B1 ProbeTerminate path. Add the
+checked S8000 stop at shutdown: failed Terminate keeps firmware and
+command buffers plus power, and kexec takes the cold-reset escape before
+those pages become incoming RAM. Successful stop may release buffers and
+force suspend. Other variants keep their shutdown behavior.
+
+Assisted-by: LLM
+---
+ .../media/platform/apple/vxd/apple-vxd-core.c | 26 ++++++++++++++
+ .../media/platform/apple/vxd/apple-vxd-fw.c   | 35 +++++++++++++++++++
+ drivers/media/platform/apple/vxd/apple-vxd.h  |  1 +
+ 3 files changed, 62 insertions(+)
+
+diff --git a/drivers/media/platform/apple/vxd/apple-vxd-core.c b/drivers/media/platform/apple/vxd/apple-vxd-core.c
+index b6bf2d300..c89e7e987 100644
+--- a/drivers/media/platform/apple/vxd/apple-vxd-core.c
++++ b/drivers/media/platform/apple/vxd/apple-vxd-core.c
+@@ -1,3 +1,6 @@
++#include <linux/kexec.h>
++#include <linux/soc/apple/cold-reset.h>
++
+ // SPDX-License-Identifier: GPL-2.0
+ /*
+  * Apple VXD (Imagination MSVDX) video decoder driver - core
+@@ -476,9 +479,32 @@ static void apple_vxd_remove(struct platform_device *pdev)
+ 	pm_runtime_disable(&pdev->dev);
+ }
+ 
++static void apple_vxd_shutdown(struct platform_device *pdev)
++{
++	struct apple_vxd_dev *vxd = platform_get_drvdata(pdev);
++	int ret;
++
++	if (!vxd->variant->sleep_stop)
++		return;
++
++	cancel_delayed_work_sync(&vxd->watchdog_work);
++	flush_work(&vxd->job_done_work);
++	ret = apple_vxd_fw_shutdown_stop(vxd);
++	if (ret) {
++		/* Outgoing allocations cannot be reserved against the next kernel. */
++		if (kexec_in_progress)
++			apple_cold_reset("VXD Terminate failed; DMA buffers cannot cross kexec");
++		return; /* Retain every buffer and the runtime-PM reference. */
++	}
++	ret = pm_runtime_force_suspend(&pdev->dev);
++	if (ret)
++		dev_warn(&pdev->dev, "power off at shutdown failed: %d\n", ret);
++}
++
+ static struct platform_driver apple_vxd_driver = {
+ 	.probe = apple_vxd_probe,
+ 	.remove = apple_vxd_remove,
++	.shutdown = apple_vxd_shutdown,
+ 	.driver = {
+ 		.name = APPLE_VXD_DRV_NAME,
+ 		.pm = &apple_vxd_pm_ops,
+diff --git a/drivers/media/platform/apple/vxd/apple-vxd-fw.c b/drivers/media/platform/apple/vxd/apple-vxd-fw.c
+index ede737efd..bccd04259 100644
+--- a/drivers/media/platform/apple/vxd/apple-vxd-fw.c
++++ b/drivers/media/platform/apple/vxd/apple-vxd-fw.c
+@@ -512,6 +512,41 @@ int apple_vxd_fw_sleep_stop(struct apple_vxd_dev *vxd)
+ 	return 0;
+ }
+ 
++int apple_vxd_fw_shutdown_stop(struct apple_vxd_dev *vxd)
++{
++	int ret;
++
++	mutex_lock(&vxd->power_lock);
++	vxd->sleep_gate = true;
++	if (!vxd->fw_loaded) {
++		mutex_unlock(&vxd->power_lock);
++		return 0;
++	}
++
++	apple_vxd_mbox_stop(vxd);
++	vxd->hw_ready = false;
++	vxd_write(vxd, VXD_REG_FW_READY_MAGIC, 0);
++	vxd_write(vxd, VXD_REG_VECT_CFG, VXD_VECT_CFG_TERMINATE);
++	ret = vxd_known_state_v1(vxd, "Terminate");
++	if (ret) {
++		dev_err(vxd->dev, "firmware stop at shutdown failed: %d; retaining buffers and power\n", ret);
++		mutex_unlock(&vxd->power_lock);
++		return ret;
++	}
++
++	apple_vxd_cmdbufs_fini(vxd);
++	apple_vxd_gart_unmap(vxd, &vxd->fw_map);
++	dma_free_coherent(vxd->dev, vxd->fw_size, vxd->fw_vaddr, vxd->fw_dma);
++	vxd->fw_vaddr = NULL;
++	vxd->fw_loaded = false;
++	mutex_unlock(&vxd->power_lock);
++
++	/* The reference boot took; the PM core holds its own until complete. */
++	pm_runtime_put_noidle(vxd->dev);
++	dev_info(vxd->dev, "firmware stopped at shutdown\n");
++	return 0;
++}
++
+ void apple_vxd_fw_cleanup(struct apple_vxd_dev *vxd)
+ {
+ 	bool was_loaded;
+diff --git a/drivers/media/platform/apple/vxd/apple-vxd.h b/drivers/media/platform/apple/vxd/apple-vxd.h
+index 7922ebb73..b601ea6b7 100644
+--- a/drivers/media/platform/apple/vxd/apple-vxd.h
++++ b/drivers/media/platform/apple/vxd/apple-vxd.h
+@@ -471,6 +471,7 @@ int apple_vxd_boot_firmware(struct apple_vxd_dev *vxd);
+ int apple_vxd_fw_open(struct apple_vxd_dev *vxd);
+ void apple_vxd_fw_close(struct apple_vxd_dev *vxd);
+ int apple_vxd_fw_sleep_stop(struct apple_vxd_dev *vxd);
++int apple_vxd_fw_shutdown_stop(struct apple_vxd_dev *vxd);
+ void apple_vxd_fw_cleanup(struct apple_vxd_dev *vxd);
+ 
+ /* mbox.c */
