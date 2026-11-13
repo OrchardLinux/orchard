@@ -72,3 +72,16 @@ To change configuration, use Kconfig tooling such as `menuconfig` or
 `scripts/config`, resolve it with `olddefconfig`, and review the resulting diff
 before updating the committed file. Preserve the pinned source/toolchain when
 checking reproducibility.
+
+## USB host
+
+The Lightning to USB camera adapter makes the A9 and A10 iPads a USB host:
+`USB_ROLES_APPLE_S8000=y` (the port's role switch) and
+`APPLE_TRISTAR_ACCESSORY=y` (the charger's accessory policy); EHCI and OHCI
+were already built in. Devices behind the adapter need their class drivers,
+built as modules: USB mass storage and UAS with SCSI disk support, exFAT
+with UTF-8 names (`EXFAT_DEFAULT_IOCHARSET="utf8"`, `NLS_UTF8`), USB
+Ethernet (`USB_RTL8152`, `USB_NET_AX88179_178A`, `USB_NET_AX8817X`,
+`USB_NET_CDCETHER`, `USB_NET_CDC_NCM`, `USB_NET_CDC_EEM`,
+`USB_NET_RNDIS_HOST`) and USB audio (`SND_USB_AUDIO`). Kconfig selects the
+PHY, MII and MDIO helpers they need.

@@ -15,6 +15,32 @@ the host and device side of an install always come from the same CLI version.
 - Private bundle: exactly the device firmware data plus `mixin.json`; the
   install script writes it to the installed root's `/usr/lib/firmware`.
 
+## USB identity
+
+Installed systems present Apple's vendor ID 0x05ac with product ID
+0x1014, one macOS lists among the devices it grants 2400 mA, and the
+interface-association device class (0xef/2/1), so a Mac charges the tablet
+at full speed; the charger still caps any grant at the board's maximum. Hosts
+treat 0x1014 as an installed system only with an Orchard serial (below), since
+real Apple hardware uses that ID too. Older installed systems use 0x4145; RAM
+payloads keep 0x4144.
+
+Installed-system and standard RAM gadgets use `BOARD:<profile> ID:<hash>` as
+their USB serial number. The ID is the first 12 hex characters of SHA-256 over
+`orchard-` followed by the device-tree `serial-number` without NUL
+padding. It identifies the unit across boots without publishing the hardware
+serial. No descriptor changes per boot, so macOS can retain accessory approval.
+Trees without a serial number warn and retain the legacy `BOOT:` identity to
+keep rescue USB available; those still need approval each boot.
+
+For RAM sessions, ACM returns `/proc/sys/kernel/random/boot_id` and the SSH
+host public key together on every connection. The host validates the boot ID
+and pins that boot's key. Installed systems use their persistent SSH keys and
+do not allocate per-boot host state. Recovery and install keep their existing
+`ECID:`/`BOOT:` serials and bootstrap/status checks. The install-to-system
+handoff also retains `BOOT:`: the CLI's install add-on can run on older initrds
+without the stable-identity helper. Normal installed boots use the new format.
+
 ## Operations
 
 `orchard-device OPERATION [BASE64_JSON]`; requests may include `protocol: 1`.

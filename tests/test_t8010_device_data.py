@@ -24,7 +24,7 @@ BOARDS = {
 # Recipe steps implemented by the Orchard CLI (docs/firmware-recipes.md).
 STEPS = {'copy@1', 'bluetool-hcd@1', 'smartio-from-kernelcache@1', 'im4p-payload@1', 'z2fw-from-mtprops@1',
          'z2fw-from-mtprops@2', 'z2fw-from-mtfw@1', 'vxd-firmware-from-kernelcache@1',
-         'agx-g9p-firmware-from-kernelcache@1'}
+         'agx-g9p-firmware-from-kernelcache@1', 'aop-image@1'}
 # Touch firmware the device tree requests (firmware-name); J171 shares the iPad 7 DT with J172.
 TOUCH = {'d11': 'dfrmtfw-d11-c1f5e-2.bin', 'd111': 'dfrmtfw-d111-c1f5e-2.bin',
          'j171': 'dfrmtfw-j172-k1f19-6.bin', 'j172': 'dfrmtfw-j172-k1f19-6.bin'}
@@ -85,7 +85,8 @@ class T8010DeviceData(unittest.TestCase):
                 names = [PurePosixPath(o['destination']).name for o in self.load(profile)[1]['outputs']]
                 for name in names:
                     self.assertTrue(name.startswith(('brcmfmac4355', 'BCM.apple,', 't8010-smartio.bin',
-                                                     'vxd-deva.bin', 'gfx-t8010.bin', profile + '-fwstart')) or name == TOUCH.get(profile), name)
+                                                     'vxd-deva.bin', 'gfx-t8010.bin', 'aop-ipad7',
+                                                     profile + '-fwstart')) or name == TOUCH.get(profile), name)
 
     def test_touch_is_claimed_exactly_where_firmware_is_built(self):
         for profile in BOARDS:

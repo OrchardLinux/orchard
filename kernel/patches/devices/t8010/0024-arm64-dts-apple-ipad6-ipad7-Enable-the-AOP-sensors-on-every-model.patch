@@ -1,0 +1,97 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Fri, 13 Nov 2026 06:10:00 +0800
+Subject: [PATCH] arm64: dts: apple: ipad6, ipad7: Enable the AOP sensors on
+ every model
+
+Only the J71b enabled its always-on processor. Apple's BuildManifests
+give both iPad 6 models (J71b, J72b) the AOP firmware aopfw-ipad7baop
+and both iPad 7 models (J171, J172) aopfw-ipad7caop. Move the J71b's
+AOP enable and accelerometer mount-matrix to the shared iPad 6 file and
+name the iPad 7 firmware in the iPad 7 file, so all four get the
+accelerometer, gyroscope and pressure sensor. Untested on J72b, J171
+and J172; the iPad 7 inherits the iPad 6 mount-matrix.
+
+Assisted-by: LLM
+---
+diff --git a/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi b/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
+index ed59564..fe76af1 100644
+--- a/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
++++ b/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
+@@ -249,6 +249,27 @@
+ 	};
+ };
+ 
++/* The iPad 6 models (J71b, J72b) use the same AOP firmware (ipad7baop). */
++&aop {
++	firmware-name = "apple/aop-ipad7b.bin", "apple/aop-ipad7b-ext.bin";
++	status = "okay";
++};
++
++&aop_mbox {
++	status = "okay";
++};
++
++/*
++ * The AOP reports the accelerometer in the device frame with y up when the
++ * iPad is upright; desktops (iio-sensor-proxy) take upright as y down and
++ * left/right accordingly, with z unchanged.
++ */
++&aop_accel {
++	mount-matrix = "-1", "0", "0",
++		       "0", "-1", "0",
++		       "0", "0", "1";
++};
++
+ &i2s_switch {
+ 	status = "okay";
+ };
+diff --git a/arch/arm64/boot/dts/apple/t8010-ipad7.dtsi b/arch/arm64/boot/dts/apple/t8010-ipad7.dtsi
+index 9a6899d..f493f50 100644
+--- a/arch/arm64/boot/dts/apple/t8010-ipad7.dtsi
++++ b/arch/arm64/boot/dts/apple/t8010-ipad7.dtsi
+@@ -13,6 +13,11 @@
+  */
+ #include "t8010-ipad6.dtsi"
+ 
++/* The iPad 7 has its own AOP firmware (ipad7caop). */
++&aop {
++	firmware-name = "apple/aop-ipad7c.bin", "apple/aop-ipad7c-ext.bin";
++};
++
+ /* The iPad 7 port controller is Bellatrix, with its own charger policy. */
+ /delete-node/ &tristar_charger;
+ /delete-node/ &tristar;
+diff --git a/arch/arm64/boot/dts/apple/t8010-j71b.dts b/arch/arm64/boot/dts/apple/t8010-j71b.dts
+index f667e67..e6b9a30 100644
+--- a/arch/arm64/boot/dts/apple/t8010-j71b.dts
++++ b/arch/arm64/boot/dts/apple/t8010-j71b.dts
+@@ -21,26 +21,6 @@
+ 	brcm,board-type = "apple,j71b";
+ };
+ 
+-&aop {
+-	firmware-name = "apple/aop-ipad7b.bin", "apple/aop-ipad7b-ext.bin";
+-	status = "okay";
+-};
+-
+-&aop_mbox {
+-	status = "okay";
+-};
+-
+-/*
+- * The AOP reports the accelerometer in the device frame with y up when the
+- * iPad is upright; desktops (iio-sensor-proxy) take upright as y down and
+- * left/right accordingly, with z unchanged.
+- */
+-&aop_accel {
+-	mount-matrix = "-1", "0", "0",
+-		       "0", "-1", "0",
+-		       "0", "0", "1";
+-};
+-
+ &touchscreen {
+ 	firmware-name = "apple/j71b-fwstart.z2fw";
+ };
+-- 
+2.54.0
