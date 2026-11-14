@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sat, 14 Nov 2026 23:28:48 +0800
+Subject: [PATCH] dt-bindings: gpu: apple,s8003-gpu: Say which interrupt is the
+ firmware's
+
+The driver gives the firmware the address of the interrupt controller
+and the number of the interrupt it raises towards the host: the last of
+the node's five. The other four are not assigned yet.
+
+Assisted-by: LLM
+---
+ .../devicetree/bindings/gpu/apple,s8003-gpu.yaml     | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/gpu/apple,s8003-gpu.yaml b/Documentation/devicetree/bindings/gpu/apple,s8003-gpu.yaml
+index 9539108..b29f915 100644
+--- a/Documentation/devicetree/bindings/gpu/apple,s8003-gpu.yaml
++++ b/Documentation/devicetree/bindings/gpu/apple,s8003-gpu.yaml
+@@ -30,8 +30,16 @@ properties:
+       - const: fender
+ 
+   interrupts:
+-    minItems: 5
+-    maxItems: 5
++    items:
++      - description: GPU interrupt 0
++      - description: GPU interrupt 1
++      - description: GPU interrupt 2
++      - description: GPU interrupt 3
++      - description:
++          The firmware's interrupt to the host, a software interrupt of the
++          interrupt controller. The firmware raises it through that
++          controller's registers, so the host tells it their address and
++          the interrupt's number.
+ 
+   power-domains:
+     maxItems: 1
