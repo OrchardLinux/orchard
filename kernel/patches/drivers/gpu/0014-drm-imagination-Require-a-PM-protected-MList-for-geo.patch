@@ -1,0 +1,555 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sat, 14 Nov 2026 21:00:00 +0800
+Subject: [PATCH] drm/imagination: Require a PM-protected MList for geometry
+ jobs
+
+The parameter manager (PM) records in a render target's MList the
+physical pages it takes from the free list, and returns them to the free
+list from there. The free list holds physical page addresses as well.
+Neither may be writable by the client: whoever can write them can make
+the PM hand an arbitrary physical page to the tiler, which then writes
+parameter data into memory outside the client's GPU address space.
+
+The driver already requires the free list to live in a buffer object
+created with DRM_PVR_BO_PM_FW_PROTECT (page-table bit 62: only the PM
+and the firmware may access the page) and without CPU access, checked
+once when the free list is created. The MList address comes in through
+CREATE_HWRT_DATASET unchecked. On the Apple A10 the kernel writes it
+into every geometry job's PM slot itself (pvr_apple_geom_job_init()).
+
+Bind each HWRT data set to the VM context of the first job submitted
+on it. At that point, check in that VM that each MList and each free
+list the data set uses lies within one PM/FW-protected, non-CPU-mappable
+mapping of the size the PM uses (for the MList: page catalogue,
+directory and table entries for every page the free lists can hold, for
+both PM address spaces), and pin those ranges in the VM. While a range
+is pinned, VM_MAP and VM_UNMAP requests that overlap it fail with
+-EBUSY, so the mappings the PM works through cannot change while a job
+may still use them. The pins are released with the data set, after its
+last job; DESTROY_HWRT_DATASET waits for those jobs, so the buffers can
+be unmapped as soon as it returns. Jobs on a bound data set from any
+other VM context, and jobs on a data set whose ranges are not
+protected, fail with -EINVAL.
+
+Mesa is unaffected: it allocates the free lists and one MList buffer
+per render-target data set with DRM_PVR_BO_PM_FW_PROTECT, sized for its
+free lists, uses a single VM context per device, and destroys a data
+set before it unmaps that MList buffer or the free lists.
+
+The macrotile array and the VHEAP table stay unprotected, as Mesa
+allocates them; the PM does not take physical page addresses from them.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_drv.c  |   2 +-
+ drivers/gpu/drm/imagination/pvr_hwrt.c | 110 +++++++++++++++++-
+ drivers/gpu/drm/imagination/pvr_hwrt.h |  23 ++++
+ drivers/gpu/drm/imagination/pvr_job.c  |   6 +
+ drivers/gpu/drm/imagination/pvr_vm.c   | 148 ++++++++++++++++++++++++-
+ drivers/gpu/drm/imagination/pvr_vm.h   |  19 ++++
+ 6 files changed, 304 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_drv.c b/drivers/gpu/drm/imagination/pvr_drv.c
+index 5b21d6c..9eeb820 100644
+--- a/drivers/gpu/drm/imagination/pvr_drv.c
++++ b/drivers/gpu/drm/imagination/pvr_drv.c
+@@ -895,7 +895,7 @@ pvr_ioctl_destroy_hwrt_dataset(struct drm_device *drm_dev, void *raw_args,
+ 	if (!hwrt)
+ 		return -EINVAL;
+ 
+-	pvr_hwrt_dataset_put(hwrt);
++	pvr_hwrt_dataset_destroy(hwrt);
+ 	return 0;
+ }
+ 
+diff --git a/drivers/gpu/drm/imagination/pvr_hwrt.c b/drivers/gpu/drm/imagination/pvr_hwrt.c
+index 1bfbcc8..550f0b7 100644
+--- a/drivers/gpu/drm/imagination/pvr_hwrt.c
++++ b/drivers/gpu/drm/imagination/pvr_hwrt.c
+@@ -10,7 +10,9 @@
+ #include <drm/drm_gem.h>
+ #include <linux/bitops.h>
+ #include <linux/math.h>
++#include <linux/mutex.h>
+ #include <linux/slab.h>
++#include <linux/wait_bit.h>
+ #include <linux/xarray.h>
+ #include <uapi/drm/pvr_drm.h>
+ 
+@@ -486,6 +488,86 @@ struct drm_gem_object *pvr_hwrt_data_resv_obj(struct pvr_hwrt_data *hwrt_data)
+ 	return gem_from_pvr_gem(hwrt_data->sync_obj);
+ }
+ 
++/* PM page catalogue, directory and table entries per 4 KiB PM page */
++#define PVR_PM_PC_ENTRIES_PER_PAGE 0x400
++#define PVR_PM_PD_ENTRIES_PER_PAGE 0x200
++#define PVR_PM_PT_ENTRIES_PER_PAGE 0x200
++/* The PM keeps one set of tables for each of its TE and VCE address spaces. */
++#define PVR_PM_NUM_ADDRESS_SPACES 2
++#define PVR_PM_MLIST_ENTRY_STRIDE 4
++#define PVR_PM_FREE_LIST_ENTRY_SIZE sizeof(u32)
++
++/**
++ * pvr_hwrt_dataset_bind_vm() - Bind a HWRT data set to the VM context its jobs
++ *                              run in
++ * @hwrt: HWRT data set a geometry or fragment job runs on.
++ * @vm_ctx: VM context of that job.
++ *
++ * The parameter manager (PM) records in a render target's MList the physical
++ * pages it takes from the free list, and returns them to the free list from
++ * there; the free list itself holds physical page addresses too. Whoever can
++ * write either can make the PM hand any physical page to the tiler. Both must
++ * therefore live in buffer objects that only the PM and the firmware can
++ * access, and the device-virtual addresses the PM uses for them must keep
++ * pointing there for as long as a job may run on the data set.
++ *
++ * The first call checks, in @vm_ctx, that each MList and free list lies within
++ * one PM/FW-protected, non-CPU-mappable mapping of the size the PM uses, and
++ * pins those ranges until the data set is released. The MList size covers the
++ * page catalogue, directory and table entries for every page the free lists
++ * can hold, for both PM address spaces. Later calls only check that the job
++ * runs in the same VM context.
++ *
++ * Return:
++ *  * 0 on success, or
++ *  * -%EINVAL if a range is not protected, or the data set is bound to
++ *    another VM context.
++ */
++int pvr_hwrt_dataset_bind_vm(struct pvr_hwrt_dataset *hwrt,
++			     struct pvr_vm_context *vm_ctx)
++{
++	u64 pages = 0, pt_pages, pd_pages, pc_pages, mlist_size;
++	unsigned int n = 0;
++	int err = 0;
++
++	mutex_lock(&hwrt->pin_lock);
++
++	if (hwrt->vm_ctx) {
++		if (hwrt->vm_ctx != vm_ctx)
++			err = -EINVAL;
++		goto out_unlock;
++	}
++
++	for (int i = 0; i < ARRAY_SIZE(hwrt->free_lists); i++) {
++		struct pvr_free_list *free_list = hwrt->free_lists[i];
++
++		pages += free_list->max_pages;
++		hwrt->pins[n].start = free_list->free_list_gpu_addr;
++		hwrt->pins[n++].size = (u64)free_list->max_pages *
++				       PVR_PM_FREE_LIST_ENTRY_SIZE;
++	}
++
++	pt_pages = DIV_ROUND_UP_ULL(pages, PVR_PM_PT_ENTRIES_PER_PAGE);
++	pd_pages = DIV_ROUND_UP_ULL(pt_pages, PVR_PM_PD_ENTRIES_PER_PAGE);
++	pc_pages = DIV_ROUND_UP_ULL(pd_pages, PVR_PM_PC_ENTRIES_PER_PAGE);
++	mlist_size = (pc_pages + pd_pages + pt_pages) *
++		     PVR_PM_NUM_ADDRESS_SPACES * PVR_PM_MLIST_ENTRY_STRIDE;
++
++	for (int i = 0; i < ARRAY_SIZE(hwrt->data); i++) {
++		hwrt->pins[n].start = hwrt->data[i].data.pm_mlist_dev_addr;
++		hwrt->pins[n++].size = mlist_size;
++	}
++
++	err = pvr_vm_pin_pm_protected(vm_ctx, hwrt->pins, n);
++	if (!err)
++		hwrt->vm_ctx = pvr_vm_context_get(vm_ctx);
++
++out_unlock:
++	mutex_unlock(&hwrt->pin_lock);
++
++	return err;
++}
++
+ /**
+  * pvr_hwrt_dataset_create() - Create a new HWRT dataset
+  * @pvr_file: Pointer to pvr_file structure.
+@@ -526,6 +608,7 @@ pvr_hwrt_dataset_create(struct pvr_file *pvr_file,
+ 		hwrt->data[i].hwrt_dataset = hwrt;
+ 	}
+ 
++	mutex_init(&hwrt->pin_lock);
+ 	kref_init(&hwrt->ref_count);
+ 	return hwrt;
+ 
+@@ -556,6 +639,12 @@ pvr_hwrt_dataset_release(struct kref *ref_count)
+ 		hwrt_data_fini_fw_structure(hwrt, i);
+ 	}
+ 
++	if (hwrt->vm_ctx) {
++		pvr_vm_unpin(hwrt->vm_ctx, hwrt->pins, ARRAY_SIZE(hwrt->pins));
++		pvr_vm_context_put(hwrt->vm_ctx);
++	}
++	mutex_destroy(&hwrt->pin_lock);
++
+ 	hwrt_fini_common_fw_structure(hwrt);
+ 	hwrt_fini_kernel_structure(hwrt);
+ 
+@@ -589,6 +678,23 @@ void pvr_destroy_hwrt_datasets_for_file(struct pvr_file *pvr_file)
+ void
+ pvr_hwrt_dataset_put(struct pvr_hwrt_dataset *hwrt)
+ {
+-	if (hwrt)
+-		kref_put(&hwrt->ref_count, pvr_hwrt_dataset_release);
++	if (hwrt && !kref_put(&hwrt->ref_count, pvr_hwrt_dataset_release))
++		wake_up_var(&hwrt->ref_count);
++}
++
++/**
++ * pvr_hwrt_dataset_destroy() - Drop the handle reference on a HWRT dataset
++ * @hwrt: HWRT dataset whose handle userspace destroyed.
++ *
++ * Jobs hold references on the data set until they are freed, shortly after
++ * they complete. Waiting for them here releases the data set, and with it the
++ * ranges pvr_hwrt_dataset_bind_vm() pinned, before userspace sees the destroy
++ * complete, so that it can unmap the MList and free list buffers right away.
++ */
++void
++pvr_hwrt_dataset_destroy(struct pvr_hwrt_dataset *hwrt)
++{
++	wait_var_event_killable(&hwrt->ref_count,
++				kref_read(&hwrt->ref_count) == 1);
++	pvr_hwrt_dataset_put(hwrt);
+ }
+diff --git a/drivers/gpu/drm/imagination/pvr_hwrt.h b/drivers/gpu/drm/imagination/pvr_hwrt.h
+index c687f35..d30103a 100644
+--- a/drivers/gpu/drm/imagination/pvr_hwrt.h
++++ b/drivers/gpu/drm/imagination/pvr_hwrt.h
+@@ -7,12 +7,14 @@
+ #include <linux/compiler_attributes.h>
+ #include <linux/kref.h>
+ #include <linux/list.h>
++#include <linux/mutex.h>
+ #include <linux/types.h>
+ #include <linux/xarray.h>
+ #include <uapi/drm/pvr_drm.h>
+ 
+ #include "pvr_device.h"
+ #include "pvr_rogue_fwif_shared.h"
++#include "pvr_vm.h"
+ 
+ /* Forward declaration from pvr_free_list.h. */
+ struct pvr_free_list;
+@@ -81,10 +83,28 @@ struct pvr_hwrt_dataset {
+ 
+ 	/** @max_rts: Maximum render targets for this HWRT data set. */
+ 	u16 max_rts;
++
++	/** @pin_lock: Protects @vm_ctx and @pins. */
++	struct mutex pin_lock;
++
++	/**
++	 * @vm_ctx: VM context the first job on this data set ran in, or %NULL
++	 * before then. Jobs in any other VM context are refused.
++	 */
++	struct pvr_vm_context *vm_ctx;
++
++	/**
++	 * @pins: PM MLists of @data and the free lists in @free_lists, pinned in
++	 * @vm_ctx while this data set exists.
++	 */
++	struct pvr_vm_pin pins[ROGUE_FWIF_NUM_RTDATAS + ROGUE_FWIF_NUM_RTDATA_FREELISTS];
+ };
+ 
+ struct drm_gem_object *pvr_hwrt_data_resv_obj(struct pvr_hwrt_data *hwrt_data);
+ 
++int pvr_hwrt_dataset_bind_vm(struct pvr_hwrt_dataset *hwrt,
++			     struct pvr_vm_context *vm_ctx);
++
+ struct pvr_hwrt_dataset *
+ pvr_hwrt_dataset_create(struct pvr_file *pvr_file,
+ 			struct drm_pvr_ioctl_create_hwrt_dataset_args *args);
+@@ -123,6 +143,9 @@ pvr_hwrt_dataset_lookup(struct pvr_file *pvr_file, u32 handle)
+ void
+ pvr_hwrt_dataset_put(struct pvr_hwrt_dataset *hwrt);
+ 
++void
++pvr_hwrt_dataset_destroy(struct pvr_hwrt_dataset *hwrt);
++
+ /**
+  * pvr_hwrt_data_lookup() - Lookup HWRT data pointer from handle and index
+  * @pvr_file: Pointer to pvr_file structure.
+diff --git a/drivers/gpu/drm/imagination/pvr_job.c b/drivers/gpu/drm/imagination/pvr_job.c
+index 8f18876..c8ac3c5 100644
+--- a/drivers/gpu/drm/imagination/pvr_job.c
++++ b/drivers/gpu/drm/imagination/pvr_job.c
+@@ -455,6 +455,12 @@ create_job(struct pvr_device *pvr_dev,
+ 			err = -EINVAL;
+ 			goto err_put_job;
+ 		}
++
++		/* The PM uses the data set's MLists and free lists. */
++		err = pvr_hwrt_dataset_bind_vm(job->hwrt->hwrt_dataset,
++					       job->ctx->vm_ctx);
++		if (err)
++			goto err_put_job;
+ 	}
+ 
+ 	err = pvr_job_fw_cmd_init(job, args);
+diff --git a/drivers/gpu/drm/imagination/pvr_vm.c b/drivers/gpu/drm/imagination/pvr_vm.c
+index 03254d5..7353dbd 100644
+--- a/drivers/gpu/drm/imagination/pvr_vm.c
++++ b/drivers/gpu/drm/imagination/pvr_vm.c
+@@ -22,7 +22,10 @@
+ #include <linux/errno.h>
+ #include <linux/gfp_types.h>
+ #include <linux/kref.h>
++#include <linux/list.h>
++#include <linux/lockdep.h>
+ #include <linux/mutex.h>
++#include <linux/overflow.h>
+ #include <linux/stddef.h>
+ 
+ /**
+@@ -51,6 +54,12 @@ struct pvr_vm_context {
+ 	/** @lock: Global lock on this VM. */
+ 	struct mutex lock;
+ 
++	/**
++	 * @pins: Ranges that map and unmap requests must leave alone, as
++	 * &struct pvr_vm_pin. Protected by @lock.
++	 */
++	struct list_head pins;
++
+ 	/** @is_userspace_context: Mappings must lie within the userspace heaps. */
+ 	bool is_userspace_context;
+ 
+@@ -598,6 +607,7 @@ pvr_vm_create_context(struct pvr_device *pvr_dev, bool is_userspace_context)
+ 		       0, 1ULL << device_addr_bits, 0, 0, &pvr_vm_gpuva_ops);
+ 
+ 	mutex_init(&vm_ctx->lock);
++	INIT_LIST_HEAD(&vm_ctx->pins);
+ 	kref_init(&vm_ctx->ref_count);
+ 
+ 	if (is_userspace_context && pvr_device_is_apple(pvr_dev)) {
+@@ -640,6 +650,7 @@ pvr_vm_context_release(struct kref *ref_count)
+ 		pvr_fw_object_destroy(vm_ctx->fw_mem_ctx_obj);
+ 
+ 	pvr_vm_unmap_all(vm_ctx);
++	WARN_ON(!list_empty(&vm_ctx->pins));
+ 
+ 	pvr_mmu_context_destroy(vm_ctx->mmu_ctx);
+ 	drm_gem_private_object_fini(&vm_ctx->dummy_gem);
+@@ -709,6 +720,33 @@ void pvr_destroy_vm_contexts_for_file(struct pvr_file *pvr_file)
+ 	}
+ }
+ 
++/**
++ * pvr_vm_range_is_pinned_locked() - Check whether a range overlaps a pin
++ * @vm_ctx: Target VM context.
++ * @device_addr: Start of the range.
++ * @size: Size of the range in bytes.
++ *
++ * The vm_ctx->lock must be held when calling this function.
++ *
++ * Return: %true if any part of the range is pinned.
++ */
++static bool
++pvr_vm_range_is_pinned_locked(struct pvr_vm_context *vm_ctx, u64 device_addr,
++			      u64 size)
++{
++	struct pvr_vm_pin *pin;
++
++	lockdep_assert_held(&vm_ctx->lock);
++
++	list_for_each_entry(pin, &vm_ctx->pins, node) {
++		if (device_addr < pin->start + pin->size &&
++		    pin->start < device_addr + size)
++			return true;
++	}
++
++	return false;
++}
++
+ static int
+ pvr_vm_lock_extra(struct drm_gpuvm_exec *vm_exec)
+ {
+@@ -737,6 +775,7 @@ pvr_vm_lock_extra(struct drm_gpuvm_exec *vm_exec)
+  *    address; the region specified by @pvr_obj_offset and @size does not fall
+  *    entirely within @pvr_obj, or any part of the specified region of @pvr_obj
+  *    is not device-virtual page-aligned,
++ *  * -%EBUSY if the requested mapping overlaps a pinned range,
+  *  * Any error encountered while performing internal operations required to
+  *    destroy the mapping (returned from pvr_vm_gpuva_map or
+  *    pvr_vm_gpuva_remap).
+@@ -775,6 +814,12 @@ __pvr_vm_map(struct pvr_vm_context *vm_ctx, struct pvr_gem_object *pvr_obj,
+ 		pvr_vm_bind_op_fini(&bind_op);
+ 		return err;
+ 	}
++
++	if (pvr_vm_range_is_pinned_locked(vm_ctx, device_addr, size)) {
++		err = -EBUSY;
++		goto err_cleanup;
++	}
++
+ 	err = drm_gpuvm_exec_lock(&vm_exec);
+ 	if (err)
+ 		goto err_cleanup;
+@@ -903,6 +948,7 @@ pvr_vm_unmap_obj(struct pvr_vm_context *vm_ctx, struct pvr_gem_object *pvr_obj,
+  *
+  * Return:
+  *  * 0 on success,
++ *  * -%EBUSY if the mapping overlaps a pinned range,
+  *  * Any error encountered by drm_gpuva_find,
+  *  * Any error encountered by pvr_vm_unmap_obj_locked.
+  */
+@@ -916,7 +962,9 @@ pvr_vm_unmap(struct pvr_vm_context *vm_ctx, u64 device_addr, u64 size)
+ 	mutex_lock(&vm_ctx->lock);
+ 
+ 	va = drm_gpuva_find(&vm_ctx->gpuvm_mgr, device_addr, size);
+-	if (va) {
++	if (va && pvr_vm_range_is_pinned_locked(vm_ctx, va->va.addr, va->va.range)) {
++		err = -EBUSY;
++	} else if (va) {
+ 		pvr_obj = gem_to_pvr_gem(va->gem.obj);
+ 		err = pvr_vm_unmap_obj_locked(vm_ctx, pvr_obj,
+ 					      va->va.addr, va->va.range);
+@@ -1276,6 +1324,104 @@ err_unlock:
+ 	return NULL;
+ }
+ 
++/**
++ * pvr_vm_range_is_pm_protected_locked() - Check that only the PM and firmware
++ *                                         can access a device-virtual range
++ * @vm_ctx: Target VM context.
++ * @device_addr: Start of the range.
++ * @size: Size of the range in bytes.
++ *
++ * The vm_ctx->lock must be held when calling this function.
++ *
++ * Return: %true if one mapping of a buffer object created with
++ * %DRM_PVR_BO_PM_FW_PROTECT, and without
++ * %DRM_PVR_BO_ALLOW_CPU_USERSPACE_ACCESS, covers the whole range.
++ */
++static bool
++pvr_vm_range_is_pm_protected_locked(struct pvr_vm_context *vm_ctx,
++				    u64 device_addr, u64 size)
++{
++	struct pvr_gem_object *pvr_obj;
++	struct drm_gpuva *va;
++	u64 end;
++
++	lockdep_assert_held(&vm_ctx->lock);
++
++	if (!size || check_add_overflow(device_addr, size, &end))
++		return false;
++
++	va = drm_gpuva_find_first(&vm_ctx->gpuvm_mgr, device_addr, 1);
++	if (!va || !va->gem.obj || end > va->va.addr + va->va.range)
++		return false;
++
++	pvr_obj = gem_to_pvr_gem(va->gem.obj);
++
++	return (pvr_obj->flags & DRM_PVR_BO_PM_FW_PROTECT) &&
++	       !(pvr_obj->flags & DRM_PVR_BO_ALLOW_CPU_USERSPACE_ACCESS);
++}
++
++/**
++ * pvr_vm_pin_pm_protected() - Pin device-virtual ranges that only the PM and
++ *                             firmware can access
++ * @vm_ctx: Target VM context.
++ * @pins: Ranges to pin, with &pvr_vm_pin.start and &pvr_vm_pin.size set.
++ * @count: Number of entries in @pins.
++ *
++ * Checks that each range lies within one mapping of a buffer object created
++ * with %DRM_PVR_BO_PM_FW_PROTECT and without
++ * %DRM_PVR_BO_ALLOW_CPU_USERSPACE_ACCESS, and then pins all of them: until
++ * pvr_vm_unpin(), pvr_vm_map() and pvr_vm_unmap() refuse to change any mapping
++ * that overlaps one. The check and the pin are atomic with respect to both.
++ *
++ * Return:
++ *  * 0 on success, or
++ *  * -%EINVAL if any range is not covered by such a mapping; nothing is
++ *    pinned then.
++ */
++int
++pvr_vm_pin_pm_protected(struct pvr_vm_context *vm_ctx, struct pvr_vm_pin *pins,
++			unsigned int count)
++{
++	unsigned int i;
++	int err = 0;
++
++	mutex_lock(&vm_ctx->lock);
++
++	for (i = 0; i < count; i++) {
++		if (!pvr_vm_range_is_pm_protected_locked(vm_ctx, pins[i].start,
++							 pins[i].size)) {
++			err = -EINVAL;
++			goto out_unlock;
++		}
++	}
++
++	for (i = 0; i < count; i++)
++		list_add_tail(&pins[i].node, &vm_ctx->pins);
++
++out_unlock:
++	mutex_unlock(&vm_ctx->lock);
++
++	return err;
++}
++
++/**
++ * pvr_vm_unpin() - Release ranges pinned by pvr_vm_pin_pm_protected()
++ * @vm_ctx: VM context the ranges were pinned in.
++ * @pins: The array passed to pvr_vm_pin_pm_protected().
++ * @count: Number of entries in @pins.
++ */
++void
++pvr_vm_unpin(struct pvr_vm_context *vm_ctx, struct pvr_vm_pin *pins,
++	     unsigned int count)
++{
++	mutex_lock(&vm_ctx->lock);
++
++	for (unsigned int i = 0; i < count; i++)
++		list_del(&pins[i].node);
++
++	mutex_unlock(&vm_ctx->lock);
++}
++
+ /**
+  * pvr_vm_get_fw_mem_context: Get object representing firmware memory context
+  * @vm_ctx: Target VM context.
+diff --git a/drivers/gpu/drm/imagination/pvr_vm.h b/drivers/gpu/drm/imagination/pvr_vm.h
+index 9555094..d3b3f3f 100644
+--- a/drivers/gpu/drm/imagination/pvr_vm.h
++++ b/drivers/gpu/drm/imagination/pvr_vm.h
+@@ -8,6 +8,7 @@
+ 
+ #include <uapi/drm/pvr_drm.h>
+ 
++#include <linux/list.h>
+ #include <linux/types.h>
+ 
+ /* Forward declaration from "pvr_device.h" */
+@@ -26,6 +27,20 @@ struct drm_pvr_ioctl_get_heap_info_args;
+ /* Forward declaration from <drm/drm_exec.h> */
+ struct drm_exec;
+ 
++/**
++ * struct pvr_vm_pin - Device-virtual range whose mappings must not change
++ */
++struct pvr_vm_pin {
++	/** @node: Node in the VM context's list of pinned ranges. */
++	struct list_head node;
++
++	/** @start: Start of the range. */
++	u64 start;
++
++	/** @size: Size of the range in bytes. */
++	u64 size;
++};
++
+ /* Functions defined in pvr_vm.c */
+ 
+ bool pvr_device_addr_is_valid(u64 device_addr);
+@@ -60,6 +75,10 @@ struct pvr_gem_object *pvr_vm_find_gem_object(struct pvr_vm_context *vm_ctx,
+ 					      u64 device_addr,
+ 					      u64 *mapped_offset_out,
+ 					      u64 *mapped_size_out);
++int pvr_vm_pin_pm_protected(struct pvr_vm_context *vm_ctx,
++			    struct pvr_vm_pin *pins, unsigned int count);
++void pvr_vm_unpin(struct pvr_vm_context *vm_ctx, struct pvr_vm_pin *pins,
++		  unsigned int count);
+ 
+ struct pvr_fw_object *
+ pvr_vm_get_fw_mem_context(struct pvr_vm_context *vm_ctx);
