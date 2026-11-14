@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Duke Eagleman <301139544+jerricky26@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 12:48:12 -0500
+Subject: [PATCH] ASoC: cs42l42: Report the jack type
+
+simple-audio-card only creates jacks for auxiliary components that
+report a jack type, so a board that uses it with a CS42L42-family codec
+gets no plug detection. Report a headset with four buttons, which is what
+the driver's interrupt handler reports, so such a card can list the codec
+in simple-audio-card,aux-devs and get its jack.
+
+Assisted-by: LLM
+---
+ sound/soc/codecs/cs42l42.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/sound/soc/codecs/cs42l42.c b/sound/soc/codecs/cs42l42.c
+index fadf688..b04f15e 100644
+--- a/sound/soc/codecs/cs42l42.c
++++ b/sound/soc/codecs/cs42l42.c
+@@ -586,8 +586,19 @@ static int cs42l42_set_jack(struct snd_soc_component *component, struct snd_soc_
+ 	return 0;
+ }
+ 
++/*
++ * What the codec reports, so that a generic card that lists the codec as an
++ * auxiliary device (simple-audio-card,aux-devs) creates its jack.
++ */
++static int cs42l42_get_jack_type(struct snd_soc_component *component)
++{
++	return SND_JACK_HEADSET | SND_JACK_BTN_0 | SND_JACK_BTN_1 |
++	       SND_JACK_BTN_2 | SND_JACK_BTN_3;
++}
++
+ const struct snd_soc_component_driver cs42l42_soc_component = {
+ 	.set_jack		= cs42l42_set_jack,
++	.get_jack_type		= cs42l42_get_jack_type,
+ 	.dapm_widgets		= cs42l42_dapm_widgets,
+ 	.num_dapm_widgets	= ARRAY_SIZE(cs42l42_dapm_widgets),
+ 	.dapm_routes		= cs42l42_audio_map,

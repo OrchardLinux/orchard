@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Duke Eagleman <301139544+jerricky26@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 17:15:00 -0500
+Subject: [PATCH] soc: apple: sio: Expose the T8010 MCA4 transmit endpoint
+
+The T8010 DMA ranges list only the endpoints in use so far, so the
+headphone link's MCA4 (/arm-io/mca4, SmartIO endpoint 0x30, the same
+MCA0..4 TX/RX layout as the S8000's 0x28..0x31 range) has no channel:
+of_dma_request_slave_channel() finds no match and the MCA driver fails
+with -ENODEV, taking the whole iPad 6/7 sound card down with it.
+
+Add the MCA4 transmit endpoint.
+
+Assisted-by: LLM
+---
+ drivers/soc/apple/apple-sio-core.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/soc/apple/apple-sio-core.c b/drivers/soc/apple/apple-sio-core.c
+--- a/drivers/soc/apple/apple-sio-core.c
++++ b/drivers/soc/apple/apple-sio-core.c
+@@ -1097,10 +1097,14 @@ static const struct apple_sio_hw apple_sio_s8000_hw = {
+ 	.num_dma_ranges = ARRAY_SIZE(apple_sio_s8000_dma_ranges),
+ };
+ 
+-/* SPI3 touch TX and MCA2 speaker TX, independently described by the J71b ADT. */
++/*
++ * SPI3 touch TX, MCA2 speaker TX and MCA4 headphone TX, independently
++ * described by the J71b ADT.
++ */
+ static const struct apple_sio_dma_range apple_sio_t8010_dma_ranges[] = {
+ 	{ 0x1a, 0x1a },
+ 	{ 0x2c, 0x2c },
++	{ 0x30, 0x30 },
+ };
+ 
+ static const struct apple_sio_hw apple_sio_t8010_hw = {
+-- 
+2.56.0
+

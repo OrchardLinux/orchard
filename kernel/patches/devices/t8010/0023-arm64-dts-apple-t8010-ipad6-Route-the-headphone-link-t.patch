@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Duke Eagleman <301139544+jerricky26@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 20:30:00 -0500
+Subject: [PATCH] arm64: dts: apple: t8010-ipad6: Route the headphone link through the AOP
+
+Describe the AOP i2s-switch and its pad output enable word as syscons
+(ADT aop-i2s-switch,t8010: reg 0x210540000 and 0x210000600) and give
+MCA4 the AOP route the ADT lists for it (function-i2s_route_aop 'mca1'
+to 'pin0', aop_i2s_oe_reg_val 0xf), identical on J71b, J72b, J171 and
+J172. With it the link reaches AOP pads 32-35, where the CS42L83 is.
+
+The words were found and checked live on J171: MCA1 node 0x00010101,
+pin0 node 0x00080818, output enable 0xf. With them set the codec's PLL
+locks on SCLK.
+
+Assisted-by: LLM
+---
+diff --git a/arch/arm64/boot/dts/apple/t8010.dtsi b/arch/arm64/boot/dts/apple/t8010.dtsi
+--- a/arch/arm64/boot/dts/apple/t8010.dtsi
++++ b/arch/arm64/boot/dts/apple/t8010.dtsi
+@@ -176,6 +176,19 @@
+ 			status = "disabled";
+ 		};
+ 
++		/* ADT aop-i2s-switch,t8010: node registers, pad output enable */
++		aop_i2s_switch: syscon@210540000 {
++			compatible = "apple,t8010-aop-i2s-switch", "syscon";
++			reg = <0x2 0x10540000 0x0 0x1000>;
++			status = "disabled";
++		};
++
++		aop_i2s_oe: syscon@210000600 {
++			compatible = "apple,t8010-aop-i2s-oe", "syscon";
++			reg = <0x2 0x10000600 0x0 0x4>;
++			status = "disabled";
++		};
++
+ 		mca2: mca@20a0a8000 {
+ 			compatible = "apple,t8010-mca";
+ 			reg = <0x2 0x0a0a8000 0x0 0x4000>,
+diff --git a/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi b/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
+--- a/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
++++ b/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
+@@ -248,8 +248,25 @@
+ 	status = "okay";
+ };
+ 
++&aop_i2s_switch {
++	status = "okay";
++};
++
++&aop_i2s_oe {
++	status = "okay";
++};
++
+ &mca4 {
+ 	apple,i2s-switch = <&i2s_switch 4 4>;
++	/*
++	 * The CS42L83 sits on AOP pads 32-35 behind the AOP's i2s-switch: ADT
++	 * mca4 function-i2s_route_aop 'mca1' to 'pin0' and aop-i2s-switch
++	 * aop_i2s_oe_reg_val 0xf, identical on J71b, J72b, J171 and J172.
++	 * Only with these words set do the AOP pads carry the link (J171).
++	 */
++	apple,aop-i2s-route = <&aop_i2s_switch 0x0 0x00010101>,
++			      <&aop_i2s_switch 0xc 0x00080818>,
++			      <&aop_i2s_oe 0x0 0xf>;
+ 	status = "okay";
+ };
+ 
+-- 
+2.56.0
