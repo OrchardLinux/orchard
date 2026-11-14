@@ -1,0 +1,298 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 16:03:26 +0100
+Subject: [PATCH] bootmgr: Boot the default entry after a PSCI SYSTEM_RESET
+
+SYSTEM_RESET brings m1n1 back with every other CPU parked and the
+original boot_args, so m1n1 can finish the reboot itself the way the
+host's orchard launch starts a system: bring main storage up, take the
+first bootable entry in BLS order (the same default the host suggests;
+there is still no remembered default) and start it with bootmgr_start().
+The board DTB file name comes from the last launch, which m1n1 now keeps
+in .data; if no entry was ever launched (a kernel from the payload, say)
+m1n1 doesn't guess the board and stays in the proxy.
+
+A re-entered m1n1 also skips the stale payload area for the logo, keeps
+the picture on screen instead of clearing it and drawing the logo (the
+entry's splash replaces it), and leaves SEP alone, which was never
+reset. A 96x96 square at the top left shows how far it got: cyan back in
+m1n1, green loading the entry, magenta no previous launch, red storage
+or entry failure. Any failure ends in the USB proxy, as a cold boot with
+nothing to do does; m1n1 never turns it into a cold reset.
+
+With psci_reset=proxy it stops in the proxy right after the re-entry.
+
+Assisted-by: LLM
+---
+ rust/src/bls.rs | 48 +++++++++++++++++++++++++++++
+ src/bootmgr.c   | 81 +++++++++++++++++++++++++++++++++++++++++++++++++
+ src/bootmgr.h   |  2 ++
+ src/fb.c        |  4 ++-
+ src/main.c      | 16 +++++++---
+ 5 files changed, 146 insertions(+), 5 deletions(-)
+
+diff --git a/rust/src/bls.rs b/rust/src/bls.rs
+index 35ddc1b..4570d63 100644
+--- a/rust/src/bls.rs
++++ b/rust/src/bls.rs
+@@ -629,6 +629,54 @@ pub unsafe extern "C" fn rust_boot_entries(
+     text.leak().as_mut_ptr() as *mut c_void
+ }
+ 
++/// The entry a boot without a host starts: the first bootable one in BLS
++/// order, as the host's `orchard launch` suggests (there is no remembered
++/// default).
++pub fn default_entry(listing: &Listing) -> Option<&Entry> {
++    listing.entries.iter().find(|entry| entry.bootable())
++}
++
++/// Writes the id of main storage's default entry (see `default_entry`),
++/// NUL-terminated, to `id` (`size` bytes). Main storage must be up;
++/// `devicetree` may be NULL. Returns 0, or -1 with the reason on the console.
++#[no_mangle]
++pub unsafe extern "C" fn rust_boot_default_entry(
++    devicetree: *const c_char,
++    id: *mut c_char,
++    size: c_size_t,
++) -> c_int {
++    let devicetree = match devicetree.is_null() {
++        true => None,
++        false => unsafe { CStr::from_ptr(devicetree) }.to_str().ok(),
++    };
++    let listing = read_entries(storage::MainStorage::new, devicetree);
++    log(&listing);
++    let entry = match &listing {
++        Err(error) => {
++            println!("bls: {}", error);
++            return -1;
++        }
++        Ok(listing) => match default_entry(listing) {
++            Some(entry) => entry,
++            None => {
++                println!("bls: no bootable entry");
++                return -1;
++            }
++        },
++    };
++    let name = entry.id.as_bytes();
++    if name.len() >= size || name.contains(&0) {
++        println!("bls: entry id too long");
++        return -1;
++    }
++    unsafe {
++        core::ptr::copy_nonoverlapping(name.as_ptr(), id as *mut u8, name.len());
++        *id.add(name.len()) = 0;
++    }
++    println!("bls: default entry {}", entry.id);
++    0
++}
++
+ #[repr(C)]
+ pub struct BootFiles {
+     kernel: *mut c_void,
+diff --git a/src/bootmgr.c b/src/bootmgr.c
+index b91b6a6..a746673 100644
+--- a/src/bootmgr.c
++++ b/src/bootmgr.c
+@@ -8,6 +8,7 @@
+ #include "heapblock.h"
+ #include "kboot.h"
+ #include "mitigations.h"
++#include "psci.h"
+ #include "smp.h"
+ #include "string.h"
+ #include "utils.h"
+@@ -32,6 +33,32 @@ struct boot_files {
+ 
+ int rust_boot_entry_load(const char *id, const char *devicetree, bool splash,
+                          struct boot_files *files);
++int rust_boot_default_entry(const char *devicetree, char *id, size_t size);
++
++/*
++ * The board DTB file name of the last launch (the host's orchard launch
++ * passes it), kept across a SYSTEM_RESET so m1n1 can boot an entry without
++ * the host and without guessing the board.
++ */
++static struct {
++    bool launched;
++    bool have_devicetree;
++    char devicetree[MAX_NAME];
++} last_launch __attribute__((section(".data")));
++
++/* Warm reset progress, top left */
++#define MARK_REENTERED 0x00b7ff
++#define MARK_LOADING   0x00c853
++#define MARK_NO_LAUNCH 0xff00ff
++#define MARK_FAILED    0xff1744
++
++static void bootmgr_mark(u32 color)
++{
++    if (!fb.ptr)
++        return;
++    fb_fill(0, 0, min(fb.width, 96U), min(fb.height, 96U), int2rgb(color));
++    fb_update();
++}
+ 
+ /* Called from Rust: the entry's splash, pixels as b, g, r, 0, centred on black. */
+ void bootmgr_paint_splash(const void *pixels, u32 width, u32 height)
+@@ -104,6 +131,11 @@ int bootmgr_start(const char *id_arg, const char *devicetree_arg, u64 flags)
+         return -1;
+     }
+ 
++    last_launch.launched = true;
++    last_launch.have_devicetree = devicetree_arg;
++    if (devicetree_arg)
++        memcpy(last_launch.devicetree, devicetree, sizeof(devicetree));
++
+     /* The kernel, initrd and DT are m1n1's now, past any limit the host set. */
+     heapblock_set_limit(NULL);
+ 
+@@ -136,8 +168,57 @@ int bootmgr_start(const char *id_arg, const char *devicetree_arg, u64 flags)
+     return kboot_boot(kernel);
+ }
+ 
++/*
++ * m1n1 was restarted by a PSCI SYSTEM_RESET from the kernel: every other CPU
++ * is parked, the watchdog is off and memory is as after a cold start. Do
++ * what the host's orchard launch would: bring up main storage and start the
++ * default entry with the last launch's board DTB. Returns 0 when the kernel
++ * is set up to run, -1 (proxy) otherwise.
++ */
++int bootmgr_warm_reset(void)
++{
++    char id[MAX_NAME];
++    const char *devicetree = last_launch.have_devicetree ? last_launch.devicetree : NULL;
++
++    bootmgr_mark(MARK_REENTERED);
++    if (psci_reset_mode_get() == PSCI_RESET_PROXY) {
++        printf("bootmgr: warm reset: psci_reset=proxy, not booting\n");
++        return -1;
++    }
++    if (!last_launch.launched) {
++        printf("bootmgr: warm reset: no boot entry was launched before, not guessing the board\n");
++        bootmgr_mark(MARK_NO_LAUNCH);
++        return -1;
++    }
++
++    printf("bootmgr: warm reset: starting the default entry (devicetree %s)\n",
++           devicetree ? devicetree : "from the entry");
++    if (!main_storage_init()) {
++        printf("bootmgr: warm reset: main storage did not come up\n");
++        bootmgr_mark(MARK_FAILED);
++        return -1;
++    }
++    if (rust_boot_default_entry(devicetree, id, sizeof(id)) < 0) {
++        main_storage_shutdown();
++        bootmgr_mark(MARK_FAILED);
++        return -1;
++    }
++    bootmgr_mark(MARK_LOADING);
++    if (bootmgr_start(id, devicetree, 0) < 0) {
++        bootmgr_mark(MARK_FAILED);
++        return -1;
++    }
++    return 0;
++}
++
+ #else
+ 
++int bootmgr_warm_reset(void)
++{
++    printf("bootmgr: not supported in this build\n");
++    return -1;
++}
++
+ int bootmgr_start(const char *id, const char *devicetree, u64 flags)
+ {
+     UNUSED(id);
+diff --git a/src/bootmgr.h b/src/bootmgr.h
+index 8a03baa..f3b86ee 100644
+--- a/src/bootmgr.h
++++ b/src/bootmgr.h
+@@ -8,5 +8,7 @@
+ #define BOOTMGR_NO_SPLASH BIT(0)
+ 
+ int bootmgr_start(const char *id, const char *devicetree, u64 flags);
++/* After a PSCI SYSTEM_RESET: boot the default entry the way the last launch did */
++int bootmgr_warm_reset(void);
+ 
+ #endif
+diff --git a/src/fb.c b/src/fb.c
+index ba606b2..0aa88b8 100644
+--- a/src/fb.c
++++ b/src/fb.c
+@@ -1,6 +1,7 @@
+ /* SPDX-License-Identifier: MIT */
+ 
+ #include "fb.h"
++#include "psci.h"
+ #include "assert.h"
+ #include "iodev.h"
+ #include "malloc.h"
+@@ -464,14 +465,16 @@ void fb_init(bool clear)
+                         &orig_logo);
+     }
+ 
++    // After a re-entry from Linux the payload area behind m1n1 is stale
++    bool payload_ok = !psci_reentered();
+     u32 *splash, splash_w, splash_h;
+-    if (payload_splash(&splash, &splash_w, &splash_h) && splash_w <= fb.width &&
++    if (payload_ok && payload_splash(&splash, &splash_w, &splash_h) && splash_w <= fb.width &&
+         splash_h <= fb.height) {
+         custom_logo.ptr = splash;
+         custom_logo.width = splash_w;
+         custom_logo.height = splash_h;
+         logo = &custom_logo;
+-    } else if (payload_logo(&custom_128, &custom_256)) {
++    } else if (payload_ok && payload_logo(&custom_128, &custom_256)) {
+         custom_logo = *logo;
+         if (custom_logo.width == 256) {
+             custom_logo.ptr = custom_256;
+diff --git a/src/main.c b/src/main.c
+index 3f32380..8966e41 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -7,6 +7,7 @@
+ 
+ #include "adt.h"
+ #include "aic.h"
++#include "bootmgr.h"
+ #include "cpufreq.h"
+ #include "display.h"
+ #include "exception.h"
+@@ -127,6 +128,9 @@ void run_actions(void)
+         printf("Valid payload found\n");
+         return;
+     }
++
++    if (psci_reset_reentered() && bootmgr_warm_reset() == 0)
++        return;
+     fb_set_active(true);
+ 
+     printf("No valid payload found\n");
+@@ -173,9 +177,11 @@ void m1n1_main(void)
+     // Kick DCP to sleep, so dodgy monitors which cause reconnect cycles don't cause us to lose the
+     // framebuffer.
+     display_shutdown(DCP_SLEEP_IF_EXTERNAL);
+-    // On idevice we need to always clear, because otherwise it looks scuffed on white devices
+-    fb_init(!is_mac);
+-    fb_display_logo();
++    // On idevice we need to always clear, because otherwise it looks scuffed on white devices.
++    // After a warm reset, keep the picture until the next system's splash.
++    fb_init(!is_mac && !psci_reset_reentered());
++    if (!psci_reset_reentered())
++        fb_display_logo();
+ #ifdef FB_SILENT_MODE
+     fb_set_active(!cur_boot_args.video.display);
+ #else
+@@ -184,7 +190,9 @@ void m1n1_main(void)
+ #endif
+ 
+     cpufreq_fixup();
+-    sep_init();
++    // SEP was never reset; it is still running what it ran at the first boot
++    if (!psci_reset_reentered())
++        sep_init();
+ #endif
+ 
+     printf("Initialization complete.\n");

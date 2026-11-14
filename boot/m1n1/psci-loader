@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+"""Append m1n1 PSCI payload variables to a bare m1n1.bin.
+
+m1n1 entered at EL3 (A7-A9 from Pongo) provides PSCI by default, including
+SYSTEM_RESET as a warm reboot into the default boot entry; a bare m1n1.bin
+needs no framing for that. Use this to get the other settings, before
+assembling any kernel/DTB/logo payload. The output works with
+orchard run/build --loader or launch's loaders/m1n1.bin. m1n1 entered at EL1
+always uses the spin table.
+"""
+import argparse
+from pathlib import Path
+import shutil
+
+RESET = {'boot': b'', 'proxy': b'psci_reset=proxy\n', 'off': b'psci_reset=0\n'}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--device', required=True, choices=('j71t',))
+    parser.add_argument('--loader', type=Path, required=True)
+    parser.add_argument('--output', type=Path, required=True)
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--system-reset', choices=tuple(RESET), default='boot',
+                       help='boot: warm reboot into the default entry (default); proxy: stop in '
+                            'the m1n1 proxy; off: NOT_SUPPORTED, kernel resets the SoC itself')
+    group.add_argument('--no-psci', action='store_true', help='psci=0: spin table, no PSCI')
+    args = parser.parse_args()
+    if not args.loader.is_file() or not args.loader.stat().st_size:
+        parser.error('input must be a nonempty bare m1n1.bin')
+    # Exclusive creation: never replace the original or another boot artifact.
+    with args.loader.open('rb') as source, args.output.open('xb') as output:
+        shutil.copyfileobj(source, output)
+        output.write(b'psci=0\n' if args.no_psci else b'psci=1\n' + RESET[args.system_reset])
+    print(args.output)
+
+
+if __name__ == '__main__':
+    main()
