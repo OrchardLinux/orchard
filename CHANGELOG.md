@@ -9,6 +9,13 @@ releasing, rename that section to the version (`## [0.3.0] - YYYY-MM-DD`). The
 release workflow uses that section as the GitHub release notes and fails if it
 is missing or empty.
 
+## Unreleased
+
+### Devices
+
+- iPad 6 and iPad 7: the built-in microphones work (stereo, 48 kHz, with a
+  volume control).
+
 ## [0.3.0] - 2026-11-12
 
 ### Highlights
