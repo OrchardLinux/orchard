@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 02:08:51 +0100
+Subject: [PATCH] PCI: apple: use explicit returns after cold reset
+
+Use standard C void returns while retaining the early exit if the reset
+helper unexpectedly returns. Successful handoff ordering is unchanged.
+
+Assisted-by: LLM
+---
+ drivers/pci/controller/pcie-apple-h9p.c | 24 ++++++++++++++++--------
+ 1 file changed, 16 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/pci/controller/pcie-apple-h9p.c b/drivers/pci/controller/pcie-apple-h9p.c
+index 28305b0ee..5890d632a 100644
+--- a/drivers/pci/controller/pcie-apple-h9p.c
++++ b/drivers/pci/controller/pcie-apple-h9p.c
+@@ -3609,8 +3609,10 @@ static void apple_h9p_s8003_shutdown(struct platform_device *pdev)
+ 	cancel_delayed_work_sync(&pcie->late_work);
+ 	if (!READ_ONCE(pcie->ans_handoff_stopped) ||
+ 	    (of_property_read_bool(pcie->dev->of_node, "apple,ans-kexec-handoff") &&
+-	     !apple_s8003_port_powered(pcie)))
+-		return apple_cold_reset("Apple ANS: refusing uncertified powered handoff");
++	     !apple_s8003_port_powered(pcie))) {
++		apple_cold_reset("Apple ANS: refusing uncertified powered handoff");
++		return;
++	}
+ 	for (port = 0; port < H9P_NUM_PORTS; port++) {
+ 		void __iomem *cfg = pcie->base_config + port * H9P_CFG_PORT_STRIDE;
+ 
+@@ -3621,10 +3623,14 @@ static void apple_h9p_s8003_shutdown(struct platform_device *pdev)
+ 		h9p_rmw(cfg + PCI_PRIMARY_BUS, GENMASK(23, 8), 0);
+ 		h9p_rmw(pcie->base_rc + S8003_RC_PORT_PWR(port), 0,
+ 			S8003_RC_PORT_PWR_REFCLK_NOGATE);
+-		if (gpiod_direction_output(pcie->perst[port], 1))
+-			return apple_cold_reset("Apple PCIe: PERST failed during handoff");
+-		if (apple_s8003_port_stop(pcie, port))
+-			return apple_cold_reset("Apple PCIe: LTSSM stop failed during handoff");
++		if (gpiod_direction_output(pcie->perst[port], 1)) {
++			apple_cold_reset("Apple PCIe: PERST failed during handoff");
++			return;
++		}
++		if (apple_s8003_port_stop(pcie, port)) {
++			apple_cold_reset("Apple PCIe: LTSSM stop failed during handoff");
++			return;
++		}
+ 		udelay(S8003_PERST_TO_REFCLK_US);
+ 		if (!port && pcie->nvmmu.ready) {
+ 			h9p_writel_flush(0, pcie->nvmmu.base + H9P_NVMMU_SART_CTRL);
+@@ -3635,8 +3641,10 @@ static void apple_h9p_s8003_shutdown(struct platform_device *pdev)
+ 			apple_s8003_port_off(pcie, port);
+ 		if (!port && of_property_read_bool(pcie->dev->of_node, "apple,ans-kexec-handoff") &&
+ 		    (!apple_s8003_port_powered(pcie) ||
+-		     gpiod_get_value_cansleep(pcie->perst[0]) != 1))
+-			return apple_cold_reset("Apple ANS: outgoing powered port certificate failed");
++		     gpiod_get_value_cansleep(pcie->perst[0]) != 1)) {
++			apple_cold_reset("Apple ANS: outgoing powered port certificate failed");
++			return;
++		}
+ 		pcie->enabled_ports &= ~BIT(port);
+ 	}
+ 	dev_info(pcie->dev, "kexec: PCIe PERST asserted, LTSSM stopped, ports powered; NVMMU SART disabled\n");

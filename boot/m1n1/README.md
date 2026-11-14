@@ -28,3 +28,16 @@ gives the same tree as Hoolock's tip before updating `sources.toml`.
 
 Scratch stays in ignored `boot/m1n1/.work/<device>/`. `--resume` reuses it only
 if the recorded patch set is unchanged.
+
+## Resident PSCI on A7-A9
+
+Orchard patch 0015 adds the resident EL3 PSCI monitor (CPU_ON, CPU_OFF,
+AFFINITY_INFO); 0016-0019 make it the default whenever m1n1 is entered at EL3
+and add SYSTEM_RESET (warm reboot back into m1n1, which boots the default BLS
+entry with the last launch's DTB) and SYSTEM_OFF (halt). Any PSCI-aware
+kernel reboots, powers off and kexecs through its ordinary paths; m1n1 takes
+IPI-stopped CPUs back by trapping EL1 WFI/WFE to EL3. EL1/EL2 entries keep
+the spin table. Payload variables (append to `m1n1.bin`, e.g. with
+`psci-loader`): `psci=0` turns PSCI off, `psci_reset=0` keeps only the CPU
+lifecycle (no WFI/WFE traps), `psci_reset=proxy` stops in the proxy after a
+reset. 0020 marks retained hardware in the device tree after a re-entry.

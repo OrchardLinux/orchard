@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 18:11:36 +0000
+Subject: [PATCH] media: apple-vxd: answer the suspend readiness query
+
+The A9 decoder's sleep admission refuses while a file is open and
+otherwise closes its open gate until complete. Provide the matching
+check: report -EBUSY while a file is open, without touching the gate.
+
+Assisted-by: LLM
+---
+ drivers/media/platform/apple/vxd/apple-vxd-core.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/drivers/media/platform/apple/vxd/apple-vxd-core.c b/drivers/media/platform/apple/vxd/apple-vxd-core.c
+index 31a024233..dff75927d 100644
+--- a/drivers/media/platform/apple/vxd/apple-vxd-core.c
++++ b/drivers/media/platform/apple/vxd/apple-vxd-core.c
+@@ -266,6 +266,18 @@ static int apple_vxd_sleep_prepare(struct device *dev)
+ 	return ret;
+ }
+ 
++/* Readiness query: what prepare would decide, without closing the gate. */
++static int apple_vxd_sleep_check(struct device *dev)
++{
++	struct apple_vxd_dev *vxd = dev_get_drvdata(dev);
++	int ret;
++
++	mutex_lock(&vxd->power_lock);
++	ret = vxd->users ? -EBUSY : 0;
++	mutex_unlock(&vxd->power_lock);
++	return ret;
++}
++
+ static void apple_vxd_sleep_complete(struct device *dev)
+ {
+ 	struct apple_vxd_dev *vxd = dev_get_drvdata(dev);
+@@ -403,6 +415,7 @@ static int apple_vxd_probe(struct platform_device *pdev)
+ 		vxd->sleep_admission.dev = &pdev->dev;
+ 		vxd->sleep_admission.prepare = apple_vxd_sleep_prepare;
+ 		vxd->sleep_admission.complete = apple_vxd_sleep_complete;
++		vxd->sleep_admission.check = apple_vxd_sleep_check;
+ 		ret = register_pm_suspend_admission(&vxd->sleep_admission);
+ 		if (ret)
+ 			goto err_gart_fini;

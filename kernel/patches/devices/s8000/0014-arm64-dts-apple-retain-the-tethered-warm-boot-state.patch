@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 17:15:00 +0100
+Subject: [PATCH] arm64: dts: apple: retain the tethered warm boot state
+
+A tethered kernel inherits initialized hardware rather than power-on
+state. Retain the board-selected warm handoff state so probe and
+shutdown do not discard resources needed by the incoming kernel.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/s800-0-3.dtsi | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/s800-0-3.dtsi b/arch/arm64/boot/dts/apple/s800-0-3.dtsi
+index 3277a73bb..f6449a7e6 100644
+--- a/arch/arm64/boot/dts/apple/s800-0-3.dtsi
++++ b/arch/arm64/boot/dts/apple/s800-0-3.dtsi
+@@ -443,3 +443,7 @@ pmu {
+  * the S8003 (APL1022) on 16nm. There are some minor differences
+  * such as timing in cpufreq state transistions.
+  */
++
++/ {
++	apple,reserve-pstore;
++};

@@ -1,0 +1,97 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 16:18:38 +0000
+Subject: [PATCH] iommu/apple-dart: save and rebuild translations around
+ certified ANS stop
+
+apple_ans_dart_stop() stops the ANS DART before a kexec handoff. System
+sleep needs the same stop and its reverse.
+
+Save the DART's translation state when apple_ans_dart_stop() stops it,
+and add apple_ans_dart_start() to restore it. The regular suspend
+callback skips a DART stopped this way, which would otherwise save its
+state a second time, and resume clears the flag. The NVMe sleep path
+uses the pair to stop the ANS translations before sleep and rebuild them
+on resume.
+
+Assisted-by: LLM
+---
+ drivers/iommu/apple-dart.c | 29 +++++++++++++++++++++++++++++
+ include/linux/apple-ans.h  |  2 ++
+ 2 files changed, 31 insertions(+)
+
+diff --git a/drivers/iommu/apple-dart.c b/drivers/iommu/apple-dart.c
+index 5aff4bc3e..5c28d4e4b 100644
+--- a/drivers/iommu/apple-dart.c
++++ b/drivers/iommu/apple-dart.c
+@@ -217,6 +217,7 @@ enum dart_type {
+  * @iommu: iommu core device
+  */
+ struct apple_dart {
++	bool ans_stopped;
+ 	struct device *dev;
+ 	const struct apple_dart_hw *hw;
+ 
+@@ -1010,6 +1011,9 @@ apple_dart_setup_translation(struct apple_dart_domain *domain,
+ 	return dart->hw->invalidate_tlb(stream_map);
+ }
+ 
++static __maybe_unused int apple_dart_suspend(struct device *dev);
++static __maybe_unused int apple_dart_resume(struct device *dev);
++
+ int apple_ans_dart_stop(struct device *dev)
+ {
+ 	struct iommu_domain *domain = iommu_get_domain_for_dev(dev);
+@@ -1026,6 +1030,8 @@ int apple_ans_dart_stop(struct device *dev)
+ 	for_each_stream_map(i, cfg, map) {
+ 		if (map->dart->hw->type != DART_S5L8960X)
+ 			return -EOPNOTSUPP;
++		apple_dart_suspend(map->dart->dev);
++		map->dart->ans_stopped = true;
+ 		apple_dart_hw_disable_dma(map);
+ 	}
+ 	dev_info(dev, "Apple ANS: DART stopped for handoff\n");
+@@ -1033,6 +1039,25 @@ int apple_ans_dart_stop(struct device *dev)
+ }
+ EXPORT_SYMBOL_GPL(apple_ans_dart_stop);
+ 
++int apple_ans_dart_start(struct device *dev)
++{
++	struct apple_dart_master_cfg *cfg = dev_iommu_priv_get(dev);
++	struct apple_dart_stream_map *map;
++	int i, ret;
++
++	if (!cfg)
++		return -ENODEV;
++	for_each_stream_map(i, cfg, map) {
++		if (!map->dart->ans_stopped)
++			continue;
++		ret = apple_dart_resume(map->dart->dev);
++		if (ret)
++			return ret;
++	}
++	return 0;
++}
++EXPORT_SYMBOL_GPL(apple_ans_dart_start);
++
+ static int apple_dart_finalize_domain(struct apple_dart_domain *dart_domain,
+ 				      struct apple_dart_master_cfg *cfg)
+ {
+@@ -2017,6 +2042,9 @@ static __maybe_unused int apple_dart_suspend(struct device *dev)
+ 	struct apple_dart *dart = dev_get_drvdata(dev);
+ 	unsigned int sid, idx;
+ 
++	if (dart->ans_stopped)
++		return 0;
++
+ 	for (sid = 0; sid < dart->num_streams; sid++) {
+ 		dart->save_tcr[sid] = dart->hw->read_tcr(dart, sid);
+ 		for (idx = 0; idx < dart->hw->ttbr_count; idx++)
+@@ -2046,6 +2074,7 @@ static __maybe_unused int apple_dart_resume(struct device *dev)
+ 		dart->hw->write_tcr(dart, sid, dart->save_tcr[sid]);
+ 	}
+ 
++	dart->ans_stopped = false;
+ 	return 0;
+ }
+ 

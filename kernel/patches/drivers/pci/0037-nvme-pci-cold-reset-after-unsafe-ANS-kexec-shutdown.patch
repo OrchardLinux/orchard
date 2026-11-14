@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 02:08:51 +0100
+Subject: [PATCH] nvme-pci: cold-reset after unsafe ANS kexec shutdown
+
+An unsafe ANS shutdown cannot panic under a zero panic timeout. Use the
+shared logged and flushed cold-reset path for each failed certificate.
+If reset unexpectedly returns, leave without further device operations.
+
+Assisted-by: LLM
+---
+ drivers/nvme/host/pci.c | 29 +++++++++++++++++++++--------
+ 1 file changed, 21 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/nvme/host/pci.c b/drivers/nvme/host/pci.c
+index 40b2448d1..2f356a8ce 100644
+--- a/drivers/nvme/host/pci.c
++++ b/drivers/nvme/host/pci.c
+@@ -22,6 +22,7 @@
+ #include <linux/of.h>
+ #include <linux/iopoll.h>
+ #include <linux/apple-ans.h>
++#include <linux/soc/apple/cold-reset.h>
+ #include <linux/mutex.h>
+ #include <linux/nodemask.h>
+ #include <linux/once.h>
+@@ -3391,20 +3392,30 @@ static int nvme_dev_disable_paired(struct nvme_dev *dev, bool shutdown, bool pai
+ 		 * Give the controller a chance to complete all entered requests
+ 		 * if doing a safe shutdown.
+ 		 */
+-		if (!dead && shutdown && nvme_wait_freeze_timeout(&dev->ctrl) <= 0 && paired)
+-			panic("Apple ANS: outgoing I/O did not drain; refusing kexec");
++		if (!dead && shutdown && nvme_wait_freeze_timeout(&dev->ctrl) <= 0 && paired) {
++			apple_cold_reset("Apple ANS: outgoing I/O did not drain");
++			mutex_unlock(&dev->shutdown_lock);
++			return -EIO;
++		}
+ 	}
+ 
+ 	nvme_quiesce_io_queues(&dev->ctrl);
+ 
+-	if (paired && (dead || !dev->ctrl.queue_count))
+-		panic("Apple ANS: dead outgoing controller; refusing kexec");
++	if (paired && (dead || !dev->ctrl.queue_count)) {
++		apple_cold_reset("Apple ANS: dead outgoing controller");
++		mutex_unlock(&dev->shutdown_lock);
++		return -EIO;
++	}
+ 	if (!dead && dev->ctrl.queue_count > 0) {
+ 		if (paired) {
+ 			nvme_sync_io_queues(&dev->ctrl);
+ 			ret = apple_ans_nvmmu_drain(dev->dev);
+-			if (ret)
+-				panic("Apple ANS: outgoing drain failed %d; refusing kexec", ret);
++			if (ret) {
++				dev_err(dev->dev, "Apple ANS: outgoing drain failed %d\n", ret);
++				apple_cold_reset("Apple ANS: outgoing drain failed");
++				mutex_unlock(&dev->shutdown_lock);
++				return -EIO;
++			}
+ 		}
+ 		nvme_delete_io_queues(dev);
+ 		dev_info(dev->dev, "Apple ANS: shutdown starting NVMe SHN paired=%u\n", paired);
+@@ -4034,8 +4045,10 @@ static void nvme_shutdown(struct pci_dev *pdev)
+ 
+ 	if (kexec_in_progress && apple_ans_is_s8003(dev->dev) &&
+ 	    dev->dma_ops == &nvme_pci_apple_ans_ops && !apple_ans_handoff_begin(dev->dev)) {
+-		if (!nvme_wait_reset(&dev->ctrl) || nvme_dev_disable_paired(dev, true, true))
+-			panic("Apple ANS: refusing unsafe powered kexec handoff");
++		if (!nvme_wait_reset(&dev->ctrl) || nvme_dev_disable_paired(dev, true, true)) {
++			apple_cold_reset("Apple ANS: refusing unsafe powered kexec handoff");
++			return;
++		}
+ 		return;
+ 	}
+ 	nvme_disable_prepare_reset(dev, true);
