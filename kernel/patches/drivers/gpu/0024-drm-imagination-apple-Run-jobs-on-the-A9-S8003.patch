@@ -63,11 +63,11 @@ Not run on hardware.
 
 Assisted-by: LLM
 ---
- drivers/gpu/drm/imagination/pvr_apple_s8003.c | 1468 ++++++++++++++++-
- 1 file changed, 1423 insertions(+), 45 deletions(-)
+ drivers/gpu/drm/imagination/pvr_apple_s8003.c | 1473 ++++++++++++++++-
+ 1 file changed, 1428 insertions(+), 45 deletions(-)
 
 diff --git a/drivers/gpu/drm/imagination/pvr_apple_s8003.c b/drivers/gpu/drm/imagination/pvr_apple_s8003.c
-index 9b84009..97c8a36 100644
+index 9b84009..468dd71 100644
 --- a/drivers/gpu/drm/imagination/pvr_apple_s8003.c
 +++ b/drivers/gpu/drm/imagination/pvr_apple_s8003.c
 @@ -23,28 +23,36 @@
@@ -315,7 +315,7 @@ index 9b84009..97c8a36 100644
  
  	err = s8003_ring_discard(s8003_object(s, S8003_STATS_CTL));
  	if (!err)
-@@ -937,67 +1034,1318 @@ static bool s8003_core_ready(struct pvr_apple *apple)
+@@ -937,67 +1034,1323 @@ static bool s8003_core_ready(struct pvr_apple *apple)
  }
  
  /*
@@ -351,8 +351,7 @@ index 9b84009..97c8a36 100644
 + * has them, protected as the firmware's are, because the PM reaches them
 + * through the job's slot. A VM takes up to two sets, one per scene in the
 + * firmware, with its first render.
-  */
--static int s8003_dc_doorbell(struct pvr_apple *apple)
++ */
 +
 +/* A channel page */
 +#define S8003_CH_CTL			0x100	/* watermarks, 16 bytes apart */
@@ -548,7 +547,8 @@ index 9b84009..97c8a36 100644
 + * ring entry: Fender's wake, then the META's scheduler register. A core whose
 + * power state is changing is not rung: the firmware looks at its rings when
 + * it is done with that.
-+ */
+  */
+-static int s8003_dc_doorbell(struct pvr_apple *apple)
 +static int s8003_doorbell(struct pvr_apple *apple, u32 dm)
  {
  	writel(FENDER_WAKE_ALL, apple->fender + FENDER_WAKE);
@@ -1047,8 +1047,13 @@ index 9b84009..97c8a36 100644
 +		.tiles = tx * ty,
 +		.tpc = (u64)tpc * tpc * 8,
 +	};
-+	/* The buffers userspace gave the dataset hold them */
-+	if (hwrt->common.rgn_header_size < rt->header || hwrt->common.tpc_size < rt->tpc)
++	/*
++	 * What userspace sized its buffers for: the dataset's region header
++	 * size is the ISP region size in dwords (pvr_drm.h), the region
++	 * headers of one of the 16 macrotiles; its tail pointer cache size is
++	 * in bytes.
++	 */
++	if (hwrt->common.rgn_header_size < rt->region / 4 || hwrt->common.tpc_size < rt->tpc)
 +		return -EINVAL;
 +	return 0;
 +}
@@ -1660,7 +1665,7 @@ index 9b84009..97c8a36 100644
  /*
   * The registers the firmware is told about, as bus addresses: Fender and the
   * Rogue core from this node, the interrupt controller and the number of the
-@@ -1062,6 +2410,13 @@ static int pvr_apple_s8003_init(struct pvr_apple *apple)
+@@ -1062,6 +2415,13 @@ static int pvr_apple_s8003_init(struct pvr_apple *apple)
  	apple->chip_data = s;
  	s->apple = apple;
  	INIT_DELAYED_WORK(&s->drain_work, s8003_drain_work);
@@ -1674,7 +1679,7 @@ index 9b84009..97c8a36 100644
  
  	err = s8003_parse_dt(apple);
  	if (err)
-@@ -1132,12 +2487,13 @@ static int pvr_apple_s8003_start(struct pvr_apple *apple)
+@@ -1132,12 +2492,13 @@ static int pvr_apple_s8003_start(struct pvr_apple *apple)
  	/* The firmware writes into its image while it runs: start from the copy */
  	memcpy(s->fw.map, s->image, S8003_IMAGE_SIZE);
  	s8003_init_build(apple, q);
@@ -1689,7 +1694,7 @@ index 9b84009..97c8a36 100644
  		err = s8003_first_command(apple);
  	}
  	if (err) {
-@@ -1145,7 +2501,15 @@ static int pvr_apple_s8003_start(struct pvr_apple *apple)
+@@ -1145,7 +2506,15 @@ static int pvr_apple_s8003_start(struct pvr_apple *apple)
  		s8003_core_off(apple);
  		return err;
  	}
@@ -1706,7 +1711,7 @@ index 9b84009..97c8a36 100644
  	schedule_delayed_work(&s->drain_work, msecs_to_jiffies(S8003_DRAIN_MS));
  	return 0;
  }
-@@ -1179,6 +2543,12 @@ static void pvr_apple_s8003_restore_image(struct pvr_apple *apple)
+@@ -1179,6 +2548,12 @@ static void pvr_apple_s8003_restore_image(struct pvr_apple *apple)
  const struct pvr_apple_chip pvr_apple_chip_s8003 = {
  	.fw_name = "apple/gfx-s8003.bin",
  	.perf_state_max = S8003_PERF_STATE_MAX,
@@ -1719,7 +1724,7 @@ index 9b84009..97c8a36 100644
  	.init = pvr_apple_s8003_init,
  	.boot = pvr_apple_s8003_boot,
  	.start = pvr_apple_s8003_start,
-@@ -1186,4 +2556,12 @@ const struct pvr_apple_chip pvr_apple_chip_s8003 = {
+@@ -1186,4 +2561,12 @@ const struct pvr_apple_chip pvr_apple_chip_s8003 = {
  	.idle = pvr_apple_s8003_idle,
  	.fini = pvr_apple_s8003_fini,
  	.restore_image = pvr_apple_s8003_restore_image,

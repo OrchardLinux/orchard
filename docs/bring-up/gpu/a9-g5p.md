@@ -560,15 +560,22 @@ VHEAP in protected objects), single layer, 1 or 4 samples, at most
 
 - `width`, `height`, `samples`: the kernel derives the geometry words;
 - `rt_data_args[i].region_header_dev_addr`: the region headers of RT data i
-  (geometry W+0x28, fragment W+0x20). `region_header_size` must be at least
-  `px * py * 5` bytes;
+  (geometry W+0x28, fragment W+0x20). The buffer holds `px * py * 5` bytes;
+  the kernel cannot check that;
+- `region_header_size`: as `pvr_drm.h` defines it for this parameter format
+  and as Mesa passes it for every other device, the ISP region size in
+  dwords: the region headers of one of the 16 macrotiles,
+  `mx * my * s * s * 5 / 4` (so `px * py * 5 / 64`). The kernel refuses a
+  job on a dataset that gave less; it writes its own derived value to the
+  record (fragment W+0xa8), not the dataset's;
 - `geom_data_args.tpc_dev_addr`, `tpc_size`: the tail pointer cache, at
   least `p2 * p2 * 8` bytes;
 
 with `tx = ceil(width / 32)`, `ty = ceil(height / 32)`,
 `mx = align(ceil(tx / 4), 4)`, `my` alike, `s = 2` for 4 samples else 1,
 `px = mx * s * 4`, `py = my * s * 4`, `p2 = roundup_pow_of_two(max(px, py))`.
-A job on a smaller buffer fails with `-EINVAL`.
+A job on a dataset with a smaller `region_header_size` or `tpc_size` fails
+with `-EINVAL`.
 
 Not used on the A9: `pm_mlist_dev_addr`, `macrotile_array_dev_addr`,
 `vheap_table_dev_addr`, `rtc_dev_addr`, the ISP merge values, the free
