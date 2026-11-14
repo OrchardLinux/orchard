@@ -51,6 +51,6 @@ usb_serial = "working"
 usb_network = "working"
 usb_host = "untested" # Same Tristar, PMU rail and USB complex as J71t in the Apple device tree.
 audio_output = "working"
-audio_input = "missing"
+audio_input = "working" # PDM controller, both microphones; recorded on J71b 2026-11-15
 camera = "missing"
 video_decode_hevc = "untested"

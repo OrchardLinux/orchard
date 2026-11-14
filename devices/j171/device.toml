@@ -54,6 +54,6 @@ usb_serial = "untested"
 usb_network = "untested"
 usb_host = "untested"
 audio_output = "working"
-audio_input = "missing"
+audio_input = "untested" # PDM controller, both built-in microphones
 camera = "missing"
 video_decode_hevc = "untested"

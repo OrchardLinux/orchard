@@ -1,0 +1,122 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sun, 15 Nov 2026 00:04:19 +0800
+Subject: [PATCH] arm64: dts: apple: ipad6, ipad7: Add the built-in microphones
+
+The iPad 6 and iPad 7 have two PDM microphones ("1imi" and "2imi" in
+their Apple device trees), each on one decimator of the PDM controller.
+Enable the controller and add a card that records both, named per board
+like the speakers.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8010-ipad6.dtsi | 24 ++++++++++++++++++++++
+ arch/arm64/boot/dts/apple/t8010-j171.dts   |  4 ++++
+ arch/arm64/boot/dts/apple/t8010-j172.dts   |  4 ++++
+ arch/arm64/boot/dts/apple/t8010-j71b.dts   |  4 ++++
+ arch/arm64/boot/dts/apple/t8010-j72b.dts   |  4 ++++
+ 5 files changed, 40 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi b/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
+index 214dfc4..b54c8f4 100644
+--- a/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
++++ b/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
+@@ -23,6 +23,13 @@
+ 	 * The speaker amplifiers: one logical codec models the MAX98357A bank's
+ 	 * shared SD_MODE line.
+ 	 */
++	/* The two built-in PDM microphones */
++	dmics: audio-codec {
++		compatible = "dmic-codec";
++		#sound-dai-cells = <0>;
++		num-channels = <2>;
++	};
++
+ 	speaker_amps: amplifier {
+ 		compatible = "maxim,max98357a";
+ 		#sound-dai-cells = <0>;
+@@ -137,6 +144,19 @@
+ 			sound-dai = <&speaker_amps>;
+ 		};
+ 	};
++
++	/* The microphones, recorded by the PDM controller. Each board names it. */
++	microphones: sound-microphones {
++		compatible = "simple-audio-card";
++
++		simple-audio-card,cpu {
++			sound-dai = <&pdm>;
++		};
++
++		simple-audio-card,codec {
++			sound-dai = <&dmics>;
++		};
++	};
+ };
+ 
+ &framebuffer0 {
+@@ -288,6 +308,10 @@
+ 	status = "okay";
+ };
+ 
++&pdm {
++	status = "okay";
++};
++
+ &nco {
+ 	status = "okay";
+ };
+diff --git a/arch/arm64/boot/dts/apple/t8010-j171.dts b/arch/arm64/boot/dts/apple/t8010-j171.dts
+index 332cb89..7336b04 100644
+--- a/arch/arm64/boot/dts/apple/t8010-j171.dts
++++ b/arch/arm64/boot/dts/apple/t8010-j171.dts
+@@ -16,3 +16,7 @@
+ &speakers {
+ 	simple-audio-card,name = "J171 Speakers";
+ };
++
++&microphones {
++	simple-audio-card,name = "J171 Microphones";
++};
+diff --git a/arch/arm64/boot/dts/apple/t8010-j172.dts b/arch/arm64/boot/dts/apple/t8010-j172.dts
+index 6dab2f5..58c28fc 100644
+--- a/arch/arm64/boot/dts/apple/t8010-j172.dts
++++ b/arch/arm64/boot/dts/apple/t8010-j172.dts
+@@ -16,3 +16,7 @@
+ &speakers {
+ 	simple-audio-card,name = "J172 Speakers";
+ };
++
++&microphones {
++	simple-audio-card,name = "J172 Microphones";
++};
+diff --git a/arch/arm64/boot/dts/apple/t8010-j71b.dts b/arch/arm64/boot/dts/apple/t8010-j71b.dts
+index 28ada67..fb7c1f4 100644
+--- a/arch/arm64/boot/dts/apple/t8010-j71b.dts
++++ b/arch/arm64/boot/dts/apple/t8010-j71b.dts
+@@ -17,6 +17,10 @@
+ 	simple-audio-card,name = "J71b Speakers";
+ };
+ 
++&microphones {
++	simple-audio-card,name = "J71b Microphones";
++};
++
+ &wifi {
+ 	brcm,board-type = "apple,j71b";
+ };
+diff --git a/arch/arm64/boot/dts/apple/t8010-j72b.dts b/arch/arm64/boot/dts/apple/t8010-j72b.dts
+index 41bd1b9..59fcbe7 100644
+--- a/arch/arm64/boot/dts/apple/t8010-j72b.dts
++++ b/arch/arm64/boot/dts/apple/t8010-j72b.dts
+@@ -17,6 +17,10 @@
+ 	simple-audio-card,name = "J72b Speakers";
+ };
+ 
++&microphones {
++	simple-audio-card,name = "J72b Microphones";
++};
++
+ &wifi {
+ 	brcm,board-type = "apple,j72b";
+ };

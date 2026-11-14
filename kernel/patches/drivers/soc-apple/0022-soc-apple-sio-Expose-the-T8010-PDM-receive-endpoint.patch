@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sat, 14 Nov 2026 23:59:44 +0800
+Subject: [PATCH] soc: apple: sio: Expose the T8010 PDM receive endpoint
+
+The A10's PDM microphone controller hands its samples to SmartIO on
+receive endpoint 0x5b (the "dma-channels" record of the pdm node in the
+iPad 6 and iPad 7 Apple device trees). Expose it as a DMA channel next
+to the touch and speaker endpoints.
+
+Assisted-by: LLM
+---
+ drivers/soc/apple/apple-sio-core.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/soc/apple/apple-sio-core.c b/drivers/soc/apple/apple-sio-core.c
+index 20d135e..fb613ef 100644
+--- a/drivers/soc/apple/apple-sio-core.c
++++ b/drivers/soc/apple/apple-sio-core.c
+@@ -1097,10 +1097,14 @@ static const struct apple_sio_hw apple_sio_s8000_hw = {
+ 	.num_dma_ranges = ARRAY_SIZE(apple_sio_s8000_dma_ranges),
+ };
+ 
+-/* SPI3 touch TX and MCA2 speaker TX, independently described by the J71b ADT. */
++/*
++ * SPI3 touch TX, MCA2 speaker TX and PDM microphone RX, each described by
++ * the J71b ADT.
++ */
+ static const struct apple_sio_dma_range apple_sio_t8010_dma_ranges[] = {
+ 	{ 0x1a, 0x1a },
+ 	{ 0x2c, 0x2c },
++	{ 0x5b, 0x5b },
+ };
+ 
+ static const struct apple_sio_hw apple_sio_t8010_hw = {

@@ -133,6 +133,7 @@
     ],
     "j171": [
       "accelerometer",
+      "audio_input",
       "audio_output",
       "backlight",
       "battery",
@@ -153,6 +154,7 @@
     ],
     "j172": [
       "accelerometer",
+      "audio_input",
       "audio_output",
       "backlight",
       "battery",
@@ -191,6 +193,7 @@
     ],
     "j71b": [
       "accelerometer",
+      "audio_input",
       "audio_output",
       "backlight",
       "battery",
@@ -248,6 +251,7 @@
     ],
     "j72b": [
       "accelerometer",
+      "audio_input",
       "audio_output",
       "backlight",
       "battery",

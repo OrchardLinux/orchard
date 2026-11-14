@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sun, 15 Nov 2026 00:00:22 +0800
+Subject: [PATCH] dt-bindings: soc: apple: apple,t8010-aop: Add the audio
+ service
+
+The AOP firmware's audio service ("aop-audio") generates the clock of the
+A10's PDM microphones. Describe it as a child of the AOP that provides
+one clock.
+
+Assisted-by: LLM
+---
+ .../bindings/soc/apple/apple,t8010-aop.yaml   | 23 +++++++++++++++++++
+ 1 file changed, 23 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/soc/apple/apple,t8010-aop.yaml b/Documentation/devicetree/bindings/soc/apple/apple,t8010-aop.yaml
+index 32788d1..fcdc31e 100644
+--- a/Documentation/devicetree/bindings/soc/apple/apple,t8010-aop.yaml
++++ b/Documentation/devicetree/bindings/soc/apple/apple,t8010-aop.yaml
+@@ -70,6 +70,24 @@ properties:
+       The SoC's chip revision, filled in by the bootloader. The S8000
+       firmware's boot arguments carry it.
+ 
++  aop-audio:
++    type: object
++    description:
++      The firmware's audio service. On the A10 it generates the clock of
++      the PDM microphones, which the application processor's PDM
++      controller records from.
++    properties:
++      compatible:
++        const: apple,t8010-aop-audio
++
++      "#clock-cells":
++        const: 0
++
++    required:
++      - compatible
++      - "#clock-cells"
++    additionalProperties: false
++
+ patternProperties:
+   "^(accel|gyro|compass|pressure)$":
+     type: object
+@@ -132,5 +150,10 @@ examples:
+             accel {
+                 compatible = "apple,t8010-aop-accel";
+             };
++
++            aop-audio {
++                compatible = "apple,t8010-aop-audio";
++                #clock-cells = <0>;
++            };
+         };
+     };
