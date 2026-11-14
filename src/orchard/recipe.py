@@ -47,6 +47,10 @@ def _agx(step, data, expected):
     return agx.extract(data)
 
 
+def _agx_g5p(step, data, expected):
+    return agx.extract_g5p(data)
+
+
 def _im4p_payload(step, data, expected):
     return im4p_payload(data)
 
@@ -112,6 +116,7 @@ STEPS = {
     'vxd-firmware-from-kernelcache@1': (_vxd, {}),
     # A10 GPU firmware from AGXFirmwareKextG9PRTBuddy.
     'agx-g9p-firmware-from-kernelcache@1': (_agx, {}),
+    'agx-g5p-ldr-from-kernelcache@1': (_agx_g5p, {}),
     'im4p-payload@1': (_im4p_payload, {}),
     # One image of an AOP firmware container (IPSW Firmware/AOP/aopfw-*.im4p payload).
     'aop-image@1': (_aop_image, {'coprocessor': str}),

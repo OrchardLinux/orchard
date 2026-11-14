@@ -144,6 +144,7 @@ The CLI used to do that; it isn't needed for recipes any more.
 | `smartio-from-kernelcache@1` | `input` (kernelcache) | SmartIO coprocessor firmware |
 | `vxd-firmware-from-kernelcache@1` | `input` (kernelcache) | the VXD (DEVA) video decoder firmware from AppleD5500 |
 | `agx-g9p-firmware-from-kernelcache@1` | `input` (kernelcache) | the A10 GPU firmware from AGXFirmwareKextG9PRTBuddy |
+| `agx-g5p-ldr-from-kernelcache@1` | `input` (kernelcache) | the A9 GPU firmware (a META LDR) from AGXFirmwareKextG5P; size and digest are pinned |
 | `im4p-payload@1` | `input` | the payload of an IM4P container |
 | `aop-image@1` | `coprocessor` | one image (`AOP`, `AOP_ext`) of an AOP firmware container, the OSSerializeBinary payload of `Firmware/AOP/aopfw-*.im4p` |
 | `z2fw-from-mtprops@1` | `input`, `profile`, `packet`, `load_address`, `hbpp_version` | Z2 touch firmware with calibration records |
@@ -238,3 +239,18 @@ The decompressed N61 kernel's SHA-256 is
 These fields are explicit recipe parameters, including zero-valued overrides.
 Physical qualification of firmware loading and input events remains separate
 from converting this shared firmware file.
+
+
+## S8003 G5P META firmware
+
+`agx-g5p-ldr-from-kernelcache@1` reads the unique `__TEXT,__const` section
+of `com.apple.AGXFirmwareKextG5P` in the user's own legacy prelinked
+kernelcache. It rejects any size other than 119112 bytes or any digest other
+than `33ae20cbbe2498e4f119ba4e9a55467e4e0192d4c86d5bf1903adce63ffa5dca`.
+The existing J71t kernelcache input names the active device kernelcache and
+the pinned restore-image fallback. The normal recipe installer writes the
+verified output to `/lib/firmware/apple/gfx-s8003.bin`, named like the A10's
+`gfx-t8010.bin`: the GPU driver asks for `apple/gfx-<chip>.bin`. The file is
+Apple's LDR, byte for byte. No payload patch, calibration, firmware bytes or
+captured job is stored in the source tree. Other C0 revisions and other
+boards require separate digest qualification.
