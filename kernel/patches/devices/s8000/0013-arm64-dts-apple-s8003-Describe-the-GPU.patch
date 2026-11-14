@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 15:07:45 +0000
+Subject: [PATCH] arm64: dts: apple: s8003: Describe the GPU
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The A9's GPU: the Rogue core's registers, Fender, the gfx power domain
+and the five interrupts, and the firmware the driver loads (the image
+the firmware recipe extracts from the device's kernelcache). The node is
+disabled: no driver takes it yet. The powervr driver's Apple firmware
+path will, and the boards enable it then.
+
+The registers and interrupts are those of Berkay Kösebay's G5P driver
+node (orchard #74, 557ef01b), which runs the GPU on the iPad 5 (J71t).
+Reworked for the powervr driver: the gpu label, the firmware name, and
+no board enables it before that driver binds.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/s8003.dtsi | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/s8003.dtsi b/arch/arm64/boot/dts/apple/s8003.dtsi
+index b515889..1ed521d 100644
+--- a/arch/arm64/boot/dts/apple/s8003.dtsi
++++ b/arch/arm64/boot/dts/apple/s8003.dtsi
+@@ -336,3 +336,25 @@
+  * the S8003 (APL1022) on 16nm. There are some minor differences
+  * such as timing in cpufreq state transistions.
+  */
++
++/*
++ * The GPU: a PowerVR Rogue core (GT7600) behind Apple's Fender block, with
++ * Apple's firmware on the core's own processor. Off until a driver takes it.
++ */
++&{/soc} {
++	gpu: gpu@201000000 {
++		compatible = "apple,s8003-gpu";
++		reg = <0x2 0x01000000 0x0 0x100000>,
++		      <0x2 0x01e00000 0x0 0x100000>;
++		reg-names = "rgx", "fender";
++		power-domains = <&ps_gfx>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 170 IRQ_TYPE_LEVEL_HIGH>,
++			     <AIC_IRQ 171 IRQ_TYPE_LEVEL_HIGH>,
++			     <AIC_IRQ 172 IRQ_TYPE_LEVEL_HIGH>,
++			     <AIC_IRQ 173 IRQ_TYPE_LEVEL_HIGH>,
++			     <AIC_IRQ 174 IRQ_TYPE_LEVEL_HIGH>;
++		firmware-name = "apple/gfx-s8003.bin";
++		status = "disabled";
++	};
++};
