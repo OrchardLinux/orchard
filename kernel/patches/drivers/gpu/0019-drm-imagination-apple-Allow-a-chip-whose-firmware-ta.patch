@@ -1,0 +1,193 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sat, 14 Nov 2026 23:28:12 +0800
+Subject: [PATCH] drm/imagination: apple: Allow a chip whose firmware takes no
+ jobs yet
+
+For a chip that is brought up in steps: its firmware is started and
+stopped before its commands are written.
+
+Such a chip leaves out the job functions. No context is created on it
+(-EOPNOTSUPP), so nothing can be submitted and no client takes it for a
+GPU that renders.
+
+A chip may also have a fini(): called when the device goes, after the
+firmware stopped and while the kernel VM context still exists, and after
+a first start that failed. A chip whose firmware lives in the kernel VM
+unmaps it there.
+
+The power state the core starts in gets its own function: a chip that
+tells its firmware the state before it powers the core asks for it.
+
+The A10 has every job function and no fini(): nothing changes for it.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_apple.c      | 47 +++++++++++++++-----
+ drivers/gpu/drm/imagination/pvr_apple.h      |  2 +
+ drivers/gpu/drm/imagination/pvr_apple_chip.h |  9 ++++
+ drivers/gpu/drm/imagination/pvr_context.c    |  4 ++
+ 4 files changed, 52 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_apple.c b/drivers/gpu/drm/imagination/pvr_apple.c
+index 2039928..b64ff4e 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple.c
++++ b/drivers/gpu/drm/imagination/pvr_apple.c
+@@ -88,6 +88,19 @@ int pvr_apple_request_power_state(struct pvr_apple *apple, u32 state)
+ 	return err;
+ }
+ 
++/**
++ * pvr_apple_start_power_state() - The power state the core starts in
++ * @apple: Apple firmware state.
++ *
++ * Return: the fixed state if one is set, else the fastest. Never state 0:
++ * that is off, and the firmware is about to start.
++ */
++u32 pvr_apple_start_power_state(struct pvr_apple *apple)
++{
++	return clamp(pvr_apple_perf_state ?: apple->perf_state_max, 1u,
++		     apple->perf_state_max ?: 1u);
++}
++
+ /**
+  * pvr_apple_fender_power_on() - Power the Rogue core up
+  * @apple: Apple firmware state.
+@@ -114,9 +127,7 @@ int pvr_apple_fender_power_on(struct pvr_apple *apple)
+ 	 * from there.
+ 	 */
+ 	mutex_lock(&apple->perf_lock);
+-	/* never state 0 here: that is off, and the firmware is about to start */
+-	err = pvr_apple_request_power_state(apple, clamp(pvr_apple_perf_state ?: apple->perf_state_max,
+-							 1u, apple->perf_state_max ?: 1u));
++	err = pvr_apple_request_power_state(apple, pvr_apple_start_power_state(apple));
+ 	mutex_unlock(&apple->perf_lock);
+ 	return err;
+ }
+@@ -1260,6 +1271,8 @@ int pvr_apple_fw_init(struct pvr_device *pvr_dev)
+ 		return err;
+ 	err = pvr_apple_fw_start(apple);
+ 	if (err) {
++		if (apple->chip->fini)
++			apple->chip->fini(apple);
+ 		pvr_apple_gpu_pages_fini(apple);
+ 		return err;
+ 	}
+@@ -1455,13 +1468,15 @@ void pvr_apple_fw_fini(struct pvr_device *pvr_dev)
+ 		pvr_gem_object_put(apple->pm_pages);
+ 		apple->pm_pages = NULL;
+ 	}
+-	if (!apple->booted)
+-		return;
+-	apple->chip->stop(apple, false);
+-	/* the firmware's messages until its stop queued completion checks */
+-	cancel_delayed_work_sync(&apple->poll_work);
+-	hrtimer_cancel(&apple->poll_timer);
+-	apple->booted = false;
++	if (apple->booted) {
++		apple->chip->stop(apple, false);
++		/* the firmware's messages until its stop queued completion checks */
++		cancel_delayed_work_sync(&apple->poll_work);
++		hrtimer_cancel(&apple->poll_timer);
++		apple->booted = false;
++	}
++	if (apple->chip->fini)
++		apple->chip->fini(apple);
+ }
+ 
+ /*
+@@ -1488,6 +1503,18 @@ void pvr_apple_device_info_init(struct pvr_device *pvr_dev)
+ 	pvr_dev->features.isp_samples_per_pixel = 2;
+ }
+ 
++/**
++ * pvr_apple_takes_jobs() - Whether the chip's firmware is given jobs
++ * @pvr_dev: Target device.
++ *
++ * Return: %false for a chip whose firmware is started and stopped, but whose
++ * commands are not written yet: it gets no contexts.
++ */
++bool pvr_apple_takes_jobs(struct pvr_device *pvr_dev)
++{
++	return pvr_dev->device_data->apple_chip->write_compute != NULL;
++}
++
+ /**
+  * pvr_apple_cmd_stream() - How a render job's command stream is decoded
+  * @pvr_dev: Target device.
+diff --git a/drivers/gpu/drm/imagination/pvr_apple.h b/drivers/gpu/drm/imagination/pvr_apple.h
+index 90aeaae..356d930 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple.h
++++ b/drivers/gpu/drm/imagination/pvr_apple.h
+@@ -93,6 +93,7 @@ int pvr_apple_reset(struct pvr_device *pvr_dev);
+ int pvr_apple_suspend(struct pvr_device *pvr_dev);
+ int pvr_apple_resume(struct pvr_device *pvr_dev);
+ void pvr_apple_device_info_init(struct pvr_device *pvr_dev);
++bool pvr_apple_takes_jobs(struct pvr_device *pvr_dev);
+ struct dma_fence *pvr_apple_submit_compute_job(struct pvr_device *pvr_dev,
+ 					       struct pvr_vm_context *vm_ctx, u64 stream,
+ 					       u64 ctx_state);
+@@ -123,6 +124,7 @@ static inline int pvr_apple_reset(struct pvr_device *pvr_dev) { return -ENODEV;
+ static inline int pvr_apple_suspend(struct pvr_device *pvr_dev) { return 0; }
+ static inline int pvr_apple_resume(struct pvr_device *pvr_dev) { return 0; }
+ static inline void pvr_apple_device_info_init(struct pvr_device *pvr_dev) {}
++static inline bool pvr_apple_takes_jobs(struct pvr_device *pvr_dev) { return false; }
+ static inline int pvr_apple_vm_init(struct pvr_device *pvr_dev, struct pvr_vm_context *vm_ctx)
+ {
+ 	return -ENODEV;
+diff --git a/drivers/gpu/drm/imagination/pvr_apple_chip.h b/drivers/gpu/drm/imagination/pvr_apple_chip.h
+index 9f399ea..168338a 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple_chip.h
++++ b/drivers/gpu/drm/imagination/pvr_apple_chip.h
+@@ -172,6 +172,9 @@ struct pvr_apple {
+  *	the processor ready for the next @boot regardless.
+  * @idle: After @stop for runtime suspend: give up what would keep the GPU's
+  *	power domain on.
++ * @fini: When the device goes, after @stop, with the kernel VM still there:
++ *	give up what @start made in it. Also after a first @start that failed.
++ *	Optional.
+  * @restore_image: Before @boot, when the firmware ran before: put its memory
+  *	back as @init left it.
+  * @kick: Make the firmware look at its work rings.
+@@ -184,6 +187,10 @@ struct pvr_apple {
+  * @write_frag: Write fragment job @seq and its work-ring entry.
+  * @report_hang: Log what else the firmware recorded about a job that timed out.
+  *
++ * A chip without @write_compute takes no jobs: its firmware is started and
++ * stopped, no context is created on it (pvr_apple_takes_jobs()), and @kick,
++ * the job functions and the streams are not used.
++ *
+  * pvr_apple.c calls @boot, @start, @stop, @restore_image, @kick and the
+  * write functions with &pvr_apple.submit_lock held, except @boot and @start
+  * at probe and @stop when the device goes. It publishes the ring's producer index
+@@ -202,6 +209,7 @@ struct pvr_apple_chip {
+ 	int (*start)(struct pvr_apple *apple);
+ 	void (*stop)(struct pvr_apple *apple, bool recover);
+ 	void (*idle)(struct pvr_apple *apple);
++	void (*fini)(struct pvr_apple *apple);
+ 	void (*restore_image)(struct pvr_apple *apple);
+ 	int (*kick)(struct pvr_apple *apple);
+ 	void (*write_compute)(struct pvr_apple *apple, u32 seq, u64 stream, u64 ctx_state);
+@@ -225,6 +233,7 @@ static inline struct device *apple_dev(struct pvr_apple *apple)
+ 
+ int pvr_apple_fw_load(struct pvr_apple *apple, size_t max_size);
+ int pvr_apple_request_power_state(struct pvr_apple *apple, u32 state);
++u32 pvr_apple_start_power_state(struct pvr_apple *apple);
+ int pvr_apple_fender_power_on(struct pvr_apple *apple);
+ 
+ #endif /* PVR_APPLE_CHIP_H */
+diff --git a/drivers/gpu/drm/imagination/pvr_context.c b/drivers/gpu/drm/imagination/pvr_context.c
+index 8e4a7fa..508a1cd 100644
+--- a/drivers/gpu/drm/imagination/pvr_context.c
++++ b/drivers/gpu/drm/imagination/pvr_context.c
+@@ -296,6 +296,10 @@ int pvr_context_create(struct pvr_file *pvr_file, struct drm_pvr_ioctl_create_co
+ 	    args->type != DRM_PVR_CTX_TYPE_RENDER)
+ 		return -EOPNOTSUPP;
+ 
++	/* ... on the chips whose commands the driver writes. */
++	if (pvr_device_is_apple(pvr_dev) && !pvr_apple_takes_jobs(pvr_dev))
++		return -EOPNOTSUPP;
++
+ 	ctx_size = get_fw_obj_size(args->type);
+ 	if (ctx_size < 0)
+ 		return ctx_size;
