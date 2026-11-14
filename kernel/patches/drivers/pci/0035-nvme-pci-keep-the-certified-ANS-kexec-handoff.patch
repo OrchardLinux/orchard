@@ -1,0 +1,337 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 17:15:00 +0100
+Subject: [PATCH] nvme-pci: keep the certified ANS kexec handoff
+
+Resetting the ANS host or its translations destroys the state required
+by the next kernel. Retain the stopped-DMA handoff only where the device
+tree requests it.
+
+Assisted-by: LLM
+---
+ drivers/nvme/host/pci-apple-ans.c |  33 +++++++-
+ drivers/nvme/host/pci-internal.h  |   2 +
+ drivers/nvme/host/pci.c           | 128 ++++++++++++++++++++++++++++--
+ 3 files changed, 155 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/nvme/host/pci-apple-ans.c b/drivers/nvme/host/pci-apple-ans.c
+index 5ba239e47..fdd9fa091 100644
+--- a/drivers/nvme/host/pci-apple-ans.c
++++ b/drivers/nvme/host/pci-apple-ans.c
+@@ -84,6 +84,7 @@ struct apple_ans_nvme {
+ 	u32 cc;
+ 	unsigned long cc_jiffies;
+ 	bool cc_written;
++	bool host_fault;
+ 	dma_addr_t hmb_dma;
+ 	u32 hmb_size;
+ 	struct apple_ans_nvme_req req[APPLE_ANS_NVMMU_MAX_REQS];
+@@ -218,13 +219,20 @@ static int nvme_pci_apple_ans_reset_dma(struct nvme_dev *dev)
+ {
+ 	struct apple_ans_nvme *ans = nvme_pci_apple_ans(dev);
+ 	unsigned long flags;
+-	unsigned int tag;
+ 	int ret;
+ 
+-	for (tag = 0; tag < APPLE_ANS_NVMMU_MAX_REQS; tag++) {
+-		ret = apple_ans_nvmmu_map(dev->dev, tag, NULL, 0, false, NULL);
++	if (ans->host == &apple_ans_host_s8003) {
++		ret = apple_ans_nvmmu_reset(dev->dev);
+ 		if (ret)
+ 			return ret;
++	} else {
++		unsigned int tag;
++
++		for (tag = 0; tag < APPLE_ANS_NVMMU_MAX_REQS; tag++) {
++			ret = apple_ans_nvmmu_map(dev->dev, tag, NULL, 0, false, NULL);
++			if (ret)
++				return ret;
++		}
+ 	}
+ 
+ 	spin_lock_irqsave(&ans->req_lock, flags);
+@@ -326,10 +334,24 @@ static int nvme_pci_apple_ans_prepare_enable(struct nvme_dev *dev)
+ 	return 0;
+ }
+ 
++static int nvme_pci_apple_ans_check_link(struct nvme_dev *dev)
++{
++	struct apple_ans_nvme *ans = nvme_pci_apple_ans(dev);
++
++	if (ans && ans->host == &apple_ans_host_s8003 &&
++	    (ans->host_fault || apple_ans_link_up(dev->dev) <= 0)) {
++		ans->host_fault = true;
++		return -EIO;
++	}
++	return 0;
++}
++
+ static int nvme_pci_apple_ans_write_cc(struct nvme_dev *dev, u32 cc)
+ {
+ 	struct apple_ans_nvme *ans = nvme_pci_apple_ans(dev);
+ 
++	if (nvme_pci_apple_ans_check_link(dev))
++		return -EIO;
+ 	writel(cc, dev->bar + NVME_REG_CC);
+ 	if (!ans)
+ 		return 0;
+@@ -349,6 +371,8 @@ static int nvme_pci_apple_ans_read_csts(struct nvme_dev *dev, u32 *csts)
+ 	struct apple_ans_nvme *ans = nvme_pci_apple_ans(dev);
+ 	unsigned long deadline;
+ 
++	if (nvme_pci_apple_ans_check_link(dev))
++		return -EIO;
+ 	*csts = readl(dev->bar + NVME_REG_CSTS);
+ 	if (!ans || !ans->cc_written || !ans->host->rdy_timeout_ms ||
+ 	    (ans->cc & NVME_CC_SHN_MASK))
+@@ -360,6 +384,8 @@ static int nvme_pci_apple_ans_read_csts(struct nvme_dev *dev, u32 *csts)
+ 	    time_after(jiffies, deadline)) {
+ 		dev_err(dev->dev, "ANS RDY timeout (CC %#x, CSTS %#x)\n",
+ 			ans->cc, *csts);
++		ans->host_fault = true;
++		apple_ans_host_dump(dev->dev, "RDY deadline");
+ 		return -ETIMEDOUT;
+ 	}
+ 
+@@ -419,6 +445,7 @@ static int nvme_pci_apple_ans_free_req(struct nvme_dev *dev,
+ 		dev_err_ratelimited(dev->dev,
+ 				    "failed to release ANS DMA slot %u: %d\n",
+ 				    tag, ret);
++		nvme_reset_ctrl(&dev->ctrl);
+ 		return ret;
+ 	}
+ 
+diff --git a/drivers/nvme/host/pci-internal.h b/drivers/nvme/host/pci-internal.h
+index a62777abd..d3fe17867 100644
+--- a/drivers/nvme/host/pci-internal.h
++++ b/drivers/nvme/host/pci-internal.h
+@@ -74,6 +74,8 @@ struct nvme_dev {
+ 	struct nvme_ctrl ctrl;
+ 	u32 last_ps;
+ 	bool hmb;
++	unsigned long apple_ans_flags;
++	atomic_t apple_ans_irq_count;
+ 	struct sg_table *hmb_sgt;
+ 	mempool_t *dmavec_mempool;
+ 	const struct nvme_pci_dma_ops *dma_ops;
+diff --git a/drivers/nvme/host/pci.c b/drivers/nvme/host/pci.c
+index 9ffe2fb74..40b2448d1 100644
+--- a/drivers/nvme/host/pci.c
++++ b/drivers/nvme/host/pci.c
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include <linux/acpi.h>
++#include <linux/kexec.h>
+ #include <linux/async.h>
+ #include <linux/blkdev.h>
+ #include <linux/blk-mq-dma.h>
+@@ -17,6 +18,10 @@
+ #include <linux/memremap.h>
+ #include <linux/mm.h>
+ #include <linux/module.h>
++#include <linux/suspend.h>
++#include <linux/of.h>
++#include <linux/iopoll.h>
++#include <linux/apple-ans.h>
+ #include <linux/mutex.h>
+ #include <linux/nodemask.h>
+ #include <linux/once.h>
+@@ -1559,6 +1564,9 @@ static irqreturn_t nvme_irq(int irq, void *data)
+ 	DEFINE_IO_COMP_BATCH(iob);
+ 	bool found;
+ 
++	if (!nvmeq->qid && dev->dma_ops == &nvme_pci_apple_ans_ops)
++		atomic_inc(&dev->apple_ans_irq_count);
++
+ 	if (nvme_apple_ans_shared_vector(dev))
+ 		found = nvme_apple_ans_irq_vector(dev, nvmeq->cq_vector, &iob);
+ 	else
+@@ -1836,6 +1844,40 @@ static void nvme_warn_reset(struct nvme_dev *dev, u32 csts)
+ 		 "Try \"nvme_core.default_ps_max_latency_us=0 pcie_aspm=off pcie_port_pm=off\" and report a bug\n");
+ }
+ 
++/* No endpoint MMIO/config or doorbell reads: safe first evidence for ANS. */
++static void nvme_apple_ans_dump(struct nvme_dev *dev, const char *reason)
++{
++	unsigned int i;
++
++	dev_info(dev->dev, "Apple ANS: snapshot %s state %d online %u allocated %u vectors %u recovery_used %u\n",
++		 reason, nvme_ctrl_state(&dev->ctrl), dev->online_queues,
++		 dev->ctrl.queue_count, dev->num_vecs,
++		 test_bit(0, &dev->apple_ans_flags));
++	apple_ans_host_dump(dev->dev, reason);
++	for (i = 0; i < dev->ctrl.queue_count; i++) {
++		struct nvme_queue *q = &dev->queues[i];
++		u16 head = READ_ONCE(q->cq_head);
++		struct nvme_completion *cqe;
++		int irq = -1;
++
++		if (!q->cqes || head >= q->q_depth)
++			continue;
++		cqe = &q->cqes[head];
++		if (test_bit(NVMEQ_ENABLED, &q->flags) &&
++		    !test_bit(NVMEQ_POLLED, &q->flags))
++			irq = pci_irq_vector(to_pci_dev(dev->dev), q->cq_vector);
++		dev_info(dev->dev, "Apple ANS: q%u flags %#lx depth %u SQ tail %u/%u CQ head %u phase %u next status %#x cid %#x sqhead %u vector %u irq %d ANS admin IRQ actions %u SQ %pad CQ %pad\n",
++			 i, READ_ONCE(q->flags), q->q_depth,
++			 READ_ONCE(q->sq_tail), READ_ONCE(q->last_sq_tail),
++			 head, READ_ONCE(q->cq_phase),
++			 le16_to_cpu(READ_ONCE(cqe->status)),
++			 le16_to_cpu(READ_ONCE(cqe->command_id)),
++			 le16_to_cpu(READ_ONCE(cqe->sq_head)), q->cq_vector,
++			 irq, atomic_read(&dev->apple_ans_irq_count),
++			 &q->sq_dma_addr, &q->cq_dma_addr);
++	}
++}
++
+ static enum blk_eh_timer_return nvme_timeout(struct request *req)
+ {
+ 	struct nvme_iod *iod = blk_mq_rq_to_pdu(req);
+@@ -1844,8 +1886,18 @@ static enum blk_eh_timer_return nvme_timeout(struct request *req)
+ 	struct request *abort_req;
+ 	struct nvme_command cmd = { };
+ 	struct pci_dev *pdev = to_pci_dev(dev->dev);
+-	u32 csts = readl(dev->bar + NVME_REG_CSTS);
++	u32 csts = ~0U;
+ 	u8 opcode;
++	bool ans = dev->dma_ops == &nvme_pci_apple_ans_ops &&
++		apple_ans_is_s8003(dev->dev);
++
++	if (ans) {
++		nvme_apple_ans_dump(dev, "timeout before CSTS");
++		if (dev->dma_ops->read_csts(dev, &csts))
++			goto disable;
++	} else {
++		csts = readl(dev->bar + NVME_REG_CSTS);
++	}
+ 
+ 	/*
+ 	 * Shutdown the device immediately if we see it is disconnected. This
+@@ -1921,6 +1973,11 @@ static enum blk_eh_timer_return nvme_timeout(struct request *req)
+ 	 * returned to the driver, or if this is the admin queue.
+ 	 */
+ 	opcode = nvme_req(req)->cmd->common.opcode;
++	if (ans) {
++		if (test_and_set_bit(0, &dev->apple_ans_flags))
++			nvme_change_ctrl_state(&dev->ctrl, NVME_CTRL_DELETING);
++		goto disable;
++	}
+ 	if (!nvmeq->qid || (iod->flags & IOD_ABORTED)) {
+ 		dev_warn(dev->ctrl.device,
+ 			 "I/O tag %d (%04x) opcode %#x (%s) QID %d timeout, reset controller\n",
+@@ -2804,6 +2861,7 @@ static umode_t nvme_pci_attrs_are_visible(struct kobject *kobj,
+ 	return a->mode;
+ }
+ 
++
+ static struct attribute *nvme_pci_attrs[] = {
+ 	&dev_attr_cmb.attr,
+ 	&dev_attr_cmbloc.attr,
+@@ -3283,11 +3341,46 @@ static bool nvme_pci_ctrl_is_dead(struct nvme_dev *dev)
+ 	return (csts & NVME_CSTS_CFS) || !(csts & NVME_CSTS_RDY);
+ }
+ 
+-static void nvme_dev_disable(struct nvme_dev *dev, bool shutdown)
++/* Certify stopped DMA before the kexec PCIe handoff. */
++static int nvme_apple_ans_handoff_disable(struct nvme_dev *dev, int shutdown_ret)
++{
++	struct pci_dev *pdev = to_pci_dev(dev->dev);
++	u32 csts = ~0U, cc, expected;
++	int ret, err;
++
++	ret = dev->dma_ops->read_csts(dev, &csts);
++	if (shutdown_ret || ret || (csts & NVME_CSTS_CFS) ||
++	    (csts & NVME_CSTS_SHST_MASK) != NVME_CSTS_SHST_CMPLT) {
++		pci_clear_master(pdev);
++		return -EBUSY;
++	}
++	dev->ctrl.ctrl_config &= ~(NVME_CC_ENABLE | NVME_CC_SHN_MASK);
++	expected = dev->ctrl.ctrl_config;
++	ret = dev->dma_ops->write_cc(dev, expected);
++	if (!ret) {
++		ret = read_poll_timeout(dev->dma_ops->read_csts, err,
++				       err || !(csts & NVME_CSTS_RDY),
++				       1000, 2000000, false, dev, &csts);
++		if (!ret)
++			ret = err;
++	}
++	if (ret)
++		goto block_dma;
++	cc = readl(dev->bar + NVME_REG_CC);
++	if ((csts & NVME_CSTS_CFS) ||
++	    (cc & (NVME_CC_ENABLE | NVME_CC_SHN_MASK)))
++		ret = -EBUSY;
++block_dma:
++	pci_clear_master(pdev);
++	return ret;
++}
++
++static int nvme_dev_disable_paired(struct nvme_dev *dev, bool shutdown, bool paired)
+ {
+ 	enum nvme_ctrl_state state = nvme_ctrl_state(&dev->ctrl);
+ 	struct pci_dev *pdev = to_pci_dev(dev->dev);
+ 	bool dead;
++	int ret = paired ? -EBUSY : 0;
+ 
+ 	mutex_lock(&dev->shutdown_lock);
+ 	dead = nvme_pci_ctrl_is_dead(dev);
+@@ -3298,15 +3391,26 @@ static void nvme_dev_disable(struct nvme_dev *dev, bool shutdown)
+ 		 * Give the controller a chance to complete all entered requests
+ 		 * if doing a safe shutdown.
+ 		 */
+-		if (!dead && shutdown)
+-			nvme_wait_freeze_timeout(&dev->ctrl);
++		if (!dead && shutdown && nvme_wait_freeze_timeout(&dev->ctrl) <= 0 && paired)
++			panic("Apple ANS: outgoing I/O did not drain; refusing kexec");
+ 	}
+ 
+ 	nvme_quiesce_io_queues(&dev->ctrl);
+ 
++	if (paired && (dead || !dev->ctrl.queue_count))
++		panic("Apple ANS: dead outgoing controller; refusing kexec");
+ 	if (!dead && dev->ctrl.queue_count > 0) {
++		if (paired) {
++			nvme_sync_io_queues(&dev->ctrl);
++			ret = apple_ans_nvmmu_drain(dev->dev);
++			if (ret)
++				panic("Apple ANS: outgoing drain failed %d; refusing kexec", ret);
++		}
+ 		nvme_delete_io_queues(dev);
+-		nvme_disable_ctrl(&dev->ctrl, shutdown);
++		dev_info(dev->dev, "Apple ANS: shutdown starting NVMe SHN paired=%u\n", paired);
++		ret = nvme_disable_ctrl(&dev->ctrl, shutdown);
++		if (paired)
++			ret = nvme_apple_ans_handoff_disable(dev, ret);
+ 		nvme_poll_irqdisable(&dev->queues[0]);
+ 	}
+ 	nvme_suspend_io_queues(dev);
+@@ -3329,7 +3433,15 @@ static void nvme_dev_disable(struct nvme_dev *dev, bool shutdown)
+ 		if (dev->ctrl.admin_q && !blk_queue_dying(dev->ctrl.admin_q))
+ 			nvme_unquiesce_admin_queue(&dev->ctrl);
+ 	}
++	if (paired && !ret)
++		ret = apple_ans_handoff_stopped(dev->dev);
+ 	mutex_unlock(&dev->shutdown_lock);
++	return ret;
++}
++
++static void nvme_dev_disable(struct nvme_dev *dev, bool shutdown)
++{
++	nvme_dev_disable_paired(dev, shutdown, false);
+ }
+ 
+ static int nvme_disable_prepare_reset(struct nvme_dev *dev, bool shutdown)
+@@ -3920,6 +4032,12 @@ static void nvme_shutdown(struct pci_dev *pdev)
+ {
+ 	struct nvme_dev *dev = pci_get_drvdata(pdev);
+ 
++	if (kexec_in_progress && apple_ans_is_s8003(dev->dev) &&
++	    dev->dma_ops == &nvme_pci_apple_ans_ops && !apple_ans_handoff_begin(dev->dev)) {
++		if (!nvme_wait_reset(&dev->ctrl) || nvme_dev_disable_paired(dev, true, true))
++			panic("Apple ANS: refusing unsafe powered kexec handoff");
++		return;
++	}
+ 	nvme_disable_prepare_reset(dev, true);
+ }
+ 
