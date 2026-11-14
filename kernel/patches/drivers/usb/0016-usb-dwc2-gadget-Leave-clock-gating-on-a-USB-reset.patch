@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 19:50:35 +0100
+Subject: [PATCH] usb: dwc2: gadget: Leave clock gating on a USB reset
+
+A host may reset a device whose bus it suspended, without resuming it
+first. In device mode with clock gating (power_down NONE, as on Apple
+SoCs), the suspend interrupt gates the PHY clock and hclk, and sets
+lx_state to L2. The USB reset interrupt that follows leaves both in
+place. dwc2_hsotg_core_init_disconnected() then queues the EP0 setup
+request, which dwc2_hsotg_ep_queue() refuses outside L0:
+
+  dwc2 ...: dwc2_hsotg_enqueue_setup: failed queue (-11)
+
+This repeats on every further reset, and the device never enumerates
+until the UDC is unbound and bound again. An Apple iPad 5 (A9) showed
+it on every boot of one kernel, 36 times per boot; a Mac host saw no
+device.
+
+Leave clock gating and enter L0 on the USB reset before EP0 is armed
+again, as the RESETDET branch does for partial power down, and as
+Apple's own device controller driver does on reset (it ungates the
+clocks, then arms EP0).
+
+Assisted-by: LLM
+---
+ drivers/usb/dwc2/gadget.c | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/drivers/usb/dwc2/gadget.c b/drivers/usb/dwc2/gadget.c
+index fbc5075..0c6e60f 100644
+--- a/drivers/usb/dwc2/gadget.c
++++ b/drivers/usb/dwc2/gadget.c
+@@ -3768,6 +3768,24 @@ irq_retry:
+ 
+ 		dwc2_writel(hsotg, GINTSTS_USBRST, GINTSTS);
+ 
++		/*
++		 * A reset of a suspended bus.  No resume came first, so a core
++		 * that entered clock gating on the suspend is still gated and
++		 * in L2, and dwc2_hsotg_ep_queue() refuses the EP0 setup
++		 * request that dwc2_hsotg_core_init_disconnected() queues
++		 * (-EAGAIN) on this and every later reset, until the UDC is
++		 * rebound.  Leave clock gating and return to L0 first, as the
++		 * RESETDET branch above does for partial power down.
++		 */
++		if (hsotg->lx_state == DWC2_L2 && !hsotg->in_ppd) {
++			if (hsotg->params.power_down ==
++			    DWC2_POWER_DOWN_PARAM_NONE && hsotg->bus_suspended &&
++			    !hsotg->params.no_clock_gating)
++				dwc2_gadget_exit_clock_gating(hsotg, 0);
++			else
++				hsotg->lx_state = DWC2_L0;
++		}
++
+ 		/* Report disconnection if it is not already done. */
+ 		dwc2_hsotg_disconnect(hsotg);
+ 
+-- 
+2.49.0
+
