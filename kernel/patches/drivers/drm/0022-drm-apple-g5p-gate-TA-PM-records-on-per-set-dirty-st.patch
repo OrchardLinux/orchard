@@ -1,0 +1,220 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 15:07:47 +0000
+Subject: [PATCH] drm/apple-g5p: gate TA PM records on per-set dirty state
+
+[Orchard: from brkosebay/linux 797a84934ec054f4a9d6581cd363399cc1ef2630;
+fixed source defaults, no production module controls.] Preserve the
+measured opt1 chain in dependency order.
+
+Assisted-by: LLM
+---
+ drivers/gpu/apple-g5p/render-user-layout.h    | 21 ++++++++++----
+ .../gpu/drm/apple-g5p/drm-render-unbind.inc   | 13 +++++++++
+ drivers/gpu/drm/apple-g5p/drm-render-v3.inc   | 28 ++++++++++++++++---
+ drivers/gpu/drm/apple-g5p/drm-render.inc      | 12 ++++++++
+ 4 files changed, 64 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/gpu/apple-g5p/render-user-layout.h b/drivers/gpu/apple-g5p/render-user-layout.h
+index 675e9fbe6..aa8eb52e9 100644
+--- a/drivers/gpu/apple-g5p/render-user-layout.h
++++ b/drivers/gpu/apple-g5p/render-user-layout.h
+@@ -474,7 +474,7 @@ static inline u32 g5p_ru_sku_at(u32 js, bool td)
+ static inline void g5p_ru_job_at(u8 *p, u32 meta, u32 global, u32 pm, u32 slot,
+ 				 bool td, u32 seq, const u8 *image,
+ 				 u32 ta_finish, bool zero_timestamps, u32 js,
+-				 u32 pmid, bool abs)
++				 u32 pmid, bool abs, bool pm_record)
+ {
+ 	u32 w = meta + g5p_ru_w_at(js), state = pm + 0x80;
+ 	u32 finish = meta + G5P_R22_STAMP + 4;
+@@ -616,11 +616,20 @@ static inline void g5p_ru_job_at(u8 *p, u32 meta, u32 global, u32 pm, u32 slot,
+ 		g5p_put32(p + cursor, 0x40000017);
+ 	}
+ 	memset(p + cmd, 0, G5P_RU_CMD_BYTES);
+-	g5p_put32(p + cmd, td ? 4 : 6);
+-	g5p_put32(p + cmd + 4, td ? ta_finish : slot);
+-	g5p_put32(p + cmd + 8,
+-		  td ? seq : pmid); /* tag6 {6, STA, PMid, M(control)} */
+-	g5p_put32(p + cmd + 12, td ? seq & 0x7fffffff : pm);
++	/* A clean PM needs only the already satisfied previous-TA dependency. */
++	if (td || !pm_record) {
++		u32 required = td ? seq : seq - 1;
++
++		g5p_put32(p + cmd, 4);
++		g5p_put32(p + cmd + 4, ta_finish);
++		g5p_put32(p + cmd + 8, required);
++		g5p_put32(p + cmd + 12, required & 0x7fffffff);
++	} else {
++		g5p_put32(p + cmd, 6);
++		g5p_put32(p + cmd + 4, slot);
++		g5p_put32(p + cmd + 8, pmid);
++		g5p_put32(p + cmd + 12, pm);
++	}
+ 	g5p_put32(p + G5P_WORK_RING + ring * 4, meta + cmd);
+ 	g5p_put32(p + G5P_WORK_RING + ((ring + 1) % G5P_WORK_SLOTS) * 4, w);
+ }
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-unbind.inc b/drivers/gpu/drm/apple-g5p/drm-render-unbind.inc
+index 36550c443..92d1a57f7 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-unbind.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render-unbind.inc
+@@ -65,6 +65,19 @@ static int g5p_rv3_unbind_slots(struct g5p_drm *d, const u32 *slots, u32 n,
+ 			why, n, cons, start, rd->dc_pending);
+ 		return -EBUSY;
+ 	}
++/* Invalidate PM-record reuse before any unbind is published. */
++	mutex_lock(&rd->lock);
++	{
++		struct g5p_render *r;
++
++		list_for_each_entry(r, &rd->contexts, rdev_link)
++			for (u32 i = 0; i < n; i++)
++				if (r->slot[0] == slots[i] || r->slot[1] == slots[i]) {
++					r->pm_dirty = true;
++					r->pm2_dirty = true;
++				}
++	}
++	mutex_unlock(&rd->lock);
+ 	rd->dc_pending = false;
+ 	for (u32 i = 0; i < n; i++) {
+ 		g5p_render_slot_mem(b, slots[i], start + i, &m);
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+index 0e308c96b..81f346623 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+@@ -83,6 +83,9 @@ static const uint render_user_pipeline_depth = 1;
+  * bumps d->ahead_poke, until a job is started or N's 3D is seen done.  Apple kicks on submit
+  * (AGXChannelQueue_submitBlockInvoke).  A no-op at render_user_pipeline_depth 1.
+  */
++/* F2.1: Apple's pending-PM-record rule, read per job; default keeps tag6. */
++static const bool render_user_pm_record;
++
+ static const bool render_user_ahead_on_submit = true;
+ 
+ /* F5c: a job joined a FIFO, or a queued head's input signalled.  Any context: the submit path,
+@@ -407,7 +410,7 @@ static void g5p_rv3_fw_touch(struct g5p_boot *b, const struct g5p_render *render
+  *       (seq - 1) % 2 of the channel page, so a job never rewrites the record the firmware used for
+  *       the job before it; the pointer ring carries each job's addresses (render-user-layout.h).
+  *   render_user_pm_once 1: the PM pool, list and F are built by the epoch's first attach only and
+- *       never rewritten by the host between jobs; the TA's tag6 record has the firmware rebuild F,
++ *       never rewritten by the host between jobs; a TA PM record has the firmware rebuild F,
+  *       as on iOS (PM created per queue once; docs/gpu/experiments/freelist-lifetime-production-fix.md).
+  */
+ /* release8 default */
+@@ -2261,8 +2264,10 @@ static int g5p_rv3_pmctx_build(struct g5p_drm *d, struct g5p_render *r, u32 seq,
+ 	for (u32 k = 0; k < G5P_PMSET_PAGES; k++)
+ 		g5p_table_clean_page(g, &page[k]);
+ 	dma_wmb();
+-	if (!ret)
++	if (!ret) {
+ 		r->pm_epoch = rd->recoveries + 1;
++		r->pm_dirty = true;
++	}
+ 	dev_info(
+ 		g->dev,
+ 		"RENDER-V3 pm-ctx seq=%u slots=%u/%u how=%s set=%d id=%u blocks=%u meta=%#x "
+@@ -2339,6 +2344,7 @@ static int g5p_rv3_pmctx_job(struct g5p_drm *d, struct g5p_render *r, u32 seq)
+ 	if (r->pm_epoch != rd->recoveries + 1 || r->pm_blocks < rd->blocks) {
+ 		ret = g5p_rv3_pmctx_build(d, r, seq, "rebuild");
+ 	} else if (!rd->pm_once) {
++		r->pm_dirty = true;
+ 		physical = kvcalloc(r->pm_blocks * 8, sizeof(*physical),
+ 				    GFP_KERNEL);
+ 		ret = physical ? 0 : -ENOMEM;
+@@ -2487,6 +2493,7 @@ static bool g5p_rv3_pm2_ready(struct g5p_drm *d, struct g5p_render *r,
+ 		rd->pm_set_next = (set + 1) % b->pm_sets;
+ 	}
+ 	r->pm2_epoch = rd->recoveries + 1;
++	r->pm2_dirty = true;
+ 	return true;
+ }
+ 
+@@ -3026,7 +3033,9 @@ static void g5p_rv3_ahead_start(struct g5p_drm *d, struct g5p_render *r,
+ 			g5p_rv3_pm_meta_of(r, pm2), r->slot[e], e, seq,
+ 			e ? job->td_w : job->ta_w,
+ 			g5p_ru_meta(0) + G5P_R22_STAMP + 4, 0, js,
+-			g5p_rv3_pm_id_of(rd, r, pm2), v->abs);
++			g5p_rv3_pm_id_of(rd, r, pm2), v->abs,
++			!READ_ONCE(render_user_pm_record) ||
++			(pm2 ? r->pm2_dirty : r->pm_dirty));
+ 		r->submitted[e] = false;
+ 		r->consumed[e] = false;
+ 		r->retired[e] = false;
+@@ -3257,7 +3266,9 @@ static int g5p_rv3_execute(struct g5p_drm *d, struct g5p_render *r,
+ 			g5p_rv3_pm_meta(r), r->slot[e], e, seq,
+ 			e ? job->td_w : job->ta_w,
+ 			g5p_ru_meta(0) + G5P_R22_STAMP + 4, 0,
+-			g5p_rv3_js(rd, seq), g5p_rv3_pm_id(rd, r), v->abs);
++			g5p_rv3_js(rd, seq), g5p_rv3_pm_id(rd, r), v->abs,
++			!READ_ONCE(render_user_pm_record) ||
++			r->pm_set < 0 || r->pm_dirty);
+ 		r->submitted[e] = false;
+ 		r->consumed[e] = false;
+ 		r->retired[e] = false;
+@@ -3343,6 +3354,13 @@ ta_wait:
+ 			g5p_r74_mark(g, G5P_R74_TA_RAM_TIMEOUT, ret);
+ 		goto out;
+ 	}
++/* Keep dirty on every pre-consumption failure.  Completion also proves that
++	 * the previous-TA stamp is available before this set can omit tag6.
++	 */
++	if (v->pm2)
++		r->pm2_dirty = false;
++	else
++		r->pm_dirty = false;
+ 	g5p_rv3_ta_count(g, d, v);
+ 	r->retired[0] = true;
+ 	g5p_rv3_terminal(g, G5P_RU_TERM_COMPLETE, "ta-complete");
+@@ -3697,6 +3715,8 @@ static bool g5p_rv3_recover(struct g5p_drm *d)
+ 	mutex_lock(&rd->lock);
+ 	list_for_each_entry(r, &rd->contexts, rdev_link) {
+ 		WRITE_ONCE(r->bound, false);
++		r->pm_dirty = true;
++		r->pm2_dirty = true;
+ 		count++;
+ 	}
+ 	mutex_unlock(&rd->lock);
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render.inc b/drivers/gpu/drm/apple-g5p/drm-render.inc
+index d51dc945a..4c6416ecb 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render.inc
+@@ -312,6 +312,7 @@ struct g5p_render {
+ 	 */
+ 	int pm_set;
+ 	u32 pm_blocks, pm_epoch;
++	bool pm_dirty; /* PM record pending until a TA completes */
+ 	struct g5p_dma_page *pm_pool;
+ 	struct g5p_dma_page pm_aux[G5P_RU_AUX_PAGES];
+ 	bool pm_aux_mapped;
+@@ -325,6 +326,7 @@ struct g5p_render {
+ 	 */
+ 	int pm2_set;
+ 	u32 pm2_blocks, pm2_epoch;
++	bool pm2_dirty;
+ 	struct g5p_dma_page *pm2_pool;
+ 	struct g5p_dma_page pm2_aux[G5P_RU_AUX_PAGES];
+ 	struct drm_mm_node aux2_node;
+@@ -480,6 +482,14 @@ static int g5p_rdev_grow(struct g5p_drm *d, u32 blocks)
+ 	kvfree(rd->physical);
+ 	rd->physical = physical;
+ 	rd->blocks = blocks;
++	{
++		struct g5p_render *r;
++
++		list_for_each_entry(r, &rd->contexts, rdev_link) {
++			r->pm_dirty = true;
++			r->pm2_dirty = true;
++		}
++	}
+ 	return 0;
+ }
+ 
+@@ -1491,6 +1501,8 @@ static int g5p_render_create_context(struct drm_device *drm,
+ 	}
+ 	r->pm_set = -1;
+ 	r->pm2_set = -1;
++	r->pm_dirty = true;
++	r->pm2_dirty = true;
+ 	c->gpu = d;
+ 	c->render = r;
+ 	r->ctx = c;

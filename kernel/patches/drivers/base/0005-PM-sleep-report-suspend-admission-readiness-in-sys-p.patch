@@ -1,0 +1,176 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 18:11:36 +0000
+Subject: [PATCH] PM: sleep: report suspend admission readiness in
+ /sys/power/suspend_ready
+
+Driver admission providers and the early suspend prechecks decide inside
+enter_state() whether a suspend is admitted, but userspace has no way to
+ask before requesting one. A desktop that offers Suspend, or a power
+daemon that would suspend on idle, can only try it and see the
+transition fail.
+
+Add an optional non-reserving check callback to struct
+pm_suspend_admission and a read-only /sys/power/suspend_ready. Reading
+it takes system_transition_mutex without waiting, runs every provider's
+check and then every precheck notifier for the current mem_sleep state,
+and reports "ready" or "not-ready <who> <errno>" for the first refusal.
+While the query runs, pm_suspend_admission_reserved() also reports a
+provider whose check passed, so prechecks that require a reserved
+provider answer as they would during a suspend. A provider without a
+check reports not ready. No reservation is taken, nothing is logged by
+the query itself, and a later suspend reserves and checks again.
+
+Assisted-by: LLM
+---
+ Documentation/ABI/testing/sysfs-power | 18 ++++++++
+ include/linux/pm-suspend-admission.h  | 10 ++++-
+ kernel/power/suspend.c                | 63 ++++++++++++++++++++++++++-
+ 3 files changed, 89 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/ABI/testing/sysfs-power b/Documentation/ABI/testing/sysfs-power
+index d38da0779..98cc5c2b5 100644
+--- a/Documentation/ABI/testing/sysfs-power
++++ b/Documentation/ABI/testing/sysfs-power
+@@ -470,3 +470,21 @@ Description:
+ 
+                 Minimum value: 1
+                 Default value: 3
++
++What:		/sys/power/suspend_ready
++Date:		November 2026
++Contact:	Linux PM list <linux-pm@vger.kernel.org>
++Description:
++		Read-only report of whether a suspend to the current
++		mem_sleep state would be admitted now. Reading runs the
++		admission a suspend runs before syncing filesystems: each
++		registered driver admission provider's non-reserving check,
++		then each early suspend precheck. It takes no reservation
++		and changes no state; a later suspend checks again.
++
++		The file reads "ready", or one line
++		"not-ready <who> <errno>" naming the first refusal: a
++		device name for a provider, the precheck callback's symbol,
++		"transition" while a system transition is in progress, or
++		"state" when the mem_sleep state is not available.
++		<errno> is a negative decimal errno value.
+diff --git a/include/linux/pm-suspend-admission.h b/include/linux/pm-suspend-admission.h
+index f1c92e058..0b1a1c57b 100644
+--- a/include/linux/pm-suspend-admission.h
++++ b/include/linux/pm-suspend-admission.h
+@@ -8,18 +8,26 @@
+  * hardware work. Unregister before removing the hardware or freeing this object.
+  * prepare must reserve admission without destructive MMIO; complete releases it
+  * after resume or ANY abort, including a failed prepare. No PM-op inference.
++ * check, optional, answers /sys/power/suspend_ready: whether prepare would
++ * admit now, without reserving or any side effect. Work prepare would drain
++ * is not a refusal. A provider without check reports not ready.
+  */
+ struct pm_suspend_admission {
+ 	struct list_head node;
+ 	struct device *dev;
+ 	int (*prepare)(struct device *dev);
+ 	void (*complete)(struct device *dev);
++	int (*check)(struct device *dev);
+ 	bool reserved;
++	bool checked; /* check passed during a readiness query */
+ };
+ #ifdef CONFIG_SUSPEND
+ int register_pm_suspend_admission(struct pm_suspend_admission *admission);
+ void unregister_pm_suspend_admission(struct pm_suspend_admission *admission);
+-/* Only callable from a precheck notifier, under system_transition_mutex. */
++/*
++ * Only callable from a precheck notifier, under system_transition_mutex.
++ * During a readiness query it reports a provider whose check passed.
++ */
+ bool pm_suspend_admission_reserved(struct device *dev);
+ #else
+ static inline int register_pm_suspend_admission(struct pm_suspend_admission *a) { return 0; }
+diff --git a/kernel/power/suspend.c b/kernel/power/suspend.c
+index 307e6d5f3..670f50ad8 100644
+--- a/kernel/power/suspend.c
++++ b/kernel/power/suspend.c
+@@ -590,6 +590,7 @@ int register_pm_suspend_admission(struct pm_suspend_admission *a)
+ 		}
+ 	}
+ 	a->reserved = false;
++	a->checked = false;
+ 	get_device(a->dev);
+ 	list_add_tail(&a->node, &suspend_admissions);
+ 	mutex_unlock(&system_transition_mutex);
+@@ -614,7 +615,7 @@ bool pm_suspend_admission_reserved(struct device *dev)
+ 	lockdep_assert_held(&system_transition_mutex);
+ 	list_for_each_entry(a, &suspend_admissions, node)
+ 		if (a->dev == dev)
+-			return a->reserved;
++			return a->reserved || a->checked;
+ 	return false;
+ }
+ EXPORT_SYMBOL_GPL(pm_suspend_admission_reserved);
+@@ -633,6 +634,66 @@ int unregister_pm_suspend_precheck_notifier(struct notifier_block *nb)
+ }
+ EXPORT_SYMBOL_GPL(unregister_pm_suspend_precheck_notifier);
+ 
++/*
++ * The admission enter_state() would run, read only: each provider's check
++ * instead of its reservation, then each precheck notifier for the current
++ * mem_sleep state. No reservation is taken and nothing is logged here; a
++ * later suspend still reserves and checks again.
++ */
++static ssize_t suspend_ready_show(struct kobject *kobj,
++				  struct kobj_attribute *attr, char *buf)
++{
++	suspend_state_t state = mem_sleep_current;
++	struct pm_suspend_admission *a;
++	struct notifier_block *nb;
++	ssize_t len = 0;
++	int error;
++
++	if (!mutex_trylock(&system_transition_mutex))
++		return sysfs_emit(buf, "not-ready transition %d\n", -EBUSY);
++	if (state != PM_SUSPEND_TO_IDLE && !valid_state(state)) {
++		len = sysfs_emit(buf, "not-ready state %d\n", -EINVAL);
++		goto unlock;
++	}
++	list_for_each_entry(a, &suspend_admissions, node) {
++		error = a->check ? a->check(a->dev) : -EOPNOTSUPP;
++		if (error) {
++			len = sysfs_emit(buf, "not-ready %s %d\n",
++					 dev_name(a->dev), error);
++			goto clear;
++		}
++		a->checked = true;
++	}
++	/* Walk the chain to name the refusing notifier, not only its errno. */
++	down_read(&suspend_precheck_chain.rwsem);
++	for (nb = rcu_dereference_raw(suspend_precheck_chain.head); nb;
++	     nb = rcu_dereference_raw(nb->next)) {
++		error = notifier_to_errno(nb->notifier_call(nb, state, NULL));
++		if (error) {
++			len = sysfs_emit(buf, "not-ready %ps %d\n",
++					 nb->notifier_call, error);
++			break;
++		}
++	}
++	up_read(&suspend_precheck_chain.rwsem);
++	if (!len)
++		len = sysfs_emit(buf, "ready\n");
++clear:
++	list_for_each_entry(a, &suspend_admissions, node)
++		a->checked = false;
++unlock:
++	mutex_unlock(&system_transition_mutex);
++	return len;
++}
++
++power_attr_ro(suspend_ready);
++
++static int __init suspend_ready_init(void)
++{
++	return sysfs_create_file(power_kobj, &suspend_ready_attr.attr);
++}
++late_initcall(suspend_ready_init);
++
+ static int enter_state(suspend_state_t state)
+ {
+ 	struct pm_suspend_admission *admission;

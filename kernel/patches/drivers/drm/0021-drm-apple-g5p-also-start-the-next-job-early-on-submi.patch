@@ -1,0 +1,404 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 15:07:47 +0000
+Subject: [PATCH] drm/apple-g5p: also start the next job early on submit
+ during the 3D wait
+
+[Orchard: from brkosebay/linux 7860353758439c13faae99d5a43c43e73ae0553b;
+fixed source defaults, no production module controls.] Preserve the
+measured opt1 chain in dependency order.
+
+Assisted-by: LLM
+---
+ drivers/gpu/apple-g5p/render-user-jobtime.h   |   7 +
+ drivers/gpu/drm/apple-g5p/a9-gpu-drm.c        |  20 ++-
+ drivers/gpu/drm/apple-g5p/drm-latency123.inc  |  11 +-
+ .../gpu/drm/apple-g5p/drm-render-sched.inc    |   2 +
+ drivers/gpu/drm/apple-g5p/drm-render-v3.h     |   7 +
+ drivers/gpu/drm/apple-g5p/drm-render-v3.inc   | 134 ++++++++++++++++--
+ 6 files changed, 160 insertions(+), 21 deletions(-)
+
+diff --git a/drivers/gpu/apple-g5p/render-user-jobtime.h b/drivers/gpu/apple-g5p/render-user-jobtime.h
+index 96ae1d258..501da66fb 100644
+--- a/drivers/gpu/apple-g5p/render-user-jobtime.h
++++ b/drivers/gpu/apple-g5p/render-user-jobtime.h
+@@ -20,10 +20,15 @@ struct g5p_jt {
+ 	u64 prev_signal_cyc;
+ 	u8 src[2];
+ 	u8 dep_own, dep_full, why;
++	/* F5c: 1 = this job started its context's next job from its 3D wait (render_user_ahead_on_submit);
++	 * why keeps the TA-decision reason.  The started job has flags bit 4 (and bit 3, as F5).
++	 */
++	u8 late;
+ 	bool abs_enabled;
+ };
+ struct g5p_jt_stats {
+ 	u64 dep_own, dep_full, why[16];
++	u64 ahead_late, late_why[16]; /* F5c: late starts; by the starter's TA-decision why */
+ 	u64 jobs, failed, joint, ahead, ta_ticks, td_ticks;
+ 	u64 ioctl_ns, queue_ns, prep_ns, ta_wait_ns, gap_ns, td_wait_ns;
+ 	u64 tail_ns, touch_ns, bell_ns, samples;
+@@ -60,6 +65,8 @@ static inline void g5p_jt_fold(struct g5p_jt_stats *s, const struct g5p_jt *j)
+ 	s->failed += j->ret != 0;
+ 	s->joint += !!(j->flags & 4);
+ 	s->ahead += !!(j->flags & 8); /* F5: started while the previous job's 3D ran */
++	s->ahead_late += !!(j->flags & 16); /* F5c: ... from that job's 3D wait (counted in ahead too) */
++	if (j->late && j->why < 16) s->late_why[j->why]++;
+ 	if (j->ta_ticks != ~0ULL)
+ 		s->ta_ticks += j->ta_ticks;
+ 	if (j->td_ticks != ~0ULL)
+diff --git a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+index 09fa937a9..f184afb68 100644
+--- a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
++++ b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+@@ -132,6 +132,13 @@ struct g5p_drm {
+ 	u32 autoboot_phase;
+ 	/* render_user_event_wake: the phase waiter sleeps here until event_serial moves */
+ 	wait_queue_head_t ev_wq;
++	/* F5c (render_user_ahead_on_submit): while a depth-2 job's 3D wait may still start its
++	 * context's next job (ahead_late_armed, written by the worker only), a push or a queued head's
++	 * signalled input bumps ahead_poke and wakes ev_wq; the waiter's pause also ends on it.
++	 * Never bumps event_serial (the firmware event count).
++	 */
++	atomic_t ahead_poke;
++	bool ahead_late_armed;
+ 	/* TYPED_V3 3D completion-event latches (render-user-retire.h): G5P_RV3_TD_WANT | endpoint
+ 	 * while a 3D phase is published, else 0; td_hit_ns: decode time of the first matching event.
+ 	 * Two, indexed by the job's sequence parity (g5p_rv3_td_latch()): with
+@@ -208,10 +215,10 @@ static void g5p_jt_abs_line(char *buf, size_t size, const struct g5p_jt *j)
+ 			g5p_jt_cyc_us(ta1, j->hit_cyc[0]),
+ 			g5p_jt_cyc_us(j->flags & 4 ? ta1 : j->bell_cyc[1], td0),
+ 			g5p_jt_cyc_us(td0, td1), g5p_jt_cyc_us(td1, j->hit_cyc[1]));
+-	n += scnprintf(buf + n, size - n, " irqth=%lld/%lld src=%u/%u pgap=%lld dep=%u/%u why=%u",
++	n += scnprintf(buf + n, size - n, " irqth=%lld/%lld src=%u/%u pgap=%lld dep=%u/%u why=%u late=%u",
+ 		j->src[0] == 1 ? g5p_jt_cyc_us(j->hard_cyc[0], j->hit_cyc[0]) : -1LL,
+ 		j->src[1] == 1 ? g5p_jt_cyc_us(j->hard_cyc[1], j->hit_cyc[1]) : -1LL,
+-		j->src[0], j->src[1], g5p_jt_cyc_us(j->prev_signal_cyc, j->exec_cyc), j->dep_own, j->dep_full, j->why);
++		j->src[0], j->src[1], g5p_jt_cyc_us(j->prev_signal_cyc, j->exec_cyc), j->dep_own, j->dep_full, j->why, j->late);
+ 	if (j->abs_enabled)
+ 		n += scnprintf(buf + n, size - n,
+ 			" wp=%08x,%08x/%08x,%08x raw=%llx,%llx,%llx,%llx",
+@@ -282,12 +289,16 @@ static int g5p_gpu_stats_show(struct seq_file *m, void *unused)
+ 	spin_unlock_irqrestore(&d->status_lock, flags);
+ 	seq_printf(
+ 		m,
+-		"now_ns=%llu since_ns=%llu jobs=%llu failed=%llu ta_ticks=%llu td_ticks=%llu ioctl_ns=%llu queue_ns=%llu prep_ns=%llu ta_wait_ns=%llu gap_ns=%llu td_wait_ns=%llu tail_ns=%llu touch_ns=%llu bell_ns=%llu samples=%llu ta_irq_ns=%llu td_irq_ns=%llu ta_decide_ns=%llu td_decide_ns=%llu joint=%llu ovh_ns=%lld ahead=%llu dep_own=%llu dep_full=%llu aheadwhy=%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
++		"now_ns=%llu since_ns=%llu jobs=%llu failed=%llu ta_ticks=%llu td_ticks=%llu ioctl_ns=%llu queue_ns=%llu prep_ns=%llu ta_wait_ns=%llu gap_ns=%llu td_wait_ns=%llu tail_ns=%llu touch_ns=%llu bell_ns=%llu samples=%llu ta_irq_ns=%llu td_irq_ns=%llu ta_decide_ns=%llu td_decide_ns=%llu joint=%llu ovh_ns=%lld ahead=%llu dep_own=%llu dep_full=%llu aheadwhy=%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu"
++		" ahead_late=%llu latewhy=%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
+ 		now, s.since_ns, s.jobs, s.failed, s.ta_ticks, s.td_ticks,
+ 		s.ioctl_ns, s.queue_ns, s.prep_ns, s.ta_wait_ns, s.gap_ns,
+ 		s.td_wait_ns, s.tail_ns, s.touch_ns, s.bell_ns, s.samples,
+ 		s.ta_irq_ns, s.td_irq_ns, s.ta_decide_ns, s.td_decide_ns,
+-		s.joint, s.ovh_ns, s.ahead, s.dep_own, s.dep_full, s.why[0], s.why[1], s.why[2], s.why[3], s.why[4], s.why[5], s.why[6], s.why[7], s.why[8], s.why[9], s.why[10], s.why[11], s.why[12], s.why[13], s.why[14], s.why[15]);
++		s.joint, s.ovh_ns, s.ahead, s.dep_own, s.dep_full, s.why[0], s.why[1], s.why[2], s.why[3], s.why[4], s.why[5], s.why[6], s.why[7], s.why[8], s.why[9], s.why[10], s.why[11], s.why[12], s.why[13], s.why[14], s.why[15],
++		s.ahead_late, s.late_why[0], s.late_why[1], s.late_why[2], s.late_why[3], s.late_why[4],
++		s.late_why[5], s.late_why[6], s.late_why[7], s.late_why[8], s.late_why[9], s.late_why[10],
++		s.late_why[11], s.late_why[12], s.late_why[13], s.late_why[14], s.late_why[15]);
+ 	return 0;
+ }
+ static int g5p_gpu_stats_open(struct inode *inode, struct file *file)
+@@ -859,6 +870,7 @@ static int g5p_drm_probe(struct platform_device *pdev)
+ 	spin_lock_init(&d->status_lock);
+ 	d->jt_stats.since_ns = ktime_get_ns();
+ 	init_waitqueue_head(&d->ev_wq);
++	atomic_set(&d->ahead_poke, 0);
+ 	atomic_set(&d->accepted, 0);
+ 	atomic64_set(&d->job_sequence, 0);
+ 	d->render_wq = drmm_alloc_ordered_workqueue(&d->drm, "g5p-render", WQ_HIGHPRI);
+diff --git a/drivers/gpu/drm/apple-g5p/drm-latency123.inc b/drivers/gpu/drm/apple-g5p/drm-latency123.inc
+index a08b0d422..d0cd28e30 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-latency123.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-latency123.inc
+@@ -233,10 +233,13 @@ static void g5p_l123_evict(struct g5p_boot *b)
+ }
+ 
+ /* Replaces the waiter's sleep between two RAM samples of engine e.  seen: d->event_serial as
+- * read after the drain and before this sample (render-user-evwait.h).
++ * read after the drain and before this sample (render-user-evwait.h).  late_seen (F5c, a depth-2
++ * 3D wait that may still start the next job; else NULL): the event-wake sleep also ends when
++ * d->ahead_poke moves past it.
+  */
+ static void g5p_l123_pause(struct g5p_drm *d, struct g5p_diag *g, u32 e,
+-			   const struct g5p_rv3_ev *s, u64 seen)
++			   const struct g5p_rv3_ev *s, u64 seen,
++			   const int *late_seen)
+ {
+ 	u64 now = s->ns, t0;
+ 	enum g5p_ew_act act;
+@@ -271,7 +274,9 @@ static void g5p_l123_pause(struct g5p_drm *d, struct g5p_diag *g, u32 e,
+ 		g5p_l123.ew[2]++;
+ 	} else if (wait_event_hrtimeout(
+ 			   d->ev_wq,
+-			   g5p_ew_woken(seen, READ_ONCE(d->event_serial)),
++			   g5p_ew_woken(seen, READ_ONCE(d->event_serial)) ||
++				   (late_seen &&
++				    atomic_read(&d->ahead_poke) != *late_seen),
+ 			   us_to_ktime(wait_us))) {
+ 		g5p_l123.ew[1]++; /* -ETIME: the safety net */
+ 	} else {
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-sched.inc b/drivers/gpu/drm/apple-g5p/drm-render-sched.inc
+index 3b3ce4b17..744bfc317 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-sched.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render-sched.inc
+@@ -44,6 +44,7 @@ static void g5p_rjob_dep_cb(struct dma_fence *fence, struct dma_fence_cb *cb)
+ 
+ 	WRITE_ONCE(job->cb_fired, true);
+ 	mod_delayed_work(job->gpu->render_wq, &job->gpu->rdev->sched_work, 0);
++	g5p_rv3_ahead_poke(job->gpu); /* F5c: a running 3D wait may start this head now */
+ }
+ 
+ /* Scheduler lock held: no callback of this job stays armed. */
+@@ -120,6 +121,7 @@ static void g5p_rsched_push(struct g5p_drm *d, struct g5p_render *r,
+ 	g5p_rs_push(&d->rdev->sched, &r->entity, &job->node);
+ 	spin_unlock_irqrestore(&d->rdev->sched_lock, flags);
+ 	g5p_rsched_kick(d);
++	g5p_rv3_ahead_poke(d); /* F5c: after the add; a running 3D wait may start it now */
+ }
+ 
+ /* The close item joins the context's entity behind its jobs; false if one is queued. */
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-v3.h b/drivers/gpu/drm/apple-g5p/drm-render-v3.h
+index db2af8af7..28450e320 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-v3.h
++++ b/drivers/gpu/drm/apple-g5p/drm-render-v3.h
+@@ -62,6 +62,13 @@ struct g5p_rv3 {
+ 	bool ahead;
+ 	int ahead_ret;
+ 	bool ta_disarmed; /* F5: the TA latch was disarmed at the TA decision */
++	/* F5c (render_user_ahead_on_submit): this job's 3D wait re-tries the early start of its
++	 * context's next job when the device's ahead_poke moves past late_poke (a push, or a queued
++	 * head's input signalled).  Set at the TA decision, cleared once a job is started ahead or
++	 * the 3D wait ends.  Worker only.
++	 */
++	bool late;
++	int late_poke;
+ 	bool pm2; /* F5: the job's PM is its context's second set */
+ 	bool touched; /* the DC3 pair was published: the firmware may reference the job's memory */
+ 	/* The bind of this job's context published its DC3 pair and then failed: that context is
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+index 85cb08d38..0e308c96b 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+@@ -76,6 +76,54 @@ static const uint render_user_pipeline_depth = 1;
+  */
+ #define G5P_RV3_AHEAD_CHAIN 8U
+ 
++/*
++ * F5c: F5 decides once, at job N's TA completion; a job pushed (or whose inputs signal) while N's
++ * 3D still runs then waited for N's retire.  With this set, N's 3D wait re-runs that same decision
++ * (g5p_rv3_ahead(), the worker, core lock held) whenever a push or a queued head's signalled input
++ * bumps d->ahead_poke, until a job is started or N's 3D is seen done.  Apple kicks on submit
++ * (AGXChannelQueue_submitBlockInvoke).  A no-op at render_user_pipeline_depth 1.
++ */
++static const bool render_user_ahead_on_submit = true;
++
++/* F5c: a job joined a FIFO, or a queued head's input signalled.  Any context: the submit path,
++ * or a fence callback under the fence lock (possibly hard IRQ): a counter and a wake only, never
++ * the start itself.  The full barrier orders the FIFO add (or the signal) before the armed look,
++ * against the executor's armed store before its FIFO look (g5p_rv3_late_arm()).
++ */
++static void g5p_rv3_ahead_poke(struct g5p_drm *d)
++{
++	smp_mb();
++	if (!READ_ONCE(d->ahead_late_armed))
++		return;
++	atomic_inc(&d->ahead_poke);
++	wake_up(&d->ev_wq);
++}
++
++/* F5c, worker: job v's 3D wait may re-try the early start (render_user_ahead_on_submit).  Before
++ * the TA-decision try, so that try is the first look after arming: no poke can be missed.
++ */
++static void g5p_rv3_late_arm(struct g5p_drm *d, struct g5p_rv3 *v)
++{
++	if (!v->depth2 || !READ_ONCE(render_user_ahead_on_submit))
++		return;
++	WRITE_ONCE(d->ahead_late_armed, true);
++	smp_mb();
++	v->late_poke = atomic_read(&d->ahead_poke);
++	v->late = true;
++}
++
++static void g5p_rv3_late_disarm(struct g5p_drm *d, struct g5p_rv3 *v)
++{
++	if (!v->late)
++		return;
++	v->late = false;
++	WRITE_ONCE(d->ahead_late_armed, false);
++}
++
++struct g5p_rjob;
++static void g5p_rv3_ahead_late(struct g5p_drm *d, struct g5p_render *r,
++			       struct g5p_rjob *cur, const struct g5p_rv3_ev *s);
++
+ /* drm-render.inc / drm-render-sched.inc, included after this file */
+ static void g5p_render_cache(struct g5p_drm *d, struct g5p_rjob *job,
+ 			     bool to_cpu);
+@@ -660,11 +708,14 @@ static void g5p_rv3_np_end(struct g5p_diag *g, u32 e, u32 seq, u32 result)
+  * touch instant is taken after a step that left the phase undecided, before the sleep (off: never).
+  * The predicate is level-triggered: every sample, including the one right after each sleep and the
+  * closing one at the deadline, re-reads the whole RAM state (rt: the 3D, ta: the TA).
++ * late (F5c, the executor's own 3D wait of a depth-2 job; else NULL): after a sample that left the
++ * phase undecided, re-try the early start of the context's next job if poked (g5p_rv3_ahead_late()).
+  */
+ static u32 g5p_rv3_wait(struct g5p_diag *g, struct g5p_render *r, u32 e,
+ 			u32 seq, struct g5p_ru_wait *w, struct g5p_ru_touch *t,
+ 			struct g5p_ru_retire *rt, struct g5p_ru_ta *ta,
+-			struct g5p_rv3_ev *s, u64 *consumed_ns, int *err)
++			struct g5p_rv3_ev *s, u64 *consumed_ns, int *err,
++			struct g5p_rjob *late)
+ {
+ 	struct g5p_drm *d = r->ctx->gpu;
+ 	bool closing = false, slow = false, sampled = false;
+@@ -722,7 +773,11 @@ static u32 g5p_rv3_wait(struct g5p_diag *g, struct g5p_render *r, u32 e,
+ 		}
+ 		if (g5p_ru_touch_due(t, s->ns, w->result, w->expired))
+ 			g5p_rv3_touch(g, t, s->ns);
+-		g5p_l123_pause(d, g, e, s, seen);
++		if (late && !fault)
++			g5p_rv3_ahead_late(d, r, late, s);
++		g5p_l123_pause(d, g, e, s, seen,
++			       late && late->rv3.late ? &late->rv3.late_poke :
++							NULL);
+ 	}
+ }
+ 
+@@ -2999,10 +3054,12 @@ out:
+ 
+ /* F5: after job `cur`'s TA completed, start its context's next job if it may (core lock held).
+  * The second PM set is made ready (taken and built at the context's first pipelined job) only
+- * when there is a next job to use it.
++ * when there is a next job to use it.  late (F5c): the same decision re-run from cur's 3D wait
++ * (g5p_rv3_ahead_late()); it keeps cur's TA-decision why and F5's skip count, and marks a start
++ * (cur->jt.late, the started job's flags bit 4).
+  */
+ static void g5p_rv3_ahead(struct g5p_drm *d, struct g5p_render *r,
+-			  struct g5p_rjob *cur)
++			  struct g5p_rjob *cur, bool late)
+ {
+ 	struct g5p_rdev *rd = d->rdev;
+ 	bool pm2 = !r->js_pm2[g5p_rv3_js(rd, cur->rv3.seq)];
+@@ -3015,18 +3072,61 @@ static void g5p_rv3_ahead(struct g5p_drm *d, struct g5p_render *r,
+ 	else if (pm2 && !g5p_rv3_pm2_ready(d, r, cur->rv3.seq + 1)) why = 13;
+ 	else why = 0;
+ 	if (why) {
+-		cur->jt.why = why;
+-		rd->ahead_skipped++;
++		if (!late) {
++			cur->jt.why = why;
++			rd->ahead_skipped++;
++		}
+ 		return;
+ 	}
+ 	next = g5p_rv3_ahead_next(d, r, true, NULL);
+ 	if (!next) {
+-		cur->jt.why = 14;
+-		rd->ahead_skipped++;
++		if (!late) {
++			cur->jt.why = 14;
++			rd->ahead_skipped++;
++		}
+ 		return;
+ 	}
+-	cur->jt.why = 1;
++	if (late)
++		cur->jt.late = 1;
++	else
++		cur->jt.why = 1;
+ 	g5p_rv3_ahead_start(d, r, cur, next);
++	if (late)
++		next->jt.flags |= BIT(4);
++}
++
++/*
++ * F5c: from job cur's own 3D wait (worker, core lock held, after a sample that left the phase
++ * undecided and saw no fault), when d->ahead_poke moved: re-run g5p_rv3_ahead() as at the TA
++ * decision.  Race-free against the 3D's completion and the pick: all of it runs in the one worker,
++ * inside cur's execute, before the wait can return, so the scheduler cannot pick meanwhile; the
++ * head leaves its FIFO only through g5p_rv3_ahead_next(pop) under sched_lock, and rd->ahead set
++ * makes every further try a no-op (g5p_rv3_ahead_why() 4, and the arm is dropped).  A 3D seen done
++ * (stamps landed in the last sample, or its completion event latched) drops the arm instead: the
++ * wait retires cur and the worker picks the next job normally.
++ */
++static void g5p_rv3_ahead_late(struct g5p_drm *d, struct g5p_render *r,
++			       struct g5p_rjob *cur, const struct g5p_rv3_ev *s)
++{
++	struct g5p_rv3 *v = &cur->rv3;
++	int poke;
++
++	if (!v->late)
++		return;
++	poke = atomic_read(&d->ahead_poke);
++	if (poke == v->late_poke)
++		return;
++	v->late_poke = poke;
++	smp_mb(); /* the poke read before the FIFO look: a later push pokes again */
++	if (s->retired || s->event || d->rdev->ahead ||
++	    d->rdev->sequence != v->seq ||
++	    READ_ONCE(d->td_hit_ns[g5p_rv3_td_latch(g5p_ru_endpoint(v->seq))])) {
++		g5p_rv3_late_disarm(d, v);
++		return;
++	}
++	g5p_rv3_ahead(d, r, cur, true);
++	if (d->rdev->ahead)
++		g5p_rv3_late_disarm(d, v);
+ }
+ 
+ static int g5p_rv3_execute(struct g5p_drm *d, struct g5p_render *r,
+@@ -3201,7 +3301,7 @@ ta_wait:
+ 	g5p_ru_touch_start(&v->touch[0], v->ta_pub_ns, r->touch_ms, seq);
+ 	g5p_ru_ta_start(&v->tr);
+ 	res = g5p_rv3_wait(g, r, 0, seq, &v->ta, &v->touch[0], NULL, &v->tr,
+-			   &v->last[0], &v->ta_consumed_ns, &err);
++			   &v->last[0], &v->ta_consumed_ns, &err, NULL);
+ 	r->consumed[0] = v->ta_consumed_ns != 0;
+ 	if (res != G5P_RU_WAIT_COMPLETE) {
+ 		struct g5p_rv3_ev late;
+@@ -3257,7 +3357,10 @@ ta_wait:
+ 		 */
+ 		v->ta_event_ns = g5p_rv3_event_disarm(d, 0, seq, &job->jt);
+ 		v->ta_disarmed = true;
+-		g5p_rv3_ahead(d, r, job);
++		g5p_rv3_late_arm(d, v); /* F5c: before the first look */
++		g5p_rv3_ahead(d, r, job, false);
++		if (rd->ahead)
++			g5p_rv3_late_disarm(d, v);
+ 	}
+ 	if (!v->joint) {
+ 		v->phase = G5P_RV3_TD_PUBLISH;
+@@ -3276,7 +3379,9 @@ ta_wait:
+ 	g5p_ru_touch_start(&v->touch[1], v->td_pub_ns, r->touch_ms, seq);
+ 	g5p_ru_rt_start(&v->rt, r->settle_ms);
+ 	res = g5p_rv3_wait(g, r, 1, seq, &v->td, &v->touch[1], &v->rt, NULL,
+-			   &v->last[1], &v->td_consumed_ns, &err);
++			   &v->last[1], &v->td_consumed_ns, &err,
++			   v->late ? job : NULL);
++	g5p_rv3_late_disarm(d, v); /* F5c: from here the worker picks the next job */
+ 	/* F5: once a later job is prepared, the context's flags are that job's */
+ 	if (rd->sequence == seq)
+ 		r->consumed[1] = v->td_consumed_ns != 0;
+@@ -3336,6 +3441,7 @@ ta_wait:
+ 		0; /* a job finished: a later fault starts a new streak */
+ 	ret = 0;
+ out:
++	g5p_rv3_late_disarm(d, v);
+ 	if (v->phase >= G5P_RV3_TA_PUBLISH && !v->ta_disarmed)
+ 		v->ta_event_ns = g5p_rv3_event_disarm(d, 0, seq, &job->jt);
+ 	if (v->joint || v->phase >= G5P_RV3_TD_PUBLISH)
+@@ -3452,7 +3558,7 @@ again:
+ 			g5p_ru_ta_start(&v->tr);
+ 			res = g5p_rv3_wait(g, r, 0, s->seq, &w, &v->touch[0],
+ 					   NULL, &v->tr, &v->last[0],
+-					   &v->ta_consumed_ns, &err);
++					   &v->ta_consumed_ns, &err, NULL);
+ 			v->ta_event_ns = g5p_rv3_event_disarm(d, 0, s->seq, NULL);
+ 		} else {
+ 			if (!armed)
+@@ -3461,7 +3567,7 @@ again:
+ 			g5p_ru_rt_start(&v->rt, r->settle_ms);
+ 			res = g5p_rv3_wait(g, r, 1, s->seq, &w, &v->touch[1],
+ 					   &v->rt, NULL, &v->last[1],
+-					   &v->td_consumed_ns, &err);
++					   &v->td_consumed_ns, &err, NULL);
+ 			v->td_event_ns = g5p_rv3_event_disarm(d, 1, s->seq, NULL);
+ 		}
+ 		act = g5p_ru_drain_step(&st, res);

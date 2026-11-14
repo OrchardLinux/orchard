@@ -1,0 +1,216 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 19:59:32 +0000
+Subject: [PATCH] drm/apple-g5p: name the sleep readiness refusal, and refuse
+ never-park
+
+The readiness check answered -EBUSY for both a ring that has not drained
+and a firmware that is not quiescent, and answered ready whenever work
+was in flight or the core lock was busy, without sampling. On J71t the
+same desktop read "ready" after a cold boot and "not-ready 201000000.gpu
+-16" after a warm restart, and the two answers could not be told apart.
+
+The shipping perf envelope pins the firmware (perf-envelope.h: floor =
+pin 400, overrides = pin, sampler off, policy+4 = 0). The firmware then
+never runs its idle park (0x1001cec8: full drain, GPC 0, R1+0 bit 29),
+and Apple's isQuiescent (6ca66e4) needs exactly that state. When it does
+not hold, Apple's powerDownIfQuiescent (c81b18), reached from the IOPM
+off ordinal (c83d28), neither acknowledges nor touches hardware; it
+re-arms and waits for the firmware to park. So a pinned firmware cannot
+pass prepare's certificate after any boot, and a busy GPU reported ready
+only because nothing was sampled. Recorded samples on pin-400 boots (GPC
+at every bell, R1+0x1000 and policy+0x34 at boot) all read state 4; they
+are taken at kicks and boot, not after long idle, so they corroborate
+this rather than prove it.
+
+Make the check report its reason through the admission reason callback:
+- never-park/busy: pinned envelope, work in flight (g5p_sleep_idle()
+false); prepare would drain and then fail the certificate; -
+never-park/locked: pinned envelope, the core lock is held; -
+never-park/gpc=NN: pinned envelope, idle, sampled GPC state NN; -
+not-quiescent/gpc=NN or not-quiescent/r1_0=X/r1_8=Y: the   certificate's
+own reads failed on an unpinned envelope; - ringN=C/P or
+ringN-unreadable: a ring has not drained; - sleep-failed, no-boot,
+firmware-failed, power-abort, terminal,   recovering, not-booted,
+not-powered for the existing -EIO and -ENODEV   answers.
+
+The sampled reads are the certificate's, in its order and under the same
+conditions (idle, core lock held, powered, MMIO licensed). A sampled GPC
+0 falls through to the certificate, so a firmware that does park is
+judged as before. prepare, the certificate and suspend are unchanged.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/apple-g5p/a9-gpu-drm.c     |   4 +
+ drivers/gpu/drm/apple-g5p/system-sleep.inc | 107 ++++++++++++++++++---
+ 2 files changed, 95 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+index 730138be9..d5f44c3b0 100644
+--- a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
++++ b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+@@ -120,6 +120,8 @@ struct g5p_drm {
+ 	struct g5p_diag *core;
+ 	/* Reserves the system-sleep certificate before sync, through complete. */
+ 	struct pm_suspend_admission sleep_admission;
++	/* Why the last readiness check refused; written by the check only. */
++	char sleep_why[64];
+ 	/* Protects cached IRQ event/status fields; never held for hardware IO. */
+ 	spinlock_t status_lock;
+ 	struct g5p_jt jt_ring[G5P_JT_RING];
+@@ -1033,6 +1035,7 @@ static void g5p_autoboot_work(struct work_struct *work)
+ 
+ static int g5p_system_sleep_prepare(struct device *dev);
+ static int g5p_system_sleep_check(struct device *dev);
++static const char *g5p_system_sleep_reason(struct device *dev);
+ 
+ static int g5p_drm_probe(struct platform_device *pdev)
+ {
+@@ -1096,6 +1099,7 @@ static int g5p_drm_probe(struct platform_device *pdev)
+ 	d->sleep_admission.prepare = g5p_system_sleep_prepare;
+ 	d->sleep_admission.complete = apple_g5p_system_sleep_complete;
+ 	d->sleep_admission.check = g5p_system_sleep_check;
++	d->sleep_admission.reason = g5p_system_sleep_reason;
+ 	ret = register_pm_suspend_admission(&d->sleep_admission);
+ 	if (ret)
+ 		goto err_pm;
+diff --git a/drivers/gpu/drm/apple-g5p/system-sleep.inc b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+index 2f8f30ae6..effe37166 100644
+--- a/drivers/gpu/drm/apple-g5p/system-sleep.inc
++++ b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+@@ -199,44 +199,119 @@ refuse_client:
+ 	return -EBUSY;
+ }
+ 
++/*
++ * The pinned perf envelope (perf-envelope.h: floor = pin, sampler off,
++ * policy+4 = 0) keeps the firmware from ever running its idle park
++ * (0x1001cec8: GPC 0 and R1+0 bit 29). Apple's isQuiescent (6ca66e4) needs
++ * that park, and powerDownIfQuiescent (c81b18) neither acknowledges nor
++ * touches hardware without it: it waits for the firmware to park. RAM only.
++ */
++static bool g5p_sleep_never_park(struct g5p_boot *b)
++{
++	return b->maps_ready && b->gpu_perf &&
++	       !g5p_dc_root_word(b, b->layout.offset[0x4a] + 4);
++}
++
++/* The readiness reason: one token, no white space or colon. */
++static __printf(3, 4) int g5p_sleep_why(struct g5p_drm *d, int ret,
++					 const char *fmt, ...)
++{
++	va_list args;
++
++	va_start(args, fmt);
++	vsnprintf(d->sleep_why, sizeof(d->sleep_why), fmt, args);
++	va_end(args);
++	return ret;
++}
++
+ /*
+  * Readiness query: what prepare would decide, without shutting any gate or
+  * draining firmware events. Accepted or in-flight work is not a refusal,
+- * since prepare drains it; the certificate is sampled only when the GPU is
+- * already idle and the core lock is free.
++ * since prepare drains it, except under the never-park envelope, where the
++ * drained firmware still cannot certify. Register samples are taken only
++ * when the GPU is already idle and the core lock is free, with the same
++ * reads as g5p_sleep_certificate(); a sampled GPC 0 falls through to it.
+  */
+ static int g5p_system_sleep_check(struct device *dev)
+ {
+ 	struct g5p_diag *g = dev_get_drvdata(dev);
+ 	struct g5p_drm *d;
+ 	struct g5p_boot *b;
++	u32 cons, prod, state, mode = 0, r8 = 0;
++	bool never_park;
+ 	int ret = 0;
+ 
+ 	if (!g || !g->event_cookie)
+ 		return -ENODEV;
+ 	d = g->event_cookie;
++	d->sleep_why[0] = 0;
+ 	b = READ_ONCE(g->boot);
+-	if (READ_ONCE(g->sleep_failed) || !b || READ_ONCE(b->failed) ||
+-	    READ_ONCE(b->event_failed) || !b->r73b ||
+-	    READ_ONCE(b->r73b->early_power_abort) ||
+-	    g5p_r8_admit_closed(&g5p_r8_state.admit) ||
+-	    g5p_ru_term_failed(&g5p_rv3_term) || READ_ONCE(d->rdev->stuck) ||
+-	    READ_ONCE(d->rdev->recovering))
+-		return -EIO;
++	if (READ_ONCE(g->sleep_failed))
++		return g5p_sleep_why(d, -EIO, "sleep-failed");
++	if (!b || !b->r73b)
++		return g5p_sleep_why(d, -EIO, "no-boot");
++	if (READ_ONCE(b->failed) || READ_ONCE(b->event_failed))
++		return g5p_sleep_why(d, -EIO, "firmware-failed");
++	if (READ_ONCE(b->r73b->early_power_abort))
++		return g5p_sleep_why(d, -EIO, "power-abort");
++	if (g5p_r8_admit_closed(&g5p_r8_state.admit) ||
++	    g5p_ru_term_failed(&g5p_rv3_term))
++		return g5p_sleep_why(d, -EIO, "terminal");
++	if (READ_ONCE(d->rdev->stuck) || READ_ONCE(d->rdev->recovering))
++		return g5p_sleep_why(d, -EIO, "recovering");
+ 	if (!READ_ONCE(b->alive) || READ_ONCE(b->stopped) || !b->released ||
+ 	    !b->irq_ready)
+-		return -ENODEV;
++		return g5p_sleep_why(d, -ENODEV, "not-booted");
++	never_park = g5p_sleep_never_park(b);
+ 	if (!mutex_trylock(&g->lock))
+-		return 0;
+-	if (!g->powered || !g->fender_ready || g->mmio_off)
+-		ret = -ENODEV;
+-	else if (g5p_sleep_idle(d) &&
+-		 (!g5p_sleep_rings(g) || !g5p_sleep_certificate(g, false)))
+-		ret = -EBUSY;
++		return never_park ? g5p_sleep_why(d, -EBUSY, "never-park/locked") :
++				    0;
++	if (!g->powered || !g->fender_ready || g->mmio_off) {
++		ret = g5p_sleep_why(d, -ENODEV, "not-powered");
++		goto unlock;
++	}
++	if (!g5p_sleep_idle(d)) {
++		if (never_park)
++			ret = g5p_sleep_why(d, -EBUSY, "never-park/busy");
++		goto unlock;
++	}
++	for (u32 i = 0; i < G5P_TD_NRING; i++) {
++		if (g5p_td_op_ring_read(g, i, &cons, &prod)) {
++			ret = g5p_sleep_why(d, -EBUSY, "ring%u-unreadable", i);
++			goto unlock;
++		}
++		if (cons > 255 || cons != prod) {
++			ret = g5p_sleep_why(d, -EBUSY, "ring%u=%u/%u", i, cons,
++					    prod);
++			goto unlock;
++		}
++	}
++	state = readl(g->window[1] + 0x1000);
++	if (state & 0x1f) {
++		ret = g5p_sleep_why(d, -EBUSY, "%s/gpc=%02x",
++				    never_park ? "never-park" : "not-quiescent",
++				    state & 0x1f);
++		goto unlock;
++	}
++	mode = readl(g->window[1]);
++	if ((mode & 0x60000000) == 0x60000000)
++		r8 = readl(g->window[1] + 8);
++	if ((mode & 0x60000000) != 0x60000000 || r8)
++		ret = g5p_sleep_why(d, -EBUSY, "not-quiescent/r1_0=%08x/r1_8=%08x",
++				    mode, r8);
++unlock:
+ 	mutex_unlock(&g->lock);
+ 	return ret;
+ }
+ 
++static const char *g5p_system_sleep_reason(struct device *dev)
++{
++	struct g5p_diag *g = dev_get_drvdata(dev);
++	struct g5p_drm *d = g ? g->event_cookie : NULL;
++
++	return d ? d->sleep_why : NULL;
++}
++
+ /* The early caller reserves admission; PM complete releases it on abort/wake.
+  * This is deliberately stronger than an observation-only readiness query.
+  */

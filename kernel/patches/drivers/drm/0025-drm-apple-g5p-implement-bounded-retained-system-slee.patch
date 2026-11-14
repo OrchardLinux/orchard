@@ -1,0 +1,890 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 16:17:18 +0000
+Subject: [PATCH] drm/apple-g5p: implement bounded retained system sleep
+
+Reserve reversible host admission before certifying quiescence and
+stamps. Stop the Fender firmware and remove platform power only after
+stable-off. Boot over retained shared memory and require a new ALIVE
+generation before IRQ or submission admission.
+
+Rebuild host bindings and both pipelined PM epochs without treating
+clean sleep as a fault. Freeze and error queued fences on a transition
+failure; retain the busy refusal for unsupported states and hibernation.
+
+Assisted-by: LLM
+---
+ drivers/gpu/apple-g5p/boot.inc                |  21 +-
+ drivers/gpu/apple-g5p/core.inc                |  47 ++-
+ drivers/gpu/apple-g5p/teardown.inc            |   5 +
+ drivers/gpu/drm/apple-g5p/a9-gpu-drm.c        |  82 +++--
+ .../gpu/drm/apple-g5p/drm-render-sched.inc    |   6 +
+ drivers/gpu/drm/apple-g5p/drm-render-v3.inc   | 110 ++++--
+ drivers/gpu/drm/apple-g5p/drm-render.inc      |   1 +
+ drivers/gpu/drm/apple-g5p/system-sleep.inc    | 345 ++++++++++++++++++
+ include/linux/apple-g5p-pm.h                  |  13 +-
+ 9 files changed, 556 insertions(+), 74 deletions(-)
+ create mode 100644 drivers/gpu/drm/apple-g5p/system-sleep.inc
+
+diff --git a/drivers/gpu/apple-g5p/boot.inc b/drivers/gpu/apple-g5p/boot.inc
+index 13267238b..286620e08 100644
+--- a/drivers/gpu/apple-g5p/boot.inc
++++ b/drivers/gpu/apple-g5p/boot.inc
+@@ -843,6 +843,8 @@ static int g5p_boot_drain(struct g5p_diag *g)
+ 		if (words[0] == 0 && READ_ONCE(b->released) &&
+ 		    !READ_ONCE(b->stopped)) {
+ 			b->alive_word = words[1];
++			if (g->sleep_boot && b->r73b)
++				b->r73b->r74f_alive++;
+ 			WRITE_ONCE(b->alive, true);
+ 		}
+ 		b->events++;
+@@ -853,7 +855,7 @@ static int g5p_boot_drain(struct g5p_diag *g)
+ 		/* Return the ALIVE slot before ringing work. No logging or
+ 		 * other MMIO may be inserted between these two operations.
+ 		 */
+-		if (!words[0] && g5p_r74f_on(b) &&
++		if (!g->sleep_boot && !words[0] && g5p_r74f_on(b) &&
+ 		    READ_ONCE(b->r73b->owner) == G5P_R73B_OWNER_IRQ &&
+ 		    READ_ONCE(b->released) && !READ_ONCE(b->stopped))
+ 			g5p_r74f_alive(g);
+@@ -1305,10 +1307,11 @@ static int g5p_boot_program_stream(struct g5p_diag *g, bool release)
+ 	ret = g5p_boot_irq_setup(g);
+ 	if (ret)
+ 		return ret;
+-	g5p_boot_snapshot(g, release ? "before-release" : "before-arm",
+-			  !g->reset_transition && !b->failed ?
+-				  G5P_READBACK_BASELINE :
+-				  G5P_READBACK_WRAPPER_ONLY);
++	if (!g->sleep_boot)
++		g5p_boot_snapshot(g, release ? "before-release" : "before-arm",
++				  !g->reset_transition && !b->failed ?
++					  G5P_READBACK_BASELINE :
++					  G5P_READBACK_WRAPPER_ONLY);
+ 	;
+ 	ret = 0;
+ 	if (ret)
+@@ -1418,6 +1421,12 @@ static int g5p_boot_program_stream(struct g5p_diag *g, bool release)
+ 		if (b->seed_stamp)
+ 			b->seed_gpc1 = arch_timer_read_counter();
+ 	}
++	if (g->sleep_boot) {
++		ret = g5p_fender_write(g, 0x20000, 0);
++		if (!ret)
++			ret = g5p_fender_write(g, 0x1000, 0x11);
++		return ret;
++	}
+ 	ret = release && b->r73b && 1 ? g5p_r74e_fender_start(g) :
+ 	      release ? g5p_fender_start_observed_q(&io, g5p_release_observe,
+ 						    b->perf_poweron ?: 1) :
+@@ -1454,6 +1463,8 @@ static int g5p_boot_program_stream(struct g5p_diag *g, bool release)
+ 	b->armed = true;
+ 	return 0;
+ out:
++	if (g->sleep_boot)
++		return ret;
+ 	/* A slow r74e epoch is scoreable without another unsafe MMIO read. */
+ 	if (release && b->r73b && 1 && READ_ONCE(b->r73b->early_power_abort))
+ 		return ret;
+diff --git a/drivers/gpu/apple-g5p/core.inc b/drivers/gpu/apple-g5p/core.inc
+index 709efed16..9177065d4 100644
+--- a/drivers/gpu/apple-g5p/core.inc
++++ b/drivers/gpu/apple-g5p/core.inc
+@@ -80,6 +80,8 @@ struct g5p_diag {
+ 	struct regmap *pmgr;
+ 	/* Serializes commands and all hardware access. */
+ 	struct mutex lock;
++	atomic_t sleep_gate; /* closed bit plus active host operations */
++	bool sleep_reserved, sleep_off, sleep_boot, sleep_failed, sleep_irq_off;
+ 	bool powered;
+ 	bool loaded;
+ 
+@@ -104,6 +106,28 @@ struct g5p_diag {
+ 	struct g5p_mmio_self *mmio_self;
+ };
+ 
++/* Separate from terminal retirement: refusal must not cancel accepted jobs. */
++static bool g5p_sleep_enter(struct g5p_diag *g)
++{
++	int old = atomic_read(&g->sleep_gate);
++
++	for (;;) {
++		int seen;
++
++		if (old < 0)
++			return false;
++		seen = atomic_cmpxchg(&g->sleep_gate, old, old + 1);
++		if (seen == old)
++			return true;
++		old = seen;
++	}
++}
++
++static void g5p_sleep_exit(struct g5p_diag *g)
++{
++	atomic_dec(&g->sleep_gate);
++}
++
+ /* Before every PMGR gfx gate (boot R33 off, dirty-start, kexec quiesce and in-boot recovery
+  * cycles): no accessor MMIO from here until g5p_fender_wake_once() brings Fender up again.
+  * Apple clears fender+0xc inside setPlatformPower(0), before its gate (G5).
+@@ -450,7 +474,7 @@ static DEVICE_ATTR_RO(result);
+ /* One bring-up phase, as the command file and the probe-time bring-up run it.  *ran is set
+  * when the phase itself ran (and its result was recorded).
+  */
+-static int g5p_run_phase(struct g5p_diag *g, const char *buf, bool *ran)
++static int g5p_run_phase_locked(struct g5p_diag *g, const char *buf, bool *ran)
+ {
+ 	int ret;
+ 
+@@ -486,6 +510,18 @@ static int g5p_run_phase(struct g5p_diag *g, const char *buf, bool *ran)
+ 	return ret;
+ }
+ 
++static int g5p_run_phase(struct g5p_diag *g, const char *buf, bool *ran)
++{
++	int ret;
++
++	*ran = false;
++	if (!g5p_sleep_enter(g))
++		return -EBUSY;
++	ret = g5p_run_phase_locked(g, buf, ran);
++	g5p_sleep_exit(g);
++	return ret;
++}
++
+ static ssize_t command_store(struct device *dev, struct device_attribute *attr,
+ 			     const char *buf, size_t count)
+ {
+@@ -495,8 +531,13 @@ static ssize_t command_store(struct device *dev, struct device_attribute *attr,
+ 
+ 	if (!capable(CAP_SYS_RAWIO))
+ 		return -EPERM;
+-	if (sysfs_streq(buf, "td-kexec"))
+-		return g5p_td_command(g, buf) ?: count;
++	if (sysfs_streq(buf, "td-kexec")) {
++		if (!g5p_sleep_enter(g))
++			return -EBUSY;
++		ret = g5p_td_command(g, buf);
++		g5p_sleep_exit(g);
++		return ret ?: count;
++	}
+ 	ret = g5p_run_phase(g, buf, &ran);
+ 	if (ran)
+ 		dev_info(dev, "command %.*s result=%d\n", (int)count, buf, ret);
+diff --git a/drivers/gpu/apple-g5p/teardown.inc b/drivers/gpu/apple-g5p/teardown.inc
+index e3875bc59..d40cfa26f 100644
+--- a/drivers/gpu/apple-g5p/teardown.inc
++++ b/drivers/gpu/apple-g5p/teardown.inc
+@@ -565,6 +565,11 @@ static int g5p_kq_run(struct g5p_diag *g, const char *why)
+ 	struct g5p_kq_ctx *c;
+ 	u64 t0 = ktime_get_ns();
+ 
++	if (READ_ONCE(g->sleep_failed)) {
++		dev_emerg(g->dev,
++			  "GPU-KQ frozen after sleep failure; no MMIO\n");
++		return -EIO;
++	}
+ 	if (atomic_xchg(&g5p_kq_ran, 1)) {
+ 		dev_emerg(
+ 			g->dev,
+diff --git a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+index 6ee3990b2..5aec0de6c 100644
+--- a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
++++ b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+@@ -674,7 +674,8 @@ static int g5p_drm_open(struct drm_device *drm, struct drm_file *file)
+ 	return 0;
+ }
+ 
+-static void g5p_drm_postclose(struct drm_device *drm, struct drm_file *file)
++static void g5p_drm_postclose_host(struct drm_device *drm,
++				   struct drm_file *file)
+ {
+ 	struct g5p_file *f = file->driver_priv;
+ 	struct g5p_context *c;
+@@ -723,6 +724,16 @@ static void g5p_drm_postclose(struct drm_device *drm, struct drm_file *file)
+ 		READ_ONCE(to_g5p(drm)->pinned_bytes) >> 10);
+ }
+ 
++static void g5p_drm_postclose(struct drm_device *drm, struct drm_file *file)
++{
++	struct g5p_drm *d = container_of(drm, struct g5p_drm, drm);
++
++	while (!g5p_sleep_enter(d->core))
++		msleep(20);
++	g5p_drm_postclose_host(drm, file);
++	g5p_sleep_exit(d->core);
++}
++
+ static const struct drm_ioctl_desc g5p_ioctls[] = {
+ 	DRM_IOCTL_DEF_DRV(G5P_GET_INFO, g5p_get_info, DRM_RENDER_ALLOW),
+ 	DRM_IOCTL_DEF_DRV(G5P_CREATE_BO, g5p_create_bo, DRM_RENDER_ALLOW),
+@@ -756,7 +767,51 @@ static const struct drm_ioctl_desc g5p_ioctls[] = {
+ 			  DRM_RENDER_ALLOW),
+ };
+ 
+-DEFINE_DRM_GEM_FOPS(g5p_drm_fops);
++static long g5p_sleep_ioctl(struct file *filp, unsigned int cmd,
++			    unsigned long arg)
++{
++	struct drm_file *file = filp->private_data;
++	struct g5p_drm *d = container_of(file->minor->dev, struct g5p_drm, drm);
++	long ret;
++
++	if (!g5p_sleep_enter(d->core))
++		return -EBUSY;
++	ret = drm_ioctl(filp, cmd, arg);
++	g5p_sleep_exit(d->core);
++	return ret;
++}
++
++#ifdef CONFIG_COMPAT
++static long g5p_sleep_compat_ioctl(struct file *filp, unsigned int cmd,
++				   unsigned long arg)
++{
++	struct drm_file *file = filp->private_data;
++	struct g5p_drm *d = container_of(file->minor->dev, struct g5p_drm, drm);
++	long ret;
++
++	if (!g5p_sleep_enter(d->core))
++		return -EBUSY;
++	ret = drm_compat_ioctl(filp, cmd, arg);
++	g5p_sleep_exit(d->core);
++	return ret;
++}
++#endif
++
++static const struct file_operations g5p_drm_fops = {
++	.owner = THIS_MODULE,
++	.open = drm_open,
++	.release = drm_release,
++	.unlocked_ioctl = g5p_sleep_ioctl,
++#ifdef CONFIG_COMPAT
++	.compat_ioctl = g5p_sleep_compat_ioctl,
++#endif
++	.poll = drm_poll,
++	.read = drm_read,
++	.llseek = noop_llseek,
++	.get_unmapped_area = drm_gem_get_unmapped_area,
++	.mmap = drm_gem_mmap,
++	.fop_flags = FOP_UNSIGNED_OFFSET,
++};
+ 
+ static const struct drm_driver g5p_drm_driver = {
+ 	.debugfs_init = g5p_jt_debugfs_init,
+@@ -951,28 +1006,7 @@ static const struct of_device_id g5p_drm_match[] = {
+ };
+ MODULE_DEVICE_TABLE(of, g5p_drm_match);
+ 
+-/*
+- * Normal Apple power-off requires quiescent firmware and a stable-off
+- * certificate before removing platform power. The pinned firmware epoch does
+- * not yet supply that contract. Do not use the one-shot kexec cycle here:
+- * it reopens platform power and permanently closes submission admission.
+- */
+-bool apple_g5p_system_sleep_ready(struct device *dev)
+-{
+-	/* Fail closed, including callers that cannot identify a bound device. */
+-	return false;
+-}
+-EXPORT_SYMBOL_GPL(apple_g5p_system_sleep_ready);
+-
+-static int g5p_system_sleep_prepare(struct device *dev)
+-{
+-	dev_warn(dev, "GPU-PM sleep refused: retained firmware resume unavailable\n");
+-	return -EBUSY;
+-}
+-
+-static const struct dev_pm_ops g5p_system_sleep_pm_ops = {
+-	.prepare = g5p_system_sleep_prepare,
+-};
++#include "system-sleep.inc"
+ 
+ static struct platform_driver g5p_drm_platform = {
+ 	.probe = g5p_drm_probe,
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-sched.inc b/drivers/gpu/drm/apple-g5p/drm-render-sched.inc
+index 744bfc317..c2463af31 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-sched.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render-sched.inc
+@@ -153,6 +153,10 @@ static void g5p_rsched_work(struct work_struct *work)
+ 					   struct g5p_rdev, sched_work);
+ 	struct g5p_drm *d = rd->drm;
+ 
++	bool sleep_user = g5p_sleep_enter(d->core);
++
++	if (!sleep_user && !READ_ONCE(d->core->sleep_failed))
++		return;
+ 	/* Each item drops the references it held; the device must outlive this loop. */
+ 	drm_dev_get(&d->drm);
+ 	for (;;) {
+@@ -216,4 +220,6 @@ static void g5p_rsched_work(struct work_struct *work)
+ 		drm_dev_put(&d->drm);
+ 	}
+ 	drm_dev_put(&d->drm);
++	if (sleep_user)
++		g5p_sleep_exit(d->core);
+ }
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+index c6c895756..7b4199cd4 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+@@ -2265,7 +2265,7 @@ static int g5p_rv3_pmctx_build(struct g5p_drm *d, struct g5p_render *r, u32 seq,
+ 		g5p_table_clean_page(g, &page[k]);
+ 	dma_wmb();
+ 	if (!ret) {
+-		r->pm_epoch = rd->recoveries + 1;
++		r->pm_epoch = rd->recoveries + rd->sleep_rebuilds + 1;
+ 		r->pm_dirty = true;
+ 	}
+ 	dev_info(
+@@ -2341,7 +2341,8 @@ static int g5p_rv3_pmctx_job(struct g5p_drm *d, struct g5p_render *r, u32 seq)
+ 		return 0;
+ 	page = &b->pm_set[r->pm_set * G5P_PMSET_PAGES];
+ 	mutex_lock(&rd->lock);
+-	if (r->pm_epoch != rd->recoveries + 1 || r->pm_blocks < rd->blocks) {
++	if (r->pm_epoch != rd->recoveries + rd->sleep_rebuilds + 1 ||
++	    r->pm_blocks < rd->blocks) {
+ 		ret = g5p_rv3_pmctx_build(d, r, seq, "rebuild");
+ 	} else if (!rd->pm_once) {
+ 		r->pm_dirty = true;
+@@ -2412,7 +2413,7 @@ static bool g5p_rv3_pm2_ready(struct g5p_drm *d, struct g5p_render *r,
+ 
+ 	if (r->pm2_failed || !r->aux2_mapped || r->pm_set < 0)
+ 		return false;
+-	if (!fresh && r->pm2_epoch == rd->recoveries + 1 &&
++	if (!fresh && r->pm2_epoch == rd->recoveries + rd->sleep_rebuilds + 1 &&
+ 	    r->pm2_blocks >= rd->blocks)
+ 		return true;
+ 	if (fresh)
+@@ -2492,7 +2493,7 @@ static bool g5p_rv3_pm2_ready(struct g5p_drm *d, struct g5p_render *r,
+ 		rd->pm_set_used[set] = true;
+ 		rd->pm_set_next = (set + 1) % b->pm_sets;
+ 	}
+-	r->pm2_epoch = rd->recoveries + 1;
++	r->pm2_epoch = rd->recoveries + rd->sleep_rebuilds + 1;
+ 	r->pm2_dirty = true;
+ 	return true;
+ }
+@@ -3696,46 +3697,30 @@ static void g5p_render_fw_rebuild(struct g5p_drm *d)
+  * pool are zeroed as at their allocation.  The held jobs run after this.  Returns false, having
+  * done nothing, when the core lock is busy.  A failed recovery leaves the device failed.
+  */
+-static bool g5p_rv3_recover(struct g5p_drm *d)
++/* Core -> rdev lock order. No user BO, VM contents or fence history is reset.
++ * Slots have been detached, or the failed firmware epoch has been replaced.
++ */
++static u32 g5p_rv3_rebuild_host(struct g5p_drm *d, struct g5p_render **drop,
++				u32 count)
+ {
+ 	struct g5p_rdev *rd = d->rdev;
+ 	struct g5p_diag *g = d->core;
+-	unsigned long deadline = jiffies + 2 * HZ, flags;
+-	struct g5p_render **drop = NULL;
+ 	struct g5p_render *r;
+-	u32 n = 0, count = 0, dropped = 0, stage;
+-	int ret;
++	unsigned long flags;
++	u32 n = 0;
+ 
+-	while (!mutex_trylock(&g->lock)) {
+-		if (time_after(jiffies, deadline))
+-			return false;
+-		msleep(5);
+-	}
+-	/* The old epoch's bindings are void from here: no edit may publish a tag into it. */
+-	mutex_lock(&rd->lock);
+-	list_for_each_entry(r, &rd->contexts, rdev_link) {
+-		WRITE_ONCE(r->bound, false);
+-		r->pm_dirty = true;
+-		r->pm2_dirty = true;
+-		count++;
+-	}
+-	mutex_unlock(&rd->lock);
+-	drop = kcalloc(max(count, 1U), sizeof(*drop), GFP_KERNEL);
+-	rd->recoveries++;
+-	rd->recover_streak++;
+-	ret = drop ? g5p_recover(g, "lost-job", &stage) : -ENOMEM;
+-	if (ret) {
+-		g5p_rv3_terminal(g, G5P_RU_TERM_FAULT, "recover-failed");
+-		WRITE_ONCE(rd->recovering, false);
+-		mutex_unlock(&g->lock);
+-		kfree(drop);
+-		dev_emerg(
+-			g->dev,
+-			"RENDER-V3 recover failed ret=%d n=%u: the epoch ends end=v3\n",
+-			ret, rd->recoveries);
+-		return true;
++	lockdep_assert_held(&g->lock);
++	/* Sleep reuses the transport allocation. Retire its host-only one-shot
++	 * doorbell state; firmware roots and ring cursors remain retained.
++	 */
++	if (g->sleep_reserved && g->boot->r73b) {
++		struct g5p_r73b *x = g->boot->r73b;
++
++		spin_lock_irqsave(&g->boot->event_lock, flags);
++		memset(x->r74f_bell, 0, sizeof(x->r74f_bell));
++		x->r74f_active = 0;
++		spin_unlock_irqrestore(&g->boot->event_lock, flags);
+ 	}
+-	g5p_ru_term_reset(&g5p_rv3_term);
+ 	/* the new firmware's PM has written nothing back yet: no context is its last or previous */
+ 	rd->pm_last = NULL;
+ 	rd->pm_prev = NULL;
+@@ -3773,6 +3758,11 @@ static bool g5p_rv3_recover(struct g5p_drm *d)
+ 		g5p_table_clean_page(g, &rd->physical[i]);
+ 	}
+ 	list_for_each_entry(r, &rd->contexts, rdev_link) {
++		WRITE_ONCE(r->bound, false);
++		r->pm_dirty = true;
++		r->pm2_dirty = true;
++		r->pm_epoch = 0;
++		r->pm2_epoch = 0;
+ 		r->jobs = 0;
+ 		r->dc_target = 0;
+ 		WRITE_ONCE(r->live_maps, false);
+@@ -3788,6 +3778,50 @@ static bool g5p_rv3_recover(struct g5p_drm *d)
+ 		}
+ 	}
+ 	mutex_unlock(&rd->lock);
++	return n;
++}
++
++static bool g5p_rv3_recover(struct g5p_drm *d)
++{
++	struct g5p_rdev *rd = d->rdev;
++	struct g5p_diag *g = d->core;
++	unsigned long deadline = jiffies + 2 * HZ, flags;
++	struct g5p_render **drop = NULL;
++	struct g5p_render *r;
++	u32 n = 0, count = 0, dropped = 0, stage;
++	int ret;
++
++	while (!mutex_trylock(&g->lock)) {
++		if (time_after(jiffies, deadline))
++			return false;
++		msleep(5);
++	}
++	/* The old epoch's bindings are void from here: no edit may publish a tag into it. */
++	mutex_lock(&rd->lock);
++	list_for_each_entry(r, &rd->contexts, rdev_link) {
++		WRITE_ONCE(r->bound, false);
++		r->pm_dirty = true;
++		r->pm2_dirty = true;
++		count++;
++	}
++	mutex_unlock(&rd->lock);
++	drop = kcalloc(max(count, 1U), sizeof(*drop), GFP_KERNEL);
++	rd->recoveries++;
++	rd->recover_streak++;
++	ret = drop ? g5p_recover(g, "lost-job", &stage) : -ENOMEM;
++	if (ret) {
++		g5p_rv3_terminal(g, G5P_RU_TERM_FAULT, "recover-failed");
++		WRITE_ONCE(rd->recovering, false);
++		mutex_unlock(&g->lock);
++		kfree(drop);
++		dev_emerg(
++			g->dev,
++			"RENDER-V3 recover failed ret=%d n=%u: the epoch ends end=v3\n",
++			ret, rd->recoveries);
++		return true;
++	}
++	g5p_ru_term_reset(&g5p_rv3_term);
++	n = g5p_rv3_rebuild_host(d, drop, count);
+ 	spin_lock_irqsave(&d->status_lock, flags);
+ 	d->last_error = 0;
+ 	d->job_error = 0;
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render.inc b/drivers/gpu/drm/apple-g5p/drm-render.inc
+index 4c6416ecb..7effd5820 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render.inc
+@@ -229,6 +229,7 @@ struct g5p_rdev {
+ 	 */
+ 	bool recovering;
+ 	u32 recoveries;
++	u32 sleep_rebuilds;
+ 	u32 recover_streak; /* recoveries since a job completed (core lock) */
+ 	struct list_head
+ 		contexts; /* every render context (lock), for the recovery */
+diff --git a/drivers/gpu/drm/apple-g5p/system-sleep.inc b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+new file mode 100644
+index 000000000..25b1e8b2c
+--- /dev/null
++++ b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+@@ -0,0 +1,345 @@
++// SPDX-License-Identifier: GPL-2.0-only OR MIT
++/* Apple 20H350: c81b18 -> c9fa10 -> ca0f78; wake c83b18.
++ * Admission is reserved through complete, including another device's abort.
++ * No terminal-retire latch is used for a reversible sleep attempt.
++ */
++static bool g5p_sleep_idle(struct g5p_drm *d)
++{
++	struct g5p_rdev *rd = d->rdev;
++	struct g5p_render *r;
++	unsigned long flags;
++	bool idle;
++
++	if (rd->cu_sequence || atomic_read(&d->accepted) ||
++	    atomic_read(&d->r8_queued) || READ_ONCE(rd->executing) ||
++	    rd->ahead || rd->stuck || rd->recovering || rd->dc_pending ||
++	    rd->close_deferred[0] || rd->close_deferred[1] ||
++	    g5p_ru_term_failed(&g5p_rv3_term))
++		return false;
++	spin_lock_irqsave(&rd->sched_lock, flags);
++	idle = list_empty(&rd->sched.run);
++	spin_unlock_irqrestore(&rd->sched_lock, flags);
++	if (!idle)
++		return false;
++	/* Re-read the latest TA/3D stamps, including the depth-2 record slot.
++	 * A CPU retirement flag alone is not Apple's all-stamps certificate.
++	 */
++	if (rd->sequence)
++		for (u32 e = 0; e < 2; e++)
++			if (!g5p_ru_retired_pl(g5p_ru_page(d->core->boot, e),
++					       g5p_ru_meta(e), e, rd->sequence,
++					       g5p_rv3_js(rd, rd->sequence),
++					       rd->sequence))
++				return false;
++	mutex_lock(&rd->lock);
++	list_for_each_entry(r, &rd->contexts, rdev_link)
++		for (u32 i = 0; i < 2; i++)
++			if (r->submitted[i] &&
++			    (!r->consumed[i] || !r->retired[i]))
++				idle = false;
++	mutex_unlock(&rd->lock);
++	return idle;
++}
++
++/* R1 only, as Apple's isQuiescent/isStableOff. Never infer bus retirement
++ * from a completed userspace fence or GPC=0 alone.
++ */
++static bool g5p_sleep_certificate(struct g5p_diag *g, bool stable)
++{
++	u32 state, mode;
++
++	if (READ_ONCE(g->boot->failed) || READ_ONCE(g->boot->event_failed) ||
++	    READ_ONCE(g->boot->r73b->early_power_abort))
++		return false;
++	state = readl(g->window[1] + 0x1000);
++
++	if (state & 0x1f)
++		return false;
++	mode = readl(g->window[1]);
++	if (stable && mode >> 30 == 1)
++		return true;
++	return (mode & 0x60000000) == 0x60000000 && !readl(g->window[1] + 8);
++}
++
++static bool g5p_sleep_rings(struct g5p_diag *g)
++{
++	u32 cons, prod;
++
++	for (u32 i = 0; i < G5P_TD_NRING; i++)
++		if (g5p_td_op_ring_read(g, i, &cons, &prod) || cons > 255 ||
++		    cons != prod)
++			return false;
++	return true;
++}
++
++static void g5p_sleep_fail(struct g5p_drm *d, int ret)
++{
++	struct g5p_diag *g = d->core;
++
++	/* RAM only: no retry, ACK or diagnostic MMIO after a failed transition. */
++	if (!g->sleep_irq_off && g->boot->irq_ready) {
++		disable_irq(g->boot->irq);
++		g->sleep_irq_off = true;
++	}
++	g->sleep_failed = true;
++	WRITE_ONCE(g->boot->failed, true);
++	WRITE_ONCE(g->boot->stopped, true);
++	g5p_mmio_gate(g);
++	g5p_rv3_terminal(g, G5P_RU_TERM_FAULT, "sleep-failed");
++	g5p_r8_admit_close(&g5p_r8_state.admit);
++	g5p_rsched_kick(
++		d); /* pending fences fail, including unsignalled inputs */
++	dev_err(g->dev, "GPU-PM frozen ret=%d; no further MMIO\n", ret);
++}
++
++void apple_g5p_system_sleep_complete(struct device *dev)
++{
++	struct g5p_diag *g = dev_get_drvdata(dev);
++
++	if (!g || !g->sleep_reserved || g->sleep_off)
++		return;
++	g->sleep_reserved = false;
++	/* A failed epoch stays terminal, but host close must still be possible. */
++	atomic_andnot(BIT(31), &g->sleep_gate);
++	g5p_rsched_kick(g->event_cookie);
++	dev_info(dev, "GPU-PM complete failed=%u\n", g->sleep_failed);
++}
++
++EXPORT_SYMBOL_GPL(apple_g5p_system_sleep_complete);
++
++static int g5p_system_sleep_prepare(struct device *dev)
++{
++	struct g5p_diag *g = dev_get_drvdata(dev);
++	struct g5p_drm *d;
++	struct g5p_boot *b;
++	struct g5p_kq_ctx c = { .g = g };
++	u64 deadline;
++	int ret = -EBUSY;
++
++	if (!g || !g->event_cookie)
++		return -EBUSY;
++	if (READ_ONCE(g->sleep_reserved))
++		return g->sleep_failed ? -EBUSY : 0;
++	if (atomic_fetch_or(BIT(31), &g->sleep_gate) < 0)
++		return -EBUSY;
++	deadline = ktime_get_ns() + 20 * NSEC_PER_MSEC;
++	while ((atomic_read(&g->sleep_gate) & INT_MAX) &&
++	       ktime_get_ns() < deadline)
++		usleep_range(100, 200);
++	if (atomic_read(&g->sleep_gate) & INT_MAX)
++		goto refuse;
++	if (!g5p_kq_lock(&c))
++		goto refuse;
++	d = g->event_cookie;
++	b = g->boot;
++	if (g->sleep_failed || g5p_r8_admit_closed(&g5p_r8_state.admit) || !b ||
++	    !g->powered || !g->fender_ready || g->mmio_off || !b->released ||
++	    !b->alive || b->failed || b->event_failed || b->stopped ||
++	    !b->irq_ready || !b->r73b ||
++	    READ_ONCE(b->r73b->early_power_abort) || !g5p_sleep_idle(d))
++		goto unlock;
++	/* No submitters, queued work or IRQ-side ALIVE action can publish now. */
++	if (g5p_boot_drain(g) || !g5p_sleep_rings(g))
++		goto unlock;
++	deadline = ktime_get_ns() + 20 * NSEC_PER_MSEC;
++	do {
++		if (g5p_sleep_certificate(g, false)) {
++			g->sleep_reserved = true;
++			ret = 0;
++			break;
++		}
++		usleep_range(100, 200);
++	} while (ktime_get_ns() < deadline);
++unlock:
++	mutex_unlock(&g->lock);
++	if (!ret) {
++		dev_info(dev, "GPU-PM prepared: admission reserved\n");
++		return 0;
++	}
++refuse:
++	atomic_andnot(BIT(31), &g->sleep_gate);
++	g5p_rsched_kick(g->event_cookie);
++	dev_info(dev,
++		 "GPU-PM sleep refused: busy or no quiescent certificate\n");
++	return -EBUSY;
++}
++
++/* The early caller reserves admission; PM complete releases it on abort/wake.
++ * This is deliberately stronger than an observation-only readiness query.
++ */
++bool apple_g5p_system_sleep_ready(struct device *dev)
++{
++	return !g5p_system_sleep_prepare(dev);
++}
++EXPORT_SYMBOL_GPL(apple_g5p_system_sleep_ready);
++
++static int g5p_system_suspend(struct device *dev)
++{
++	struct g5p_diag *g = dev_get_drvdata(dev);
++	struct g5p_drm *d = g->event_cookie;
++	struct g5p_boot *b = g->boot;
++	struct g5p_render **drop, *r;
++	u32 slots[G5P_RU_USER_SLOTS], held, count = 0, n = 0;
++	int ret;
++
++	if (!g->sleep_reserved || g->sleep_failed)
++		return -EBUSY;
++	mutex_lock(&g->lock);
++	if (!READ_ONCE(b->alive) || READ_ONCE(b->failed) ||
++	    READ_ONCE(b->event_failed) || READ_ONCE(b->stopped) ||
++	    READ_ONCE(b->r73b->early_power_abort) || !g5p_sleep_idle(d) ||
++	    !g5p_sleep_rings(g) || !g5p_sleep_certificate(g, false)) {
++		ret = -EBUSY;
++		goto out;
++	}
++	mutex_lock(&d->rdev->lock);
++	list_for_each_entry(r, &d->rdev->contexts, rdev_link)
++		count++;
++	mutex_unlock(&d->rdev->lock);
++	drop = kcalloc(max(count, 1U), sizeof(*drop), GFP_KERNEL);
++	if (!drop) {
++		ret = -EBUSY;
++		goto out;
++	}
++	held = g5p_ru_held_slots(g5p_boot_shared(b, 0x86),
++				 g5p_boot_shared(b, 0x84), slots,
++				 ARRAY_SIZE(slots));
++	ret = held ? g5p_rv3_unbind_slots(d, slots, held, "sleep") : 0;
++	if (ret)
++		goto failed;
++	/* Detach has changed firmware ownership: any later failure is terminal. */
++	if (!g5p_sleep_rings(g) || !g5p_sleep_certificate(g, false)) {
++		ret = -EBUSY;
++		goto failed;
++	}
++	ret = g5p_fender_write(g, 0x10, 0); /* Fender mode 3 */
++	if (!ret)
++		ret = g5p_fender_write(g, 0x20000, 0);
++	if (!ret)
++		ret = g5p_fender_poll(g, 0x1000, 0x10, 0);
++	if (!ret)
++		ret = g5p_fender_write(g, 0x1000, 0x10);
++	WRITE_ONCE(b->alive, false);
++	WRITE_ONCE(b->stopped, true);
++	disable_irq(b->irq);
++	g->sleep_irq_off = true;
++	if (ret || !g5p_sleep_certificate(g, true)) {
++		ret = ret ?: -EIO;
++		goto failed;
++	}
++	n = g5p_rv3_rebuild_host(d, drop, count);
++	d->rdev->sleep_rebuilds++;
++	g5p_mmio_gate(g);
++	g->fender_ready = false;
++	ret = pm_runtime_put_sync_suspend(dev);
++	g->powered = false; /* put consumed our reference, including on error */
++	if (ret < 0)
++		goto failed;
++	g->sleep_off = true;
++	dev_info(dev, "GPU-PM off: stable-off epoch=%u\n",
++		 d->rdev->sleep_rebuilds);
++	ret = 0;
++	goto free;
++failed:
++	g5p_sleep_fail(d, ret);
++free:
++	mutex_unlock(&g->lock);
++	for (u32 i = 0; i < n; i++) {
++		g5p_context_put(drop[i]->ctx);
++		drm_dev_put(&d->drm);
++	}
++	kfree(drop);
++	return ret;
++out:
++	mutex_unlock(&g->lock);
++	return ret;
++}
++
++static int g5p_system_resume(struct device *dev)
++{
++	struct g5p_diag *g = dev_get_drvdata(dev);
++	struct g5p_drm *d = g->event_cookie;
++	struct g5p_boot *b = g->boot;
++	unsigned long deadline;
++	int ret;
++
++	if (!g->sleep_off)
++		return g->sleep_failed ? -EIO : 0;
++	mutex_lock(&g->lock);
++	ret = pm_runtime_resume_and_get(dev);
++	if (ret < 0)
++		goto failed;
++	g->powered = true;
++	g->sleep_boot = true;
++	/* A witnessed platform off/on invalidates DS108's old ALIVE generation.
++  * Retained maps/image are validated, never allocated or reinitialised.
++  */
++	ret = g5p_ds_hook_recover(g, 0);
++	if (ret)
++		goto failed;
++	g->fender_ready = true;
++	g->mmio_off = false;
++	b->stopped = false;
++	ret = g5p_boot_program_stream(g, true);
++	g5p_ds_hook_wake(g, ret);
++	if (ret)
++		goto failed;
++	g5p_ds_hook_maps(g, 0);
++	g5p_ds_hook_load(g, 0);
++	g5p_ds_hook_release(g, 0);
++	deadline = jiffies + 3 * HZ;
++	do {
++		/* IRQ remains masked. Consume fresh ALIVE in RAM without cmd8 or kicks. */
++		ret = g5p_boot_drain(g);
++		if (ret || READ_ONCE(b->alive))
++			break;
++		usleep_range(1000, 2000);
++	} while (time_before(jiffies, deadline));
++	if (!ret && !b->alive)
++		ret = -ETIMEDOUT;
++	if (!ret) {
++		u32 raw = readl(g->window[1] + 0x1000);
++
++		b->r73b->early_state = raw;
++		if (!g5p_gpc_ok(raw)) {
++			WRITE_ONCE(b->r73b->early_power_abort, true);
++			ret = -EHOSTDOWN;
++		}
++	}
++	g5p_ds_hook_alive(g, ret);
++	if (!ret)
++		ret = g5p_ds_hook_claim(g);
++	if (ret)
++		goto failed;
++	g5p_ru_term_reset(&g5p_rv3_term);
++	g->sleep_boot = false;
++	g->sleep_off = false;
++	g5p_td_op_aic_ack(g);
++	g->sleep_irq_off = false;
++	enable_irq(b->irq);
++	dev_info(dev, "GPU-PM on: fresh ALIVE gen=%u epoch=%u\n", g5p_ds_gen(),
++		 d->rdev->sleep_rebuilds);
++	mutex_unlock(&g->lock);
++	return 0;
++failed:
++	g->sleep_boot = false;
++	g->sleep_off = false;
++	g5p_sleep_fail(d, ret);
++	mutex_unlock(&g->lock);
++	return ret;
++}
++
++static int g5p_system_hibernate(struct device *dev)
++{
++	return -EBUSY;
++}
++
++static const struct dev_pm_ops g5p_system_sleep_pm_ops = {
++	.prepare = g5p_system_sleep_prepare,
++	.complete = apple_g5p_system_sleep_complete,
++	.suspend = g5p_system_suspend,
++	.resume = g5p_system_resume,
++	.freeze = g5p_system_hibernate,
++	.poweroff = g5p_system_hibernate,
++	.restore = g5p_system_hibernate,
++};
+diff --git a/include/linux/apple-g5p-pm.h b/include/linux/apple-g5p-pm.h
+index 5b152b8fd..7d3316769 100644
+--- a/include/linux/apple-g5p-pm.h
++++ b/include/linux/apple-g5p-pm.h
+@@ -8,18 +8,23 @@
+ struct device;
+ 
+ /*
+- * For the platform pre-sync sleep veto. Missing support is never a promise
+- * that a bound GPU can sleep. Currently all bound G5P devices must be vetoed.
+- * A future positive result requires an admission reservation through abort
+- * or resume; a snapshot alone cannot authorize power removal.
++ * The pre-sync veto reserves admission on success, through PM complete.
++ * Call only for the bound G5P platform device, from sleepable context.
++ * If sleep aborts before device PM, the caller MUST release the reservation
++ * with apple_g5p_system_sleep_complete(), including every PM_POST_* path.
++ * A false result has no reservation and leaves the running epoch intact.
+  */
+ #if IS_REACHABLE(CONFIG_DRM_APPLE_G5P)
+ bool apple_g5p_system_sleep_ready(struct device *dev);
++void apple_g5p_system_sleep_complete(struct device *dev);
+ #else
+ static inline bool apple_g5p_system_sleep_ready(struct device *dev)
+ {
+ 	return false;
+ }
++static inline void apple_g5p_system_sleep_complete(struct device *dev)
++{
++}
+ #endif
+ 
+ #endif /* _LINUX_APPLE_G5P_PM_H */

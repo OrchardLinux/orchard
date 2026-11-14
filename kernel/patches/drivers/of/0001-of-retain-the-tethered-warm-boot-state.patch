@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 17:15:00 +0100
+Subject: [PATCH] of: retain the tethered warm boot state
+
+A tethered kernel inherits initialized hardware rather than power-on
+state. Retain the board-selected warm handoff state so probe and
+shutdown do not discard resources needed by the incoming kernel.
+
+Assisted-by: LLM
+---
+ drivers/of/of_reserved_mem.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/drivers/of/of_reserved_mem.c b/drivers/of/of_reserved_mem.c
+index 8c9d6395d..76cf3e5a4 100644
+--- a/drivers/of/of_reserved_mem.c
++++ b/drivers/of/of_reserved_mem.c
+@@ -275,6 +275,16 @@ void __init fdt_scan_reserved_mem_late(void)
+ 		return;
+ 	}
+ 
++	/* Early architecture fixups may have added static reservations. */
++	total_reserved_mem_cnt = reserved_mem_count;
++	fdt_for_each_subnode(child, fdt, node) {
++		int len;
++
++		if (of_fdt_device_is_available(fdt, child) &&
++		    fdt_getprop(fdt, child, "reg", &len) && len)
++			total_reserved_mem_cnt++;
++	}
++
+ 	/* Attempt dynamic allocation of a new reserved_mem array */
+ 	if (alloc_reserved_mem_array())
+ 		return;

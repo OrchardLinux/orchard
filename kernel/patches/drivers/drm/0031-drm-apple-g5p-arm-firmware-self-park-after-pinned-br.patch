@@ -1,0 +1,622 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 13:28:33 +0100
+Subject: [PATCH] drm/apple-g5p: arm firmware self-park after pinned bring-up
+
+Keep the proven pinned record through ALIVE and control completion. Arm
+the idle policy only on a complete live epoch, with policy+4 published
+before ctrl+0x20. Refused epochs remain pinned. The coefficient block is
+Apple's observed record; its role in avoiding pstate zero is inferred,
+not independently isolated. Never disarm an armed live epoch.
+
+Assisted-by: LLM
+---
+ drivers/gpu/apple-g5p/boot-r74f.inc          |   5 +-
+ drivers/gpu/apple-g5p/boot.inc               |  89 ++++++++++++++
+ drivers/gpu/apple-g5p/idle-power.inc         |   8 +-
+ drivers/gpu/apple-g5p/kick.inc               |   5 +-
+ drivers/gpu/apple-g5p/mmio-licence.h         |   8 +-
+ drivers/gpu/apple-g5p/mmio.inc               |   2 +-
+ drivers/gpu/apple-g5p/perf-envelope.h        | 121 +++++++++++++++++++
+ drivers/gpu/apple-g5p/recover.inc            |   1 +
+ drivers/gpu/apple-g5p/render-user-wake.h     |   6 +-
+ drivers/gpu/drm/apple-g5p/a9-gpu-drm.c       | 111 +++++++++++++++++
+ drivers/gpu/drm/apple-g5p/drm-compute-v1.inc |   5 +-
+ drivers/gpu/drm/apple-g5p/drm-render-v3.inc  |  34 ++++--
+ 12 files changed, 377 insertions(+), 18 deletions(-)
+
+diff --git a/drivers/gpu/apple-g5p/boot-r74f.inc b/drivers/gpu/apple-g5p/boot-r74f.inc
+index 71cf79d..9ab4947 100644
+--- a/drivers/gpu/apple-g5p/boot-r74f.inc
++++ b/drivers/gpu/apple-g5p/boot-r74f.inc
+@@ -100,7 +100,10 @@ static int g5p_r74f_ring(struct g5p_diag *g, const struct g5p_r74f_bell *f,
+ 			*state = readl(g->window[1] + 0x1000);
+ 		}
+ 	}
+-	if (!g5p_gpc_ok(*state))
++	/* self-park: a parked firmware wakes through this doorbell (Apple: any nibble) */
++	if (!g5p_gpc_ok(*state) &&
++	    !g5p_park_may_ring(READ_ONCE(b->park_epoch), *state,
++			       readl(g->window[1])))
+ 		return -EHOSTDOWN;
+ 	dma_wmb();
+ 	writel(f->kind == G5P_R74F_3D ? 0x11 : 0x10, g->rgx + 0xb00);
+diff --git a/drivers/gpu/apple-g5p/boot.inc b/drivers/gpu/apple-g5p/boot.inc
+index 286620e..beaf75c 100644
+--- a/drivers/gpu/apple-g5p/boot.inc
++++ b/drivers/gpu/apple-g5p/boot.inc
+@@ -197,6 +197,11 @@ struct g5p_boot {
+ 	u64 seed_stamp,
+ 		seed_gpc1; /* seed 3/4: the stamp and the GPC1 write (arch timer) */
+ 	u32 meta6d4;
++	/* self-park: iOS's policy record (latched at map), ctrl+0x20 as last written, and
++	 * park_epoch: armed at least once since this firmware boot, so the firmware may be parked
++	 * (the doorbell and R0 rules follow it; only a host-driven boot clears it)
++	 */
++	bool self_park, self_park_armed, park_epoch;
+ 	u32 r78_ctrl0;
+ 	u32 r73_aux_drain;
+ 	u32 r73_aux_entries[6];
+@@ -365,6 +370,84 @@ static u8 *g5p_boot_shared(struct g5p_boot *b, u32 slot)
+ 	return b->shared[off / G5P_GPU_PAGE].cpu + off % G5P_GPU_PAGE;
+ }
+ 
++/* self-park: one word of a live boot object (root or shared group, paged), RAM only */
++static u32 *g5p_park_word(struct g5p_boot *b, u32 slot, u32 offset)
++{
++	u32 off = b->layout.offset[slot] + offset;
++	struct g5p_dma_page *pages = b->layout.group[slot] ? b->shared : b->root;
++
++	return (u32 *)(pages[off / G5P_GPU_PAGE].cpu + off % G5P_GPU_PAGE);
++}
++
++/*
++ * self-park (perf-envelope.h): the epoch's park in the live record.  The firmware re-reads
++ * ctrl+0x20 on every tick (0x1001061c) and the governor reads its policy record live, so
++ * arming needs no reboot.  Armed only on a complete epoch: ALIVE seen, control stream done,
++ * nothing failed or stopped; a refused arm writes nothing, which leaves the pinned never-park
++ * epoch exactly as it was booted.  Arm order: iOS's coefficient block and envelope, then
++ * policy+4 = 16 (the wake's boot sampler divides by it), then ctrl+0x20 = 1, each store set
++ * before the next (dma_wmb).  Disarm (a host-driven boot of a stopped firmware): ctrl+0x20 = 0
++ * and the pinned record's boot words.  The read-back is a Normal-NC load of the line (the
++ * visibility rule of g5p_rv3_fw_touch()).  RAM only.
++ */
++static void g5p_park_set(struct g5p_diag *g, bool on, const char *why)
++{
++	struct g5p_boot *b = g->boot;
++	u32 *w, now, i;
++
++	lockdep_assert_held(&g->lock);
++	if (!b || !b->maps_ready || !b->self_park)
++		return;
++	if (on && (!READ_ONCE(b->alive) || !READ_ONCE(b->control_complete) ||
++		   READ_ONCE(b->failed) || READ_ONCE(b->event_failed) ||
++		   READ_ONCE(b->stopped))) {
++		dev_info(g->dev,
++			 "G5P self-park arm refused why=%s alive=%u control=%u failed=%u stopped=%u "
++			 "end=park\n",
++			 why, b->alive, b->control_complete, b->failed,
++			 b->stopped);
++		return;
++	}
++	w = g5p_park_word(b, G5P_PERF_CTL, G5P_PARK_CTL_FLAG);
++	if (on) {
++		for (i = 0; i < ARRAY_SIZE(g5p_park_policy); i++)
++			WRITE_ONCE(*g5p_park_word(b, G5P_PERF_POLICY,
++						  g5p_park_policy[i].offset),
++				   g5p_park_policy[i].value);
++		WRITE_ONCE(*g5p_park_word(b, G5P_PERF_CTL, 0x1028),
++			   G5P_PARK_ENVELOPE);
++		dma_wmb();
++		WRITE_ONCE(*g5p_park_word(b, G5P_PERF_POLICY, 4),
++			   G5P_PARK_SAMPLE_MS);
++		dma_wmb();
++		WRITE_ONCE(*w, 1);
++	} else {
++		WRITE_ONCE(*w, 0);
++		dma_wmb();
++		for (i = 0; i < ARRAY_SIZE(g5p_park_policy); i++)
++			WRITE_ONCE(*g5p_park_word(b, G5P_PERF_POLICY,
++						  g5p_park_policy[i].offset),
++				   g5p_park_pinned_value(
++					   g5p_park_policy[i].offset));
++		WRITE_ONCE(*g5p_park_word(b, G5P_PERF_CTL, 0x1028),
++			   G5P_PIN_ENVELOPE);
++		WRITE_ONCE(*g5p_park_word(b, G5P_PERF_POLICY, 4), 0);
++		WRITE_ONCE(*g5p_park_word(b, G5P_PERF_POLICY, 0), 0);
++	}
++	dma_wmb();
++	now = READ_ONCE(*w);
++	WRITE_ONCE(b->self_park_armed, on);
++	if (on)
++		WRITE_ONCE(b->park_epoch, true);
++	dev_info(g->dev,
++		 "G5P self-park %s why=%s ctl20=%u policy4=%u envelope=%u pin=%u/%u end=park\n",
++		 on ? "armed" : "disarmed", why, now,
++		 READ_ONCE(*g5p_park_word(b, G5P_PERF_POLICY, 4)),
++		 READ_ONCE(*g5p_park_word(b, G5P_PERF_CTL, 0x1028)),
++		 READ_ONCE(*g5p_park_word(b, G5P_PERF_CTL, 0x1038)),
++		 READ_ONCE(*g5p_park_word(b, G5P_PERF_CTL, 0x1040)));
++}
++
+ static int g5p_boot_maps(struct g5p_diag *g)
+ {
+ 	struct g5p_boot *b;
+@@ -433,6 +516,12 @@ static int g5p_boot_maps(struct g5p_diag *g)
+ 	;
+ 	b->perf_poweron =
+ 		(1) ? (0 ? G5P_OC_STATE : g5p_perf_seed_q(b->gpu_perf)) : 0;
++	/* self-park: bring-up is the pinned never-park record; the park is armed in the live
++	 * record once the epoch is complete (g5p_park_set(), perf-envelope.h).
++	 */
++	b->self_park = true;
++	b->self_park_armed = false;
++	b->park_epoch = false;
+ 	b->perf_seed = seed && !b->perf_poweron ? g5p_perf_seed_q(b->gpu_perf) :
+ 						  0;
+ 	b->perf_seed_mode = b->perf_seed ? seed : 0;
+diff --git a/drivers/gpu/apple-g5p/idle-power.inc b/drivers/gpu/apple-g5p/idle-power.inc
+index d2ce718..4401fd6 100644
+--- a/drivers/gpu/apple-g5p/idle-power.inc
++++ b/drivers/gpu/apple-g5p/idle-power.inc
+@@ -28,9 +28,13 @@ static ssize_t idle_power_status_show(struct device *dev,
+ 	ret = sysfs_emit(buf,
+ 			 "available=1 gen=%u alive=%u failed=%u stopped=%u powered=%u "
+ 			 "policy_state=%u target=%u policy_pstate=%u sample_ms=%u "
+-			 "meta71c=%u source=shared-ram atomic=0 hw_ack=0 mmio=0\n",
++			 "meta71c=%u self_park=%u armed=%u park_epoch=%u ctl20=%u "
++			 "source=shared-ram atomic=0 hw_ack=0 mmio=0\n",
+ 			 g5p_ds_gen(), b->alive, b->failed, b->stopped,
+-			 g->powered, state, target, mirror, period, b->meta71c);
++			 g->powered, state, target, mirror, period, b->meta71c,
++			 b->self_park, b->self_park_armed, b->park_epoch,
++			 READ_ONCE(*(u32 *)(g5p_boot_shared(b, G5P_PERF_CTL) +
++					    G5P_PARK_CTL_FLAG)));
+ out:
+ 	mutex_unlock(&g->lock);
+ 	return ret;
+diff --git a/drivers/gpu/apple-g5p/kick.inc b/drivers/gpu/apple-g5p/kick.inc
+index 6ef7395..1addf0a 100644
+--- a/drivers/gpu/apple-g5p/kick.inc
++++ b/drivers/gpu/apple-g5p/kick.inc
+@@ -19,7 +19,10 @@ static int g5p_prepare_kick(struct g5p_diag *g, const char *name)
+ 	if (raw & ~7U)
+ 		return -EPROTO;
+ 	state = readl(g->window[1] + 0x1000);
+-	if (!g5p_gpc_ok(state))
++	/* self-park: a parked firmware wakes through the kick that follows */
++	if (!g5p_gpc_ok(state) &&
++	    !g5p_park_may_ring(READ_ONCE(g->boot->park_epoch), state,
++			       readl(g->window[1])))
+ 		return -EHOSTDOWN;
+ 	if (READ_ONCE(g->boot->failed))
+ 		return -EIO;
+diff --git a/drivers/gpu/apple-g5p/mmio-licence.h b/drivers/gpu/apple-g5p/mmio-licence.h
+index d9d23ca..19135ea 100644
+--- a/drivers/gpu/apple-g5p/mmio-licence.h
++++ b/drivers/gpu/apple-g5p/mmio-licence.h
+@@ -86,11 +86,13 @@ static inline enum g5p_mmio_why g5p_mmio_check_gpc(u32 gpc, u32 max)
+  * has no such window; at pin 400/500 the 3D-completion and clock samples saw bit 29 0 times, while
+  * the park tuple's rung 5 (2026-11-03) saw it on 749 of 983 3D completions and then froze the SoC.
+  * iOS reads R0 only at a fault event, never at idle.  `override` = mmio_r0_park (DFU-class rungs
+- * only).
++ * only).  `park_epoch` (self-park): the firmware's own idle park is armed in this epoch, so
++ * the GPC can drop to 0 between any R1 check and the load whatever the envelope.
+  */
+-static inline bool g5p_mmio_r0_regime_ok(u32 gpu_perf, bool override)
++static inline bool g5p_mmio_r0_regime_ok(u32 gpu_perf, bool park_epoch,
++					 bool override)
+ {
+-	return override || gpu_perf >= 100;
++	return override || (!park_epoch && gpu_perf >= 100);
+ }
+ 
+ /*
+diff --git a/drivers/gpu/apple-g5p/mmio.inc b/drivers/gpu/apple-g5p/mmio.inc
+index b8c25bd..d59e869 100644
+--- a/drivers/gpu/apple-g5p/mmio.inc
++++ b/drivers/gpu/apple-g5p/mmio.inc
+@@ -141,7 +141,7 @@ static int g5p_mmio_hold(struct g5p_diag *g, struct g5p_mmio_ticket *t,
+ 	}
+ 	/* before any bus access: an R0 ticket in a park epoch is refused outright */
+ 	if (!(flags & G5P_MMIO_CENSUS) && b &&
+-	    !g5p_mmio_r0_regime_ok(b->gpu_perf, (0))) {
++	    !g5p_mmio_r0_regime_ok(b->gpu_perf, READ_ONCE(b->park_epoch), (0))) {
+ 		t->why = G5P_MMIO_PARKEPOCH;
+ 		t->t_end_ns = ktime_get_mono_fast_ns();
+ 		spin_unlock_irqrestore(&g->mmio_lock, irq);
+diff --git a/drivers/gpu/apple-g5p/perf-envelope.h b/drivers/gpu/apple-g5p/perf-envelope.h
+index 57387bc..7ec1ca1 100644
+--- a/drivers/gpu/apple-g5p/perf-envelope.h
++++ b/drivers/gpu/apple-g5p/perf-envelope.h
+@@ -104,4 +104,125 @@ static inline void g5p_perf_seed(const struct g5p_boot_layout *p, u8 *root,
+ 	}
+ }
+ 
++/*
++ * Self-park: the firmware's own idle park (Apple's Level 1), as the AGX kext configures it on J71t
++ * (iOS 16.7.10 20H350; firmware addresses are the META image's, kext addresses unslid).
++ *
++ * Who parks.  The firmware governor 0x1000c0d8 ends every pass in the idle tail 0x10009bd8.
++ * The tail calls the try-park wrapper 0x1000968c -> 0x1001cec8 only when, in order:
++ *   priv+0x188 != 0 (0x10009bec), policy+0x34 != 0, the engines are idle (0x100013f4), every
++ *   root ring is empty (0x1000176c), 0x10001bdc == 0 and 0x1001ee98 == 0.
++ * priv+0x188 is the host's control word ctrl+0x20, re-read on every firmware tick
++ * (0x1001061c -> 0x10001328, copy at 0x10001388).  The kext writes ctrl+0x20 =
++ * platform+0x510 & 1 (fffffff006c97888); j71t's platform word is 0x00200545, so iOS runs with
++ * 1.  The same bit decides the host's submit path (AGXMetaFirmware_submitDeviceControl
++ * fffffff006ca05d4): with it clear a parked GPC is power-cycled and rebooted; with it set the
++ * submit only kicks.  With ctrl+0x20 = 0 the tail returns at once: the firmware never parks,
++ * whatever the pstate policy.  That, not the pin, is why no Linux boot could sleep.
++ *
++ * The park (0x1001cec8).  The full drain 0x1001b638, R1+0x1004 = the wake target
++ * (policy+0x28), R1+0 |= bit 29, an abort if a ring took work meanwhile (0x1001cd8c), else
++ * bit 30 is kept (0x1001cf74: only priv+0x188 == 0 clears it), setter(0) = GPC 0 and the
++ * self-branch 0x1001d074.  R1+0[30:29] = 11, GPC 0, R1+8 = 0 is exactly
++ * AGXMetaFender_isQuiescent (fffffff006ca66e4), so Apple's sleep certificate assumes this bit.
++ *
++ * The wake.  A parked firmware does not return from 0x1001d074; it reboots.  Every boot runs the
++ * unpark handshake 0x1001cd8c(1) (0x10000b88) and then the boot sampler 0x1000aa80
++ * (0x10000b54), which applies the target to Fender before the scheduler runs.  The host's part
++ * is Apple's submit order: R1+0x14 = 7 and its read-back (Fender vt+0x80, fffffff006ca6644),
++ * one GPC read (vt+0x18), and R0+0xb00 at any nibble.
++ *
++ * Why the policy record must be iOS's.  The boot sampler takes its sampling path on any boot
++ * after the first (policy+0 = 1, stored by its own init 0x1000aec8) and divides the elapsed
++ * time by policy+4 (0x1000ac28).  The pinned envelope leaves policy+4 = 0, so a parked pinned
++ * firmware would wake into a division by zero.  iOS's record (16 ms sampler, its coefficient
++ * block, no override) is the only configuration Apple runs through this path.  The target
++ * then moves only across park -> wake, as on iOS (policy+0x34: 4 <-> 0 under load, 1 <-> 0 idle).
++ *
++ * Values: the kext's init (6c974f0, 6c95770) and six 2026-11-01 J71t captures, which agree on
++ * every word below.  They are the platform power model (3851 mW envelope, filter constants),
++ * the class of data the pstate table already is.  No sampled state, deadline, accumulator or
++ * clock is written: a fresh record starts as the kext starts it (state 0, substate 4, target 1).
++ *
++ * Bring-up is the pinned never-park record, unchanged.  The record is not installed at map:
++ * integration-g did (and the release at pstate 1, no override, meta+0x6c4 = meta+0x700 = 1),
++ * and on its cold boot the firmware came ALIVE but never consumed the control command 8
++ * (IP0, 2026-11-11), where every pinned boot consumes it.  meta+0x6c4 is copied once per
++ * firmware boot into priv+0x230 (0x10003cf0; the copy is not linear: priv+0x22c = meta+0x6c8),
++ * and the main loop calls 0x100044f0 on every idle pass while priv+0x230 != 0 (0x10010808); the
++ * pinned record never runs that routine.  The governor also wanted target 2 at pstate 1 with
++ * ctrl+0x20 = 0, a move it only makes across a park.  Which of these held the command is not
++ * isolated; none is needed to park, so none is written before the epoch is complete.
++ *
++ * Arming (complete epoch only: ALIVE, control stream done, nothing failed or stopped).  The
++ * idle tail needs only priv+0x188 != 0 and a powered pstate policy+0x34 != 0 (0x10009bec,
++ * 0x10009c0c), which the pinned record has.  What the wake needs is a sampler record that
++ * neither divides by zero nor lands on pstate 0: seed 2 (pinned record, +0 = 1, +4 = 16, no
++ * coefficients) ran the load governor at a stale stamp and gave no ALIVE.  So the arm writes,
++ * live and in this order: the coefficient block and filter initialisation below and the
++ * 3851 mW envelope; then policy+4 = 16; then ctrl+0x20 = 1.  The pin (ctrl+0x1038/0x1040 =
++ * 400) stays, so the target the park hands to the wake (R1+0x1004 = policy+0x28) is the
++ * pstate the release requested.  meta+0x6c4 and meta+0x700 stay 0.  policy+4 is written only
++ * just before ctrl+0x20: latency123 T2/T3 (policy+4 = 16 with ctrl+0x20 = 0) wedged the first
++ * TA, and IP0 is the same pair.  The B2 device test (ctrl+0x20 = 1 before release) parked before
++ * its first-ALIVE GPC read and latched a power abort.
++ *
++ * Disarming is for a host-driven boot of a stopped firmware (resume) only: ctrl+0x20 = 0 and
++ * the pinned record's boot words again (policy+0 = 0 so the boot sampler takes its first-call
++ * init, policy+4 = 0, the block cleared, envelope 3348), so that boot is a pinned bring-up.
++ * A live epoch is never disarmed (debugfs "park 0" is refused once the epoch has parked).
++ */
++#define G5P_PARK_CTL_FLAG 0x20U /* ctrl+0x20 -> priv+0x188 */
++#define G5P_PARK_SAMPLE_MS 16U /* policy+4 */
++#define G5P_PARK_PIN_OFF 0U /* debugfs pin: the firmware governor owns the target */
++
++struct g5p_park_word {
++	u32 offset, value;
++};
++
++/* policy (slot 0x4a): the coefficient block and the kext's filter initialisation */
++static const struct g5p_park_word g5p_park_policy[] = {
++	{ 0x03c, 0x40635631 }, { 0x040, 0x42bbbc1a }, { 0x044, 0x41493627 },
++	{ 0x048, 0x3dcf8fa7 }, { 0x04c, 0x3e1af366 }, { 0x0dc, 0x4226a00d },
++	{ 0x160, 0x3f8187d7 }, { 0x164, 0x3fad683b }, { 0x168, 0x3fbcd580 },
++	{ 0x16c, 0x3fdca811 }, { 0x638, 0x3f7f2e9f }, { 0x640, 0x3b516154 },
++	{ 0x648, 0x3ca59586 }, { 0x650, 0x00000000 }, { 0x654, 0x4570b000 },
++	{ 0x658, 0x40a90fdb }, { 0x660, 0xbdd4b956 }, { 0x664, 0xfffffe98 },
++	{ 0x668, 0x00000000 }, { 0x66c, 0x00000190 }, { 0x674, 0x00000f0b },
++	{ 0x684, 0x00000000 }, { 0x688, 0x00000190 }, { 0x694, 0x0000005f },
++	{ 0x698, 0x00000001 }, { 0x69c, 0x00000000 }, { 0x6a0, 0x3f4ccccd },
++	{ 0x6a4, 0x3f7ae148 }, { 0x6a8, 0x3e4ccccd }, { 0x6ac, 0x3ca3d70a },
++	{ 0x6b0, 0x40fca970 }, { 0x6b4, 0x3e4a2121 }, { 0x6b8, 0x00000000 },
++	{ 0x6bc, 0x42be0000 }, { 0x6c0, 0x416b53d1 }, { 0x6c4, 0x40db53d0 },
++	{ 0x6c8, 0x404a1af3 }, { 0x6cc, 0x00000064 }, { 0x6d0, 0x00000190 },
++	{ 0x6d4, 0x00000064 }, { 0x6dc, 0x0000005f }, { 0x6ec, 0x00000000 },
++	{ 0x6f8, 0x42c80000 }, { 0x6fc, 0x00000190 }, { 0x704, 0x3f4ccccd },
++	{ 0x708, 0x3e4ccccd }, { 0x7cc, 0x00000190 },
++};
++
++#define G5P_PARK_ENVELOPE 3851U /* ctrl+0x1028, iOS */
++#define G5P_PIN_ENVELOPE 3348U /* ctrl+0x1028, g5p_perf_install() */
++
++/*
++ * The block's value in the pinned record: 0, except policy+0x688, which g5p_perf_install()
++ * writes as G5P_PERF_TOP (the same value iOS has).
++ */
++static inline u32 g5p_park_pinned_value(u32 offset)
++{
++	return offset == 0x688 ? G5P_PERF_TOP : 0;
++}
++
++/*
++ * The doorbell rule after R1+0x14 = 7.  A settled powered GPC rings as before.  In a park
++ * epoch a GPC that is still off or in transition rings too (Apple writes R0+0xb00 at any
++ * nibble, 6ca05d4); only a dead wrapper (R1+0 == 0) is refused, which Apple would answer with a
++ * power cycle we do not run.
++ */
++static inline bool g5p_park_may_ring(bool self_park, u32 gpc, u32 r1_0)
++{
++	if (!(gpc & 0x10) && (gpc & 0xf))
++		return true;
++	return self_park && r1_0;
++}
++
+ #endif
+diff --git a/drivers/gpu/apple-g5p/recover.inc b/drivers/gpu/apple-g5p/recover.inc
+index f550d10..af837c0 100644
+--- a/drivers/gpu/apple-g5p/recover.inc
++++ b/drivers/gpu/apple-g5p/recover.inc
+@@ -82,6 +82,7 @@ static int __maybe_unused g5p_recover(struct g5p_diag *g, const char *why,
+ 	if (!ret) {
+ 		/* The render claim is kept: no diagnostic command may reset this epoch. */
+ 		WRITE_ONCE(g->boot->user_compute_owned, true);
++		g5p_park_set(g, true, "recover");
+ 		stage = 0;
+ 	}
+ out:
+diff --git a/drivers/gpu/apple-g5p/render-user-wake.h b/drivers/gpu/apple-g5p/render-user-wake.h
+index 64a51ea..c8fd0aa 100644
+--- a/drivers/gpu/apple-g5p/render-user-wake.h
++++ b/drivers/gpu/apple-g5p/render-user-wake.h
+@@ -132,6 +132,10 @@ struct g5p_wk_io {
+ 	u32 (*r1)(void *ctx, u32 reg);
+ 	void (*wbarrier)(void *ctx);
+ 	void (*w0)(void *ctx, u32 reg, u32 value);
++	/* self-park: the firmware may be parked; a GPC that is not on still rings unless
++	 * R1+0 reads 0 (Apple's submitDeviceControl rings at any nibble)
++	 */
++	bool park;
+ };
+ 
+ static inline bool g5p_wk_mode_valid(u32 mode)
+@@ -233,7 +237,7 @@ static inline u32 g5p_wk_ring(const struct g5p_wk_io *io, u32 e, u32 *fence,
+ 	if (*fence & ~7U)
+ 		return G5P_WK_SKIP_FENCE;
+ 	*gpc = io->r1(io->ctx, G5P_WK_R1_GPC);
+-	if (!G5P_GPC_ON(*gpc))
++	if (!G5P_GPC_ON(*gpc) && !(io->park && io->r1(io->ctx, 0)))
+ 		return G5P_WK_SKIP_GPC;
+ 	/* the publish's RAM stores before the MTS write (Apple: dmb ish before vt+0x80) */
+ 	io->wbarrier(io->ctx);
+diff --git a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+index d5f44c3..5576a41 100644
+--- a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
++++ b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+@@ -389,11 +389,118 @@ static int g5p_fwclock_show(struct seq_file *m, void *unused)
+ 	kvfree(offsets);
+ 	return 0;
+ }
++
++/*
++ * Qualification control for the firmware's idle park (self-park), root only.  Reading prints
++ * the RAM state: the latches, ctrl+0x20 and the policy record's live words (no MMIO).  Writes:
++ *   "park 1"             arm (a complete epoch only); "park 0" before the first arm only,
++ *                        a park epoch is not disarmed (-EBUSY);
++ *   "pin 0"              the firmware governor owns the target (the fixed policy);
++ *   "pin N"              N in 100..400 by 100: ctrl+0x1038/0x1040 = N, the kext's override
++ *                        input, copied by the governor into policy+0x68c/0x6f4, so the target
++ *                        is N / 100 from the next park -> wake on.
++ * Nothing here wakes, boots or reads the GPU; a value takes effect at the firmware's next tick.
++ */
++static int g5p_self_park_show(struct seq_file *m, void *unused)
++{
++	struct g5p_drm *d = m->private;
++	struct g5p_diag *g = d->core;
++	struct g5p_boot *b;
++	u8 *ctl;
++	u32 p;
++
++	mutex_lock(&g->lock);
++	b = g->boot;
++	if (!b || !b->maps_ready) {
++		seq_puts(m, "available=0\n");
++		goto out;
++	}
++	p = b->layout.offset[G5P_PERF_POLICY];
++	ctl = g5p_boot_shared(b, G5P_PERF_CTL);
++	dma_rmb();
++	seq_printf(m, "self_park=%u armed=%u park_epoch=%u ctl20=%u\n",
++		   b->self_park, b->self_park_armed, b->park_epoch,
++		   READ_ONCE(*(u32 *)(ctl + G5P_PARK_CTL_FLAG)));
++	seq_printf(m, "ovr=%u/%u ceiling=%u\n",
++		   READ_ONCE(*(u32 *)(ctl + 0x1038)),
++		   READ_ONCE(*(u32 *)(ctl + 0x1040)),
++		   READ_ONCE(*(u32 *)(ctl + 0x102c)));
++	seq_printf(m, "policy0=%u sample_ms=%u state=%u target=%u pstate=%u x=%u\n",
++		   g5p_dc_root_word(b, p), g5p_dc_root_word(b, p + 4),
++		   g5p_dc_root_word(b, p + 8), g5p_dc_root_word(b, p + 0x28),
++		   g5p_dc_root_word(b, p + 0x34), g5p_dc_root_word(b, p + 0x38));
++	seq_printf(m, "alive=%u stopped=%u mmio=0\n", b->alive, b->stopped);
++out:
++	mutex_unlock(&g->lock);
++	return 0;
++}
++
++static int g5p_self_park_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, g5p_self_park_show, inode->i_private);
++}
++
++static ssize_t g5p_self_park_write(struct file *file, const char __user *ubuf,
++				   size_t len, loff_t *pos)
++{
++	struct seq_file *m = file->private_data;
++	struct g5p_drm *d = m->private;
++	struct g5p_diag *g = d->core;
++	struct g5p_boot *b;
++	char buf[16], what[8];
++	u32 v;
++	int ret = len;
++
++	if (len >= sizeof(buf))
++		return -EINVAL;
++	if (copy_from_user(buf, ubuf, len))
++		return -EFAULT;
++	buf[len] = 0;
++	if (sscanf(buf, "%7s %u", what, &v) != 2)
++		return -EINVAL;
++	mutex_lock(&g->lock);
++	b = g->boot;
++	if (!b || !b->maps_ready || !b->self_park) {
++		ret = -ENODEV;
++	} else if (!strcmp(what, "park") && !v && b->park_epoch) {
++		/* a live park epoch is never disarmed: the wake needs the armed record */
++		ret = -EBUSY;
++	} else if (!strcmp(what, "park") && v <= 1) {
++		g5p_park_set(g, v, "debugfs");
++		if (v && !b->self_park_armed)
++			ret = -EBUSY;
++	} else if (!strcmp(what, "pin") && v <= G5P_PERF_TOP && !(v % 100)) {
++		u8 *ctl = g5p_boot_shared(b, G5P_PERF_CTL);
++
++		WRITE_ONCE(*(u32 *)(ctl + 0x1038), v ? G5P_PERF_TOP : 0);
++		WRITE_ONCE(*(u32 *)(ctl + 0x1040), v);
++		dma_wmb();
++		(void)READ_ONCE(*(u32 *)(ctl + 0x1040));
++		dev_info(g->dev, "G5P self-park pin=%u ovr=%u/%u end=park\n", v,
++			 v ? G5P_PERF_TOP : 0, v);
++	} else {
++		ret = -EINVAL;
++	}
++	mutex_unlock(&g->lock);
++	return ret;
++}
++
++static const struct file_operations g5p_self_park_fops = {
++	.owner = THIS_MODULE,
++	.open = g5p_self_park_open,
++	.read = seq_read,
++	.write = g5p_self_park_write,
++	.llseek = seq_lseek,
++	.release = single_release,
++};
++
+ static void g5p_jt_debugfs_init(struct drm_minor *minor)
+ {
+ 	struct g5p_drm *d = to_g5p(minor->dev);
+ 	debugfs_create_file("g5p_gpu_stats", 0600, d->drm.debugfs_root, d,
+ 			    &g5p_gpu_stats_fops);
++	debugfs_create_file("g5p_self_park", 0600, d->drm.debugfs_root, d,
++			    &g5p_self_park_fops);
+ }
+ 
+ static inline struct g5p_bo *to_g5p_bo(struct drm_gem_object *obj)
+@@ -1030,6 +1137,10 @@ static void g5p_autoboot_work(struct work_struct *work)
+ 		d->autoboot_phase++;
+ 	}
+ 	dev_info(g->dev, "autoboot complete: GPU up\n");
++	/* self-park: the epoch is complete, so the firmware may now park at idle */
++	mutex_lock(&g->lock);
++	g5p_park_set(g, true, "autoboot");
++	mutex_unlock(&g->lock);
+ 	g5p_idle_queue(d);
+ }
+ 
+diff --git a/drivers/gpu/drm/apple-g5p/drm-compute-v1.inc b/drivers/gpu/drm/apple-g5p/drm-compute-v1.inc
+index 2873ca7..4a32078 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-compute-v1.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-compute-v1.inc
+@@ -163,9 +163,10 @@ static u32 g5p_cu_wait(struct g5p_drm *d, struct g5p_diag *g, u32 seq,
+  */
+ static int g5p_cu_wake(struct g5p_diag *g, u32 seq, u32 start, u32 target)
+ {
+-	const struct g5p_wk_io io = { g, g5p_rv3_wk_w1, g5p_rv3_wk_r1,
+-				      g5p_rv3_wk_wmb, g5p_rv3_wk_w0 };
+ 	struct g5p_boot *b = g->boot;
++	const struct g5p_wk_io io = { g, g5p_rv3_wk_w1, g5p_rv3_wk_r1,
++				      g5p_rv3_wk_wmb, g5p_rv3_wk_w0,
++				      .park = READ_ONCE(b->park_epoch) };
+ 	u32 *ring = (u32 *)g5p_boot_shared(b, 0x68);
+ 	u8 *p = g5p_cu_page(b);
+ 	struct g5p_wk_in in;
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+index 7b4199c..a2f7501 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+@@ -88,6 +88,17 @@ static const bool render_user_pm_record = true;
+ 
+ static const bool render_user_ahead_on_submit = true;
+ 
++/*
++ * Self-park (perf-envelope.h): a parked firmware loses GPC power between two jobs and reboots
++ * on the next doorbell.  The clean-PM shortcut above (tag4 instead of the TA's PM record) was
++ * measured only on never-park epochs, so a park epoch sends the record with every TA, the
++ * behaviour before the shortcut.
++ */
++static bool g5p_rv3_pm_always(struct g5p_boot *b)
++{
++	return READ_ONCE(b->park_epoch);
++}
++
+ /* F5c: a job joined a FIFO, or a queued head's input signalled.  Any context: the submit path,
+  * or a fence callback under the fence lock (possibly hard IRQ): a counter and a wake only, never
+  * the start itself.  The full barrier orders the FIFO add (or the signal) before the armed look,
+@@ -966,9 +977,10 @@ static s64 g5p_rv3_wk_ms(u64 from_ns, u64 to_ns)
+ static void g5p_rv3_wake(struct g5p_diag *g, struct g5p_render *r,
+ 			 struct g5p_rv3 *v, u32 e, u32 start, u32 seq)
+ {
+-	const struct g5p_wk_io io = { g, g5p_rv3_wk_w1, g5p_rv3_wk_r1,
+-				      g5p_rv3_wk_wmb, g5p_rv3_wk_w0 };
+ 	struct g5p_boot *b = g->boot;
++	const struct g5p_wk_io io = { g, g5p_rv3_wk_w1, g5p_rv3_wk_r1,
++				      g5p_rv3_wk_wmb, g5p_rv3_wk_w0,
++				      .park = READ_ONCE(b->park_epoch) };
+ 	struct g5p_drm *d = r->ctx->gpu;
+ 	u32 *ring = (u32 *)g5p_boot_shared(b, e ? 0x64 : 0x60);
+ 	u8 *p = g5p_ru_page(b, e);
+@@ -1159,13 +1171,19 @@ static void g5p_rv3_dc_kick(struct g5p_diag *g, u32 start, u32 target,
+ 		n++;
+ 	}
+ 	if (!g5p_gpc_ok(gpc)) {
+-		did = "skip-gpc";
+-		goto out;
++		/* self-park: a parked firmware wakes through this doorbell */
++		if (!g5p_park_may_ring(READ_ONCE(b->park_epoch), gpc,
++				       readl(g->window[1]))) {
++			did = "skip-gpc";
++			goto out;
++		}
++		did = "rang-parked";
++	} else {
++		did = "rang";
+ 	}
+ 	/* the publication's RAM stores before the MTS write (Apple: dmb ish before vt+0x80) */
+ 	wmb();
+ 	writel(0x10, g->rgx + 0xb00);
+-	did = "rang";
+ out:
+ 	spin_unlock_irqrestore(&b->event_lock, flags);
+ 	dev_info(
+@@ -3036,7 +3054,8 @@ static void g5p_rv3_ahead_start(struct g5p_drm *d, struct g5p_render *r,
+ 			g5p_ru_meta(0) + G5P_R22_STAMP + 4, 0, js,
+ 			g5p_rv3_pm_id_of(rd, r, pm2), v->abs,
+ 			!READ_ONCE(render_user_pm_record) ||
+-			(pm2 ? r->pm2_dirty : r->pm_dirty));
++				g5p_rv3_pm_always(b) ||
++				(pm2 ? r->pm2_dirty : r->pm_dirty));
+ 		r->submitted[e] = false;
+ 		r->consumed[e] = false;
+ 		r->retired[e] = false;
+@@ -3269,7 +3288,8 @@ static int g5p_rv3_execute(struct g5p_drm *d, struct g5p_render *r,
+ 			g5p_ru_meta(0) + G5P_R22_STAMP + 4, 0,
+ 			g5p_rv3_js(rd, seq), g5p_rv3_pm_id(rd, r), v->abs,
+ 			!READ_ONCE(render_user_pm_record) ||
+-			r->pm_set < 0 || r->pm_dirty);
++				g5p_rv3_pm_always(b) || r->pm_set < 0 ||
++				r->pm_dirty);
+ 		r->submitted[e] = false;
+ 		r->consumed[e] = false;
+ 		r->retired[e] = false;

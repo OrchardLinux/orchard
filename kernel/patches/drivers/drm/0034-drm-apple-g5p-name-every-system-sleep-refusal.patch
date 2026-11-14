@@ -1,0 +1,491 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 15:26:20 +0100
+Subject: [PATCH] drm/apple-g5p: name every system sleep refusal
+
+Prepare refused with one line for every cause ("busy or no quiescent
+certificate") and with no line at all for its early exits (no boot, a
+failed epoch, a gate already closed). Suspend and resume failures logged
+only "GPU-PM frozen". A refused device test could not say which
+condition held.
+
+Replace g5p_sleep_idle() by g5p_sleep_busy(), which returns a token for
+the first busy condition and says whether the client drain can clear it.
+Prepare logs the stage and reason of every refusal (and the R1 words
+when the certificate does not hold), plus one line when the client drain
+hits its bound. Its client drain stops early on a state no drain clears.
+The readiness query refuses those states too, instead of answering
+"ready" for a GPU that prepare will refuse after a 1 s drain. Suspend
+names its pre-detach refusal and each failing step, including the
+re-park after the DC3 detach and its duration; resume names its failing
+step. Register reads are the certificate's own, taken only where it has
+just read them; none follow a failed transition.
+
+Behaviour is otherwise unchanged.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/apple-g5p/system-sleep.inc | 269 +++++++++++++++++----
+ 1 file changed, 221 insertions(+), 48 deletions(-)
+
+diff --git a/drivers/gpu/drm/apple-g5p/system-sleep.inc b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+index 9da18505b..6a89e5f48 100644
+--- a/drivers/gpu/drm/apple-g5p/system-sleep.inc
++++ b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+@@ -3,24 +3,51 @@
+  * Admission is reserved through complete, including another device's abort.
+  * No terminal-retire latch is used for a reversible sleep attempt.
+  */
+-static bool g5p_sleep_idle(struct g5p_drm *d)
++/*
++ * Why the host side is not idle: one token (no white space or colon), or NULL
++ * when idle. *drains is set when the client drain in prepare can clear it
++ * (work in flight); otherwise nothing at idle clears it and only a refusal is
++ * honest.
++ */
++static const char *g5p_sleep_busy(struct g5p_drm *d, bool *drains)
+ {
+ 	struct g5p_rdev *rd = d->rdev;
+ 	struct g5p_render *r;
+ 	unsigned long flags;
++	const char *why = NULL;
+ 	bool idle;
+ 
+-	if (rd->cu_sequence || atomic_read(&d->accepted) ||
+-	    atomic_read(&d->r8_queued) || READ_ONCE(rd->executing) ||
+-	    rd->ahead || rd->stuck || rd->recovering || rd->dc_pending ||
+-	    rd->close_deferred[0] || rd->close_deferred[1] ||
+-	    g5p_ru_term_failed(&g5p_rv3_term))
+-		return false;
++	*drains = false;
++	/* No CDM stamp certificate yet (lane GS): compute epochs refuse. */
++	if (rd->cu_sequence)
++		return "compute-epoch";
++	if (g5p_ru_term_failed(&g5p_rv3_term))
++		return "terminal";
++	/* A bind's DC3 pair the firmware never consumed; only a later DC op clears it. */
++	if (rd->dc_pending)
++		return "dc-pending";
++	/* Released only after a job of a third context (render-user-pmset.h). */
++	if (rd->close_deferred[0] || rd->close_deferred[1])
++		return "close-deferred";
++	*drains = true;
++	/* A lost-job drain or recovery may finish inside the client drain bound. */
++	if (rd->stuck)
++		return "stuck";
++	if (rd->recovering)
++		return "recovering";
++	if (atomic_read(&d->accepted))
++		return "accepted";
++	if (atomic_read(&d->r8_queued))
++		return "r8-queued";
++	if (READ_ONCE(rd->executing))
++		return "executing";
++	if (rd->ahead)
++		return "ahead";
+ 	spin_lock_irqsave(&rd->sched_lock, flags);
+ 	idle = list_empty(&rd->sched.run);
+ 	spin_unlock_irqrestore(&rd->sched_lock, flags);
+ 	if (!idle)
+-		return false;
++		return "queued";
+ 	/* Re-read the latest TA/3D stamps, including the depth-2 record slot.
+ 	 * A CPU retirement flag alone is not Apple's all-stamps certificate.
+ 	 */
+@@ -30,15 +57,35 @@ static bool g5p_sleep_idle(struct g5p_drm *d)
+ 					       g5p_ru_meta(e), e, rd->sequence,
+ 					       g5p_rv3_js(rd, rd->sequence),
+ 					       rd->sequence))
+-				return false;
++				return e ? "stamp-3d" : "stamp-ta";
+ 	mutex_lock(&rd->lock);
+ 	list_for_each_entry(r, &rd->contexts, rdev_link)
+ 		for (u32 i = 0; i < 2; i++)
+-			if (r->submitted[i] &&
+-			    (!r->consumed[i] || !r->retired[i]))
+-				idle = false;
++			if (r->submitted[i] && !why)
++				why = !r->consumed[i] ?
++					      (i ? "unconsumed-3d" : "unconsumed-ta") :
++				      !r->retired[i] ?
++					      (i ? "unretired-3d" : "unretired-ta") :
++					      NULL;
+ 	mutex_unlock(&rd->lock);
+-	return idle;
++	return why;
++}
++
++/*
++ * The certificate's own R1 reads, in its order and under its conditions
++ * (R1+8 only with bits 30:29 set), for a refusal line. Only where the
++ * certificate itself has just read them.
++ */
++static void g5p_sleep_sample(struct g5p_diag *g, u32 *state, u32 *mode, u32 *r8)
++{
++	*r8 = 0;
++	*state = readl(g->window[1] + 0x1000);
++	*mode = 0;
++	if (*state & 0x1f)
++		return;
++	*mode = readl(g->window[1]);
++	if ((*mode & 0x60000000) == 0x60000000)
++		*r8 = readl(g->window[1] + 8);
+ }
+ 
+ /* R1 only, as Apple's isQuiescent/isStableOff. Never infer bus retirement
+@@ -149,59 +196,128 @@ static int g5p_system_sleep_prepare(struct device *dev)
+ 	struct g5p_drm *d;
+ 	struct g5p_boot *b;
+ 	struct g5p_kq_ctx c = { .g = g };
+-	u64 deadline;
+-	int ret = -EBUSY;
+-
+-	if (!g || !g->event_cookie || !g->boot)
++	const char *stage = "entry", *busy;
++	char why[64] = "";
++	u64 t0 = ktime_get_ns(), deadline, drain_ns;
++	u32 cons, prod, state, mode, r8;
++	bool drains;
++	int ret = -EBUSY, users;
++
++	/* Every refusal below names its stage and reason: no silent -EBUSY. */
++	if (!g || !g->event_cookie || !g->boot) {
++		dev_info(dev, "GPU-PM sleep refused: stage=entry why=%s\n",
++			 !g ? "no-core" : !g->event_cookie ? "no-drm" : "no-boot");
+ 		return -EBUSY;
++	}
+ 	d = g->event_cookie;
+-	if (READ_ONCE(g->sleep_reserved))
+-		return g->sleep_failed ? -EBUSY : 0;
++	if (READ_ONCE(g->sleep_reserved)) {
++		if (!g->sleep_failed)
++			return 0;
++		dev_info(dev, "GPU-PM sleep refused: stage=entry why=sleep-failed\n");
++		return -EBUSY;
++	}
+ 	/*
+ 	 * Stage 1: shut client admission only. New client work and closes wait,
+ 	 * while the scheduler keeps running so accepted jobs retire.
+ 	 */
+-	if (atomic_fetch_or(BIT(31), &d->client_gate) < 0)
++	if (atomic_fetch_or(BIT(31), &d->client_gate) < 0) {
++		dev_info(dev, "GPU-PM sleep refused: stage=client why=client-gate-closed\n");
+ 		return -EBUSY;
+-	deadline = ktime_get_ns() + G5P_SLEEP_DRAIN_MS * NSEC_PER_MSEC;
+-	while (((atomic_read(&d->client_gate) & INT_MAX) || !g5p_sleep_idle(d)) &&
+-	       ktime_get_ns() < deadline)
++	}
++	deadline = t0 + G5P_SLEEP_DRAIN_MS * NSEC_PER_MSEC;
++	for (;;) {
++		users = atomic_read(&d->client_gate) & INT_MAX;
++		busy = g5p_sleep_busy(d, &drains);
++		/* Stop waiting on what no drain clears; stage 2 names it. */
++		if ((!users && !busy) || (busy && !drains) ||
++		    ktime_get_ns() >= deadline)
++			break;
+ 		usleep_range(500, 1000);
++	}
++	drain_ns = ktime_get_ns() - t0;
++	if (users || busy)
++		dev_info(dev, "GPU-PM sleep drain bound: client_users=%d busy=%s drain_ms=%llu\n",
++			 users, busy ?: "none", drain_ns / NSEC_PER_MSEC);
+ 	/* Stage 2: shut the host gate and certify, unchanged. */
+-	if (atomic_fetch_or(BIT(31), &g->sleep_gate) < 0)
++	stage = "host";
++	if (atomic_fetch_or(BIT(31), &g->sleep_gate) < 0) {
++		dev_info(dev, "GPU-PM sleep refused: stage=host why=host-gate-closed\n");
+ 		goto refuse_client;
++	}
+ 	deadline = ktime_get_ns() + 20 * NSEC_PER_MSEC;
+ 	while ((atomic_read(&g->sleep_gate) & INT_MAX) &&
+ 	       ktime_get_ns() < deadline)
+ 		usleep_range(100, 200);
+-	if (atomic_read(&g->sleep_gate) & INT_MAX)
++	users = atomic_read(&g->sleep_gate) & INT_MAX;
++	if (users) {
++		snprintf(why, sizeof(why), "host-users=%d", users);
+ 		goto refuse;
+-	if (!g5p_kq_lock(&c))
++	}
++	stage = "lock";
++	if (!g5p_kq_lock(&c)) {
++		strscpy(why, "core-lock");
+ 		goto refuse;
++	}
++	stage = "state";
+ 	b = g->boot;
+-	if (g->sleep_failed || g5p_r8_admit_closed(&g5p_r8_state.admit) || !b ||
+-	    !g->powered || !g->fender_ready || g->mmio_off || !b->released ||
+-	    !b->alive || b->failed || b->event_failed || b->stopped ||
+-	    !b->irq_ready || !b->r73b ||
+-	    READ_ONCE(b->r73b->early_power_abort) || !g5p_sleep_idle(d))
++	busy = !b ? "no-boot" :
++	       g->sleep_failed ? "sleep-failed" :
++	       g5p_r8_admit_closed(&g5p_r8_state.admit) ? "r8-admission-closed" :
++	       !g->powered ? "not-powered" :
++	       !g->fender_ready ? "fender-not-ready" :
++	       g->mmio_off ? "mmio-off" :
++	       !b->released ? "not-released" :
++	       !b->alive ? "not-alive" :
++	       b->failed ? "firmware-failed" :
++	       b->event_failed ? "event-failed" :
++	       b->stopped ? "stopped" :
++	       !b->irq_ready ? "irq-not-ready" :
++	       !b->r73b ? "no-r73b" :
++	       READ_ONCE(b->r73b->early_power_abort) ? "power-abort" :
++	       g5p_sleep_busy(d, &drains);
++	if (busy) {
++		strscpy(why, busy);
+ 		goto unlock;
++	}
+ 	/* No submitters, queued work or IRQ-side ALIVE action can publish now. */
+-	if (g5p_boot_drain(g) || !g5p_sleep_rings(g))
++	stage = "drain";
++	ret = g5p_boot_drain(g);
++	if (ret) {
++		snprintf(why, sizeof(why), "boot-drain=%d", ret);
++		ret = -EBUSY;
+ 		goto unlock;
++	}
++	ret = -EBUSY;
++	for (u32 i = 0; i < G5P_TD_NRING; i++) {
++		if (g5p_td_op_ring_read(g, i, &cons, &prod)) {
++			snprintf(why, sizeof(why), "ring%u-unreadable", i);
++			goto unlock;
++		}
++		if (cons > 255 || cons != prod) {
++			snprintf(why, sizeof(why), "ring%u=%u/%u", i, cons, prod);
++			goto unlock;
++		}
++	}
++	stage = "certificate";
+ 	if (g5p_sleep_certificate_wait(g)) {
+ 		g->sleep_reserved = true;
+ 		ret = 0;
++	} else {
++		g5p_sleep_sample(g, &state, &mode, &r8);
++		snprintf(why, sizeof(why), "not-quiescent/r1_1000=%08x/r1_0=%08x/r1_8=%08x",
++			 state, mode, r8);
+ 	}
+ unlock:
+ 	mutex_unlock(&g->lock);
+ 	if (!ret) {
+-		dev_info(dev, "GPU-PM prepared: admission reserved\n");
++		dev_info(dev, "GPU-PM prepared: admission reserved ms=%llu\n",
++			 (ktime_get_ns() - t0) / NSEC_PER_MSEC);
+ 		return 0;
+ 	}
+ refuse:
+ 	g5p_sleep_reopen(g);
+-	dev_info(dev,
+-		 "GPU-PM sleep refused: busy or no quiescent certificate\n");
++	dev_info(dev, "GPU-PM sleep refused: stage=%s why=%s ms=%llu\n", stage,
++		 why, (ktime_get_ns() - t0) / NSEC_PER_MSEC);
+ 	return -EBUSY;
+ refuse_client:
+ 	atomic_andnot(BIT(31), &d->client_gate);
+@@ -244,7 +360,9 @@ static __printf(3, 4) int g5p_sleep_why(struct g5p_drm *d, int ret,
+  * Readiness query: what prepare would decide, without shutting any gate or
+  * draining firmware events. Accepted or in-flight work is not a refusal,
+  * since prepare drains it, except under the never-park envelope, where the
+- * drained firmware still cannot certify. Register samples are taken only
++ * drained firmware still cannot certify. A busy state no drain clears
++ * (g5p_sleep_busy() without *drains) refuses here exactly as prepare would,
++ * so "ready" is never answered for it. Register samples are taken only
+  * when the GPU is already idle and the core lock is free, with the same
+  * reads as g5p_sleep_certificate(); a sampled GPC 0 falls through to it.
+  */
+@@ -254,7 +372,8 @@ static int g5p_system_sleep_check(struct device *dev)
+ 	struct g5p_drm *d;
+ 	struct g5p_boot *b;
+ 	u32 cons, prod, state, mode = 0, r8 = 0;
+-	bool never_park;
++	const char *busy;
++	bool never_park, drains;
+ 	int ret = 0;
+ 
+ 	if (!g || !g->event_cookie)
+@@ -286,9 +405,13 @@ static int g5p_system_sleep_check(struct device *dev)
+ 		ret = g5p_sleep_why(d, -ENODEV, "not-powered");
+ 		goto unlock;
+ 	}
+-	if (!g5p_sleep_idle(d)) {
+-		if (never_park)
+-			ret = g5p_sleep_why(d, -EBUSY, "never-park/busy");
++	busy = g5p_sleep_busy(d, &drains);
++	if (busy) {
++		/* Prepare drains work in flight; it cannot drain the rest. */
++		if (never_park || !drains)
++			ret = g5p_sleep_why(d, -EBUSY, "%s%s",
++					    never_park ? "never-park/" : "busy/",
++					    busy);
+ 		goto unlock;
+ 	}
+ 	for (u32 i = 0; i < G5P_TD_NRING; i++) {
+@@ -343,16 +466,35 @@ static int g5p_system_suspend(struct device *dev)
+ 	struct g5p_drm *d = g->event_cookie;
+ 	struct g5p_boot *b = g->boot;
+ 	struct g5p_render **drop, *r;
+-	u32 slots[G5P_RU_USER_SLOTS], held, count = 0, n = 0;
++	u32 slots[G5P_RU_USER_SLOTS], held, count = 0, n = 0, state, mode, r8;
++	const char *busy, *step = "entry";
++	bool drains;
++	u64 t0;
+ 	int ret;
+ 
+-	if (!g->sleep_reserved || g->sleep_failed)
++	if (!g->sleep_reserved || g->sleep_failed) {
++		dev_info(dev, "GPU-PM suspend refused: why=%s\n",
++			 g->sleep_failed ? "sleep-failed" : "not-reserved");
+ 		return -EBUSY;
++	}
+ 	mutex_lock(&g->lock);
+-	if (!READ_ONCE(b->alive) || READ_ONCE(b->failed) ||
+-	    READ_ONCE(b->event_failed) || READ_ONCE(b->stopped) ||
+-	    READ_ONCE(b->r73b->early_power_abort) || !g5p_sleep_idle(d) ||
+-	    !g5p_sleep_rings(g) || !g5p_sleep_certificate(g, false)) {
++	busy = !READ_ONCE(b->alive) ? "not-alive" :
++	       READ_ONCE(b->failed) ? "firmware-failed" :
++	       READ_ONCE(b->event_failed) ? "event-failed" :
++	       READ_ONCE(b->stopped) ? "stopped" :
++	       READ_ONCE(b->r73b->early_power_abort) ? "power-abort" :
++	       g5p_sleep_busy(d, &drains);
++	if (!busy && !g5p_sleep_rings(g))
++		busy = "rings";
++	if (!busy && !g5p_sleep_certificate(g, false)) {
++		g5p_sleep_sample(g, &state, &mode, &r8);
++		dev_info(dev, "GPU-PM suspend certificate r1_1000=%08x r1_0=%08x r1_8=%08x\n",
++			 state, mode, r8);
++		busy = "not-quiescent";
++	}
++	if (busy) {
++		/* Before the detach: reversible, admission reopens at complete. */
++		dev_info(dev, "GPU-PM suspend refused: why=%s\n", busy);
+ 		ret = -EBUSY;
+ 		goto out;
+ 	}
+@@ -362,22 +504,40 @@ static int g5p_system_suspend(struct device *dev)
+ 	mutex_unlock(&d->rdev->lock);
+ 	drop = kcalloc(max(count, 1U), sizeof(*drop), GFP_KERNEL);
+ 	if (!drop) {
++		dev_info(dev, "GPU-PM suspend refused: why=no-memory\n");
+ 		ret = -EBUSY;
+ 		goto out;
+ 	}
+ 	held = g5p_ru_held_slots(g5p_boot_shared(b, 0x86),
+ 				 g5p_boot_shared(b, 0x84), slots,
+ 				 ARRAY_SIZE(slots));
++	dev_info(dev, "GPU-PM suspend detach held=%u contexts=%u deferred=%u/%u\n",
++		 held, count, !!d->rdev->close_deferred[0],
++		 !!d->rdev->close_deferred[1]);
++	step = "detach";
+ 	ret = held ? g5p_rv3_unbind_slots(d, slots, held, "sleep") : 0;
+ 	if (ret)
+ 		goto failed;
+ 	/* Detach has changed firmware ownership: any later failure is terminal.
+ 	 * The detach woke a parked firmware; it parks again once the DC ring drains.
+ 	 */
+-	if (!g5p_sleep_rings(g) || !g5p_sleep_certificate_wait(g)) {
++	step = "rings-after-detach";
++	if (!g5p_sleep_rings(g)) {
++		ret = -EBUSY;
++		goto failed;
++	}
++	step = "park-after-detach";
++	t0 = ktime_get_ns();
++	if (!g5p_sleep_certificate_wait(g)) {
++		g5p_sleep_sample(g, &state, &mode, &r8);
++		dev_info(dev, "GPU-PM suspend certificate r1_1000=%08x r1_0=%08x r1_8=%08x\n",
++			 state, mode, r8);
+ 		ret = -EBUSY;
+ 		goto failed;
+ 	}
++	dev_info(dev, "GPU-PM suspend parked again after detach us=%llu\n",
++		 (ktime_get_ns() - t0) / NSEC_PER_USEC);
++	step = "fender-stop";
+ 	ret = g5p_fender_write(g, 0x10, 0); /* Fender mode 3 */
+ 	if (!ret)
+ 		ret = g5p_fender_write(g, 0x20000, 0);
+@@ -389,6 +549,8 @@ static int g5p_system_suspend(struct device *dev)
+ 	WRITE_ONCE(b->stopped, true);
+ 	disable_irq(b->irq);
+ 	g->sleep_irq_off = true;
++	if (!ret)
++		step = "stable-off";
+ 	if (ret || !g5p_sleep_certificate(g, true)) {
+ 		ret = ret ?: -EIO;
+ 		goto failed;
+@@ -397,6 +559,7 @@ static int g5p_system_suspend(struct device *dev)
+ 	d->rdev->sleep_rebuilds++;
+ 	g5p_mmio_gate(g);
+ 	g->fender_ready = false;
++	step = "platform-off";
+ 	ret = pm_runtime_put_sync_suspend(dev);
+ 	g->powered = false; /* put consumed our reference, including on error */
+ 	if (ret < 0)
+@@ -407,6 +570,8 @@ static int g5p_system_suspend(struct device *dev)
+ 	ret = 0;
+ 	goto free;
+ failed:
++	/* No MMIO here: g5p_sleep_fail() freezes the epoch. */
++	dev_err(dev, "GPU-PM suspend failed step=%s ret=%d\n", step, ret);
+ 	g5p_sleep_fail(d, ret);
+ free:
+ 	mutex_unlock(&g->lock);
+@@ -427,6 +592,7 @@ static int g5p_system_resume(struct device *dev)
+ 	struct g5p_drm *d = g->event_cookie;
+ 	struct g5p_boot *b = g->boot;
+ 	unsigned long deadline;
++	const char *step = "platform-on";
+ 	int ret;
+ 
+ 	if (!g->sleep_off)
+@@ -440,6 +606,7 @@ static int g5p_system_resume(struct device *dev)
+ 	/* A witnessed platform off/on invalidates DS108's old ALIVE generation.
+   * Retained maps/image are validated, never allocated or reinitialised.
+   */
++	step = "ds108-recover";
+ 	ret = g5p_ds_hook_recover(g, 0);
+ 	if (ret)
+ 		goto failed;
+@@ -451,6 +618,7 @@ static int g5p_system_resume(struct device *dev)
+ 	g5p_park_set(g, false, "resume-boot");
+ 	WRITE_ONCE(b->park_epoch, false);
+ 	b->stopped = false;
++	step = "boot-stream";
+ 	ret = g5p_boot_program_stream(g, true);
+ 	g5p_ds_hook_wake(g, ret);
+ 	if (ret)
+@@ -458,6 +626,7 @@ static int g5p_system_resume(struct device *dev)
+ 	g5p_ds_hook_maps(g, 0);
+ 	g5p_ds_hook_load(g, 0);
+ 	g5p_ds_hook_release(g, 0);
++	step = "alive";
+ 	deadline = jiffies + 3 * HZ;
+ 	do {
+ 		/* IRQ remains masked. Consume fresh ALIVE in RAM without cmd8 or kicks. */
+@@ -474,12 +643,15 @@ static int g5p_system_resume(struct device *dev)
+ 		b->r73b->early_state = raw;
+ 		if (!g5p_gpc_ok(raw)) {
+ 			WRITE_ONCE(b->r73b->early_power_abort, true);
++			step = "gpc";
+ 			ret = -EHOSTDOWN;
+ 		}
+ 	}
+ 	g5p_ds_hook_alive(g, ret);
+-	if (!ret)
++	if (!ret) {
++		step = "ds108-claim";
+ 		ret = g5p_ds_hook_claim(g);
++	}
+ 	if (ret)
+ 		goto failed;
+ 	g5p_ru_term_reset(&g5p_rv3_term);
+@@ -494,6 +666,7 @@ static int g5p_system_resume(struct device *dev)
+ 	mutex_unlock(&g->lock);
+ 	return 0;
+ failed:
++	dev_err(dev, "GPU-PM resume failed step=%s ret=%d\n", step, ret);
+ 	g->sleep_boot = false;
+ 	g->sleep_off = false;
+ 	g5p_sleep_fail(d, ret);

@@ -1,0 +1,129 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 13:28:33 +0100
+Subject: [PATCH] drm/apple-g5p: ring a parked firmware without the GPC settle 
+ wait
+
+In a park epoch every doorbell still ran the GPC settle: after
+R1+0x14 = 7 it re-read R1+0x1000 every 10 us for up to 2 ms, waiting for
+a settled powered GPC, and only then rang R0+0xb00 at any nibble. A
+parked firmware powers its GPC on only after the doorbell, so the wait
+always ran to its end: in one test run the DC kicks rang 455 times at
+gpc=00000000 after settle=185..186 reads, and the per-job publish spent
+394..410 us of host time in the bell (1..2 us without park).
+
+Apple's AGXMetaFirmware_submitDeviceControl (20H350 fffffff006ca05d4)
+issues Fender +0x80 (R1+0x14 = 7 and its read-back), one +0x18 nibble
+read, at nibble 0 only the +0x70/+0x78/+0x90 read-backs, then R0+0xb00 =
+0x10, with no wait. Do the same in park epochs: the r74f bells, the DC
+kicks and the wake110 publish (render and compute) read the GPC once and
+ring. The refusal of a dead wrapper (R1+0 == 0) is kept. Never-park
+epochs keep the settle unchanged. g5p_prepare_kick already read the GPC
+once.
+
+Not device-proven.
+
+Assisted-by: LLM
+---
+ drivers/gpu/apple-g5p/boot-r74f.inc         |  8 +++++---
+ drivers/gpu/drm/apple-g5p/drm-render-v3.inc | 18 ++++++++++++------
+ 2 files changed, 17 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/gpu/apple-g5p/boot-r74f.inc b/drivers/gpu/apple-g5p/boot-r74f.inc
+index 9ab4947..c7f234a 100644
+--- a/drivers/gpu/apple-g5p/boot-r74f.inc
++++ b/drivers/gpu/apple-g5p/boot-r74f.inc
+@@ -71,6 +71,7 @@ static int g5p_r74f_ring(struct g5p_diag *g, const struct g5p_r74f_bell *f,
+ 	u32 queued = (f->target - f->start) & 255;
+ 	u32 progressed = (consumer - f->start) & 255;
+ 	u32 expected = f->kind == G5P_R74F_DC3 ? 2 : 1;
++	bool park = READ_ONCE(b->park_epoch);
+ 
+ 	if (READ_ONCE(b->failed))
+ 		return -EIO;
+@@ -90,8 +91,10 @@ static int g5p_r74f_ring(struct g5p_diag *g, const struct g5p_r74f_bell *f,
+ 	*state = readl(g->window[1] + 0x1000);
+ 	/* perf60 (gpc_any_pstate): a GPC request in flight or a not-yet-awake GPC after the wake
+ 	 * above; re-read for up to 2 ms, as Apple's setGPCPerformanceState waits for bit 4.  Reads only.
++	 * Not in a park epoch: a parked GPC powers on only after this doorbell, and Apple's
++	 * submitDeviceControl (6ca05d4) reads the nibble once and rings.
+ 	 */
+-	{
++	if (!park) {
+ 		u64 t0 = ktime_get_mono_fast_ns();
+ 
+ 		while (!g5p_gpc_ok(*state) && ktime_get_mono_fast_ns() - t0 <
+@@ -102,8 +105,7 @@ static int g5p_r74f_ring(struct g5p_diag *g, const struct g5p_r74f_bell *f,
+ 	}
+ 	/* self-park: a parked firmware wakes through this doorbell (Apple: any nibble) */
+ 	if (!g5p_gpc_ok(*state) &&
+-	    !g5p_park_may_ring(READ_ONCE(b->park_epoch), *state,
+-			       readl(g->window[1])))
++	    !g5p_park_may_ring(park, *state, readl(g->window[1])))
+ 		return -EHOSTDOWN;
+ 	dma_wmb();
+ 	writel(f->kind == G5P_R74F_3D ? 0x11 : 0x10, g->rgx + 0xb00);
+diff --git a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+index a2f7501..70b4ba2 100644
+--- a/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
++++ b/drivers/gpu/drm/apple-g5p/drm-render-v3.inc
+@@ -857,18 +857,22 @@ static void g5p_rv3_wk_w1(void *ctx, u32 reg, u32 value)
+ /* The GPC state read of g5p_wk_ring() comes right after its R1+0x14 = 7 wake: in bell mode
+  * (render_user_wake=2) it waits up to G5P_RV3_WK_SETTLE_US, re-reading every 10 us, for a settled
+  * powered pstate (bit 4 clear, nibble nonzero), as Apple's setGPCPerformanceState waits for bit 4.
+- * Reads only; the ring's own check of the final value is unchanged.
++ * Reads only; the ring's own check of the final value is unchanged.  Not in a park epoch: a
++ * parked GPC powers on only after the doorbell, and Apple's submitDeviceControl (6ca05d4) reads
++ * the nibble once and rings.  The epoch only goes from never-park to park while it is live, so
++ * if this read and the caller's io.park disagree the ring refuses an off GPC (fail closed).
+  */
+ #define G5P_RV3_WK_SETTLE_US 2000U
+ 
+ static u32 g5p_rv3_wk_r1(void *ctx, u32 reg)
+ {
+-	void __iomem *r1 = ((struct g5p_diag *)ctx)->window[1];
++	struct g5p_diag *g = ctx;
++	void __iomem *r1 = g->window[1];
+ 	u32 raw = readl(r1 + reg);
+ 	u64 t0;
+ 
+ 	if (reg != G5P_WK_R1_GPC || (2) != G5P_WK_ALWAYS ||
+-	    (!(raw & 0x10) && (raw & 0xf)))
++	    (!(raw & 0x10) && (raw & 0xf)) || READ_ONCE(g->boot->park_epoch))
+ 		return raw;
+ 	t0 = ktime_get_mono_fast_ns();
+ 	while (((raw & 0x10) || !(raw & 0xf)) &&
+@@ -1137,11 +1141,13 @@ static void g5p_rv3_dc_kick(struct g5p_diag *g, u32 start, u32 target,
+ 	u32 fence = U32_MAX, gpc = U32_MAX, power, cons, n = 0;
+ 	const char *did = "skip-guard";
+ 	unsigned long flags;
++	bool park;
+ 	u64 t0;
+ 
+ 	;
+ 	;
+ 	spin_lock_irqsave(&b->event_lock, flags);
++	park = READ_ONCE(b->park_epoch);
+ 	dma_rmb();
+ 	cons = READ_ONCE(ctl[0]);
+ 	power = g5p_wk_power_mask(READ_ONCE(g->powered),
+@@ -1163,7 +1169,8 @@ static void g5p_rv3_dc_kick(struct g5p_diag *g, u32 start, u32 target,
+ 	}
+ 	t0 = ktime_get_mono_fast_ns();
+ 	gpc = readl(g->window[1] + 0x1000);
+-	while (!g5p_gpc_ok(gpc) &&
++	/* a park epoch reads once and rings, as Apple does (6ca05d4) */
++	while (!park && !g5p_gpc_ok(gpc) &&
+ 	       ktime_get_mono_fast_ns() - t0 <
+ 		       (u64)G5P_RV3_DC_SETTLE_US * NSEC_PER_USEC) {
+ 		udelay(10);
+@@ -1172,8 +1179,7 @@ static void g5p_rv3_dc_kick(struct g5p_diag *g, u32 start, u32 target,
+ 	}
+ 	if (!g5p_gpc_ok(gpc)) {
+ 		/* self-park: a parked firmware wakes through this doorbell */
+-		if (!g5p_park_may_ring(READ_ONCE(b->park_epoch), gpc,
+-				       readl(g->window[1]))) {
++		if (!g5p_park_may_ring(park, gpc, readl(g->window[1]))) {
+ 			did = "skip-gpc";
+ 			goto out;
+ 		}

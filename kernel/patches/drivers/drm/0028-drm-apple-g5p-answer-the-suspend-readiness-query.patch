@@ -1,0 +1,91 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 18:12:11 +0000
+Subject: [PATCH] drm/apple-g5p: answer the suspend readiness query
+
+/sys/power/suspend_ready asks each sleep admission provider whether its
+prepare would admit now, without reserving. Provide the G5P check:
+report a frozen or failed epoch, a sampled power abort, a stuck or
+recovering channel and closed admission as -EIO, and a GPU that is not
+booted and powered as -ENODEV. Accepted or in-flight work is not a
+refusal, since prepare drains it before certifying; when the GPU is
+already idle and the core lock is free, sample the rings and the
+quiescence certificate prepare uses and report a failure as -EBUSY.
+
+No gate is shut, no firmware event is drained and nothing is written.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/apple-g5p/a9-gpu-drm.c     |  2 ++
+ drivers/gpu/drm/apple-g5p/system-sleep.inc | 38 ++++++++++++++++++++++
+ 2 files changed, 40 insertions(+)
+
+diff --git a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+index 523fdfa44..730138be9 100644
+--- a/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
++++ b/drivers/gpu/drm/apple-g5p/a9-gpu-drm.c
+@@ -1032,6 +1032,7 @@ static void g5p_autoboot_work(struct work_struct *work)
+ }
+ 
+ static int g5p_system_sleep_prepare(struct device *dev);
++static int g5p_system_sleep_check(struct device *dev);
+ 
+ static int g5p_drm_probe(struct platform_device *pdev)
+ {
+@@ -1094,6 +1095,7 @@ static int g5p_drm_probe(struct platform_device *pdev)
+ 	d->sleep_admission.dev = &pdev->dev;
+ 	d->sleep_admission.prepare = g5p_system_sleep_prepare;
+ 	d->sleep_admission.complete = apple_g5p_system_sleep_complete;
++	d->sleep_admission.check = g5p_system_sleep_check;
+ 	ret = register_pm_suspend_admission(&d->sleep_admission);
+ 	if (ret)
+ 		goto err_pm;
+diff --git a/drivers/gpu/drm/apple-g5p/system-sleep.inc b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+index 96a77078a..2f8f30ae6 100644
+--- a/drivers/gpu/drm/apple-g5p/system-sleep.inc
++++ b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+@@ -199,6 +199,44 @@ refuse_client:
+ 	return -EBUSY;
+ }
+ 
++/*
++ * Readiness query: what prepare would decide, without shutting any gate or
++ * draining firmware events. Accepted or in-flight work is not a refusal,
++ * since prepare drains it; the certificate is sampled only when the GPU is
++ * already idle and the core lock is free.
++ */
++static int g5p_system_sleep_check(struct device *dev)
++{
++	struct g5p_diag *g = dev_get_drvdata(dev);
++	struct g5p_drm *d;
++	struct g5p_boot *b;
++	int ret = 0;
++
++	if (!g || !g->event_cookie)
++		return -ENODEV;
++	d = g->event_cookie;
++	b = READ_ONCE(g->boot);
++	if (READ_ONCE(g->sleep_failed) || !b || READ_ONCE(b->failed) ||
++	    READ_ONCE(b->event_failed) || !b->r73b ||
++	    READ_ONCE(b->r73b->early_power_abort) ||
++	    g5p_r8_admit_closed(&g5p_r8_state.admit) ||
++	    g5p_ru_term_failed(&g5p_rv3_term) || READ_ONCE(d->rdev->stuck) ||
++	    READ_ONCE(d->rdev->recovering))
++		return -EIO;
++	if (!READ_ONCE(b->alive) || READ_ONCE(b->stopped) || !b->released ||
++	    !b->irq_ready)
++		return -ENODEV;
++	if (!mutex_trylock(&g->lock))
++		return 0;
++	if (!g->powered || !g->fender_ready || g->mmio_off)
++		ret = -ENODEV;
++	else if (g5p_sleep_idle(d) &&
++		 (!g5p_sleep_rings(g) || !g5p_sleep_certificate(g, false)))
++		ret = -EBUSY;
++	mutex_unlock(&g->lock);
++	return ret;
++}
++
+ /* The early caller reserves admission; PM complete releases it on abort/wake.
+  * This is deliberately stronger than an observation-only readiness query.
+  */

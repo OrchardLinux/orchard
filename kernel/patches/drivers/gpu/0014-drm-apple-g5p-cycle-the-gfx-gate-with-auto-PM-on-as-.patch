@@ -1,0 +1,92 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 16:08:39 +0100
+Subject: [PATCH] drm/apple-g5p: cycle the gfx gate with auto-PM on as
+ pmgr-pwrstate does
+
+The bounded gfx gate cycle (the incoming dirty-start reset, the in-boot
+recovery and the kexec quiesce) refused any gate with auto-PM set.
+pmgr-pwrstate sets auto-PM whenever genpd powers gfx on, which is every
+cold boot: there the cycle was always refused, so a cold boot could not
+recover the GPU in place, and once a warm boot gates idle domains like a
+cold one it could not either.
+
+Do what pmgr-pwrstate does for every transition it makes: clear auto-PM
+together with the off target, and set it again only after the on target
+is reached. The minimum-state and reset refusals are unchanged.
+
+Assisted-by: LLM
+---
+ drivers/gpu/apple-g5p/power-r33.inc | 27 +++++++++++++++++++--------
+ 1 file changed, 19 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/gpu/apple-g5p/power-r33.inc b/drivers/gpu/apple-g5p/power-r33.inc
+index ce8a18f3c..4edc3b4c8 100644
+--- a/drivers/gpu/apple-g5p/power-r33.inc
++++ b/drivers/gpu/apple-g5p/power-r33.inc
+@@ -3,10 +3,14 @@
+  * R0+0x418/0x41c (no reset) keeps the previous boot's value through it. At the
+  * first Fender wake, before any GPU MMIO and before any GPU IRQ is requested,
+  * hold the same PMGR gate (0x80340, gate124) off for boot_gfx_off_ms, then
+- * restore target 0xf. The refusal rules are pmgr-pwrstate's own (min, reset,
+- * auto). Every exit leaves the gate requested on.
++ * restore target 0xf. The refusal rules are pmgr-pwrstate's own (min, reset).
++ * Auto-PM, which pmgr-pwrstate turns on whenever genpd powers gfx (every cold
++ * boot), is handled as pmgr-pwrstate handles it: cleared with the off target,
++ * set again once the on target is reached. Every exit leaves the gate
++ * requested on.
+  */
+ #define G5P_R33_GFX_PS 0x80340U
++#define G5P_R33_GFX_AUTO BIT(28)
+ #define G5P_R33_GFX_OFF_MAX_MS 2000U
+ #define G5P_R33_GFX_POLL_US 10000U
+ 
+@@ -15,16 +19,15 @@ static inline bool g5p_r33_gfx_on(u32 raw)
+ 	return (raw & 0xf) == 0xf && ((raw >> 4) & 0xf) == 0xf;
+ }
+ 
+-/* Only a plain, fully-on, software-controlled gate may be cycled. */
++/* Only a plain, fully-on gate with no floor and no reset may be cycled. */
+ static inline bool g5p_r33_gfx_cyclable(u32 raw)
+ {
+-	return g5p_r33_gfx_on(raw) && !((raw >> 16) & 0xf) && !(raw >> 31) &&
+-	       !((raw >> 28) & 1);
++	return g5p_r33_gfx_on(raw) && !((raw >> 16) & 0xf) && !(raw >> 31);
+ }
+ 
+ static int g5p_r33_gfx_off(struct device *dev, struct regmap *pmgr, u32 ms)
+ {
+-	u32 before, held, v = 0, after = 0;
++	u32 before, held, v = 0, after = 0, autopm;
+ 	u64 t0;
+ 	int ret, on;
+ 
+@@ -38,11 +41,13 @@ static int g5p_r33_gfx_off(struct device *dev, struct regmap *pmgr, u32 ms)
+ 	if (!g5p_r33_gfx_cyclable(before)) {
+ 		dev_info(
+ 			dev,
+-			"POWER gfx-off refused ms=%u before=%08x; pmgr min/reset/auto or not on\n",
++			"POWER gfx-off refused ms=%u before=%08x; pmgr min/reset or not on\n",
+ 			ms, before);
+ 		return -EBUSY;
+ 	}
+-	ret = regmap_update_bits(pmgr, G5P_R33_GFX_PS, 0xf, 0);
++	/* pmgr-pwrstate apple_pmgr_ps_set(): auto-PM off with the target write. */
++	autopm = before & G5P_R33_GFX_AUTO;
++	ret = regmap_update_bits(pmgr, G5P_R33_GFX_PS, autopm | 0xf, 0);
+ 	if (!ret)
+ 		ret = regmap_read_poll_timeout(pmgr, G5P_R33_GFX_PS, v,
+ 					       !((v >> 4) & 0xf), 10,
+@@ -59,6 +64,12 @@ static int g5p_r33_gfx_off(struct device *dev, struct regmap *pmgr, u32 ms)
+ 		on = regmap_read_poll_timeout(pmgr, G5P_R33_GFX_PS, after,
+ 					      g5p_r33_gfx_on(after), 10,
+ 					      G5P_R33_GFX_POLL_US);
++	/* ... and back on only once the on target is reached, as there. */
++	if (!on && autopm) {
++		on = regmap_update_bits(pmgr, G5P_R33_GFX_PS, autopm, autopm);
++		if (!on)
++			on = regmap_read(pmgr, G5P_R33_GFX_PS, &after);
++	}
+ 	dev_info(
+ 		dev,
+ 		"POWER gfx-off ms=%u held_us=%u before=%08x end=%08x after=%08x off_ret=%d "

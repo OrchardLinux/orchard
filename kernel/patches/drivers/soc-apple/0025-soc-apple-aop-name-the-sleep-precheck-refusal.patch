@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 15:26:19 +0100
+Subject: [PATCH] soc: apple: aop: name the sleep precheck refusal
+
+Log that the AOP firmware has not started when the precheck refuses,
+only during a suspend attempt. The decision is unchanged.
+
+Assisted-by: LLM
+---
+ drivers/soc/apple/aop.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/soc/apple/aop.c b/drivers/soc/apple/aop.c
+index f0ad4c87f..84ba67c59 100644
+--- a/drivers/soc/apple/aop.c
++++ b/drivers/soc/apple/aop.c
+@@ -1394,7 +1394,12 @@ static int apple_aop_sleep_precheck(struct notifier_block *nb, unsigned long act
+ 
+ 	if (action == PM_SUSPEND_PRECHECK_COMPLETE)
+ 		return NOTIFY_DONE;
+-	return READ_ONCE(aop->sleep_ready) ? NOTIFY_OK : notifier_from_errno(-EBUSY);
++	if (READ_ONCE(aop->sleep_ready))
++		return NOTIFY_OK;
++	/* Only for an attempt: the readiness query polls this. */
++	if (data == PM_SUSPEND_PRECHECK_ATTEMPT)
++		dev_info(aop->dev, "system sleep refused: AOP firmware not started\n");
++	return notifier_from_errno(-EBUSY);
+ }
+ 
+ static void apple_aop_sleep_unregister(void *data)

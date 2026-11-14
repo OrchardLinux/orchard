@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 16:12:42 +0100
+Subject: [PATCH] drm/apple-g5p: do not refuse system sleep on the render claim
+
+The sleep busy predicate (since "implement bounded retained system
+sleep") reads d->accepted as accepted work in flight. It is not: it is
+the render claim, set 0 -> 1 by the first accepted job in
+g5p_render_device_claim() and never cleared ("one render attachment per
+boot: accepted stays held"). Once any client has rendered, which on a
+desktop is at boot, every sleep attempt drained for 1 s and refused
+"accepted", although no client was in the driver and the firmware was
+parked. The deferred-close term hid it until it was dropped.
+
+Accepted jobs not yet signalled are r8_queued (incremented at accept,
+decremented at signal), which the predicate already checks. Drop the
+claim from the busy states. The R1 quiescent certificate, the rings, the
+TA/3D stamps and every other busy state are unchanged.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/apple-g5p/system-sleep.inc | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/apple-g5p/system-sleep.inc b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+index e93d1b02c..ad782758a 100644
+--- a/drivers/gpu/drm/apple-g5p/system-sleep.inc
++++ b/drivers/gpu/drm/apple-g5p/system-sleep.inc
+@@ -18,6 +18,11 @@
+  * after an in-boot recovery. With one compositor running, a context that
+  * closed earlier stays "previous" for good, so refusing on it refused every
+  * sleep.
++ *
++ * Neither is the render claim (d->accepted, g5p_render_device_claim()): it
++ * latches on the first accepted job and holds for the rest of the boot (one
++ * render attachment per boot), so it says nothing about work in flight.
++ * Accepted jobs not yet signalled are r8_queued.
+  */
+ static const char *g5p_sleep_busy(struct g5p_drm *d, bool *drains)
+ {
+@@ -42,8 +47,6 @@ static const char *g5p_sleep_busy(struct g5p_drm *d, bool *drains)
+ 		return "stuck";
+ 	if (rd->recovering)
+ 		return "recovering";
+-	if (atomic_read(&d->accepted))
+-		return "accepted";
+ 	if (atomic_read(&d->r8_queued))
+ 		return "r8-queued";
+ 	if (READ_ONCE(rd->executing))

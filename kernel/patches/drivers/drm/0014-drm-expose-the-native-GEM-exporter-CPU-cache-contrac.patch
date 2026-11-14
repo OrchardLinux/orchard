@@ -1,0 +1,147 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 15:11:46 +0000
+Subject: [PATCH] drm: expose the native GEM exporter CPU cache contract
+
+[Orchard: from brkosebay/linux 78775ea3b9e; retain Orchard ADBE
+implementation, adding its exporter contract only.]
+
+G5P PRIME imports require an immutable native cache mapping contract.
+Unknown and foreign exporters stay conservative.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/adbe/adbe_drv.c  | 25 +++++++++++++++++++++++++
+ drivers/gpu/drm/drm_prime.c      | 19 +++++++++++++++++++
+ include/drm/drm_gem.h            |  8 ++++++++
+ include/drm/drm_gem_dma_helper.h |  8 ++++++++
+ include/drm/drm_prime.h          |  2 ++
+ 5 files changed, 62 insertions(+)
+
+diff --git a/drivers/gpu/drm/adbe/adbe_drv.c b/drivers/gpu/drm/adbe/adbe_drv.c
+index 2508e6531..24c76fef9 100644
+--- a/drivers/gpu/drm/adbe/adbe_drv.c
++++ b/drivers/gpu/drm/adbe/adbe_drv.c
+@@ -653,11 +653,36 @@ static int adbe_dumb_create(struct drm_file *file, struct drm_device *drm,
+ 	return drm_gem_dma_dumb_create_internal(file, drm, args);
+ }
+ 
++/* Native allocations: the DMA helper's defaults plus the uncached-export
++ * contract. Imported objects never make that promise.
++ */
++static const struct drm_gem_object_funcs adbe_gem_funcs = {
++	.free = drm_gem_dma_object_free,
++	.print_info = drm_gem_dma_object_print_info,
++	.get_sg_table = drm_gem_dma_object_get_sg_table,
++	.vmap = drm_gem_dma_object_vmap,
++	.mmap = drm_gem_dma_object_mmap,
++	.vm_ops = &drm_gem_dma_vm_ops,
++	.is_cpu_uncached = drm_gem_dma_object_is_cpu_uncached,
++};
++
++static struct drm_gem_object *adbe_gem_create_object(struct drm_device *drm,
++						     size_t size)
++{
++	struct drm_gem_dma_object *dma_obj = kzalloc_obj(*dma_obj);
++
++	if (!dma_obj)
++		return ERR_PTR(-ENOMEM);
++	dma_obj->base.funcs = &adbe_gem_funcs;
++	return &dma_obj->base;
++}
++
+ DEFINE_DRM_GEM_DMA_FOPS(adbe_fops);
+ 
+ static const struct drm_driver adbe_drm_driver = {
+ 	.driver_features = DRIVER_GEM | DRIVER_MODESET | DRIVER_ATOMIC,
+ 	.fops = &adbe_fops,
++	.gem_create_object = adbe_gem_create_object,
+ 	DRM_GEM_DMA_DRIVER_OPS_WITH_DUMB_CREATE(adbe_dumb_create),
+ 	DRM_FBDEV_DMA_DRIVER_OPS,
+ 	.name = "adbe",
+diff --git a/drivers/gpu/drm/drm_prime.c b/drivers/gpu/drm/drm_prime.c
+index 9b44c78cd..70110173d 100644
+--- a/drivers/gpu/drm/drm_prime.c
++++ b/drivers/gpu/drm/drm_prime.c
+@@ -835,6 +835,25 @@ static const struct dma_buf_ops drm_gem_prime_dmabuf_ops =  {
+ 	.vunmap = drm_gem_dmabuf_vunmap,
+ };
+ 
++/**
++ * drm_gem_dma_buf_is_cpu_uncached - query a trusted native GEM exporter
++ * @dma_buf: exported buffer whose supported CPU aliases are queried
++ *
++ * Returns true only for the explicit native exporter contract. Non-GEM,
++ * re-exported foreign objects and unspecified exporters remain conservative.
++ */
++bool drm_gem_dma_buf_is_cpu_uncached(struct dma_buf *dma_buf)
++{
++	struct drm_gem_object *obj;
++
++	if (!dma_buf || dma_buf->ops != &drm_gem_prime_dmabuf_ops)
++		return false;
++	obj = dma_buf->priv;
++	return !drm_gem_is_imported(obj) && obj->funcs &&
++		obj->funcs->is_cpu_uncached && obj->funcs->is_cpu_uncached(obj);
++}
++EXPORT_SYMBOL_GPL(drm_gem_dma_buf_is_cpu_uncached);
++
+ /**
+  * drm_prime_pages_to_sg - converts a page array into an sg list
+  * @dev: DRM device
+diff --git a/include/drm/drm_gem.h b/include/drm/drm_gem.h
+index 885244e37..048193377 100644
+--- a/include/drm/drm_gem.h
++++ b/include/drm/drm_gem.h
+@@ -73,6 +73,14 @@ enum drm_gem_object_status {
+  * struct drm_gem_object_funcs - GEM object functions
+  */
+ struct drm_gem_object_funcs {
++	/**
++	 * @is_cpu_uncached: Optional exporter contract. True only when every
++	 * supported CPU mapping (kernel and userspace) is uncached or WC and
++	 * no cacheable alias exists. Native allocation properties must be
++	 * immutable; imported memory must not inherit this promise. Default
++	 * NULL is conservative. This does not remove DMA ordering barriers.
++	 */
++	bool (*is_cpu_uncached)(struct drm_gem_object *obj);
+ 	/**
+ 	 * @free:
+ 	 *
+diff --git a/include/drm/drm_gem_dma_helper.h b/include/drm/drm_gem_dma_helper.h
+index f2678e7ec..481007c13 100644
+--- a/include/drm/drm_gem_dma_helper.h
++++ b/include/drm/drm_gem_dma_helper.h
+@@ -4,6 +4,7 @@
+ 
+ #include <drm/drm_file.h>
+ #include <drm/drm_ioctl.h>
++#include <linux/dma-map-ops.h>
+ #include <drm/drm_gem.h>
+ 
+ struct drm_mode_create_dumb;
+@@ -55,6 +56,13 @@ extern const struct vm_operations_struct drm_gem_dma_vm_ops;
+  * This function wraps drm_gem_dma_free_object(). Drivers that employ the DMA helpers
+  * should use it as their &drm_gem_object_funcs.free handler.
+  */
++static inline bool drm_gem_dma_object_is_cpu_uncached(struct drm_gem_object *obj)
++{
++	return !drm_gem_is_imported(obj) &&
++		!to_drm_gem_dma_obj(obj)->map_noncoherent &&
++		!dev_is_dma_coherent(drm_dev_dma_dev(obj->dev));
++}
++
+ static inline void drm_gem_dma_object_free(struct drm_gem_object *obj)
+ {
+ 	struct drm_gem_dma_object *dma_obj = to_drm_gem_dma_obj(obj);
+diff --git a/include/drm/drm_prime.h b/include/drm/drm_prime.h
+index f50f862f0..5de957f7d 100644
+--- a/include/drm/drm_prime.h
++++ b/include/drm/drm_prime.h
+@@ -116,4 +116,6 @@ int drm_prime_sg_to_page_array(struct sg_table *sgt, struct page **pages,
+ int drm_prime_sg_to_dma_addr_array(struct sg_table *sgt, dma_addr_t *addrs,
+ 				   int max_pages);
+ 
++bool drm_gem_dma_buf_is_cpu_uncached(struct dma_buf *dma_buf);
++
+ #endif /* __DRM_PRIME_H__ */

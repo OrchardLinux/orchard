@@ -1,0 +1,88 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 19:56:59 +0000
+Subject: [PATCH] drm/apple-g5p: keep the boot perf readback off the
+ synchronous console
+
+The GPUPERF readback after the release's first ALIVE was one 330
+character KERN_EMERG record. An emergency record is always written to
+every console, and the legacy console flush in vprintk_emit() runs with
+preemption disabled. On the 115200 baud serial console that one record
+holds CPU0 for about 29 ms, so an expedited grace period started in the
+window reports:
+
+  rcu: INFO: rcu_preempt detected expedited stalls on CPUs/tasks:   {
+0-.... } 21 jiffies
+
+with the NMI backtrace in console_flush_all() under g5p_perf_readback()
+<- g5p_r73c_fast_control() <- g5p_boot_release().
+
+Print the same fields at info level as three short records. The readback
+runs after the control submit, and its RAM and register-licence reads
+are unchanged, so the hardware sequence and its timing are not affected.
+
+Assisted-by: LLM
+---
+ drivers/gpu/apple-g5p/lifecycle.inc | 49 +++++++++++++++++------------
+ 1 file changed, 29 insertions(+), 20 deletions(-)
+
+diff --git a/drivers/gpu/apple-g5p/lifecycle.inc b/drivers/gpu/apple-g5p/lifecycle.inc
+index 9a896569c..bf2a76a08 100644
+--- a/drivers/gpu/apple-g5p/lifecycle.inc
++++ b/drivers/gpu/apple-g5p/lifecycle.inc
+@@ -421,26 +421,35 @@ static void g5p_perf_readback(struct g5p_diag *g, const char *why)
+ 	       (u64)g5p_dc_root_word(b, meta + 0x788) << 32;
+ 	if (!g5p_mmio_hold(g, &t, G5P_MMIO_CENSUS))
+ 		g5p_mmio_release(g, &t);
+-	dev_emerg(
+-		g->dev,
+-		"GPUPERF readback why=%s seed=%u/%u poweron=%u pol0=%u pol4=%u pol8=%u polc=%u "
+-		"pol28=%u pol2c=%u pol30=%u pol34=%u p8f8=%llx fw_now918=%llx p920=%llx "
+-		"meta784=%llx host_now=%llx stamp=%llx fw_counter_minus_stamp_us=%lld "
+-		"host_minus_fw_counter_us=%lld r1=%s r1_1000=%08x r1_0=%08x end=gpuperf\n",
+-		why, b->perf_seed_mode, b->perf_seed, b->perf_poweron,
+-		g5p_dc_root_word(b, pol + 0), g5p_dc_root_word(b, pol + 4),
+-		g5p_dc_root_word(b, pol + 8), g5p_dc_root_word(b, pol + 0xc),
+-		g5p_dc_root_word(b, pol + 0x28),
+-		g5p_dc_root_word(b, pol + 0x2c),
+-		g5p_dc_root_word(b, pol + 0x30),
+-		g5p_dc_root_word(b, pol + 0x34), p8f8, p918, p920, m784, host,
+-		b->seed_stamp,
+-		b->seed_stamp ?
+-			div_s64((s64)(p918 - m784 - b->seed_stamp) * 1000000LL,
+-				rate) :
+-			0,
+-		div_s64((s64)(host - (p918 - m784)) * 1000000LL, rate),
+-		g5p_mmio_did(&t), t.gpc, t.r1_0);
++	/*
++	 * Info level, three short records. One 330-character emergency record
++	 * was written to the 115200 baud console inside vprintk_emit()'s
++	 * preempt-disabled flush (~29 ms), which stalled expedited RCU on CPU0.
++	 */
++	dev_info(g->dev,
++		 "GPUPERF readback why=%s seed=%u/%u poweron=%u pol0=%u pol4=%u pol8=%u polc=%u "
++		 "pol28=%u pol2c=%u pol30=%u pol34=%u end=gpuperf\n",
++		 why, b->perf_seed_mode, b->perf_seed, b->perf_poweron,
++		 g5p_dc_root_word(b, pol + 0), g5p_dc_root_word(b, pol + 4),
++		 g5p_dc_root_word(b, pol + 8), g5p_dc_root_word(b, pol + 0xc),
++		 g5p_dc_root_word(b, pol + 0x28),
++		 g5p_dc_root_word(b, pol + 0x2c),
++		 g5p_dc_root_word(b, pol + 0x30),
++		 g5p_dc_root_word(b, pol + 0x34));
++	dev_info(g->dev,
++		 "GPUPERF readback why=%s p8f8=%llx fw_now918=%llx p920=%llx meta784=%llx "
++		 "r1=%s r1_1000=%08x r1_0=%08x end=gpuperf\n",
++		 why, p8f8, p918, p920, m784, g5p_mmio_did(&t), t.gpc, t.r1_0);
++	dev_info(g->dev,
++		 "GPUPERF readback why=%s host_now=%llx stamp=%llx fw_counter_minus_stamp_us=%lld "
++		 "host_minus_fw_counter_us=%lld end=gpuperf\n",
++		 why, host, b->seed_stamp,
++		 b->seed_stamp ?
++			 div_s64((s64)(p918 - m784 - b->seed_stamp) *
++					 1000000LL,
++				 rate) :
++			 0,
++		 div_s64((s64)(host - (p918 - m784)) * 1000000LL, rate));
+ }
+ 
+ static int g5p_r73c_fast_control(struct g5p_diag *g)

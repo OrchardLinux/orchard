@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 11:15:38 +0100
+Subject: [PATCH] nvme-pci: stop Apple ANS before a restart as before a kexec
+
+A restart that re-enters the boot loader (PSCI SYSTEM_RESET to m1n1)
+leaves the S8003 ANS controller to a loader that brings its port up again
+and reads from it. On a plain shutdown nvme_disable_prepare_reset() sets
+SHN but keeps CC.EN, and power-cycling the port in that state hangs the
+SoC.
+
+Take the paired, certified stop that a kexec handoff already uses on every
+restart as well: drain, SHN, CC.EN and RDY clear, bus mastering off and the
+NVMMU/DART retired. Such a failure is not a sleep refusal, so it no longer
+takes the sleep branch; it ends in a cold watchdog reset, as for kexec.
+Power-off and halt keep the existing shutdown.
+
+Assisted-by: LLM
+---
+ drivers/nvme/host/pci.c | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/nvme/host/pci.c b/drivers/nvme/host/pci.c
+index 6868811d5..9fe60de0e 100644
+--- a/drivers/nvme/host/pci.c
++++ b/drivers/nvme/host/pci.c
+@@ -3381,7 +3381,7 @@ static int nvme_dev_disable_paired(struct nvme_dev *dev, bool shutdown, bool pai
+ 	enum nvme_ctrl_state state = nvme_ctrl_state(&dev->ctrl);
+ 	struct pci_dev *pdev = to_pci_dev(dev->dev);
+ 	bool dead;
+-	bool for_sleep = paired && !kexec_in_progress;
++	bool for_sleep = paired && !kexec_in_progress && system_state != SYSTEM_RESTART;
+ 	int ret = paired ? -EBUSY : 0;
+ 
+ 	mutex_lock(&dev->shutdown_lock);
+@@ -4053,14 +4053,23 @@ static void nvme_reset_done(struct pci_dev *pdev)
+ 		flush_work(&dev->ctrl.reset_work);
+ }
+ 
++/*
++ * A restart re-enters the boot loader, which starts the storage port again
++ * and reads from the controller. It needs the controller stopped as iBoot
++ * leaves it (SHN complete, CC.EN and RDY clear, DMA certified stopped): the
++ * stop a kexec handoff takes. Anything less ends in a cold reset.
++ */
+ static void nvme_shutdown(struct pci_dev *pdev)
+ {
+ 	struct nvme_dev *dev = pci_get_drvdata(pdev);
++	bool restart = !kexec_in_progress && system_state == SYSTEM_RESTART;
+ 
+-	if (kexec_in_progress && apple_ans_is_s8003(dev->dev) &&
++	if ((kexec_in_progress || restart) && apple_ans_is_s8003(dev->dev) &&
+ 	    dev->dma_ops == &nvme_pci_apple_ans_ops && !apple_ans_handoff_begin(dev->dev)) {
+ 		if (!nvme_wait_reset(&dev->ctrl) || nvme_dev_disable_paired(dev, true, true)) {
+-			apple_cold_reset("Apple ANS: refusing unsafe powered kexec handoff");
++			apple_cold_reset(restart ?
++					 "Apple ANS: unsafe controller stop before restart" :
++					 "Apple ANS: refusing unsafe powered kexec handoff");
+ 			return;
+ 		}
+ 		return;

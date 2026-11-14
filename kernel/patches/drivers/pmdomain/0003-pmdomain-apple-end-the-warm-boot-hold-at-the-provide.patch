@@ -1,0 +1,185 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 16:08:04 +0100
+Subject: [PATCH] pmdomain: apple: end the warm boot hold at the provider's
+ sync_state
+
+On a kexec boot every S8000 power state keeps its inherited state:
+power-off returns -EBUSY, clock-gate disable does nothing and auto-PM
+stays off. That hold never ended, so for the whole warm boot no domain
+was ever gated, at runtime or in system sleep, while a cold boot gates
+every idle domain. genpd ignores the -EBUSY, so a warm system sleep
+reported success with every domain still powered.
+
+The hold is only needed while the previous kernel's hardware is handed
+over, that is until the domain's consumers have probed. genpd already
+keeps an on-at-boot domain on until its provider's sync_state on a cold
+boot. End the warm hold at the same point: in sync_state, drop keep_on,
+turn auto-PM on for a domain that is still powered (as probe does on a
+cold boot) and let genpd power off what nothing uses. From there the
+domain behaves as on a cold boot.
+
+Export apple_pmgr_ps_power_held() so that a consumer can refuse a
+transition that would need its domain off while the hold is still in
+place, e.g. when one of the domain's consumers never probes.
+
+Cold boots are unchanged.
+
+Assisted-by: LLM
+---
+ drivers/pmdomain/apple/pmgr-pwrstate.c  | 69 +++++++++++++++++++++++--
+ include/linux/soc/apple/pmgr-pwrstate.h | 23 +++++++++
+ 2 files changed, 88 insertions(+), 4 deletions(-)
+ create mode 100644 include/linux/soc/apple/pmgr-pwrstate.h
+
+diff --git a/drivers/pmdomain/apple/pmgr-pwrstate.c b/drivers/pmdomain/apple/pmgr-pwrstate.c
+index 1a8034d8f..4f7086330 100644
+--- a/drivers/pmdomain/apple/pmgr-pwrstate.c
++++ b/drivers/pmdomain/apple/pmgr-pwrstate.c
+@@ -19,6 +19,7 @@
+ #include <linux/reset-controller.h>
+ #include <linux/module.h>
+ #include <linux/soc/apple/pmgr-observe.h>
++#include <linux/soc/apple/pmgr-pwrstate.h>
+ 
+ #define APPLE_PMGR_RESET        BIT(31)
+ #define APPLE_PMGR_AUTO_ENABLE  BIT(28)
+@@ -61,6 +62,10 @@ struct apple_pmgr_ps {
+ 	bool has_genpd;
+ 	bool manual_pm;
+ 	bool warm;
++	/*
++	 * Warm (kexec) boot only: hold the inherited state until this
++	 * provider's sync_state, i.e. until every consumer has probed.
++	 */
+ 	bool keep_on;
+ };
+ 
+@@ -101,7 +106,7 @@ static int apple_pmgr_ps_set(struct apple_pmgr_ps *ps, u32 pstate, bool auto_ena
+ 		return ret;
+ 	}
+ 
+-	if (auto_enable && !ps->keep_on) {
++	if (auto_enable && !READ_ONCE(ps->keep_on)) {
+ 		/* Not all devices implement this; this is a no-op where not implemented. */
+ 		reg &= ~APPLE_PMGR_FLAGS;
+ 		reg |= APPLE_PMGR_AUTO_ENABLE;
+@@ -144,7 +149,7 @@ static int apple_pmgr_ps_power_off(struct generic_pm_domain *genpd)
+ 	unsigned long flags;
+ 	int ret;
+ 
+-	if (ps->keep_on)
++	if (READ_ONCE(ps->keep_on))
+ 		return -EBUSY;
+ 
+ 	spin_lock_irqsave(&ps->lock, flags);
+@@ -179,8 +184,8 @@ static void apple_pmgr_clk_disable(struct clk_hw *hw)
+ 	unsigned long flags;
+ 	int ret;
+ 
+-	/* The lab has no separate clk gate sharing this power-state word. */
+-	if (ps->keep_on)
++	/* Held like the power domain until sync_state. */
++	if (READ_ONCE(ps->keep_on))
+ 		return;
+ 
+ 	spin_lock_irqsave(&ps->lock, flags);
+@@ -451,6 +456,61 @@ err_remove:
+ 	return ret;
+ }
+ 
++/*
++ * Every consumer of this provider has probed: end a warm boot's hold and
++ * leave the domain as a cold boot would have it, with auto-PM on if it is
++ * still powered, then let genpd power it off if nothing uses it.  From here
++ * on runtime PM and system sleep gate the domain as on a cold boot.
++ */
++static void apple_pmgr_ps_sync_state(struct device *dev)
++{
++	struct apple_pmgr_ps *ps = dev_get_drvdata(dev);
++	unsigned long flags;
++	u32 reg = 0;
++
++	if (!ps)
++		return;
++	if (READ_ONCE(ps->keep_on)) {
++		spin_lock_irqsave(&ps->lock, flags);
++		WRITE_ONCE(ps->keep_on, false);
++		if (!ps->manual_pm && apple_pmgr_ps_is_active(ps))
++			regmap_update_bits(ps->regmap, ps->offset,
++					   APPLE_PMGR_FLAGS | APPLE_PMGR_AUTO_ENABLE,
++					   APPLE_PMGR_AUTO_ENABLE);
++		regmap_read(ps->regmap, ps->offset, &reg);
++		spin_unlock_irqrestore(&ps->lock, flags);
++		dev_info(dev, "PS %s: warm hold released reg=%08x\n", ps->name, reg);
++	}
++	if (ps->has_genpd)
++		of_genpd_sync_state(dev->of_node);
++}
++
++/*
++ * 1 while a warm boot still holds this provider's domain on (power-off
++ * returns -EBUSY), 0 once released or on a cold boot, -EPROBE_DEFER while
++ * the provider is not bound.
++ */
++int apple_pmgr_ps_power_held(struct device_node *np)
++{
++	struct platform_device *pdev = of_find_device_by_node(np);
++	struct apple_pmgr_ps *ps;
++	int ret = -EPROBE_DEFER;
++
++	if (!pdev)
++		return ret;
++	device_lock(&pdev->dev);
++	if (pdev->dev.driver &&
++	    !strcmp(pdev->dev.driver->name, "apple-pmgr-pwrstate")) {
++		ps = platform_get_drvdata(pdev);
++		if (ps)
++			ret = READ_ONCE(ps->keep_on);
++	}
++	device_unlock(&pdev->dev);
++	put_device(&pdev->dev);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(apple_pmgr_ps_power_held);
++
+ static const struct of_device_id apple_pmgr_ps_of_match[] = {
+ 	{ .compatible = "apple,t8103-pmgr-pwrstate" },
+ 	{ .compatible = "apple,pmgr-pwrstate" },
+@@ -464,6 +524,7 @@ static struct platform_driver apple_pmgr_ps_driver = {
+ 	.driver = {
+ 		.name = "apple-pmgr-pwrstate",
+ 		.of_match_table = apple_pmgr_ps_of_match,
++		.sync_state = apple_pmgr_ps_sync_state,
+ 	},
+ };
+ 
+diff --git a/include/linux/soc/apple/pmgr-pwrstate.h b/include/linux/soc/apple/pmgr-pwrstate.h
+new file mode 100644
+index 000000000..8e56d0de0
+--- /dev/null
++++ b/include/linux/soc/apple/pmgr-pwrstate.h
+@@ -0,0 +1,23 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _LINUX_SOC_APPLE_PMGR_PWRSTATE_H
++#define _LINUX_SOC_APPLE_PMGR_PWRSTATE_H
++
++#include <linux/kconfig.h>
++
++struct device_node;
++
++/*
++ * 1 while a warm (kexec) boot still holds the domain of this PMGR power-state
++ * node on, 0 when it does not (released at the provider's sync_state, or a
++ * cold boot), -EPROBE_DEFER while the provider is not bound.
++ */
++#if IS_ENABLED(CONFIG_APPLE_PMGR_PWRSTATE)
++int apple_pmgr_ps_power_held(struct device_node *np);
++#else
++static inline int apple_pmgr_ps_power_held(struct device_node *np)
++{
++	return 0;
++}
++#endif
++
++#endif

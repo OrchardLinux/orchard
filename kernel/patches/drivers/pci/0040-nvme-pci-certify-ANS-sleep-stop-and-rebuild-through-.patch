@@ -1,0 +1,163 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 16:18:38 +0000
+Subject: [PATCH] nvme-pci: certify ANS sleep stop and rebuild through
+ warm-storage APIs
+
+On S8003 the NVMe controller (ANS) sits behind a PCIe port that keeps
+power and reference clock over system sleep, while its DART loses its
+translations. The generic nvme_suspend() path neither drains the paired
+controller nor rebuilds the DART, so storage did not come back after
+suspend to idle.
+
+For the paired ANS controller, nvme_suspend() now begins the handoff,
+moves the controller to RESETTING and shuts it down through
+nvme_dev_disable_paired(). preinit restores the DART with
+apple_ans_dart_start(). In nvme_dev_disable_paired() a failure while
+preparing for sleep unfreezes the queues and returns -EBUSY, so the
+suspend is aborted instead of taking the cold-reset path used for kexec.
+Resume returns -ENODEV when the PCIe link was lost over sleep.
+
+Assisted-by: LLM
+---
+ drivers/nvme/host/pci-apple-ans.c |  7 ++++
+ drivers/nvme/host/pci.c           | 54 +++++++++++++++++++++++++------
+ 2 files changed, 51 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/nvme/host/pci-apple-ans.c b/drivers/nvme/host/pci-apple-ans.c
+index fdd9fa091..bdd9f991f 100644
+--- a/drivers/nvme/host/pci-apple-ans.c
++++ b/drivers/nvme/host/pci-apple-ans.c
+@@ -6,6 +6,7 @@
+  * Copyright (C) 2026 Paul Praschl <praschlpaul@g-p.at>
+  */
+ 
++#include <linux/apple-dart.h>
+ #include <linux/apple-ans.h>
+ #include <linux/bitmap.h>
+ #include <linux/dma-mapping.h>
+@@ -276,6 +277,12 @@ static int nvme_pci_apple_ans_preinit(struct nvme_dev *dev)
+ 	if (!ans)
+ 		return 0;
+ 
++	if (apple_ans_is_s8003(dev->dev)) {
++		ret = apple_ans_dart_start(dev->dev);
++		if (ret)
++			return ret;
++	}
++
+ 	core_mask = readl(dev->bar + APPLE_ANS_REG_CORE_MASK);
+ 	log_size = readl(dev->bar + APPLE_ANS_REG_LOG_SIZE);
+ 	hmb_size = readl(dev->bar + APPLE_ANS_REG_HMB_SIZE_REQ);
+diff --git a/drivers/nvme/host/pci.c b/drivers/nvme/host/pci.c
+index 2f356a8ce..6868811d5 100644
+--- a/drivers/nvme/host/pci.c
++++ b/drivers/nvme/host/pci.c
+@@ -3381,6 +3381,7 @@ static int nvme_dev_disable_paired(struct nvme_dev *dev, bool shutdown, bool pai
+ 	enum nvme_ctrl_state state = nvme_ctrl_state(&dev->ctrl);
+ 	struct pci_dev *pdev = to_pci_dev(dev->dev);
+ 	bool dead;
++	bool for_sleep = paired && !kexec_in_progress;
+ 	int ret = paired ? -EBUSY : 0;
+ 
+ 	mutex_lock(&dev->shutdown_lock);
+@@ -3393,28 +3394,40 @@ static int nvme_dev_disable_paired(struct nvme_dev *dev, bool shutdown, bool pai
+ 		 * if doing a safe shutdown.
+ 		 */
+ 		if (!dead && shutdown && nvme_wait_freeze_timeout(&dev->ctrl) <= 0 && paired) {
+-			apple_cold_reset("Apple ANS: outgoing I/O did not drain");
+-			mutex_unlock(&dev->shutdown_lock);
+-			return -EIO;
++			if (for_sleep) {
++				nvme_unfreeze(&dev->ctrl);
++				mutex_unlock(&dev->shutdown_lock);
++				return -EBUSY;
++			} else {
++				apple_cold_reset("Apple ANS: outgoing I/O did not drain");
++				mutex_unlock(&dev->shutdown_lock);
++				return -EIO;
++			}
+ 		}
+ 	}
+ 
+ 	nvme_quiesce_io_queues(&dev->ctrl);
+ 
+ 	if (paired && (dead || !dev->ctrl.queue_count)) {
+-		apple_cold_reset("Apple ANS: dead outgoing controller");
+-		mutex_unlock(&dev->shutdown_lock);
+-		return -EIO;
++		if (!for_sleep) {
++			apple_cold_reset("Apple ANS: dead outgoing controller");
++			mutex_unlock(&dev->shutdown_lock);
++			return -EIO;
++		}
++		goto sleep_failed;
+ 	}
+ 	if (!dead && dev->ctrl.queue_count > 0) {
+ 		if (paired) {
+ 			nvme_sync_io_queues(&dev->ctrl);
+ 			ret = apple_ans_nvmmu_drain(dev->dev);
+ 			if (ret) {
+-				dev_err(dev->dev, "Apple ANS: outgoing drain failed %d\n", ret);
+-				apple_cold_reset("Apple ANS: outgoing drain failed");
+-				mutex_unlock(&dev->shutdown_lock);
+-				return -EIO;
++				if (!for_sleep) {
++					dev_err(dev->dev, "Apple ANS: outgoing drain failed %d\n", ret);
++					apple_cold_reset("Apple ANS: outgoing drain failed");
++					mutex_unlock(&dev->shutdown_lock);
++					return -EIO;
++				}
++				goto sleep_failed;
+ 			}
+ 		}
+ 		nvme_delete_io_queues(dev);
+@@ -3424,6 +3437,7 @@ static int nvme_dev_disable_paired(struct nvme_dev *dev, bool shutdown, bool pai
+ 			ret = nvme_apple_ans_handoff_disable(dev, ret);
+ 		nvme_poll_irqdisable(&dev->queues[0]);
+ 	}
++sleep_failed:
+ 	nvme_suspend_io_queues(dev);
+ 	nvme_suspend_queue(dev, 0);
+ 	pci_free_irq_vectors(pdev);
+@@ -4101,6 +4115,9 @@ static int nvme_resume(struct device *dev)
+ 	struct nvme_dev *ndev = pci_get_drvdata(to_pci_dev(dev));
+ 	struct nvme_ctrl *ctrl = &ndev->ctrl;
+ 
++	if (pci_dev_is_disconnected(to_pci_dev(dev)))
++		return -ENODEV;
++
+ 	if (ndev->last_ps == U32_MAX ||
+ 	    nvme_set_power_state(ctrl, ndev->last_ps) != 0)
+ 		goto reset;
+@@ -4120,6 +4137,20 @@ static int nvme_suspend(struct device *dev)
+ 	int ret = -EBUSY;
+ 
+ 	ndev->last_ps = U32_MAX;
++	if (ndev->dma_ops == &nvme_pci_apple_ans_ops && apple_ans_is_s8003(dev)) {
++		ret = apple_ans_handoff_begin(dev);
++		if (ret)
++			return ret;
++		if (nvme_ctrl_state(ctrl) != NVME_CTRL_LIVE ||
++		    !nvme_change_ctrl_state(ctrl, NVME_CTRL_RESETTING))
++			return -EBUSY;
++		ret = nvme_dev_disable_paired(ndev, true, true);
++		if (ret) {
++			nvme_try_sched_reset(ctrl);
++			return -EBUSY;
++		}
++		return 0;
++	}
+ 
+ 	/*
+ 	 * The platform does not remove power for a kernel managed suspend so
+@@ -4201,6 +4232,9 @@ static int nvme_simple_resume(struct device *dev)
+ 	struct pci_dev *pdev = to_pci_dev(dev);
+ 	struct nvme_dev *ndev = pci_get_drvdata(pdev);
+ 
++	if (pci_dev_is_disconnected(to_pci_dev(dev)))
++		return -ENODEV;
++
+ 	return nvme_try_sched_reset(&ndev->ctrl);
+ }
+ 
