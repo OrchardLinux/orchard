@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sun, 15 Nov 2026 00:04:12 +0800
+Subject: [PATCH] arm64: dts: apple: t8010: Add the PDM microphone controller
+
+Describe the A10's PDM microphone controller with its two HiFi
+decimators, its SmartIO receive endpoint and its power domain, and the
+AOP's audio service, which provides the PDM clock. Addresses, interrupt
+and endpoint are those of the pdm node in the iPad 6 and iPad 7 Apple
+device trees. Boards enable the controller.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8010.dtsi | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t8010.dtsi b/arch/arm64/boot/dts/apple/t8010.dtsi
+index e08ce0d..07a58ae 100644
+--- a/arch/arm64/boot/dts/apple/t8010.dtsi
++++ b/arch/arm64/boot/dts/apple/t8010.dtsi
+@@ -193,6 +193,21 @@
+ 			status = "disabled";
+ 		};
+ 
++		pdm: pdm@20a0b4000 {
++			compatible = "apple,t8010-pdm";
++			reg = <0x2 0x0a0b4000 0x0 0x1000>,
++			      <0x2 0x0a120000 0x0 0x4000>,
++			      <0x2 0x0a124000 0x0 0x4000>;
++			reg-names = "pdm", "dec0", "dec1";
++			interrupts = <AIC_IRQ 238 IRQ_TYPE_LEVEL_HIGH>;
++			clocks = <&aop_audio>;
++			power-domains = <&ps_hfd0>;
++			dmas = <&sio 0x5b>;
++			dma-names = "rx";
++			#sound-dai-cells = <0>;
++			status = "disabled";
++		};
++
+ 		nco: clock-controller@20e044000 {
+ 			compatible = "apple,t8010-nco";
+ 			reg = <0x2 0x0e044000 0x0 0x14000>;
+@@ -728,6 +743,11 @@
+ 			aop_pressure: pressure {
+ 				compatible = "apple,t8010-aop-pressure";
+ 			};
++
++			aop_audio: aop-audio {
++				compatible = "apple,t8010-aop-audio";
++				#clock-cells = <0>;
++			};
+ 		};
+ 
+ 		aop_mbox: mbox@210804000 {
