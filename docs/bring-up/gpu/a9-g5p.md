@@ -6,17 +6,23 @@ and #125 on top). Orchard runs the GPU from the upstream `powervr` driver
 instead, as a second chip next to the A10 (`pvr_apple_s8003.c`). This page
 records everything of his boot work that the backend does **not** carry, with
 the reason it existed and what he measured, so none of it has to be found
-again. It also says where the ported parts live now.
+again. It also says where the ported parts live now, and it defines what
+userspace hands the kernel for a job on the A9 ("The job interface for
+userspace"): the Mesa port is built from that section.
 
 Everything below about the hardware and the firmware is his finding, read from
-his code and its comments (`drivers/gpu/apple-g5p/` in #74). Firmware
+his code and its comments (`drivers/gpu/apple-g5p/` and
+`drivers/gpu/drm/apple-g5p/` in #74, with #119 and #125). Firmware
 addresses (`0x1000....`) are the META image's, kext addresses (`c9....`,
 `6c9....`) are the iOS 16.7.10 (20H350) AGX kext's, as he cites them. Nothing
 here was re-measured: the backend has not run on hardware yet.
 
-State of the backend: it boots Apple's unmodified firmware, waits for its
-first "alive" event, gives it one empty device-control command, and stops it
-again when idle. It writes no job, so nothing renders.
+State of the backend: it boots Apple's unmodified firmware, attaches VMs,
+writes geometry, fragment and compute jobs, completes them from the
+firmware's stamps, restarts the firmware when a job hangs, and stops it when
+idle and for sleep. The core counts as supported, so the GPU starts on every
+boot of a board whose device tree enables it. None of it has run on hardware:
+the first run is Berkay's test of `main` on his J71t.
 
 ## Where his boot code lives now
 
@@ -34,7 +40,7 @@ again when idle. It writes no job, so nothing renders.
 | `fender.h` idle / hold / start, `boot.inc` `g5p_boot_program_stream()` | `s8003_core_off()`, `s8003_release()` |
 | `boot.inc` `g5p_boot_drain()`, `boot-r73b.inc` `g5p_r73b_aux_pass()` | `s8003_drain()`, on a timer instead of the interrupt |
 | `boot.inc` `g5p_boot_events()` (ALIVE wait) | `s8003_wait_alive()` |
-| `lifecycle.inc` control prepare / submit / wait, `kick.inc` | `s8003_first_command()`, `s8003_dc_doorbell()` |
+| `lifecycle.inc` control prepare / submit / wait, `kick.inc` | `s8003_first_command()`, `s8003_device_control()`, `s8003_doorbell()` |
 | `lifecycle.inc` `g5p_boot_park()` | `pvr_apple_s8003_stop()` |
 | `boot.inc` `g5p_boot_sink_init()` (zero page at GPU address 0) | `s8003_map()`: `zero`, in the kernel VM, plain leaf flags as his |
 
@@ -201,8 +207,9 @@ r73b case 1, fast 1, r73e 1, r74 1, r74f 1, r74g 1, r74h 0, r87b policy 1,
 - **r74f** (deferred doorbell): if the power state is not "on" when a DC3
   attach pair or a TA is published, the host repeats the off/on transition
   (bounds 1000 us off, 1800 us on) and the first ALIVE afterwards owns one
-  doorbell attempt (bound 250 ms). Belongs to render attach; not needed to
-  boot.
+  doorbell attempt (bound 250 ms). The backend does not repeat a power
+  transition: it rings the doorbell when no request is in flight and waits
+  for the firmware either way (`s8003_doorbell()`).
 - **r74g** (firmware-owned MMU pass): the firmware's DC3 handler
   (0x1000218c..0x10002218) writes R0+0xe140/0xe148 for the slot, copies the
   host's generation to its cached one and issues the catalogue invalidation
@@ -210,14 +217,16 @@ r73b case 1, fast 1, r73e 1, r74 1, r74f 1, r74g 1, r74h 0, r87b policy 1,
   does no MMU register access. The TA is then published without a doorbell
   and given a grace of four ALIVEs or 20 ms to be taken; root+0x3980 = 2
   means the firmware entered recovery. This is how a client's page tables
-  reach the firmware and will be needed for jobs.
+  reach the firmware; in the backend `s8003_slots_load()`, with a doorbell
+  and without the grace.
 - **r74h, r80..r96**: observers (trace tail, register banks read from the
   interrupt). Diagnostic.
 - **r87b** (attach policy): in two campaigns the DC3 attach read the power
   state as 0x10/0x11, the host's off/on repair timed out (-110) and the
   machine froze, while every retained case shows the firmware consuming the
   pair by itself. Policy 1 ("self-drain"): no repair, no bell, wait for the
-  consume in RAM for 3 s. Again for render attach.
+  consume in RAM for 3 s. The backend's attach waits 3 s the same way and
+  rings the doorbell first unless a power request is in flight.
 - **heartbeat116**: replaced the lifetime interrupt/event caps (which made an
   idle, healthy GPU fail after about 30 minutes) by per-window rates. The
   backend has no cap.
@@ -281,10 +290,14 @@ alternative, and the coefficient block is in `perf-envelope.h`
 - **In-boot recovery** (`recover.inc`): freeze, mask the interrupt, cycle the
   gfx gate (10 ms off), then wake / map / ... / control again with a new set
   of firmware memory. Measured to bring back a wedged device. iOS does the
-  same: stop, platform power cycle, new boot. The backend's restart is a
-  runtime-PM cycle, which also turns the gate off and on, but it does not
-  enforce the 10 ms and a hang recovery (`pvr_apple_reset()`) does not cycle
-  the gate at all yet.
+  same: stop, platform power cycle, new boot. In the backend a hang
+  recovery (`pvr_apple_reset()`) stops the firmware, runtime-suspends the
+  GPU, which turns the gate off, waits 10 ms and leaves the boot to the next
+  job. If another job holds the GPU powered at that moment the gate stays
+  on and the firmware is restarted in place. An idle runtime-PM cycle
+  usually lasts far longer than 10 ms, but nothing enforces it: a job that
+  arrives right after the GPU went idle boots the firmware after a shorter
+  gate-off time.
 - **dirtystart108**: a state machine that classifies how the GPU was left
   (cold, kexec, gate seen off) and refuses a release or a DRM claim on bad
   evidence. Dropped with kexec.
@@ -304,7 +317,7 @@ alternative, and the coefficient block is in `perf-envelope.h`
    job and its context were lost (glmark2 terrain: 2 of about 11 runs).
    Apple rings after every ring entry without any check, and a doorbell for a
    consumed entry adds no work. His fix: skip only when the phase's own stamp
-   shows it retired. For the backend's job path: ring after every entry.
+   shows it retired. The backend does the same (`s8003_publish()`).
 2. **A power-on request that ALIVE overtook.** The firmware boots without
    waiting for the cores' power-on, so ALIVE can arrive while R1+0x1000 still
    has bit 4 set next to the target (0x14 for state 4). Counting that as a
@@ -336,33 +349,323 @@ because it reads no GPU register while the firmware runs.
   sets it through the AIC's software-set register (AIC+0x4014, bit 14) and
   the host clears it at AIC+0x4094 before draining. The backend does not take
   the interrupt yet (the AIC driver cannot clear a software-set interrupt)
-  and reads the rings every 100 ms.
+  and reads the rings whenever it looks for a finished job (every 100 us
+  while one is in flight) and every 100 ms otherwise.
 - **Interrupt self-test** (host sets the software interrupt itself): dropped.
-- **PM pages** (two pages after the shared memory, eight per-context PM sets)
-  and the event/recovery bookkeeping of the render path: come with jobs.
+- **The device PM** (control page at shared+0x5c000, list and free list in
+  the two pages after the shared memory): the first context's PM in his
+  driver. The backend has PM sets only, starting right after the shared
+  memory.
+- **Events beyond "alive" and a job's stamp**: recovery (the firmware
+  stopped), page request (type 7), channel error (type 8) with his fault
+  bookkeeping per context. The backend logs such an event and goes on
+  reading; a job the firmware gave up times out into the reset.
 - **Timing values**: Fender polls 10 us / 100 ms; ALIVE wait 3 s; command 8
   wait 3 s; attach consume wait 3 s; first-ALIVE settle 2 ms; render waits
   20 s soft, 45 s, 60 s hard; quiesce lock 2 s.
 
-## What the job path has to bring (not started)
+## The job path, as ported
 
-His compute and render paths are not the A10's ring-of-commands model, so
-the shared `pvr_apple.c` submit path does not carry them as it is:
+His compute and render paths are not the A10's ring-of-commands model. In the
+backend the A9 therefore submits and completes its own jobs
+(`pvr_apple_s8003_submit()`, `pvr_apple_s8003_engine_done()`); the fences and
+their polling, the scheduler queues and their timeout, the order of scenes
+across VMs, runtime PM, sleep and the reset are `pvr_apple.c`'s, shared with
+the A10.
 
-- A job is a work record ("W", compute 0x290 bytes, TA 0x560, 3D 0x8c0) plus
-  a firmware microsequence written per job, reached through a 16-entry
-  pointer ring per channel with five watermarks and two stamps
-  (`compute-user-layout.h`, `render-user-layout.h`); completion is "ring
-  consumed, both stamps at the job's number, all watermarks at its endpoint".
-- A context needs a firmware "slot pair" attached before its first job: a
-  DC3 device-control pair, after which the firmware itself programs the
-  slot's page-table root (r74g above). Compute runs on the context's TA slot
-  and refuses to run before a render job brought the device up.
-- The PM record, the per-context PM sets and the firmware window in user VMs
-  (`render-user-window.h`, `render-user-pmset.h`) come with the render path.
+| apple-g5p | powervr backend |
+|---|---|
+| `render-user-layout.h` `g5p_ru_channel_init()`, `compute-user-layout.h` `g5p_cu_channel_init()` | `s8003_channel_init()` |
+| `render-user-layout.h` `g5p_ru_fill_ta()`, `g5p_ru_fill_ta_v3()`, the TA half of `g5p_ru_rt_fill()` | `s8003_fill_ta()` |
+| `g5p_ru_fill_3d()`, `g5p_ru_fill_3d_v2()`, `g5p_ru_fill_3d_width()`, the 3D half of `g5p_ru_rt_fill()`, `render-user-msaa.h` `g5p_ru_fill_msaa()` | `s8003_fill_3d()`, `s8003_fill_output()` |
+| `render-user-geometry.h` `g5p_ru_rt_derive_samples()` | `s8003_rt_derive()`, from the HWRT dataset's width, height and samples |
+| `render-user-layout.h` `g5p_ru_job_at()` (record links, microsequence, command, pointer ring) | `s8003_job_write()` |
+| `compute-user-layout.h` `g5p_cu_job()`, `g5p_cu_sku()` | `s8003_submit_compute()` |
+| `drm-render-v3.inc` `g5p_rv3_publish_ta()`, `g5p_rv3_publish_3d()`, `drm-compute-v1.inc` publish | `s8003_publish()` |
+| `render-user-wake.h` `g5p_wk_ring()`, `drm-render-v3.inc` `g5p_rv3_dc_kick()`, `kick.inc` | `s8003_doorbell()` |
+| `render-user-layout.h` `g5p_ru_retired_pl()`, `g5p_cu_retired()` | `pvr_apple_s8003_engine_done()` |
+| `drm-render-v3.inc` `g5p_rv3_fw_touch()` | `s8003_touch()`, at most once a millisecond while a job is waited for |
+| `render-user-bind.h`, `drm-render-v3.inc` `g5p_rv3_bind()`, `g5p_rv3_unpark()`, `g5p_rv3_dc_wait()` | `s8003_slots_load()`, `s8003_vm_attach()`, `s8003_device_control()` |
+| `render-user-mmu.h`, `drm-render.inc` `g5p_render_invalidate()` | `pvr_apple_s8003_mmu_flush()` |
+| `render-user-window.h`, `drm-render.inc` `g5p_render_fw_entry()` (firmware window) | `pvr_apple_s8003_vm_init()`: the PM sets mapped in every VM at the firmware's addresses |
+| `render-user-pmset.h`, `render-user-layout.h` `g5p_ru_pm()`, `drm-render-v3.inc` `g5p_rv3_pmctx_build()` | `s8003_pm_build()`, `pvr_apple_s8003_vm_scenes()` |
+| `render-user-pmset.h` park rule, `render_user_close_park` | `pvr_apple_s8003_vm_fini()` and the park VM |
+| `recover.inc`, `power-r33.inc` (gate cycle, 10 ms) | `pvr_apple_reset()` with the chip's `gate_off_ms` |
+| #119 `render_user_pipeline_depth` 2, `render_user_joint`, job slots | two scenes per VM (`scenes`, `vm_scenes()`), the fragment job submitted with its geometry job, two record slots per channel |
+| #125 "ring a phase's doorbell unless its own stamp ..." | `s8003_publish()` |
 
-Sizes of his code for it: `drm-render-v3.inc` 3878 lines, `drm-render.inc`
-2733, `render-user-*.h` about 3200, compute about 1100, `drm-vm.inc` 916.
+### Channels and records
+
+Each engine has one channel in the shared memory: geometry at shared+0x54000,
+fragment at +0x58000 (a page each), compute at +0x5b000 (0x1000 bytes). In a
+channel: control words at +0x100 (five watermarks 16 bytes apart, the host's
+at +0x140; the ring's size, 16, at +0x150), a ring of 16 pointers at +0x200,
+a timestamp queue (+0x1800; compute +0x900), two stamp words (+0x1840;
+compute +0x940), a dependency object (+0x1900; compute +0x980).
+
+A render job takes two pointer-ring entries, a 0x40-byte command and its work
+record W (geometry 0x560 bytes, fragment 0x8c0), and has a microsequence
+(geometry 0xc0 bytes, fragment 0x180). Odd jobs have command, W and
+microsequence at +0x300, +0x400 and +0xa00 (fragment +0xd00), even jobs
+packed from +0x1c00, so a job never rewrites what the firmware still reads
+for the job before it. A compute job takes one entry: W (0x290 bytes) at
++0x400, microsequence at +0x800.
+
+The command of a geometry job is `{6, slot, PM id, PM set}`: the firmware
+takes the parameter manager's record from the set and rebuilds its free
+list. His driver sends that only when the PM state is not known clean and
+otherwise `{4, own stamp, seq - 1}` (`render_user_pm_record`); the backend
+always sends it, his older and longer-flown form. The command of a fragment
+job is `{4, address of the geometry channel's second stamp, n}`: wait until
+that stamp reached n, the number of its geometry job. The firmware compares
+signed, so a later geometry job's stamp does not block it.
+
+To publish: an entry `{engine, channel, end}` in the engine's work ring
+(0x61, 0x65, 0x69; `end` is how far the pointer ring is filled), the host's
+watermark = `end`, the work ring's producer index, then the doorbell:
+Fender+0x14 = 7 and its read-back, wait for no power request in flight,
+R0+0xb00 = 0x10 (geometry, compute, device control) or 0x11 (fragment). The
+doorbell is skipped only if both of the channel's stamps already reached the
+job's number. His compute path rang no doorbell; the backend rings the
+geometry engine's, which wakes the firmware's scheduler.
+
+A job is done when both stamps reached its number and every watermark lies
+between its end of the pointer ring and that of the last job submitted. His
+driver also looked at the engine's idle words (channel object +0x724..), the
+completion events and a 500 ms hold, to tell a job the firmware finished from
+one it gave up; the backend takes the stamps alone, and a job whose stamps
+never come times out after 5 s, which restarts the firmware.
+
+### VMs: slots and tags
+
+A VM gets two of the firmware's slots (7 to 255) with its first job, one for
+geometry and compute jobs and one for fragment jobs: the page-table root's
+address goes to object 0x86[slot] (64 bits), a tag to 0x84[slot], then two
+device-control commands `{3, slot}` (the fragment slot's first). The
+firmware's handler loads the root and copies the tag to 0x85[slot]; the
+commands being consumed and the tag copied is the receipt. No job runs while
+a slot is loaded.
+
+The tag's top ten bits changing make the firmware drop the slot's
+translations from the catalogue down when the slot's next job starts
+(bits 21:12 from the directory, 11:0 the tables only). The backend adds
+0x400000 to the tag of every loaded slot whenever powervr flushes the MMU
+(any VM's page tables changed); his driver kept a counter per VM and level.
+
+When a VM goes its slots are not emptied but loaded with the park VM's root
+(a VM that maps only what every VM maps) and tag 0x500000, and slots and PM
+sets are handed out in turn: the PM kept writing the free list of a context
+through its geometry slot after the context was closed, two job switches
+later at the latest (his release8 runs, page faults in the closed slot).
+A parked slot is emptied (root 0, tag 0, `{3, slot}`) before a new VM takes
+it.
+
+After every start of the firmware all of this is told again: slots with the
+VM's next job, PM sets with its next geometry job.
+
+### The parameter manager's memory
+
+A PM set is three pages in the firmware's GiB, behind the shared memory
+(GPU address 0xe1c0260000 + 0xc000 * set; 12 sets, his driver had 8 and a
+"device PM" the backend does not have):
+
+- control page: +0x10 the META address of the last block's list entry, +0x14
+  the free list's GPU address, +0x1c its bytes, +0x20 its entries, +0x24
+  entries - 1, +0x34 0x4000, +0x40 the list page's META address, +0x54 and
+  +0x58 the entries again. At +0x80 the scene's record (0xc0 bytes): +0xa8
+  macrotile array, +0xa0 MList, +0xb0 VHEAP (GPU addresses in the VM), +0xb8
+  the META address of list+0x40; the firmware saves the PM's state in the
+  rest between a geometry job and its fragment job.
+- list page: +0x60 = 1; from +0x80 one entry of 0x24 bytes per block: the
+  META address of the entry before it, then the block's eight 16 KiB pages
+  as 4 KiB page numbers.
+- free list page: four consecutive 4 KiB page numbers per pool page.
+
+A set's PM id is its number + 1 (W+0x10 of the geometry record, both
+microsequences, the command).
+
+The pool is `blocks` blocks of 128 KiB, kernel pages that are mapped nowhere.
+The PM's own tables (5 pages: macrotile array 0x80 bytes, MList 0x10000,
+VHEAP 0x600) are kernel pages mapped in the VM at
+0x101000000 + 0x20000 * set, protected (PM/firmware only, bit 62) and without
+a CPU mapping for userspace. His driver mapped them at 0x101000000 without
+bit 62; see "Open on hardware".
+
+All sets' three pages are mapped in every VM at the firmware's addresses
+with the firmware's attributes (protected, cache coherent): the PM reaches
+them through the job's slot. His driver shared one kernel-built directory
+under the firmware's catalogue entry for that; the backend maps the same
+pages through the VM's own tables.
+
+### What is not ported from the job path
+
+- His own UAPI, VM, buffer objects, resource lists and their validation
+  (`drm-vm.inc`, `render-user-validate.h`, `compute-user-validate.h`): the
+  backend takes addresses from the stream unchecked, as on the A10. An
+  address userspace gets wrong faults in its own slot.
+- The serial executor with its phases, the r74f/r74g/r87b attach machinery,
+  job logs, latency and job-time accounting, receipts, PM snapshots, fault
+  readers, the wake A/B, `job_slots`/`pm_once`/`pm_ctx` switches, spare
+  pairs, the per-boot fault budget and frozen contexts.
+- The render target's "main ring" of sixteen slices: the HWRT dataset has a
+  region header buffer per RT data, which userspace alternates.
+- Typed profiles V1 and V2 (allocator pools, `vdm_control`).
+- The firmware's self-park and the retained-RAM sleep of #120: the firmware
+  is stopped for runtime suspend and for sleep and booted again.
+
+## The job interface for userspace
+
+The A9 uses powervr's UAPI (`include/uapi/drm/pvr_drm.h`) unchanged: VM
+contexts and maps, buffer objects, contexts of type `RENDER` and `COMPUTE`,
+`CREATE_FREE_LIST`, `CREATE_HWRT_DATASET`, `SUBMIT_JOBS`, sync objects.
+What differs from the A10 is listed here. The structures are in
+`drivers/gpu/drm/imagination/pvr_apple.h`, the header values in
+`pvr_rogue_fwif_stream.h`, the stream definitions (order of the fields in the
+stream) at the end of `pvr_stream_defs.c`.
+
+### Device
+
+- The device query's GPU info reports BVNC 9.15.6.2. The heaps are the A10's
+  (`pvr_apple_heaps`): general at 0x0800000000, PDS at 0x2a00000000, USC at
+  0x2c00000000, region headers at 0x2ef0000000, all below 2^38.
+- PDS code addresses in the firmware's program words are relative to the PDS
+  heap's base, USC code addresses to the USC heap's base: the firmware is
+  given those bases at boot. (apple-g5p used one base, 0x300000000, for
+  both, and a 4 GiB window from it.)
+- Reserved in every VM, outside the heaps: 0 (a zeroed page),
+  0x200000 (a kernel page, unused on the A9), 0x101000000 to 0x101180000
+  (the PM's tables), 0xe1c0260000 to 0xe1c02f0000 (PM sets).
+- Context creation: the static context state is optional and only
+  validated, as on the A10.
+
+### Free list
+
+`CREATE_FREE_LIST` is validated as on the A10 (the free-list buffer must be
+a `PM_FW_PROTECT` object that userspace cannot map), but the list holds no
+pages on the A9 and its buffer is not written. `initial_num_pages` (4 KiB
+pages) is the size of the parameter manager's pool for the VM's renders:
+`blocks = max(initial_num_pages / 32, (50 + tiles) / 32)`, both rounded up,
+at most 128 (16 MiB); `tiles` is the render target's 32x32 tiles. A VM pins
+one pool with its first render and a second one with its first render while
+a scene of its own is still in the firmware, if the firmware has more than
+half of its 12 PM sets left. There is no growth and no partial render: a
+scene that needs more than the pool stops the firmware and the job times
+out.
+
+### HWRT dataset
+
+`CREATE_HWRT_DATASET` is validated as on the A10 (MList, macrotile array and
+VHEAP in protected objects), single layer, 1 or 4 samples, at most
+8192x8192. Used on the A9:
+
+- `width`, `height`, `samples`: the kernel derives the geometry words;
+- `rt_data_args[i].region_header_dev_addr`: the region headers of RT data i
+  (geometry W+0x28, fragment W+0x20). `region_header_size` must be at least
+  `px * py * 5` bytes;
+- `geom_data_args.tpc_dev_addr`, `tpc_size`: the tail pointer cache, at
+  least `p2 * p2 * 8` bytes;
+
+with `tx = ceil(width / 32)`, `ty = ceil(height / 32)`,
+`mx = align(ceil(tx / 4), 4)`, `my` alike, `s = 2` for 4 samples else 1,
+`px = mx * s * 4`, `py = my * s * 4`, `p2 = roundup_pow_of_two(max(px, py))`.
+A job on a smaller buffer fails with `-EINVAL`.
+
+Not used on the A9: `pm_mlist_dev_addr`, `macrotile_array_dev_addr`,
+`vheap_table_dev_addr`, `rtc_dev_addr`, the ISP merge values, the free
+list's own buffer. The PM's tables are the kernel's (above).
+
+Userspace alternates the two RT datas between consecutive renders to one
+target, as upstream does: the kernel may hold two scenes of a VM, and each
+needs its own region headers.
+
+### Jobs
+
+A render is a geometry job and a fragment job on the same HWRT data, in one
+`SUBMIT_JOBS` call or two. The kernel submits the fragment job to the
+firmware right after its geometry job. A fragment job whose geometry job was
+not submitted (or failed) ends with `-ECANCELED`. Partial-render fragment
+jobs are refused (`-EOPNOTSUPP`), transfer contexts do not exist, as on the
+A10. A compute job needs no render before it.
+
+Each command stream is the Rogue command's stream followed by one extension
+header and its data. The header word is `type << 29 | BIT(0)`; all three
+A9 extensions have only bit 0. The kernel does not insist on the extension:
+without it those words of the record are zero. The A10's extension types (1
+for geometry and fragment) are refused on the A9.
+
+**Geometry**: `PVR_STREAM_EXTHDR_TYPE_GEOM_G5P` = 2,
+`struct pvr_apple_g5p_geom_regs`. From the Rogue command the kernel reads
+only `regs.vdm_ctrl_stream_base` (W+0x98, low two bits cleared).
+
+| field | drm_g5p_render_pass(_v3) | goes to (geometry W) |
+|---|---|---|
+| `u64 scratch_base` | `scratch_va` | +0x90, low three bits cleared |
+| `u64 scratch_ptr[6]` | `scratch_ptr[6]` | [0..3] +0x468.., [4] +0x48 and +0x488, [5] +0x50 |
+| `u64 ta_program` | `ta_program_va` - PDS base | +0x88 (R0+0x470): byte offset of the TA state PDS program from the PDS heap's base |
+| `u64 sample_positions` | `sample_positions` | +0x40; 0 = the standard pattern (0x88, or 0xeaa26e26 for 4 samples) |
+| `u32 context_pds[2][6]` | `context_pds` | +0x58, +0x70 |
+| `u32 resume_pds[2][4]` | `resume_pds` | +0xa0, +0xb0 |
+| `u32 ta_pds[4]` | `ta_pds` | +0xc0 (three words; the fourth is zero) |
+
+**Fragment**: `PVR_STREAM_EXTHDR_TYPE_FRAG_G5P` = 2,
+`struct pvr_apple_g5p_frag_regs`. From the Rogue command the kernel reads
+`regs.isp_scissor_base` (W+0x60 with the low two bits cleared, +0x4a0),
+`regs.isp_dbias_base` (+0x68, +0x490), `regs.isp_oclqry_base` (+0x70,
++0x78), `regs.isp_bgobjdepth` (+0x3a4, +0x6a8) and `regs.isp_bgobjvals`
+(+0x3a8, +0x6ac); these were `scissor_va`, `dbias_va`,
+`occlusion_query_va`, `bgobj_depth` and `bgobj_vals` of
+`drm_g5p_render_pass_ext`. A zero depth or values word is taken as given
+(apple-g5p's defaults for a pass without them were 1.0f and 0x300).
+
+| field | drm_g5p_render_pass(_ext) | goes to (fragment W) |
+|---|---|---|
+| `u64 background_texture` | `background_texture` | +0xb8, +0x5f0 |
+| `u64 zls[6]` | `zls[6]` | +0x80/+0x618, +0x88/+0x628, +0x90/+0x630, +0x98/+0x648, +0xa0/+0x650, +0x138/+0x6d0 |
+| `u64 sample_positions` | `sample_positions` | +0x58; 0 = the standard pattern |
+| `u32 background[8]` | `background` | +0x5b8..; [0], [1] also +0xb0, +0xb4; [4..7] also +0xc0.. |
+| `u32 eot[4]` | `eot` | [1], [0], [2] at +0x3b4..; [0..2] at +0x680.. |
+| `u32 eot_resume[4]` | `eot_resume` | [0..2] at +0x694.. |
+| `u32 restore[4]` | `restore` | +0x600, +0x604, +0x610, +0x614 |
+| `u32 pixel_output_width` | `pixel_output_width` | 2, 4 or 8 (0 = 2): +0x6b0 and the partition words |
+| `u32 flags` | `msaa_flags` | bit 0 `PVR_APPLE_G5P_FRAG_MSAA_RESOLVE`, with 4 samples only |
+
+The sample count is the HWRT dataset's; there is no `samples` field. With 4
+samples the kernel writes the AA mode, ISP_CTL and the output partitions as
+`g5p_ru_fill_msaa()` did.
+
+**Compute**: `PVR_STREAM_EXTHDR_TYPE_COMPUTE_G5P` = 1,
+`struct pvr_apple_g5p_compute_regs`. From the Rogue command the kernel reads
+only `regs.cdm_ctrl_stream_base` (W+0x70). Compute jobs are submitted on a
+`COMPUTE` context; they run on the VM's geometry slot.
+
+| field | drm_g5p_compute_pass | goes to (compute W) |
+|---|---|---|
+| `u64 state[4]` | `state_va[4]` | +0x1ec.. |
+| `u64 tail` | `state_tail_va` | +0x60, +0x20c |
+| `u64 terminate` | `cdm_va + cdm_end - 4` | +0x214, +0x23c: the address of the stream's terminate word |
+| `u64 pds_store` | `store.code \| store.data << 32` | +0x21c |
+| `u64 pds_resume` | `resume.code \| resume.data << 32` | +0x22c |
+| `u64 pds_terminate` | `terminate.code \| terminate.data << 32` | +0x68 |
+| `u32 config[2]` | `config` | +0x10, +0x14 |
+| `u32 pds_store1` | `store.control` | +0x224 |
+| `u32 pds_resume1` | `resume.control` | +0x234 |
+
+Fields in the stream follow the order of the tables, each naturally aligned;
+an array is copied as bytes, aligned to 8.
+
+What apple-g5p's passes had and the stream does not: `vdm_va` (the Rogue
+command), `vdm_size`, `vdm_end`, `ta_program_size`, `scratch_size`, the
+pools and `vdm_control` of the older profiles, `samples`, the resource list
+with its access flags, `zls_address_mask`, `occlusion_query_size`,
+`scissor_count`, `dbias_count`: the kernel does not validate ranges.
+
+### Errors and loss
+
+A job the firmware does not finish in 5 s ends with `-ETIMEDOUT`, as does
+every other job in flight; the context it was on takes no more jobs (the
+A10's rule), the firmware is stopped, the GPU's power domain goes off for at
+least 10 ms if no other job holds it on, and the next job boots the firmware
+again. Other contexts go on.
 
 ## Open on hardware
 
@@ -371,3 +674,22 @@ Sizes of his code for it: `drm-render-v3.inc` 3878 lines, `drm-render.inc`
 - Does stop, gate off, boot repeat (runtime PM), and how long does it take?
 - Does the firmware mind that its interrupt is never acknowledged?
 - Which of the first four interrupts fire, and for what?
+- Does a render complete with the PM's tables mapped protected (bit 62)? His
+  driver mapped them without it. If not, the fallback is his attribute for
+  those five pages; a compute shader writing them must then be shown to
+  fault or the pages need another guard.
+- Does the firmware take PDS and USC code bases that differ (powervr's
+  heaps, 0x2a00000000 and 0x2c00000000), and data addresses up to 2^38? His
+  driver ran with one base at 0x300000000 and low addresses.
+- Does a geometry job's `{6, ...}` command on every job, the stamps alone as
+  completion, and a doorbell for compute behave as assumed above?
+- Do two scenes of one VM in flight work with one PM set each from the
+  start (his second set came with the first pipelined job)?
+- Is 3 MiB at platform+0x77c the limit for PM sets (12 used, he had 8)?
+- Does a reset's gate cycle through runtime PM bring a hung firmware back
+  as his direct PMGR cycle did, and what happens when another job keeps the
+  domain on (then the firmware is restarted without the cycle)?
+- The cost of the page reads (`s8003_touch()`) per millisecond while jobs
+  run, and whether they are needed with the backend's memory (his was
+  DMA-coherent memory mapped non-cached; the backend's is shmem mapped
+  write-combined).
