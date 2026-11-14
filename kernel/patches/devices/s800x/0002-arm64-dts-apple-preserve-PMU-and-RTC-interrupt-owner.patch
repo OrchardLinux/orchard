@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 17:15:00 +0100
+Subject: [PATCH] arm64: dts: apple: preserve PMU and RTC interrupt ownership
+
+Shared wake events must have one interrupt owner. Preserve the PMU and
+RTC event split so that acknowledgement by one consumer cannot steal the
+other consumer's wake event.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/s800x-ipad5.dtsi | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi b/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
+index 2ce40b469..20de6953f 100644
+--- a/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
++++ b/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
+@@ -191,11 +191,11 @@
+ 			interrupt-parent = <&pmu_gpio>;
+ 			/*
+ 			 * The PMU line, ADC done, then the events the iPadOS
+-			 * charger subscribes to.
++			 * charger subscribes to, except RTC event 16: Linux gives that
++			 * event exclusively to rtc@500, not to source identification.
+ 			 */
+ 			interrupts = <240 IRQ_TYPE_EDGE_RISING>,
+ 				     <176 IRQ_TYPE_EDGE_RISING>,
+-				     <16 IRQ_TYPE_EDGE_RISING>,
+ 				     <40 IRQ_TYPE_EDGE_RISING>,
+ 				     <41 IRQ_TYPE_EDGE_RISING>,
+ 				     <42 IRQ_TYPE_EDGE_RISING>,
+@@ -218,6 +218,9 @@
+ 			reg = <0x500 0x10>;
+ 			nvmem-cells = <&rtc_offset>;
+ 			nvmem-cell-names = "rtc_offset";
++			interrupt-parent = <&pmu_gpio>;
++			interrupts = <16 IRQ_TYPE_EDGE_RISING>;
++			wakeup-source;
+ 		};
+ 
+ 		/* D2365 register 0x31c bit 0 */
