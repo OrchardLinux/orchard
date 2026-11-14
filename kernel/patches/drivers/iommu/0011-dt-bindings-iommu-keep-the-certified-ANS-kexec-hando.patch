@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 17:15:00 +0100
+Subject: [PATCH] dt-bindings: iommu: keep the certified ANS kexec handoff
+
+Resetting the ANS host or its translations destroys the state required
+by the next kernel. Describe the board-selected retained handoff.
+
+Assisted-by: LLM
+---
+ Documentation/devicetree/bindings/iommu/apple,dart.yaml | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/iommu/apple,dart.yaml b/Documentation/devicetree/bindings/iommu/apple,dart.yaml
+index df72722fc..adcbd21fc 100644
+--- a/Documentation/devicetree/bindings/iommu/apple,dart.yaml
++++ b/Documentation/devicetree/bindings/iommu/apple,dart.yaml
+@@ -21,6 +21,10 @@ description: |+
+   fault conditions.
+ 
+ properties:
++  apple,ans-dart-handoff:
++    type: boolean
++    description: Allow the storage endpoint to retire and rebuild this DART stream during kexec.
++
+   compatible:
+     oneOf:
+       - enum:

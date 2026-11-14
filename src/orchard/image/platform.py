@@ -85,7 +85,7 @@ def tools(hardware=None, cache=None, platform='apple-16k'):
     return prepare_tools(hardware, cache, device=sorted(boards(platform, hardware))[0]) / 'busybox'
 
 
-def initrd(modules, release, busybox, *, hardware=None, storage_modules=STORAGE_MODULES):
+def initrd(modules, release, busybox, *, hardware=None, storage_modules=STORAGE_MODULES, pristine_dtbs=None):
     """orchard's initrd for installed systems: BusyBox, the storage modules and their dependencies.
 
     MODULES is {path: (data, mode)} as module_files gives it.
@@ -116,6 +116,15 @@ def initrd(modules, release, busybox, *, hardware=None, storage_modules=STORAGE_
     entries['etc/orchard/modules'] = (stat.S_IFREG | 0o644, ('\n'.join(loaded) + '\n').encode())
     if usb:
         entries['etc/orchard/usb-modules'] = (stat.S_IFREG | 0o644, ('\n'.join(usb) + '\n').encode())
+    if pristine_dtbs:
+        entries['etc/orchard/dtbs'] = (directory, b'')
+        mapping = []
+        for board, data in sorted(pristine_dtbs.items()):
+            if not board.replace('-', '').isalnum():
+                raise ValueError('Invalid pristine DT board')
+            entries[f'etc/orchard/dtbs/{board}.dtb'] = (stat.S_IFREG | 0o644, data)
+            mapping.append(f'apple,{board} {board}.dtb\n')
+        entries['etc/orchard/pristine-map'] = (stat.S_IFREG | 0o644, ''.join(mapping).encode())
     dependency_lines = []
     for name in sorted(wanted):
         target = f'lib/modules/{release}/{name}'
@@ -154,13 +163,13 @@ def files(bundle, platform, board_dtbs, *, busybox, hardware=None):
     base = f'usr/lib/modules/{release}/'
     result[base + 'vmlinuz'] = ((bundle / described['image']).read_bytes(), 0o644)
     modules_to_load = storage_modules(hardware, platform)
-    result[base + 'initrd'] = (initrd(result, release, busybox, hardware=hardware,
-                                     storage_modules=modules_to_load), 0o644)
     for dtb in sorted(set(board_dtbs.values())):
         path = bundle / 'dtbs' / (dtb + '.dtb')
         if path.is_symlink() or not path.is_file():
             raise ValueError(f'Kernel bundle lacks {path.name}')
         result[base + 'dtb/' + path.name] = (path.read_bytes(), 0o644)
+    pristine = {board: result[base + 'dtb/' + dtb + '.dtb'][0] for board, dtb in board_dtbs.items()}
+    result[base + 'initrd'] = (initrd(result, release, busybox, hardware=hardware, pristine_dtbs=pristine, storage_modules=modules_to_load), 0o644)
     result.update(regulatory_files())
     defaults = hardware / 'system/defaults'
     for path in sorted(defaults.rglob('*')):

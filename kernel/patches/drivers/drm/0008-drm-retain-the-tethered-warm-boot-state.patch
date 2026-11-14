@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 17:15:00 +0100
+Subject: [PATCH] drm: retain the tethered warm boot state
+
+A tethered kernel inherits initialized hardware rather than power-on
+state. Retain the board-selected warm handoff state so probe and
+shutdown do not discard resources needed by the incoming kernel.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/adbe/adbe_drv.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/gpu/drm/adbe/adbe_drv.c b/drivers/gpu/drm/adbe/adbe_drv.c
+index 2508e6531..7ed2de3d7 100644
+--- a/drivers/gpu/drm/adbe/adbe_drv.c
++++ b/drivers/gpu/drm/adbe/adbe_drv.c
+@@ -1065,6 +1065,9 @@ static void adbe_shutdown(struct platform_device *pdev)
+ 	struct adbe *adbe = platform_get_drvdata(pdev);
+ 
+ 	drm_atomic_helper_shutdown(&adbe->drm);
++	timer_delete_sync(&adbe->flip_timer);
++	/* release9: restore the boot buffer even if the CRTC was never enabled. */
++	adbe_park(adbe);
+ 	writel(adbe->saved_inten, adbe->regs + ADP_INTEN);
+ }
+ 

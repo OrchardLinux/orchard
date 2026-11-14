@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 00:43:06 +0100
+Subject: [PATCH] watchdog: apple: initialize the parent before registering
+ restart
+
+The tethered restart guard dereferences the parent, but probe never set
+it. Initialize it before registration and tolerate a missing parent in
+the restart callback so the cold watchdog writes remain reachable.
+
+Assisted-by: LLM
+---
+ drivers/watchdog/apple_wdt.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/watchdog/apple_wdt.c b/drivers/watchdog/apple_wdt.c
+index 04e287fe8..6de9f863c 100644
+--- a/drivers/watchdog/apple_wdt.c
++++ b/drivers/watchdog/apple_wdt.c
+@@ -124,7 +124,8 @@ static int apple_wdt_restart(struct watchdog_device *wdd, unsigned long mode,
+ {
+ 	struct apple_wdt *wdt = to_apple_wdt(wdd);
+ 
+-	if (of_property_read_bool(wdd->parent->of_node, "apple,tethered-boot") &&
++	if (wdd->parent &&
++	    of_property_read_bool(wdd->parent->of_node, "apple,tethered-boot") &&
+ 	    (mode == REBOOT_WARM || mode == REBOOT_SOFT)) {
+ 		pr_emerg("apple-wdt: warm/soft reset delegated to PSCI on tethered boot\n");
+ 		return 0; /* Continue the restart chain; NOTIFY_BAD would stop PSCI. */
+@@ -185,6 +186,7 @@ static int apple_wdt_probe(struct platform_device *pdev)
+ 
+ 	platform_set_drvdata(pdev, wdt);
+ 
++	wdt->wdd.parent = dev;
+ 	wdt->wdd.ops = &apple_wdt_ops;
+ 	wdt->wdd.info = &apple_wdt_info;
+ 	wdt->wdd.max_hw_heartbeat_ms = U32_MAX / wdt->clk_rate * 1000;
