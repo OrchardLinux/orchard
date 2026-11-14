@@ -36,6 +36,7 @@ again when idle. It writes no job, so nothing renders.
 | `boot.inc` `g5p_boot_events()` (ALIVE wait) | `s8003_wait_alive()` |
 | `lifecycle.inc` control prepare / submit / wait, `kick.inc` | `s8003_first_command()`, `s8003_dc_doorbell()` |
 | `lifecycle.inc` `g5p_boot_park()` | `pvr_apple_s8003_stop()` |
+| `boot.inc` `g5p_boot_sink_init()` (zero page at GPU address 0) | `s8003_map()`: `zero`, in the kernel VM, plain leaf flags as his |
 
 ## The boot, as ported
 
@@ -86,6 +87,7 @@ first boot stream on for the rest of the boot.
 | 0xe1c0200000 | 0x60000 | "shared": control, rings | protect, cache coherent |
 | 0xe1c3200000 | 0x8000 | "root": init, channels, policy, platform | protect, cache coherent |
 | 0xe1c4200000 | 4 pages | Fender (2), AIC+0 (time), AIC+0x4000 (software interrupts) | protect, SLC bypass |
+| 0 | 1 page | zeroes ("sink", his round 12): catches an access at address 0 while the firmware starts; iOS can map a dummy page for every unmapped address | none |
 
 The image: LDR address 0x10000000 (0x18000) at +0x4000, 0x20000000 (0x4000) at
 +0x1c000, 0xc0000000 (0x4000) at +0, 0xe0001000 (0x4000) at +0x20000, core
@@ -326,15 +328,10 @@ because it reads no GPU register while the firmware runs.
 
 ### Smaller things
 
-- **The page at GPU address 0** ("sink", "round 12"): one zeroed page mapped
-  at address 0 of the firmware's context before the release, a containment
-  for stray accesses; iOS optionally maps a dummy tree for all addresses. It
-  was installed on every boot of his. The backend does not map it in the
-  kernel VM (user VMs get a zero page at 0 as on the A10); if the firmware
-  faults at 0 on release, this is the first thing to add.
 - **Cleaning the page tables' cache lines** (`dcache_clean_poc` on catalogue,
-  directory and leaves before the release): marked experimental; `pvr_mmu.c`
-  syncs its tables through the DMA API.
+  directory and leaves before the release): not ported as a step of its own,
+  because `pvr_mmu.c` does it for every table it changes
+  (`dma_sync_single_for_device()`, which is that clean on arm64).
 - **The firmware's interrupt** (AIC 174, the fifth of the node): the firmware
   sets it through the AIC's software-set register (AIC+0x4014, bit 14) and
   the host clears it at AIC+0x4094 before draining. The backend does not take
@@ -347,10 +344,30 @@ because it reads no GPU register while the firmware runs.
   wait 3 s; attach consume wait 3 s; first-ALIVE settle 2 ms; render waits
   20 s soft, 45 s, 60 s hard; quiesce lock 2 s.
 
+## What the job path has to bring (not started)
+
+His compute and render paths are not the A10's ring-of-commands model, so
+the shared `pvr_apple.c` submit path does not carry them as it is:
+
+- A job is a work record ("W", compute 0x290 bytes, TA 0x560, 3D 0x8c0) plus
+  a firmware microsequence written per job, reached through a 16-entry
+  pointer ring per channel with five watermarks and two stamps
+  (`compute-user-layout.h`, `render-user-layout.h`); completion is "ring
+  consumed, both stamps at the job's number, all watermarks at its endpoint".
+- A context needs a firmware "slot pair" attached before its first job: a
+  DC3 device-control pair, after which the firmware itself programs the
+  slot's page-table root (r74g above). Compute runs on the context's TA slot
+  and refuses to run before a render job brought the device up.
+- The PM record, the per-context PM sets and the firmware window in user VMs
+  (`render-user-window.h`, `render-user-pmset.h`) come with the render path.
+
+Sizes of his code for it: `drm-render-v3.inc` 3878 lines, `drm-render.inc`
+2733, `render-user-*.h` about 3200, compute about 1100, `drm-vm.inc` 916.
+
 ## Open on hardware
 
 - Does the boot work at all in this shape (kernel VM page tables, shmem
-  pages instead of DMA-coherent ones, no page at address 0, polling)?
+  pages instead of DMA-coherent ones, polling)?
 - Does stop, gate off, boot repeat (runtime PM), and how long does it take?
 - Does the firmware mind that its interrupt is never acknowledged?
 - Which of the first four interrupts fire, and for what?

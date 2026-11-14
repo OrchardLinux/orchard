@@ -46,10 +46,10 @@ Assisted-by: LLM
  drivers/gpu/drm/imagination/Makefile          |    1 +
  drivers/gpu/drm/imagination/pvr_apple.c       |    3 +-
  drivers/gpu/drm/imagination/pvr_apple.h       |    1 +
- drivers/gpu/drm/imagination/pvr_apple_s8003.c | 1179 +++++++++++++++++
+ drivers/gpu/drm/imagination/pvr_apple_s8003.c | 1189 +++++++++++++++++
  drivers/gpu/drm/imagination/pvr_device.c      |    4 +
  drivers/gpu/drm/imagination/pvr_drv.c         |   10 +
- 7 files changed, 1201 insertions(+), 3 deletions(-)
+ 7 files changed, 1211 insertions(+), 3 deletions(-)
  create mode 100644 drivers/gpu/drm/imagination/pvr_apple_s8003.c
 
 diff --git a/drivers/gpu/drm/imagination/Kconfig b/drivers/gpu/drm/imagination/Kconfig
@@ -115,10 +115,10 @@ index 356d930..a7f697c 100644
  /*
 diff --git a/drivers/gpu/drm/imagination/pvr_apple_s8003.c b/drivers/gpu/drm/imagination/pvr_apple_s8003.c
 new file mode 100644
-index 0000000..06b8ffa
+index 0000000..9b84009
 --- /dev/null
 +++ b/drivers/gpu/drm/imagination/pvr_apple_s8003.c
-@@ -0,0 +1,1179 @@
+@@ -0,0 +1,1189 @@
 +// SPDX-License-Identifier: GPL-2.0-only OR MIT
 +/*
 + * Apple A9 (S8003): the GFX firmware on the Rogue core's own META processor.
@@ -296,6 +296,7 @@ index 0000000..06b8ffa
 +	u8 *map;
 +	u64 device_addr;
 +	size_t size;
++	bool mapped;
 +};
 +
 +/*
@@ -335,6 +336,7 @@ index 0000000..06b8ffa
 +	struct s8003_mem fw;		/* the image the firmware runs in */
 +	struct s8003_mem root;
 +	struct s8003_mem shared;
++	struct s8003_mem zero;		/* at GPU address 0 */
 +	struct pvr_gem_object *spare;
 +	bool pio_mapped;
 +
@@ -697,7 +699,7 @@ index 0000000..06b8ffa
 +{
 +	if (!mem->obj)
 +		return;
-+	if (mem->device_addr)
++	if (mem->mapped)
 +		pvr_vm_unmap_obj(apple->pvr_dev->kernel_vm_ctx, mem->obj, mem->device_addr,
 +				 mem->size);
 +	if (mem->map)
@@ -728,6 +730,7 @@ index 0000000..06b8ffa
 +	if (err)
 +		goto err_fini;
 +	mem->device_addr = device_addr;
++	mem->mapped = true;
 +	return 0;
 +
 +err_fini:
@@ -745,6 +748,7 @@ index 0000000..06b8ffa
 +		pvr_vm_unmap_io(vm_ctx, S8003_PIO_VA + S8003_PIO_AIC, S8003_PIO_SIZE);
 +		s->pio_mapped = false;
 +	}
++	s8003_mem_fini(apple, &s->zero);
 +	s8003_mem_fini(apple, &s->shared);
 +	s8003_mem_fini(apple, &s->root);
 +	s8003_mem_fini(apple, &s->fw);
@@ -758,6 +762,9 @@ index 0000000..06b8ffa
 + * The firmware's memory and registers in the kernel VM. Everything is for the
 + * firmware only (PM/firmware protect): the image, the root and shared memory
 + * cache coherent as Apple's kext maps them, the registers past the cache.
++ * One plain zeroed page lies at address 0, which nothing else maps there: an
++ * access the firmware's context makes at 0 while it starts lands in it
++ * instead of faulting (iOS can map a dummy page for every unmapped address).
 + */
 +static int s8003_map(struct pvr_apple *apple)
 +{
@@ -773,6 +780,9 @@ index 0000000..06b8ffa
 +	if (!err)
 +		err = s8003_mem_init(apple, &s->shared, S8003_SHARED_VA, S8003_SHARED_SIZE,
 +				     DRM_PVR_BO_PM_FW_PROTECT | PVR_BO_DEVICE_CACHE_COHERENT);
++	if (!err)
++		err = s8003_mem_init(apple, &s->zero, 0, PVR_DEVICE_PAGE_SIZE,
++				     PVR_BO_FW_FLAGS_DEVICE_CACHED);
 +	if (!err) {
 +		s->spare = pvr_gem_object_create(apple->pvr_dev, PVR_DEVICE_PAGE_SIZE,
 +						 PVR_BO_FW_FLAGS_DEVICE_CACHED);
