@@ -184,8 +184,9 @@ def files(bundle, platform, board_dtbs, *, busybox, hardware=None):
 def write(layer, output):
     """Write LAYER's files to OUTPUT (a new .tar.gz); returns (expanded bytes, members)."""
     expanded = 0
+    # Level 6: level 9 takes eight times as long on a kernel and its modules for 0.3 % less.
     with Path(output).open('xb') as raw, \
-            gzip.GzipFile(fileobj=raw, mode='wb', filename='', mtime=0) as compressed, \
+            gzip.GzipFile(fileobj=raw, mode='wb', compresslevel=6, filename='', mtime=0) as compressed, \
             tarfile.open(fileobj=compressed, mode='w|', format=tarfile.PAX_FORMAT) as archive:
         for name, (data, mode) in sorted(layer.items()):
             member = tarfile.TarInfo(name)
