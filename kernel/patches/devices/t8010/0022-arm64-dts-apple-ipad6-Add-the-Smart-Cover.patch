@@ -7,9 +7,13 @@ The iPad 6 has the iPad 5's Smart Cover hall sensors on the same PMIC
 lines: Apple's device tree for both boards names PMIC GPIO 0
 "halleffect" and GPIO 10 "halleffect1" (/arm-io/i2c0/pmu event names,
 /buttons function-button_halleffect{,1} with the same flags). Describe
-them as on the iPad 5: two polled SW_MACHINE_COVER switches,
-the two lines taken out of the reserved ranges, and their events 0x30
-and 0x3a as wake-only, so that opening the cover wakes the iPad.
+them as on the iPad 5: two polled SW_MACHINE_COVER switches and the
+two lines taken out of the reserved ranges.
+
+Their events 0x30 and 0x3a are not listed as wake-only: on a J71b,
+arming them for sleep ends every suspend at once ("early wake event",
+-EBUSY right after the PMIC GPIO suspend), plugged in or not. Opening
+the cover does not wake the iPad 6 until that is understood.
 
 Measured on a J71b by reading the PMIC input register (0x186): both
 lines read 1 with the cover open and 0 with it closed, so the assumed
@@ -64,7 +68,7 @@ index cd4e184..d6ec2b6 100644
  	battery_info: battery {
  		compatible = "simple-battery";
  		charge-full-design-microamp-hours = <8827000>;
-@@ -136,10 +172,12 @@
+@@ -136,10 +172,10 @@
  			compatible = "apple,d2365-pmic-gpio";
  			gpio-controller;
  			#gpio-cells = <2>;
@@ -73,8 +77,6 @@ index cd4e184..d6ec2b6 100644
  			interrupt-controller;
  			#interrupt-cells = <2>;
  			interrupts-extended = <&pinctrl_ap 38 IRQ_TYPE_LEVEL_LOW>;
-+			/* Smart Cover hall sensors (lines 0 and 10): wake only. */
-+			apple,wake-events = <0x30 0x3a>;
  		};
  
  		rtc@500 {
