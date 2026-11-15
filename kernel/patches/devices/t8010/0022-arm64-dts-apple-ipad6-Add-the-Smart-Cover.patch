@@ -21,7 +21,7 @@ diff --git a/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi b/arch/arm64/boot/dts/ap
 index cd4e184..d6ec2b6 100644
 --- a/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
 +++ b/arch/arm64/boot/dts/apple/t8010-ipad6.dtsi
-@@ -59,6 +59,42 @@
+@@ -59,6 +59,28 @@
  		};
  	};
  
@@ -47,20 +47,6 @@ index cd4e184..d6ec2b6 100644
 +		};
 +	};
 +
-+	smart-cover-aux {
-+		compatible = "gpio-keys-polled";
-+		poll-interval = <50>;
-+		label = "iPad Smart Cover 2";
-+
-+		cover-switch {
-+			label = "Smart Cover (PMIC GPIO 10)";
-+			gpios = <&pmu_gpio 10 GPIO_ACTIVE_LOW>;
-+			linux,input-type = <EV_SW>;
-+			linux,code = <SW_MACHINE_COVER>;
-+			debounce-interval = <50>;
-+		};
-+	};
-+
  	battery_info: battery {
  		compatible = "simple-battery";
  		charge-full-design-microamp-hours = <8827000>;
@@ -73,8 +59,8 @@ index cd4e184..d6ec2b6 100644
  			interrupt-controller;
  			#interrupt-cells = <2>;
  			interrupts-extended = <&pinctrl_ap 38 IRQ_TYPE_LEVEL_LOW>;
-+			/* Smart Cover hall sensors (lines 0 and 10): wake only. */
-+			apple,wake-events = <0x30 0x3a>;
++			/* Smart Cover front hall sensor (line 0): wake only. */
++			apple,wake-events = <0x30>;
  		};
  
  		rtc@500 {

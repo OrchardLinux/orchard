@@ -29,8 +29,8 @@ index 87f1cd1..09952d1 100644
 +			interrupt-controller;
 +			#interrupt-cells = <2>;
 +			interrupts-extended = <&pinctrl 107 IRQ_TYPE_LEVEL_LOW>;
-+			/* Smart Cover hall sensors (lines 10 and 12): wake only. */
-+			apple,wake-events = <0x22 0x24>;
++			/* Smart Cover front hall sensor (line 12): wake only. */
++			apple,wake-events = <0x24>;
  		};
  	};
  };

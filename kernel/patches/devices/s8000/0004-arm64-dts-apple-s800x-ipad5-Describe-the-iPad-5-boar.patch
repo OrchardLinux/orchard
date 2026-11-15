@@ -70,7 +70,7 @@ index 972d84d6c..c427ce167 100644
  	gpio-keys {
  		compatible = "gpio-keys";
  
-@@ -40,21 +53,136 @@
+@@ -40,21 +53,122 @@
  			linux,code = <KEY_VOLUMEUP>;
  		};
  	};
@@ -91,20 +91,6 @@ index 972d84d6c..c427ce167 100644
 +		cover-switch {
 +			label = "Smart Cover (PMIC GPIO 0)";
 +			gpios = <&pmu_gpio 0 GPIO_ACTIVE_LOW>;
-+			linux,input-type = <EV_SW>;
-+			linux,code = <SW_MACHINE_COVER>;
-+			debounce-interval = <50>;
-+		};
-+	};
-+
-+	smart-cover-aux {
-+		compatible = "gpio-keys-polled";
-+		poll-interval = <50>;
-+		label = "iPad Smart Cover 2";
-+
-+		cover-switch {
-+			label = "Smart Cover (PMIC GPIO 10)";
-+			gpios = <&pmu_gpio 10 GPIO_ACTIVE_LOW>;
 +			linux,input-type = <EV_SW>;
 +			linux,code = <SW_MACHINE_COVER>;
 +			debounce-interval = <50>;

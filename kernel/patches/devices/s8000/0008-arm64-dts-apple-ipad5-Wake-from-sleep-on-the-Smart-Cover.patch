@@ -21,8 +21,8 @@ index 2ce40b4..fc06d53 100644
  			interrupt-controller;
  			#interrupt-cells = <2>;
  			interrupts-extended = <&pinctrl_ap 76 IRQ_TYPE_LEVEL_LOW>;
-+			/* Smart Cover hall sensors (lines 0 and 10): wake only. */
-+			apple,wake-events = <0x30 0x3a>;
++			/* Smart Cover front hall sensor (line 0): wake only. */
++			apple,wake-events = <0x30>;
  		};
  
  		tristar_charger: charger@180 {
