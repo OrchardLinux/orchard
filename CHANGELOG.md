@@ -11,8 +11,19 @@ is missing or empty.
 
 ## Unreleased
 
+## [0.3.1] - 2026-11-15
+
 ### Devices
 
+- iPad 5 (A9): the GPU runs in the same driver as the iPad 6 and 7, ready for
+  testing.
+- Sleep: storage and Wi-Fi shut down and come back the way iOS does it (iPad 5,
+  6 and 7, iPad Air 2, iPad mini 4).
+- Smart Cover: opening it wakes the iPad, and folding it back no longer locks
+  it.
+- iPad 6 and 7: sleep works again, the screen rotates the right way again, and
+  the motion sensors use the unit's factory calibration.
+- iPad 5, 6 and 7: the clock can set an alarm.
 - iPad 6 and iPad 7: the built-in microphones work (stereo, 48 kHz, with a
   volume control).
 
