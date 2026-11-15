@@ -14,6 +14,10 @@ on:
         description: Publish this run's components as the rolling nightly pre-release
         type: boolean
         default: false
+      rebuild_kernels:
+        description: Compile every kernel, even where the last nightly has it from the same sources
+        type: boolean
+        default: false
   # Nightly: every published component of main, as the rolling `nightly`
   # pre-release, when main changed since the last one.
   schedule:
@@ -74,7 +78,6 @@ jobs:
             echo nightly=false >> "$GITHUB_OUTPUT"
           fi
   native-smoke:
-    needs: test
     runs-on: ubuntu-24.04-arm
     env:
       ORCHARD_BUILD_NATIVE: '1'
@@ -95,9 +98,11 @@ jobs:
             --bind "$PWD/out/native-source:/src:ro" --bind "$PWD/out/native-output:/out:rw" --cwd /src -- \
             bash -euc 'cc "$ORCHARD_SRC/test.c" -o "$ORCHARD_OUT/test"; "$ORCHARD_OUT/test"'
           test -s out/native-output/test
+  # The compile jobs start beside the tests, not after them: a failed test costs
+  # some compiling, and `assets` (so every draft and nightly) still waits for both.
   kernel:
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changed.outputs.nightly == 'true'
-    needs: [native-smoke, changed]
+    needs: changed
     runs-on: ubuntu-24.04-arm
     container: debian:bookworm
     timeout-minutes: 360
@@ -113,21 +118,50 @@ jobs:
       ORCHARD_BUILD_ENV_ID: debian-bookworm-arm64-llvm19
       PLATFORM: ${{ matrix.platform }}
     steps:
-      - run: apt-get update && apt-get install -y git ca-certificates python3
+      - run: apt-get update && apt-get install -y git ca-certificates python3 pigz
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       # Recipes need only Debian's python3 and its standard library.
-      - name: Install the kernel toolchain
-        run: bash kernel/install-toolchain
-      - name: Build the platform kernel, modules and all device trees once
+      # A platform whose kernel sources and build scripts are those of the last
+      # nightly takes that nightly's kernel (ci/reuse_kernel.py) and compiles nothing.
+      - name: Use the kernel of the last nightly while nothing that decides it changed
+        id: reuse
+        env:
+          REBUILD: ${{ inputs.rebuild_kernels }}
         run: |
+          rebuild=()
+          [[ "$REBUILD" == true ]] && rebuild=(--rebuild)
+          python3 ci/reuse_kernel.py "$PLATFORM" --output out "${rebuild[@]}"
+      - name: Install the kernel toolchain
+        if: steps.reuse.outputs.reused == ''
+        run: bash kernel/install-toolchain
+      # The compiler cache of this platform's last build: a changed patch then
+      # compiles only what it changes. One cache per kernel state; a new state
+      # starts from the newest older one.
+      - uses: actions/cache@v4
+        if: steps.reuse.outputs.reused == ''
+        with:
+          path: out/cache/ccache/kernel
+          key: kernel-ccache-v1-${{ matrix.platform }}-${{ steps.reuse.outputs.key }}
+          restore-keys: kernel-ccache-v1-${{ matrix.platform }}-
+      - name: Build the platform kernel, modules and all device trees once
+        if: steps.reuse.outputs.reused == ''
+        run: |
+          export ORCHARD_CACHE_DIR="$PWD/out/cache" CCACHE_DIR="$PWD/out/cache/ccache/kernel"
+          mkdir -p "$CCACHE_DIR"
+          ccache --zero-stats >/dev/null
+          started=$(date +%s)
           bash kernel/build "$PLATFORM" --work-dir "$PWD/out/kernel-work" --output "$PWD/out/components/kernel"
           dpkg-query -W > out/components/kernel-toolchain-packages.lock
+          # Keep only what this build used, so the saved cache stays one build large.
+          ccache --evict-older-than "$(( $(date +%s) - started + 60 ))s" >/dev/null
+          { echo "Compiler cache, $PLATFORM:"; echo '```'; ccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Archive components and corresponding kernel source
+        if: steps.reuse.outputs.reused == ''
         run: |
           tar -C out -czf "out/kernel-components-$PLATFORM.tar.gz" components
-          tar -C out/kernel-work/source --exclude=.git -czf "out/kernel-source-$PLATFORM.tar.gz" .
+          tar -C out/kernel-work/source --exclude=.git --use-compress-program=pigz -cf "out/kernel-source-$PLATFORM.tar.gz" .
       - uses: actions/upload-artifact@v4
         with:
           name: orchard-kernel-${{ matrix.platform }}
@@ -139,7 +173,7 @@ jobs:
           retention-days: 2
   tools:
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changed.outputs.nightly == 'true'
-    needs: [native-smoke, changed]
+    needs: changed
     runs-on: ubuntu-24.04-arm
     container: debian:bookworm
     timeout-minutes: 90
@@ -205,7 +239,7 @@ jobs:
     # Pongo only builds on a Mac and doesn't change: while its recipe matches the last
     # nightly's, use that nightly's Pongo, so a Mac shortage can't hold up a nightly.
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changed.outputs.nightly == 'true'
-    needs: [native-smoke, changed]
+    needs: changed
     runs-on: ubuntu-24.04
     outputs:
       tag: ${{ steps.check.outputs.tag }}
@@ -232,7 +266,7 @@ jobs:
           if [[ -n "$tag" ]]; then echo "Pongo: from $tag, recipe unchanged" >> "$GITHUB_STEP_SUMMARY"; fi
   pongo:
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changed.outputs.nightly == 'true'
-    needs: [native-smoke, changed, pongo-check]
+    needs: [changed, pongo-check]
     runs-on: ${{ needs.pongo-check.outputs.runner }}
     timeout-minutes: 60
     env:
@@ -304,7 +338,8 @@ jobs:
           if-no-files-found: error
           retention-days: 2
   assets:
-    needs: [kernel, tools, pongo]
+    # Nothing is assembled, drafted or published unless the tests passed.
+    needs: [test, native-smoke, kernel, tools, pongo]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -351,7 +386,8 @@ jobs:
           cp "out/components/kernel/dtbs/$dtb.dtb" "$bundle/kernel/j71b.dtb"
           python ci/package_components.py --device j71b --directory "$bundle" \
             --output out/publication/j71b-components.tar.gz
-          cp out/downloads/*.tar.gz out/publication/
+          # Moved, not copied: the kernel sources are over 800 MB.
+          mv out/downloads/*.tar.gz out/publication/
           # orchard launch starts any device with only Pongo and the storage-capable
           # m1n1 (orchard.hardware.loader); they are release assets of their own.
           cp out/components/quiet/m1n1.bin out/components/quiet/pongo.bin out/publication/

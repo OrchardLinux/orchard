@@ -1,6 +1,6 @@
 # GitHub builds
 
-`.github/workflows/build.yml` tests the checkout on Python 3.11 and 3.14 and runs a native ARM64 compile/execute smoke test for pull requests and `main`. Tags matching `v*` and manual dispatches additionally build:
+`.github/workflows/build.yml` tests the checkout on Python 3.11 and 3.14 and runs a native ARM64 compile/execute smoke test for pull requests and `main`. Tags matching `v*`, manual dispatches and the nightly additionally build, beside the tests instead of after them:
 
 - Linux ARM64: per platform (one job each) the kernel, modules and every DTB; static recovery tools and quiet m1n1.
 - macOS: quiet Pongo with the pinned newlib revision.
@@ -14,7 +14,13 @@ GitHub must offer the `ubuntu-24.04-arm` runner for the repository. Kernel build
 
 There is no package to build: the tests install the checkout, and the recipe jobs run the recipes from the checkout with Debian's `python3`. No job rebuilds another job's output. Kernel and tools/loader are separate jobs, so **rerun failed jobs**, not the entire workflow, when an unchanged run can be recovered. Final assembly consumes their artifacts without recompiling. The combined tools installer takes the union of the local recipes' package lists and runs one APT transaction.
 
-Pongo/newlib compile once on macOS. An exact-input cache includes its source pins/build script, patch, runner OS/architecture, Xcode, SDK and compiler fingerprint; unchanged Apple inputs reuse the binary **and corresponding source archive**. No broad fallback cache is used, and the kernel's compiler cache starts empty in every run. Compiler jobs only run for tags/manual dispatch; documentation-only pushes do not start CI.
+Pongo/newlib compile once on macOS. An exact-input cache includes its source pins/build script, patch, runner OS/architecture, Xcode, SDK and compiler fingerprint; unchanged Apple inputs reuse the binary **and corresponding source archive**. Compiler jobs only run for tags, manual dispatch and the nightly; documentation-only pushes do not start CI.
+
+A kernel job first asks the newest nightly (`ci/reuse_kernel.py`). When the platform's source key (`component-keys.json`: upstream pin, series, patches, config, toolchain recipes) is the nightly's and the build scripts the key leaves out (`kernel/build`, `build-modules`, `stage-modules.py`, `series.py`, `kernel/modules/`, `buildenv.py`) are the files of the nightly's `orchard-source.tar.gz`, the job takes that nightly's kernel, toolchain lock and kernel source archive, each checked against the nightly's `SHA256SUMS`, and installs no compiler. A device-tree change on one platform so compiles one kernel, not three. The dispatch input `rebuild_kernels` compiles all of them regardless.
+
+A kernel that is compiled keeps its compiler cache (ccache, which the local build uses too) between runs: one GitHub cache per platform and source key, `kernel-ccache-v1-PLATFORM-KEY`, and a new key starts from the newest older cache of its platform. ccache keys every object by the compiler binary, its arguments and the preprocessed source, so a stale cache can only miss; after the build the job drops the objects this build did not use, which keeps a cache one build large. Caches saved on `main` (the nightly) serve every branch; one saved by a dispatch on another branch serves only that branch. To start from nothing, raise `v1` in the cache key.
+
+The tests gate what is published, not the compile: `assets` needs the tests, the smoke test and every compile job, and the draft release and the nightly need `assets`. Bundles and platform layers are gzip level 6: level 9 took eight times as long for 0.3 % smaller files.
 
 Standard GitHub-hosted Linux ARM64 and macOS runners are free for public repositories. Included private-repository minutes are not a limit on these public standard-runner builds; larger runners are always billed. Artifact/cache storage is separate, so intermediate artifacts expire after two days and the Pongo cache is limited to its small, exact-input outputs. See [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
 

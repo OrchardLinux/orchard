@@ -39,6 +39,27 @@ class CIEfficiency(unittest.TestCase):
         self.assertIn('for platform in ' + ' '.join(platforms) + '; do', job(workflow, 'assets'))
         self.assertIn('component-keys.json ' + ' '.join(platforms) + '\n', job(workflow, 'assets'))
 
+    def test_compilers_start_beside_the_tests_and_only_assembly_waits_for_them(self):
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        for name in ('kernel', 'tools', 'pongo-check', 'pongo', 'native-smoke'):
+            needs = re.search(r'^    needs: (.*)$', job(workflow, name), re.M)
+            self.assertNotIn('test', needs.group(1) if needs else '', name)
+        self.assertIn('needs: [test, native-smoke, kernel, tools, pongo]', job(workflow, 'assets'))
+        # Every publishing job goes through the assembly.
+        for name in ('draft', 'nightly'):
+            self.assertIn('assets', re.search(r'^    needs: (.*)$', job(workflow, name), re.M).group(1))
+
+    def test_kernel_job_reuses_the_nightly_or_compiles_with_the_kept_compiler_cache(self):
+        body = job((ROOT / '.github/workflows/build.yml').read_text(), 'kernel')
+        self.assertIn('python3 ci/reuse_kernel.py "$PLATFORM" --output out', body)
+        # Everything after the question compiles only when the nightly had no answer.
+        self.assertEqual(body.count("if: steps.reuse.outputs.reused == ''"), 4)
+        self.assertIn('path: out/cache/ccache/kernel', body)
+        self.assertIn('key: kernel-ccache-v1-${{ matrix.platform }}-${{ steps.reuse.outputs.key }}', body)
+        self.assertIn('restore-keys: kernel-ccache-v1-${{ matrix.platform }}-\n', body)
+        self.assertIn('ORCHARD_CACHE_DIR="$PWD/out/cache"', body)
+        self.assertLess(body.index('bash kernel/install-toolchain'), body.index('uses: actions/cache@v4'))
+
     def test_apple_build_has_exact_input_cache_and_one_compiler_invocation(self):
         body = job((ROOT / '.github/workflows/build.yml').read_text(), 'pongo')
         self.assertEqual(body.count('python boot/quiet/build-pongo.py'), 1)

@@ -56,7 +56,9 @@ def package(directory, output, device='j71b', platform=None):
             files[path.relative_to(directory).as_posix()] = receipt(path)
     (directory / 'components.json').write_text(json.dumps({'schema': 1, 'files': files}, indent=2) + '\n')
     output.parent.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(output, 'x:gz') as archive:
+    # Level 6: a bundle is mostly compressed kernel and modules, where level 9 takes
+    # eight times as long for 0.3 % less.
+    with tarfile.open(output, 'x:gz', compresslevel=6) as archive:
         archive.add(directory, arcname='components')
 
 
