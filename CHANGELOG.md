@@ -11,6 +11,11 @@ is missing or empty.
 
 ## Unreleased
 
+### Devices
+
+- A10 iPads: if the video decoder firmware is missing, sound keeps working and
+  the decoder just stays off.
+
 ## [0.3.1] - 2026-11-15
 
 ### Devices
