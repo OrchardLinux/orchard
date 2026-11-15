@@ -15,6 +15,8 @@ is missing or empty.
 
 - A10 iPads: if the video decoder firmware is missing, sound keeps working and
   the decoder just stays off.
+- iPad 6 and 7: the headphone jack works; plugging in switches the sound to
+  the headphones, unplugging switches back.
 
 ## [0.3.1] - 2026-11-15
 
