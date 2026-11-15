@@ -46,6 +46,10 @@ All in the kernel, nothing in user space:
 instead of saving power in suspend. Each entry goes once its driver saves and
 restores its own state. Sleep current has not been measured.
 
+Storage and Wi-Fi were tested here with the PCIe ports left up over the sleep.
+That has since been replaced, see
+[Storage and PCIe over sleep](#storage-and-pcie-over-sleep).
+
 The gauge bug is general: on every HDQ gauge (iPad 5, 6, 7, Air 2) the poll
 kept running into suspend and touched the suspended 1-Wire UART. The default
 poll of 360 s rarely collides; orchard's `30-orchard-battery-poll.conf` sets
@@ -57,6 +61,111 @@ The same parts are in the kernel for S5L8960X, T7000, T7001, S8000, S8003, S8001
 T8011 and T8015: `ps_gpio` always-on in each `-pmgr.dtsi`, the framebuffer's
 display domains always-on in each family's `.dtsi`, and the `apple_cpuidle`
 entry. Only T8010 has been tested. Their state is `untested`.
+
+## Storage and PCIe over sleep
+
+The NVMe controller (ANS) and Wi-Fi sit behind Apple's PCIe root complex
+(`pcie-apple-h9p`). Over a sleep the ports are powered off and rebuilt, as iOS
+does it. Nothing behind the root complex stays powered, with one exception
+named below, and nothing is expected to survive.
+
+Not run on any board yet: the code was written on 2026-11-15 without a device.
+What a test has to show is at the end of this section.
+
+### What iOS does
+
+Read from the iPad 5 kernelcache (iPad6,11, iOS 16.7.x):
+
+- **Storage** (`AppleEmbeddedNVMeController`): on sleep it freezes its queue
+  and shuts the controller down, keeping no state. On wake it initializes the
+  controller as at boot and unfreezes.
+- **Root complex** (`AppleS8003PCIe`, `AppleT8010PCIe`): registers a platform
+  quiesce and a platform active action. Quiesce disables every port. Active
+  applies the common tunables again, runs the common bring-up again (on S8003
+  the lane configuration, the ready wait and the common-done write), resumes
+  the ports and waits for their links.
+- **Taking a port down** (`disableGated`): save the endpoint's configuration,
+  send PME_Turn_Off and wait for the acknowledge, wait for L2 (both waits may
+  time out, iOS goes on), assert PERST#, then turn the port hardware off:
+  reference clock, then port enable. iOS panics with "Can't assert NVMe reset
+  while port is enabled" if the order is violated.
+- The Apple device tree gives `perst-to-refclk-delay-us = 60` on the root
+  complex and `t-refclk-to-perst = 100` per bridge, on J71t and J71b alike.
+  No property asks for a port to stay powered in sleep.
+
+### What the kernel does
+
+| Step | Where | What |
+|---|---|---|
+| NVMe stop | `nvme_suspend()`, ANS glue | I/O drained, NVMMU idle, shutdown notification completed (`CSTS.SHST`), then `CC.EN` cleared and `CSTS.RDY` gone, bus mastering off, every NVMMU translation retired. Only then is the root complex told that the controller is stopped. |
+| Wi-Fi | `brcmfmac` | its normal D3 entry |
+| DARTs | `apple-dart` | saved in the suspend phase, while their port is still up |
+| Ports down | `pcie-apple-h9p`, `suspend_noirq` | Wi-Fi first, storage last: PME_Turn_Off and a wait of at most 10 ms for L2 (S8003), PERST#, 60 us, reference clock off, port off |
+| Power domains | genpd | the PCIe domains go off after the ports |
+| Ports up | `pcie-apple-h9p`, `resume_noirq` | the bring-up of the probe: common block and tunables, storage port with its power cycle and NVMe mode, the other ports, link training, 100 ms, NVMMU on zeroed tables |
+| Configuration space | PCI core | restored for root ports and endpoints |
+| DARTs | `apple-dart` | rebuilt in the resume phase, after the ports are up |
+| NVMe start | `nvme_resume()` | the controller reset that follows any suspend, as after boot |
+| Wi-Fi | `brcmfmac` | finds a chip that was reset and loads its firmware again |
+
+Why the NVMe stop matters: a controller that was shut down but still has
+`CC.EN` set hangs the SoC when its port is power cycled (found by Berkay
+Kösebay on J71t, see [fast-restart.md](fast-restart.md)). The stop is his, from
+orchard #105 and #117. If it fails, the controller is reset and the sleep is
+refused with `-EBUSY`; it never continues into a power-off. If no NVMe driver
+is bound, nobody stopped the controller, and the root complex leaves all its
+ports as they are (kernel log: `storage controller not stopped, ports stay up
+over sleep`).
+
+**The exception: the Wi-Fi chip's supply.** It is switched by a PMIC GPIO
+behind I2C, which can't be reached in the phase where the ports go down and
+come up. The chip keeps its supply over the sleep and is held in reset, with
+its port, link and reference clock off.
+
+**A Wi-Fi port that does not come back** in the resume itself gets a second
+attempt as soon as the system is up, with the chip's power cycle as at boot;
+the Wi-Fi device is then removed and found again. Kernel log: `no link after
+sleep ... power cycling its endpoint`, then `back after an endpoint power
+cycle`. **A storage port that does not come back** is cut off: its devices
+are marked disconnected, the NVMe controller is marked dead and I/O fails
+with errors. On a tablet that runs from that disk this ends the session.
+
+USB is not kept: the gadget disconnects and enumerates again after the wake.
+
+### Per SoC
+
+The sequences are per SoC in the driver's match data, never per board.
+
+| SoC | Boards with PCIe described | Take-down | State |
+|---|---|---|---|
+| S8003 (A9, TSMC) | iPad 5: J71t, J72t | iOS's, as decoded | untested |
+| S8000 (A9, Samsung), S8001 (A9X) | none: the root complex is not described for them | | nothing to do |
+| T8010 (A10) | iPad 6, iPad 7, iPhone 7 and 7 Plus (the boards that enable it) | PERST#, link off, 60 us, then the same two root complex bits as on S8003 (same register layout, and the bits the bring-up sets). No PME_Turn_Off: the request register of this port block is not known. | untested; replaces "ports left up", which is what was tested on J71b on 2026-11-04 |
+| T8011 (A10X) | none | | nothing to do |
+| T7000, T7001 (A8, A8X) | iPad mini 4, iPad Air 2: Wi-Fi only | PERST#, link off, then the link enable and reference clock bits the bring-up sets; not decoded from iOS | untested |
+| T8015 (A11) | the boards that enable it | none | left as before: ports stay up |
+
+On the A9 iPhones with an S8003 the root complex is described but not enabled;
+they get the S8003 path once it is.
+
+### Testing it
+
+One sleep of more than 3 minutes on the installed system, then:
+
+- the same boot ID, and no `nvme`, `pcie-apple-h9p` or `brcmfmac` error in the
+  kernel log;
+- a read that bypasses the page cache works:
+  `dd if=/dev/nvme0n1 of=/dev/null bs=16k count=64 skip=$RANDOM iflag=direct`;
+- Wi-Fi reconnects by itself (allow a few seconds: the firmware is loaded
+  again);
+- a second sleep right after works as well.
+
+Kernel log after each wake: `nvme nvme0: N/0/0 default/read/poll queues`
+(the controller came up from reset) and `brcmfmac: brcmf_c_preinit_dcmds:
+Firmware: ...` (the chip loaded its firmware again). On S8003, `port N: no L2
+after PME_Turn_Off` is a finding to report, not a failure. `ports stay up over
+sleep`, `did not come back after sleep`, `controller not stopped for sleep`
+and `Disabling device after reset failure` are failures.
 
 ## Waking on plug
 

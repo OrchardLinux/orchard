@@ -235,6 +235,14 @@ reuses; the boot loader touches only the storage port). A separate opt-in,
 `apple,ans-kexec-link-flush`, waits up to 100 ms for link-up to fall under
 PERST# before the LTSSM stop (0043).
 
+**System sleep uses the same stop** (written 2026-11-15, untested):
+before a sleep the NVMe driver takes the controller through the shutdown
+notification and then clears `CC.EN`, and only then does the root complex
+power the storage port off, which is the state the finding above asks for.
+Unlike the handover here, sleep keeps nothing powered: the port goes off and
+resume runs the cold-boot sequence. See
+[suspend.md](suspend.md#storage-and-pcie-over-sleep).
+
 **Crash kernel.** In a kdump kernel on `apple,s8003-pcie` a `crash_quiesce`
 sysfs attribute clears `CC.EN` without a shutdown notification (an unknown
 queue must never be rung), waits up to 2 s for `RDY`, blocks bus mastering

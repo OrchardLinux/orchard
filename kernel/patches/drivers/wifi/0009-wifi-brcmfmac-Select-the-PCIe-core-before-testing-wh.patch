@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sun, 15 Nov 2026 18:27:54 +0800
+Subject: [PATCH] wifi: brcmfmac: Select the PCIe core before testing whether
+ the chip kept its state
+
+On resume the driver reads the PCIe core's interrupt mask to decide
+whether the firmware survived the sleep: non-zero means a hot resume, zero
+a chip that was reset and has to be probed again. The register is read
+through the BAR0 window, and which core that window shows is set by a
+vendor register in configuration space that the PCI core does not save.
+After a sleep in which the chip was reset, for instance because its
+PCIe port was powered off, the window is back at its default, and the
+test reads a register of another core. If that is non-zero the driver
+takes the hot path against a firmware that is gone.
+
+Select the PCIe core first.
+
+Assisted-by: LLM
+---
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
+index c103f618e..9c52f50d8 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
+@@ -2710,6 +2710,13 @@ static int brcmf_pcie_pm_leave_D3(struct device *dev)
+ 		return -ENODEV;
+ 	}
+ 
++	/*
++	 * The BAR0 window register is not part of the configuration space the
++	 * PCI core restores. After a sleep that reset the chip it selects
++	 * another core, and the test below would read that core's register.
++	 */
++	brcmf_pcie_select_core(devinfo, BCMA_CORE_PCIE2);
++
+ 	/* Check if device is still up and running, if so we are ready */
+ 	if (brcmf_pcie_read_reg32(devinfo, devinfo->reginfo->intmask) != 0) {
+ 		brcmf_dbg(PCIE, "Try to wakeup device....\n");
