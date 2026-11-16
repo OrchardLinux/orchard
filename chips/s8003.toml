@@ -15,3 +15,4 @@ stages = ["iBSS", "iBEC"]
 page_size = "xnu-6153.141.1 osfmk/arm/proc_reg.h"
 platform = "J71t on hardware; USB serial and networking verified"
 stages = "remote_boot two-stage CPID list"
+display = "J71t: display DART/SMMU pattern CRC passed; desktop and imported-plane scanout verified on the full development kernel"
