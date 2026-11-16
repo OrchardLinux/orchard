@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 02:57:19 +0100
+Subject: [PATCH 35/40] drm/imagination: apple: Honour the minimum runtime
+ gate-off interval
+
+A quick idle suspend and resume can restart firmware before the chip's
+minimum gate-off interval expires. Record successful power-off time and
+wait only its remaining interval before powering up. Retain reset's
+existing delay. Chips with no minimum are unaffected.
+
+Affects: Apple A9 (S8003); A10 has no gate-off minimum
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_apple.c      | 9 +++++++++
+ drivers/gpu/drm/imagination/pvr_apple_chip.h | 1 +
+ 2 files changed, 10 insertions(+)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_apple.c b/drivers/gpu/drm/imagination/pvr_apple.c
+index 96097fc..ea1150d 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple.c
++++ b/drivers/gpu/drm/imagination/pvr_apple.c
+@@ -387,6 +387,13 @@ static int pvr_apple_power_on(struct pvr_device *pvr_dev)
+ 	struct pvr_apple *apple = to_apple(pvr_dev);
+ 	int err;
+ 
++	if (apple->chip->gate_off_ms && apple->gate_off) {
++		s64 remaining = (s64)apple->chip->gate_off_ms * USEC_PER_MSEC -
++				ktime_us_delta(ktime_get(), apple->gate_off);
++
++		if (remaining > 0)
++			msleep(DIV_ROUND_UP(remaining, USEC_PER_MSEC));
++	}
+ 	if (!apple->fw_ready)
+ 		return pvr_apple_boot(apple);
+ 
+@@ -429,6 +436,8 @@ static int pvr_apple_power_off(struct pvr_device *pvr_dev)
+ 	/* the pollers run only while fences are pending; none are */
+ 	hrtimer_cancel(&apple->poll_timer);
+ 	cancel_delayed_work_sync(&apple->poll_work);
++	if (apple->chip->gate_off_ms)
++		apple->gate_off = ktime_get();
+ 	return 0;
+ }
+ 
+diff --git a/drivers/gpu/drm/imagination/pvr_apple_chip.h b/drivers/gpu/drm/imagination/pvr_apple_chip.h
+index 663e409..e223cf8 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple_chip.h
++++ b/drivers/gpu/drm/imagination/pvr_apple_chip.h
+@@ -88,6 +88,7 @@ struct pvr_apple {
+ 	bool booted;
+ 	bool fault_reported;		/* once per firmware boot */
+ 	bool fw_ready;		/* init data handed over once: runtime PM restarts it */
++	ktime_t gate_off;		/* last successful runtime power-off */
+ 
+ 	struct mutex submit_lock;	/* job slots, rings, producer index, GPU VM */
+ 	u32 last_seq;			/* last submitted compute job */
