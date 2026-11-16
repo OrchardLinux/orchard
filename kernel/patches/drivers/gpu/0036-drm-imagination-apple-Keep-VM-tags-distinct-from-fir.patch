@@ -1,0 +1,86 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 02:57:20 +0100
+Subject: [PATCH 36/40] drm/imagination: apple: Keep VM tags distinct from
+ firmware's cache
+
+A slot tag can wrap onto firmware's cached value, making a page-table
+change invisible and retaining stale translations. Share the helper
+that skips zero and the cached tag, retaining unsigned wrap and the
+steps-past counter. Leave A10's generation bump unchanged until its
+cached-generation offset is known.
+
+Affects: Apple A9 (S8003); A10 unchanged
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_apple_chip.h  |  9 +++++++++
+ drivers/gpu/drm/imagination/pvr_apple_s8003.c | 16 ++++++++++++----
+ 2 files changed, 21 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_apple_chip.h b/drivers/gpu/drm/imagination/pvr_apple_chip.h
+index e223cf8..7c49546 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple_chip.h
++++ b/drivers/gpu/drm/imagination/pvr_apple_chip.h
+@@ -280,6 +280,15 @@ struct pvr_apple_chip {
+ 	void (*mmu_flush)(struct pvr_apple *apple);
+ };
+ 
++/* A new host tag must be nonzero and differ from the firmware's cached tag. */
++static inline u32 pvr_apple_tag_bump(u32 tag, u32 step, u32 cached)
++{
++	tag += step;
++	while (!tag || tag == cached)
++		tag += step;
++	return tag;
++}
++
+ /* The heap is coherent memory shared with the firmware, not MMIO. */
+ static inline u32 heap_read32(struct pvr_apple *apple, u32 offset)
+ {
+diff --git a/drivers/gpu/drm/imagination/pvr_apple_s8003.c b/drivers/gpu/drm/imagination/pvr_apple_s8003.c
+index 23483f8..6a4affa 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple_s8003.c
++++ b/drivers/gpu/drm/imagination/pvr_apple_s8003.c
+@@ -275,6 +275,7 @@ struct pvr_apple_s8003 {
+ 	u32 gen;
+ 	spinlock_t tag_lock;		/* @tag and the host's tags in the shared memory */
+ 	u32 tag[S8003_SLOTS];		/* 0: slot not loaded */
++	u64 tag_steps_past;		/* cached or zero tags skipped, under tag_lock */
+ 	DECLARE_BITMAP(slots, S8003_SLOTS);
+ 	DECLARE_BITMAP(parked, S8003_SLOTS);	/* left on @park_vm's tables */
+ 	u32 next_slot;
+@@ -1409,23 +1410,30 @@ static void pvr_apple_s8003_mmu_flush(struct pvr_apple *apple)
+ 	struct pvr_apple_s8003 *s = apple->chip_data;
+ 	unsigned long flags;
+ 	u32 slot;
++	u64 steps = 0, total;
+ 
+ 	if (!s->shared.map)
+ 		return;
+ 	spin_lock_irqsave(&s->tag_lock, flags);
+ 	for (slot = S8003_SLOT_FIRST; slot < S8003_SLOTS; slot++) {
+-		u32 tag = s->tag[slot];
++		u32 tag = s->tag[slot], cached, next;
+ 
+ 		if (!tag)
+ 			continue;
+-		tag += S8003_TAG_CATALOGUE;
+-		if (!tag)
+-			tag = S8003_TAG_CATALOGUE;
++		cached = get32(s8003_object(s, S8003_TAG_SEEN) + 4 * slot);
++		next = pvr_apple_tag_bump(tag, S8003_TAG_CATALOGUE, cached);
++		steps += (u32)(next - (tag + S8003_TAG_CATALOGUE)) / S8003_TAG_CATALOGUE;
++		tag = next;
+ 		s->tag[slot] = tag;
+ 		put32(s8003_object(s, S8003_TAG_HOST) + 4 * slot, tag);
+ 	}
++	s->tag_steps_past += steps;
++	total = s->tag_steps_past;
+ 	spin_unlock_irqrestore(&s->tag_lock, flags);
+ 	wmb();
++	if (steps)
++		dev_dbg_ratelimited(apple_dev(apple),
++				    "MMU tag steps-past=%llu total=%llu\n", steps, total);
+ }
+ 
+ static int pvr_apple_s8003_vm_init(struct pvr_apple *apple, struct pvr_vm_context *vm_ctx)
