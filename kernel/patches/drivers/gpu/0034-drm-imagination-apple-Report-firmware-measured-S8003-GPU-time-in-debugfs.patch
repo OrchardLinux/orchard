@@ -1,0 +1,275 @@
+From 3a19f9211c0ef2ae6af305c792cfc555e573f58d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 17:46:27 +0100
+Subject: [PATCH] drm/imagination: apple: Report firmware-measured S8003 GPU
+ time in debugfs
+
+Host in-flight durations include queueing and firmware overhead, so they
+cannot show how long the GPU geometry and fragment phases actually ran.
+
+Read the retired phase-time u64 at W+0x550 or W+0x8ac before the record is
+cleared. Both submission paths wait for last_seq - 1 before writing the
+two-slot ring's next record, so its previous occupant has retired. Order
+that shared-memory read with dma_rmb(), preserve it across the fill, and
+account only successful fills before the result word is cleared.
+
+Expose accumulated geometry and fragment time, jobs and zero samples in
+apple_jobs, converting 24 MHz ticks by ticks * 125 / 3. Add only the small
+chip debugfs callback needed by that line; no timing parameters, phase-gap
+attribution or memory census. Submission ordering and power policy stay
+unchanged.
+
+Affects: Apple A9 (S8003), measurement only. The A10 is unchanged.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_apple.c       | 19 +++++++
+ drivers/gpu/drm/imagination/pvr_apple.h       |  3 ++
+ drivers/gpu/drm/imagination/pvr_apple_chip.h  |  3 ++
+ drivers/gpu/drm/imagination/pvr_apple_s8003.c | 53 ++++++++++++++++---
+ drivers/gpu/drm/imagination/pvr_debugfs.c     |  3 ++
+ 5 files changed, 75 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_apple.c b/drivers/gpu/drm/imagination/pvr_apple.c
+index 5a43e3f..964549a 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple.c
++++ b/drivers/gpu/drm/imagination/pvr_apple.c
+@@ -31,6 +31,8 @@
+ 
+ #include <drm/drm_print.h>
+ #include <drm/gpu_scheduler.h>
++#include <linux/debugfs.h>
++#include <linux/seq_file.h>
+ #include <linux/delay.h>
+ #include <linux/devfreq.h>
+ #include <linux/dma-fence.h>
+@@ -579,6 +581,23 @@ static u32 pvr_apple_engine_done(struct pvr_apple *apple, enum pvr_apple_engine
+ 	return heap_read32(apple, apple->layout.stamp[engine]);
+ }
+ 
++static int pvr_apple_jobs_show(struct seq_file *s, void *unused)
++{
++	struct pvr_apple *apple = s->private;
++
++	apple->chip->debugfs_show(apple, s);
++	return 0;
++}
++DEFINE_SHOW_ATTRIBUTE(pvr_apple_jobs);
++
++void pvr_apple_debugfs_init(struct pvr_device *pvr_dev, struct dentry *root)
++{
++	struct pvr_apple *apple = to_apple(pvr_dev);
++
++	if (apple && apple->chip->debugfs_show)
++		debugfs_create_file("apple_jobs", 0400, root, apple, &pvr_apple_jobs_fops);
++}
++
+ /* For a wait: what the firmware posted meanwhile is read first */
+ static u32 pvr_apple_engine_poll(struct pvr_apple *apple, enum pvr_apple_engine engine)
+ {
+diff --git a/drivers/gpu/drm/imagination/pvr_apple.h b/drivers/gpu/drm/imagination/pvr_apple.h
+index d1de0ad..24e3ec2 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple.h
++++ b/drivers/gpu/drm/imagination/pvr_apple.h
+@@ -12,6 +12,7 @@
+ #include "pvr_rogue_fwif_client.h"
+ #include "pvr_stream.h"
+ 
++struct dentry;
+ struct dma_fence;
+ struct pvr_apple_chip;
+ struct pvr_context;
+@@ -159,6 +160,7 @@ struct pvr_apple_g5p_cmd_compute {
+ };
+ 
+ #if IS_ENABLED(CONFIG_DRM_POWERVR_APPLE)
++void pvr_apple_debugfs_init(struct pvr_device *pvr_dev, struct dentry *root);
+ int pvr_apple_fw_init(struct pvr_device *pvr_dev);
+ void pvr_apple_fw_fini(struct pvr_device *pvr_dev);
+ struct pvr_gem_object *pvr_apple_pm_pages(struct pvr_device *pvr_dev, size_t size);
+@@ -191,6 +193,7 @@ void pvr_apple_queue_destroy(struct pvr_queue *queue, bool cleanup_queue_entity)
+ int pvr_apple_queue_job_init(struct pvr_job *job, u64 drm_client_id);
+ void pvr_apple_queue_job_cleanup(struct pvr_job *job);
+ #else
++static inline void pvr_apple_debugfs_init(struct pvr_device *pvr_dev, struct dentry *root) {}
+ static inline int pvr_apple_fw_init(struct pvr_device *pvr_dev) { return -ENODEV; }
+ static inline void pvr_apple_fw_fini(struct pvr_device *pvr_dev) {}
+ static inline struct pvr_gem_object *pvr_apple_pm_pages(struct pvr_device *pvr_dev, size_t size)
+diff --git a/drivers/gpu/drm/imagination/pvr_apple_chip.h b/drivers/gpu/drm/imagination/pvr_apple_chip.h
+index d524415..1527248 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple_chip.h
++++ b/drivers/gpu/drm/imagination/pvr_apple_chip.h
+@@ -28,6 +28,7 @@
+ #include <linux/workqueue.h>
+ 
+ struct devfreq;
++struct seq_file;
+ struct pvr_gem_object;
+ struct pvr_stream_cmd_defs;
+ 
+@@ -273,6 +274,8 @@ struct pvr_apple_chip {
+ 	void (*vm_fini)(struct pvr_apple *apple, struct pvr_vm_context *vm_ctx);
+ 	unsigned int (*vm_scenes)(struct pvr_apple *apple, struct pvr_vm_context *vm_ctx);
+ 	void (*mmu_flush)(struct pvr_apple *apple);
++	/* Chip-specific measurements in apple_jobs; no MMIO. */
++	void (*debugfs_show)(struct pvr_apple *apple, struct seq_file *m);
+ };
+ 
+ /* The heap is coherent memory shared with the firmware, not MMIO. */
+diff --git a/drivers/gpu/drm/imagination/pvr_apple_s8003.c b/drivers/gpu/drm/imagination/pvr_apple_s8003.c
+index 40ca888..0f69c5a 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple_s8003.c
++++ b/drivers/gpu/drm/imagination/pvr_apple_s8003.c
+@@ -34,6 +34,9 @@
+  * readings of Apple's kext and firmware.
+  */
+ 
++#include <linux/math64.h>
++#include <linux/seq_file.h>
++
+ #include "pvr_apple.h"
+ #include "pvr_apple_chip.h"
+ #include "pvr_context.h"
+@@ -307,6 +310,8 @@ struct pvr_apple_s8003 {
+ 	struct pvr_gem_object *spare;
+ 	bool pio_mapped;
+ 
++	u64 gpu_ticks[2], gpu_jobs[2], gpu_zero[2]; /* retired geometry/fragment phase time */
++
+ 	struct s8003_idle idle;
+ };
+ 
+@@ -1958,6 +1963,19 @@ static struct s8003_job_slot s8003_slot_of(u32 seq, bool frag)
+ 	};
+ }
+ 
++/*
++ * Submissions wait for last_seq - 1 before reusing either of the two records:
++ * the prior occupant of s8003_slot_of(last_seq + 1) is last_seq - 1. Preserve
++ * its result before fill_ta/fill_3d clears W. Failed fills do not count it.
++ */
++static u64 s8003_job_ticks(u8 *p, u32 seq, bool frag)
++{
++	struct s8003_job_slot at = s8003_slot_of(seq, frag);
++
++	dma_rmb();
++	return get_unaligned_le64(p + at.w + (frag ? 0x8ac : 0x550));
++}
++
+ /* What the 3D engine is waited for between a fragment job's start and finish */
+ static const u32 s8003_3d_wait[] = {
+ 	0x201,	    0x138204,  0x10,   0x8388204, 0,	  0x104000a, 0x1f,
+@@ -1983,8 +2001,8 @@ static u8 *useq_put(u8 *out, const u32 *words, unsigned int n)
+  * the PM set; a fragment job's waits for the stamp at @wait_stamp to reach
+  * @wait_seq, its geometry job's.
+  */
+-static void s8003_job_write(u8 *p, u32 addr, u32 global, u32 pm, u32 pm_id, u32 slot, bool frag,
+-			    u32 seq, u32 wait_stamp, u32 wait_seq)
++static void s8003_job_write(struct pvr_apple_s8003 *s, u8 *p, u32 addr, u32 global, u32 pm, u32 pm_id, u32 slot, bool frag,
++			    u32 seq, u32 wait_stamp, u32 wait_seq, u64 gpu_ticks)
+ {
+ 	struct s8003_job_slot at = s8003_slot_of(seq, frag);
+ 	u32 w = addr + at.w, record = pm + S8003_PM_RECORD;
+@@ -1997,6 +2015,13 @@ static void s8003_job_write(u8 *p, u32 addr, u32 global, u32 pm, u32 pm_id, u32
+ 	const u32 time_end[] = { 0x18, result, time, time + 4, seq };
+ 	const u32 wait_ta = 0x801, end = 0x40000017;
+ 
++	if (gpu_ticks) {
++		s->gpu_ticks[frag] += gpu_ticks;
++		s->gpu_jobs[frag]++;
++	} else {
++		s->gpu_zero[frag]++;
++	}
++
+ 	put32(work + (frag ? 0x8ac : 0x550), 0);
+ 	put32(work + (frag ? 0x8b0 : 0x554), 0);
+ 	put32(work + (frag ? 0x8b4 : 0x558), times);
+@@ -2145,6 +2170,7 @@ static int s8003_submit_geom(struct pvr_apple *apple, struct s8003_vm *vm, struc
+ 	struct s8003_pm *pm = NULL;
+ 	struct s8003_rt rt;
+ 	u32 seq, blocks;
++	u64 gpu_ticks;
+ 	unsigned int i;
+ 	int err;
+ 
+@@ -2179,11 +2205,12 @@ static int s8003_submit_geom(struct pvr_apple *apple, struct s8003_vm *vm, struc
+ 		return s8003_submit_error(apple, vm, "geometry", err, "record slot wait");
+ 
+ 	seq = apple->ta_seq + 1;
++	gpu_ticks = s8003_job_ticks(p, seq, false);
+ 	s8003_fill_ta(p + s8003_slot_of(seq, false).w, job->cmd, job->hwrt, &rt);
+-	s8003_job_write(p, s8003_channel_addr(APPLE_ENGINE_GEOM),
++	s8003_job_write(s, p, s8003_channel_addr(APPLE_ENGINE_GEOM),
+ 			s8003_object_addr(&s->layout, S8003_CHANNEL),
+ 			s8003_meta_addr(s8003_pm_set_va(pm, 0)), pm->set + 1, vm->slot[0], false,
+-			seq, 0, 0);
++			seq, 0, 0, gpu_ticks);
+ 	pm->hwrt = job->hwrt;
+ 	pm->scene = s->gen;
+ 	pm->ta_seq = seq;
+@@ -2203,6 +2230,7 @@ static int s8003_submit_frag(struct pvr_apple *apple, struct s8003_vm *vm, struc
+ 	struct s8003_rt rt;
+ 	unsigned int i;
+ 	u32 seq;
++	u64 gpu_ticks;
+ 	int err;
+ 
+ 	/* The scene of this job's geometry job, which was submitted before it */
+@@ -2221,13 +2249,14 @@ static int s8003_submit_frag(struct pvr_apple *apple, struct s8003_vm *vm, struc
+ 		return s8003_submit_error(apple, vm, "fragment", err, "record slot wait");
+ 
+ 	seq = apple->frag_seq + 1;
++	gpu_ticks = s8003_job_ticks(p, seq, true);
+ 	err = s8003_fill_3d(p + s8003_slot_of(seq, true).w, job->cmd, job->hwrt, &rt);
+ 	if (err)
+ 		return s8003_submit_error(apple, vm, "fragment", err, "3D record fill");
+-	s8003_job_write(p, s8003_channel_addr(APPLE_ENGINE_FRAG),
++	s8003_job_write(s, p, s8003_channel_addr(APPLE_ENGINE_FRAG),
+ 			s8003_object_addr(&s->layout, S8003_CHANNEL + 1),
+ 			s8003_meta_addr(s8003_pm_set_va(pm, 0)), pm->set + 1, vm->slot[1], true, seq,
+-			s8003_channel_addr(APPLE_ENGINE_GEOM) + S8003_CH_STAMP + 4, pm->ta_seq);
++			s8003_channel_addr(APPLE_ENGINE_GEOM) + S8003_CH_STAMP + 4, pm->ta_seq, gpu_ticks);
+ 	pm->td_seq = seq;
+ 	apple->frag_seq = seq;
+ 	err = s8003_publish(apple, APPLE_ENGINE_FRAG, seq, (2 * seq) % S8003_CH_ENTRIES);
+@@ -2589,7 +2618,19 @@ static void pvr_apple_s8003_restore_image(struct pvr_apple *apple)
+ 	/* start() copies the image and builds the init data anew each time */
+ }
+ 
++static void pvr_apple_s8003_debugfs_show(struct pvr_apple *apple, struct seq_file *m)
++{
++	struct pvr_apple_s8003 *s = apple->chip_data;
++
++	seq_printf(m, "gpu_ns geometry %llu fragment %llu jobs %llu %llu zero %llu %llu\n",
++		   mul_u64_u32_div(READ_ONCE(s->gpu_ticks[0]), 125, 3),
++		   mul_u64_u32_div(READ_ONCE(s->gpu_ticks[1]), 125, 3),
++		   READ_ONCE(s->gpu_jobs[0]), READ_ONCE(s->gpu_jobs[1]),
++		   READ_ONCE(s->gpu_zero[0]), READ_ONCE(s->gpu_zero[1]));
++}
++
+ const struct pvr_apple_chip pvr_apple_chip_s8003 = {
++	.debugfs_show = pvr_apple_s8003_debugfs_show,
+ 	.fw_name = "apple/gfx-s8003.bin",
+ 	.perf_state_max = S8003_PERF_STATE_MAX,
+ 	.geom_stream = &pvr_apple_g5p_cmd_geom_stream,
+diff --git a/drivers/gpu/drm/imagination/pvr_debugfs.c b/drivers/gpu/drm/imagination/pvr_debugfs.c
+index ebdb05d..fce6cdf 100644
+--- a/drivers/gpu/drm/imagination/pvr_debugfs.c
++++ b/drivers/gpu/drm/imagination/pvr_debugfs.c
+@@ -2,6 +2,7 @@
+ /* Copyright (c) 2023 Imagination Technologies Ltd. */
+ 
+ #include "pvr_debugfs.h"
++#include "pvr_apple.h"
+ 
+ #include "pvr_device.h"
+ #include "pvr_fw_trace.h"
+@@ -27,6 +28,8 @@ pvr_debugfs_init(struct drm_minor *minor)
+ 	struct pvr_device *pvr_dev = to_pvr_device(drm_dev);
+ 	struct dentry *root = minor->debugfs_root;
+ 
++	pvr_apple_debugfs_init(pvr_dev, root);
++
+ 	for (size_t i = 0; i < ARRAY_SIZE(pvr_debugfs_entries); ++i) {
+ 		const struct pvr_debugfs_entry *entry = &pvr_debugfs_entries[i];
+ 		struct dentry *dir;
