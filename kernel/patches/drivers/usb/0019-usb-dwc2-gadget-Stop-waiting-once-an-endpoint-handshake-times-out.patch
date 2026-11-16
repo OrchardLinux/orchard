@@ -1,0 +1,261 @@
+From 62e5226099316b41c03ad46901e4d74166232999 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 17:02:13 +0100
+Subject: [PATCH] usb: dwc2: gadget: Stop waiting once an endpoint handshake
+ times out
+
+A stopped PHY clock makes every endpoint handshake fail in one teardown.
+After the first failure, skip later disable waits, make one 100 us FIFO
+flush attempt and report a bounded register snapshot. Normal gadget TX
+flushes use a 2 ms limit rather than the host helper's 10 ms IRQ-off
+wait. Count stop and flush failures and mark teardown scopes for
+recovery policy. The host FIFO flush helper is unchanged.
+
+Assisted-by: LLM
+---
+ drivers/usb/dwc2/core.h   |   2 +
+ drivers/usb/dwc2/gadget.c | 134 ++++++++++++++++++++------------------
+ 2 files changed, 71 insertions(+), 65 deletions(-)
+
+diff --git a/drivers/usb/dwc2/core.h b/drivers/usb/dwc2/core.h
+index 1cd9292..4b99b50 100644
+--- a/drivers/usb/dwc2/core.h
++++ b/drivers/usb/dwc2/core.h
+@@ -1239,6 +1239,8 @@ struct dwc2_hsotg {
+ 	struct usb_gadget gadget;
+ 	unsigned int enabled:1;
+ 	unsigned int connected:1;
++	unsigned int stop_timeouts; /* endpoint stop/flush handshake failures */
++	bool in_teardown;
+ 	unsigned int remote_wakeup_allowed:1;
+ 	struct dwc2_hsotg_ep *eps_in[MAX_EPS_CHANNELS];
+ 	struct dwc2_hsotg_ep *eps_out[MAX_EPS_CHANNELS];
+diff --git a/drivers/usb/dwc2/gadget.c b/drivers/usb/dwc2/gadget.c
+index b9fd335..85367da 100644
+--- a/drivers/usb/dwc2/gadget.c
++++ b/drivers/usb/dwc2/gadget.c
+@@ -307,6 +307,11 @@ int dwc2_hsotg_tx_fifo_average_depth(struct dwc2_hsotg *hsotg)
+  * dwc2_hsotg_init_fifo - initialise non-periodic FIFOs
+  * @hsotg: The device instance.
+  */
++static void dwc2_hsotg_stop_timeout(struct dwc2_hsotg *hsotg)
++{
++	hsotg->stop_timeouts++;
++}
++
+ static void dwc2_hsotg_init_fifo(struct dwc2_hsotg *hsotg)
+ {
+ 	unsigned int ep;
+@@ -375,6 +380,7 @@ static void dwc2_hsotg_init_fifo(struct dwc2_hsotg *hsotg)
+ 			break;
+ 
+ 		if (--timeout == 0) {
++			dwc2_hsotg_stop_timeout(hsotg);
+ 			dev_err(hsotg->dev,
+ 				"%s: timeout flushing fifos (GRSTCTL=%08x)\n",
+ 				__func__, val);
+@@ -2651,9 +2657,11 @@ static void dwc2_hsotg_txfifo_flush(struct dwc2_hsotg *hsotg, unsigned int idx)
+ 		    GRSTCTL);
+ 
+ 	/* wait until the fifo is flushed */
+-	if (dwc2_hsotg_wait_bit_clear(hsotg, GRSTCTL, GRSTCTL_TXFFLSH, 100))
++	if (dwc2_hsotg_wait_bit_clear(hsotg, GRSTCTL, GRSTCTL_TXFFLSH, 100)) {
++		dwc2_hsotg_stop_timeout(hsotg);
+ 		dev_warn(hsotg->dev, "%s: timeout flushing fifo GRSTCTL_TXFFLSH\n",
+ 			 __func__);
++	}
+ }
+ 
+ /**
+@@ -3330,6 +3338,7 @@ static void kill_all_requests(struct dwc2_hsotg *hsotg,
+ void dwc2_hsotg_disconnect(struct dwc2_hsotg *hsotg)
+ {
+ 	unsigned int ep;
++	bool was_teardown = hsotg->in_teardown;
+ 
+ 	if (!hsotg->connected)
+ 		return;
+@@ -3339,6 +3348,7 @@ void dwc2_hsotg_disconnect(struct dwc2_hsotg *hsotg)
+ 	hsotg->connected = 0;
+ 	hsotg->test_mode = 0;
+ 
++	hsotg->in_teardown = true;
+ 	/* all endpoints should be shutdown */
+ 	for (ep = 0; ep < hsotg->num_of_eps; ep++) {
+ 		if (hsotg->eps_in[ep])
+@@ -3350,6 +3360,7 @@ void dwc2_hsotg_disconnect(struct dwc2_hsotg *hsotg)
+ 	}
+ 
+ 	call_gadget(hsotg, disconnect);
++	hsotg->in_teardown = was_teardown;
+ 	hsotg->lx_state = DWC2_L3;
+ 
+ 	usb_gadget_set_state(&hsotg->gadget, USB_STATE_NOTATTACHED);
+@@ -3414,6 +3425,9 @@ void dwc2_hsotg_core_init_disconnected(struct dwc2_hsotg *hsotg,
+ 		if (dwc2_core_reset(hsotg, true))
+ 			return;
+ 	} else {
++		bool was_teardown = hsotg->in_teardown;
++
++		hsotg->in_teardown = true;
+ 		/* all endpoints should be shutdown */
+ 		for (ep = 1; ep < hsotg->num_of_eps; ep++) {
+ 			if (hsotg->eps_in[ep])
+@@ -3421,6 +3435,7 @@ void dwc2_hsotg_core_init_disconnected(struct dwc2_hsotg *hsotg,
+ 			if (hsotg->eps_out[ep])
+ 				dwc2_hsotg_ep_disable(&hsotg->eps_out[ep]->ep);
+ 		}
++		hsotg->in_teardown = was_teardown;
+ 	}
+ 
+ 	/*
+@@ -3957,96 +3972,85 @@ irq_retry:
+ static void dwc2_hsotg_ep_stop_xfr(struct dwc2_hsotg *hsotg,
+ 				   struct dwc2_hsotg_ep *hs_ep)
+ {
+-	u32 epctrl_reg;
+-	u32 epint_reg;
++	u32 epctrl_reg = hs_ep->dir_in ? DIEPCTL(hs_ep->index) : DOEPCTL(hs_ep->index);
++	u32 epint_reg = hs_ep->dir_in ? DIEPINT(hs_ep->index) : DOEPINT(hs_ep->index);
+ 	bool regate = dwc2_gadget_ungate_clock(hsotg) &&
+ 		hsotg->lx_state == DWC2_L2 && hsotg->bus_suspended;
++	bool timed_out = false;
++	u32 flush;
+ 
+-	epctrl_reg = hs_ep->dir_in ? DIEPCTL(hs_ep->index) :
+-		DOEPCTL(hs_ep->index);
+-	epint_reg = hs_ep->dir_in ? DIEPINT(hs_ep->index) :
+-		DOEPINT(hs_ep->index);
+-
+-	dev_dbg(hsotg->dev, "%s: stopping transfer on %s\n", __func__,
+-		hs_ep->name);
+-
++	dev_dbg(hsotg->dev, "%s: stopping transfer on %s\n", __func__, hs_ep->name);
+ 	if (hs_ep->dir_in) {
+ 		if (hsotg->dedicated_fifos || hs_ep->periodic) {
+ 			dwc2_set_bit(hsotg, epctrl_reg, DXEPCTL_SNAK);
+-			/* Wait for Nak effect */
+-			if (dwc2_hsotg_wait_bit_set(hsotg, epint_reg,
+-						    DXEPINT_INEPNAKEFF, 100))
+-				dev_warn(hsotg->dev,
+-					 "%s: timeout DIEPINT.NAKEFF\n",
+-					 __func__);
++			if (dwc2_hsotg_wait_bit_set(hsotg, epint_reg, DXEPINT_INEPNAKEFF, 100)) {
++				dev_warn(hsotg->dev, "%s: timeout DIEPINT.NAKEFF\n", __func__);
++				goto nak_timeout;
++			}
+ 		} else {
+ 			dwc2_set_bit(hsotg, DCTL, DCTL_SGNPINNAK);
+-			/* Wait for Nak effect */
+-			if (dwc2_hsotg_wait_bit_set(hsotg, GINTSTS,
+-						    GINTSTS_GINNAKEFF, 100))
+-				dev_warn(hsotg->dev,
+-					 "%s: timeout GINTSTS.GINNAKEFF\n",
+-					 __func__);
++			if (dwc2_hsotg_wait_bit_set(hsotg, GINTSTS, GINTSTS_GINNAKEFF, 100)) {
++				dev_warn(hsotg->dev, "%s: timeout GINTSTS.GINNAKEFF\n", __func__);
++				goto nak_timeout;
++			}
+ 		}
+ 	} else {
+-		/* Mask GINTSTS_GOUTNAKEFF interrupt */
+ 		dwc2_hsotg_disable_gsint(hsotg, GINTSTS_GOUTNAKEFF);
+-
+ 		if (!(dwc2_readl(hsotg, GINTSTS) & GINTSTS_GOUTNAKEFF))
+ 			dwc2_set_bit(hsotg, DCTL, DCTL_SGOUTNAK);
+-
+ 		if (!using_dma(hsotg)) {
+-			/* Wait for GINTSTS_RXFLVL interrupt */
+-			if (dwc2_hsotg_wait_bit_set(hsotg, GINTSTS,
+-						    GINTSTS_RXFLVL, 100)) {
+-				dev_warn(hsotg->dev, "%s: timeout GINTSTS.RXFLVL\n",
+-					 __func__);
+-			} else {
+-				/*
+-				 * Pop GLOBAL OUT NAK status packet from RxFIFO
+-				 * to assert GOUTNAKEFF interrupt
+-				 */
+-				dwc2_readl(hsotg, GRXSTSP);
++			if (dwc2_hsotg_wait_bit_set(hsotg, GINTSTS, GINTSTS_RXFLVL, 100)) {
++				dev_warn(hsotg->dev, "%s: timeout GINTSTS.RXFLVL\n", __func__);
++				goto nak_timeout;
+ 			}
++			dwc2_readl(hsotg, GRXSTSP);
++		}
++		if (dwc2_hsotg_wait_bit_set(hsotg, GINTSTS, GINTSTS_GOUTNAKEFF, 100)) {
++			dev_warn(hsotg->dev, "%s: timeout GINTSTS.GOUTNAKEFF\n", __func__);
++			goto nak_timeout;
+ 		}
+-
+-		/* Wait for global nak to take effect */
+-		if (dwc2_hsotg_wait_bit_set(hsotg, GINTSTS,
+-					    GINTSTS_GOUTNAKEFF, 100))
+-			dev_warn(hsotg->dev, "%s: timeout GINTSTS.GOUTNAKEFF\n",
+-				 __func__);
+ 	}
+-
+-	/* Disable ep */
++	goto disable;
++nak_timeout:
++	timed_out = true;
++	dwc2_hsotg_stop_timeout(hsotg);
++disable:
+ 	dwc2_set_bit(hsotg, epctrl_reg, DXEPCTL_EPDIS | DXEPCTL_SNAK);
+-
+-	/* Wait for ep to be disabled */
+-	if (dwc2_hsotg_wait_bit_set(hsotg, epint_reg, DXEPINT_EPDISBLD, 100))
+-		dev_warn(hsotg->dev,
+-			 "%s: timeout DOEPCTL.EPDisable\n", __func__);
+-
+-	/* Clear EPDISBLD interrupt */
++	/* Once NAK failed, another PHY-domain handshake cannot make progress. */
++	if (!timed_out &&
++	    dwc2_hsotg_wait_bit_set(hsotg, epint_reg, DXEPINT_EPDISBLD, 100)) {
++		dev_warn(hsotg->dev, "%s: timeout DOEPCTL.EPDisable\n", __func__);
++		timed_out = true;
++		dwc2_hsotg_stop_timeout(hsotg);
++	}
+ 	dwc2_set_bit(hsotg, epint_reg, DXEPINT_EPDISBLD);
++	if (hs_ep->dir_in || timed_out) {
++		if (hs_ep->dir_in) {
++			u32 fifo = hsotg->dedicated_fifos || hs_ep->periodic ? hs_ep->fifo_index : 0;
+ 
++			flush = GRSTCTL_TXFNUM(fifo) | GRSTCTL_TXFFLSH;
++		} else {
++			flush = GRSTCTL_RXFFLSH;
++		}
++		dwc2_writel(hsotg, flush, GRSTCTL);
++		if (dwc2_hsotg_wait_bit_clear(hsotg, GRSTCTL,
++					     hs_ep->dir_in ? GRSTCTL_TXFFLSH : GRSTCTL_RXFFLSH,
++					     timed_out ? 100 : 2000)) {
++			timed_out = true;
++			dwc2_hsotg_stop_timeout(hsotg);
++		}
++	}
+ 	if (hs_ep->dir_in) {
+-		unsigned short fifo_index;
+-
+-		if (hsotg->dedicated_fifos || hs_ep->periodic)
+-			fifo_index = hs_ep->fifo_index;
+-		else
+-			fifo_index = 0;
+-
+-		/* Flush TX FIFO */
+-		dwc2_flush_tx_fifo(hsotg, fifo_index);
+-
+-		/* Clear Global In NP NAK in Shared FIFO for non periodic ep */
+ 		if (!hsotg->dedicated_fifos && !hs_ep->periodic)
+ 			dwc2_set_bit(hsotg, DCTL, DCTL_CGNPINNAK);
+-
+ 	} else {
+-		/* Remove global NAKs */
+ 		dwc2_set_bit(hsotg, DCTL, DCTL_CGOUTNAK);
+ 	}
++	if (timed_out)
++		dev_warn_ratelimited(hsotg->dev,
++			"%s: %s stop timed out (PCGCTL %08x DCTL %08x DSTS %08x GINTSTS %08x): core needs a reset\n",
++			__func__, hs_ep->name, dwc2_readl(hsotg, PCGCTL), dwc2_readl(hsotg, DCTL),
++			dwc2_readl(hsotg, DSTS), dwc2_readl(hsotg, GINTSTS));
+ 	if (regate)
+ 		dwc2_gadget_enter_clock_gating(hsotg);
+ }
