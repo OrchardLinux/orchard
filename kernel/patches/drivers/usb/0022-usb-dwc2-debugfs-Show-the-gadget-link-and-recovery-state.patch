@@ -1,0 +1,81 @@
+From 8ebfdf2a78a6d20aeb5132bd84de76b9cf34f8ad Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 17:06:12 +0100
+Subject: [PATCH] usb: dwc2: debugfs: Show the gadget link and recovery state
+
+A configured but mute gadget is ambiguous without its software link
+state alongside PCGCTL. Expose link, suspend, role hold and recovery
+counters in the existing gadget state file. Record PCGCTL and DSTS on up
+to eight real clock-gated suspends and eight device resumes before
+ungating, so suspend-state readback can qualify the opt-in watchdog
+trigger.
+
+Assisted-by: LLM
+---
+ drivers/usb/dwc2/core_intr.c | 15 ++++++++++++++-
+ drivers/usb/dwc2/debugfs.c   |  4 ++++
+ 2 files changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/usb/dwc2/core_intr.c b/drivers/usb/dwc2/core_intr.c
+index df6cad2..6b18c4f 100644
+--- a/drivers/usb/dwc2/core_intr.c
++++ b/drivers/usb/dwc2/core_intr.c
+@@ -417,6 +417,7 @@ fail:		dwc2_gadget_init_lpm(hsotg);
+  */
+ static void dwc2_handle_wakeup_detected_intr(struct dwc2_hsotg *hsotg)
+ {
++	static unsigned int resume_logs;
+ 	int ret;
+ 
+ 	/* Clear interrupt */
+@@ -425,6 +426,11 @@ static void dwc2_handle_wakeup_detected_intr(struct dwc2_hsotg *hsotg)
+ 	dev_dbg(hsotg->dev, "++Resume or Remote Wakeup Detected Interrupt++\n");
+ 	dev_dbg(hsotg->dev, "%s lxstate = %d\n", __func__, hsotg->lx_state);
+ 
++	if (dwc2_is_device_mode(hsotg) && resume_logs < 8) {
++		resume_logs++;
++		dev_info(hsotg->dev, "resume: before ungate, PCGCTL %08x DSTS %08x\n",
++			 dwc2_readl(hsotg, PCGCTL), dwc2_readl(hsotg, DSTS));
++	}
+ 	if (hsotg->lx_state == DWC2_L1) {
+ 		dwc2_wakeup_from_lpm_l1(hsotg, false);
+ 		return;
+@@ -519,6 +525,7 @@ static void dwc2_handle_disconnect_intr(struct dwc2_hsotg *hsotg)
+ static void dwc2_handle_usb_suspend_intr(struct dwc2_hsotg *hsotg)
+ {
+ 	u32 dsts;
++	static unsigned int suspend_logs;
+ 	int ret;
+ 
+ 	/* Clear interrupt */
+@@ -570,8 +577,14 @@ static void dwc2_handle_usb_suspend_intr(struct dwc2_hsotg *hsotg)
+ 				 * If neither hibernation nor partial power down are supported,
+ 				 * clock gating is used to save power.
+ 				 */
+-				if (!hsotg->params.no_clock_gating)
++				if (!hsotg->params.no_clock_gating) {
+ 					dwc2_gadget_enter_clock_gating(hsotg);
++					if (suspend_logs < 8) {
++						suspend_logs++;
++						dev_info(hsotg->dev, "suspend: gated, PCGCTL %08x DSTS %08x\n",
++							 dwc2_readl(hsotg, PCGCTL), dwc2_readl(hsotg, DSTS));
++					}
++				}
+ 			}
+ 
+ 			/*
+diff --git a/drivers/usb/dwc2/debugfs.c b/drivers/usb/dwc2/debugfs.c
+index 3116ac7..cf9367d 100644
+--- a/drivers/usb/dwc2/debugfs.c
++++ b/drivers/usb/dwc2/debugfs.c
+@@ -128,6 +128,10 @@ static int state_show(struct seq_file *seq, void *v)
+ 	struct dwc2_hsotg *hsotg = seq->private;
+ 	int idx;
+ 
++	seq_printf(seq, "lx_state=%u connected=%u bus_suspended=%u enabled=%u role_sw_hold=%u stop_timeouts=%u recover_count=%u PCGCTL=0x%08x\n",
++		   hsotg->lx_state, hsotg->connected, hsotg->bus_suspended,
++		   hsotg->enabled, hsotg->role_sw_hold, hsotg->stop_timeouts,
++		   hsotg->recover_count, dwc2_readl(hsotg, PCGCTL));
+ 	seq_printf(seq, "DCFG=0x%08x, DCTL=0x%08x, DSTS=0x%08x\n",
+ 		   dwc2_readl(hsotg, DCFG),
+ 		 dwc2_readl(hsotg, DCTL),
