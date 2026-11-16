@@ -1,0 +1,850 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 23:39:24 +0100
+Subject: [PATCH 36/38] drm/imagination: Evict idle BOs under memory pressure
+
+Idle clients keep every mapped BO unswappable on small-memory systems.
+Use the GEM LRUs and shrinker to release native shmem backing while
+preserving GPU virtual addresses. Require all mapping VMs to be idle,
+with published retirement timestamps, for a one-second quiet period.
+
+Trylock every VM under the BO reservation before editing any PTE. Mark
+each cleared VA and vm_bo evicted, publish the MMU invalidation, then zap
+CPU mappings, DMA-unmap and release the sole sgt page reference. Keep
+pages on any partial unmap or flush failure for submit-time repair.
+
+Never reclaim imports, exports (including export publication), kernel
+BOs, PM/FW-protected BOs, vmaps, explicit pins or additional page users.
+The Apple veto trylocks submit_lock and S8003 checks pm_last/pm_prev,
+attached versus firmware gen, fault/booted, and each pm[].scene/td_seq
+through s8003_pm_idle(). Track the last two geometry VM targets; no new
+register access is introduced. T8010 keeps its generation invalidation.
+
+Use base.gem_lru_mutex, required by drm_gem_lru, rather than a private LRU
+lock. Reclaim edits use GFP_NOWAIT cursors. IMG KCCB flushing can acquire
+power/CCB locks and reset firmware: schedule its scan in ordinary work
+context rather than invoke it from direct reclaim. Eviction is enabled
+on every device. Apple scans publish RAM-only tags directly in reclaim.
+
+Expose controls and resident/evicted bytes, counters and skip reasons in
+gem_evict; writing a MiB limit requests one pass. No swap, no eviction.
+
+Affects: every PowerVR device
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/Makefile          |   1 +
+ drivers/gpu/drm/imagination/pvr_apple.c       |  13 +
+ drivers/gpu/drm/imagination/pvr_apple.h       |   7 +
+ drivers/gpu/drm/imagination/pvr_apple_chip.h  |   1 +
+ drivers/gpu/drm/imagination/pvr_apple_s8003.c |  30 +++
+ drivers/gpu/drm/imagination/pvr_debugfs.c     |   3 +
+ drivers/gpu/drm/imagination/pvr_device.c      |   7 +
+ drivers/gpu/drm/imagination/pvr_device.h      |  17 ++
+ drivers/gpu/drm/imagination/pvr_gem.c         |  81 ++++++-
+ drivers/gpu/drm/imagination/pvr_gem.h         |  11 +
+ .../gpu/drm/imagination/pvr_gem_shrinker.c    | 223 ++++++++++++++++++
+ drivers/gpu/drm/imagination/pvr_mmu.c         |  18 ++
+ drivers/gpu/drm/imagination/pvr_mmu.h         |   2 +
+ drivers/gpu/drm/imagination/pvr_vm.c          | 100 ++++++++
+ drivers/gpu/drm/imagination/pvr_vm.h          |   2 +
+ 15 files changed, 510 insertions(+), 6 deletions(-)
+ create mode 100644 drivers/gpu/drm/imagination/pvr_gem_shrinker.c
+
+diff --git a/drivers/gpu/drm/imagination/Makefile b/drivers/gpu/drm/imagination/Makefile
+index 08181ce..2e250a4 100644
+--- a/drivers/gpu/drm/imagination/Makefile
++++ b/drivers/gpu/drm/imagination/Makefile
+@@ -18,6 +18,7 @@ powervr-y := \
+ 	pvr_fw_trace.o \
+ 	pvr_fw_util.o \
+ 	pvr_gem.o \
++	pvr_gem_shrinker.o \
+ 	pvr_hwrt.o \
+ 	pvr_job.o \
+ 	pvr_mmu.o \
+diff --git a/drivers/gpu/drm/imagination/pvr_apple.c b/drivers/gpu/drm/imagination/pvr_apple.c
+index 5a43e3f..d062461 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple.c
++++ b/drivers/gpu/drm/imagination/pvr_apple.c
+@@ -1666,3 +1666,16 @@ u32 pvr_apple_stream_musthave(struct pvr_device *pvr_dev, enum pvr_stream_type t
+ 	*ext_type = 0;
+ 	return 0;
+ }
++
++/* Reclaim cannot wait behind a chip submission or firmware restart. */
++bool pvr_apple_vm_evictable(struct pvr_device *pvr_dev, struct pvr_vm_context *vm_ctx)
++{
++	struct pvr_apple *apple = to_apple(pvr_dev);
++	bool allowed;
++
++	if (!mutex_trylock(&apple->submit_lock))
++		return false;
++	allowed = !apple->chip->vm_evictable || apple->chip->vm_evictable(apple, vm_ctx);
++	mutex_unlock(&apple->submit_lock);
++	return allowed;
++}
+diff --git a/drivers/gpu/drm/imagination/pvr_apple.h b/drivers/gpu/drm/imagination/pvr_apple.h
+index d1de0ad..fe3c7a5 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple.h
++++ b/drivers/gpu/drm/imagination/pvr_apple.h
+@@ -179,6 +179,7 @@ void pvr_apple_report_hang(struct pvr_device *pvr_dev, struct dma_fence *fence);
+ void pvr_apple_wait_file_jobs(struct pvr_device *pvr_dev);
+ int pvr_apple_job_add_deps(struct pvr_job *job);
+ void pvr_apple_job_armed(struct pvr_job *job, struct dma_fence *finished);
++bool pvr_apple_vm_evictable(struct pvr_device *pvr_dev, struct pvr_vm_context *vm_ctx);
+ int pvr_apple_vm_init(struct pvr_device *pvr_dev, struct pvr_vm_context *vm_ctx);
+ void pvr_apple_mmu_flush(struct pvr_device *pvr_dev);
+ void pvr_apple_vm_fini(struct pvr_device *pvr_dev, struct pvr_vm_context *vm_ctx);
+@@ -209,6 +210,12 @@ static inline u32 pvr_apple_stream_musthave(struct pvr_device *pvr_dev,
+ 	*ext_type = 0;
+ 	return 0;
+ }
++static inline bool pvr_apple_vm_evictable(struct pvr_device *pvr_dev,
++					struct pvr_vm_context *vm_ctx)
++{
++	return true;
++}
++
+ static inline int pvr_apple_vm_init(struct pvr_device *pvr_dev, struct pvr_vm_context *vm_ctx)
+ {
+ 	return -ENODEV;
+diff --git a/drivers/gpu/drm/imagination/pvr_apple_chip.h b/drivers/gpu/drm/imagination/pvr_apple_chip.h
+index d524415..1cec40e 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple_chip.h
++++ b/drivers/gpu/drm/imagination/pvr_apple_chip.h
+@@ -271,6 +271,7 @@ struct pvr_apple_chip {
+ 	void (*events)(struct pvr_apple *apple);
+ 	int (*vm_init)(struct pvr_apple *apple, struct pvr_vm_context *vm_ctx);
+ 	void (*vm_fini)(struct pvr_apple *apple, struct pvr_vm_context *vm_ctx);
++	bool (*vm_evictable)(struct pvr_apple *apple, struct pvr_vm_context *vm_ctx);
+ 	unsigned int (*vm_scenes)(struct pvr_apple *apple, struct pvr_vm_context *vm_ctx);
+ 	void (*mmu_flush)(struct pvr_apple *apple);
+ };
+diff --git a/drivers/gpu/drm/imagination/pvr_apple_s8003.c b/drivers/gpu/drm/imagination/pvr_apple_s8003.c
+index bc6f300..2389178 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple_s8003.c
++++ b/drivers/gpu/drm/imagination/pvr_apple_s8003.c
+@@ -261,6 +261,7 @@ struct s8003_vm {
+ 
+ struct pvr_apple_s8003 {
+ 	struct pvr_apple *apple;
++	struct s8003_vm *pm_last, *pm_prev;
+ 	struct delayed_work drain_work;	/* reads the rings while the firmware runs */
+ 	struct mutex event_lock;	/* the rings the firmware posts to */
+ 	ktime_t touched;		/* s8003_touch() */
+@@ -1521,6 +1522,10 @@ static void pvr_apple_s8003_vm_fini(struct pvr_apple *apple, struct pvr_vm_conte
+ 		__set_bit(vm->slot[0], s->parked);
+ 		__set_bit(vm->slot[1], s->parked);
+ 	}
++	if (s->pm_last == vm)
++		s->pm_last = NULL;
++	if (s->pm_prev == vm)
++		s->pm_prev = NULL;
+ 	for (e = 0; e < 2; e++) {
+ 		if (vm->slot[e])
+ 			__clear_bit(vm->slot[e], s->slots);
+@@ -2101,6 +2106,26 @@ static bool s8003_pm_idle(struct pvr_apple *apple, const struct s8003_pm *pm)
+ 	return false;
+ }
+ 
++static bool pvr_apple_s8003_vm_evictable(struct pvr_apple *apple,
++					      struct pvr_vm_context *vm_ctx)
++{
++	struct pvr_apple_s8003 *s = apple->chip_data;
++	struct s8003_vm *vm = xa_load(&s->vms, (unsigned long)vm_ctx);
++	unsigned int i;
++
++	lockdep_assert_held(&apple->submit_lock);
++	if (!vm || READ_ONCE(s->fault))
++		return false;
++	if (vm->attached != s->gen)
++		return true;
++	if (!apple->booted || s->pm_last == vm || s->pm_prev == vm)
++		return false;
++	for (i = 0; i < ARRAY_SIZE(vm->pm); i++)
++		if (!s8003_pm_idle(apple, &vm->pm[i]))
++			return false;
++	return true;
++}
++
+ static int s8003_submit_error(struct pvr_apple *apple, struct s8003_vm *vm,
+ 			      const char *engine, int err, const char *reason)
+ {
+@@ -2158,6 +2183,10 @@ static int s8003_submit_geom(struct pvr_apple *apple, struct s8003_vm *vm, struc
+ 			s8003_meta_addr(s8003_pm_set_va(pm, 0)), pm->set + 1, vm->slot[0], false,
+ 			seq, 0, 0);
+ 	pm->hwrt = job->hwrt;
++	if (s->pm_last != vm) {
++		s->pm_prev = s->pm_last;
++		s->pm_last = vm;
++	}
+ 	pm->scene = s->gen;
+ 	pm->ta_seq = seq;
+ 	pm->td_seq = 0;
+@@ -2589,5 +2618,6 @@ const struct pvr_apple_chip pvr_apple_chip_s8003 = {
+ 	.vm_init = pvr_apple_s8003_vm_init,
+ 	.vm_fini = pvr_apple_s8003_vm_fini,
+ 	.vm_scenes = pvr_apple_s8003_vm_scenes,
++	.vm_evictable = pvr_apple_s8003_vm_evictable,
+ 	.mmu_flush = pvr_apple_s8003_mmu_flush,
+ };
+diff --git a/drivers/gpu/drm/imagination/pvr_debugfs.c b/drivers/gpu/drm/imagination/pvr_debugfs.c
+index ebdb05d..cc96631 100644
+--- a/drivers/gpu/drm/imagination/pvr_debugfs.c
++++ b/drivers/gpu/drm/imagination/pvr_debugfs.c
+@@ -4,6 +4,7 @@
+ #include "pvr_debugfs.h"
+ 
+ #include "pvr_device.h"
++#include "pvr_gem.h"
+ #include "pvr_fw_trace.h"
+ 
+ #include <linux/dcache.h>
+@@ -27,6 +28,8 @@ pvr_debugfs_init(struct drm_minor *minor)
+ 	struct pvr_device *pvr_dev = to_pvr_device(drm_dev);
+ 	struct dentry *root = minor->debugfs_root;
+ 
++	pvr_gem_shrinker_debugfs_init(pvr_dev, root);
++
+ 	for (size_t i = 0; i < ARRAY_SIZE(pvr_debugfs_entries); ++i) {
+ 		const struct pvr_debugfs_entry *entry = &pvr_debugfs_entries[i];
+ 		struct dentry *dir;
+diff --git a/drivers/gpu/drm/imagination/pvr_device.c b/drivers/gpu/drm/imagination/pvr_device.c
+index 2c06a4a..8c1bb33 100644
+--- a/drivers/gpu/drm/imagination/pvr_device.c
++++ b/drivers/gpu/drm/imagination/pvr_device.c
+@@ -3,6 +3,7 @@
+ 
+ #include "pvr_apple.h"
+ #include "pvr_device.h"
++#include "pvr_gem.h"
+ #include "pvr_device_info.h"
+ 
+ #include "pvr_fw.h"
+@@ -807,6 +808,10 @@ pvr_device_init(struct pvr_device *pvr_dev)
+ 	/* Get the platform-specific data based on the compatible string. */
+ 	pvr_dev->device_data = of_device_get_match_data(dev);
+ 
++	err = pvr_gem_shrinker_init(pvr_dev);
++	if (err)
++		return err;
++
+ 	/* Enable and initialize clocks required for the device to operate. */
+ 	err = pvr_device_clk_init(pvr_dev);
+ 	if (err)
+@@ -858,6 +863,8 @@ err_pm_runtime_put:
+ void
+ pvr_device_fini(struct pvr_device *pvr_dev)
+ {
++	pvr_gem_shrinker_fini(pvr_dev);
++
+ 	/*
+ 	 * Deinitialization stages are performed in reverse order compared to
+ 	 * the initialization stages in pvr_device_init().
+diff --git a/drivers/gpu/drm/imagination/pvr_device.h b/drivers/gpu/drm/imagination/pvr_device.h
+index 26b589e..0157190 100644
+--- a/drivers/gpu/drm/imagination/pvr_device.h
++++ b/drivers/gpu/drm/imagination/pvr_device.h
+@@ -11,6 +11,8 @@
+ #include "pvr_stream.h"
+ 
+ #include <drm/drm_device.h>
++#include <drm/drm_gem.h>
++#include <linux/shrinker.h>
+ #include <drm/drm_file.h>
+ #include <drm/drm_mm.h>
+ 
+@@ -92,6 +94,21 @@ struct pvr_device {
+ 	 */
+ 	struct drm_device base;
+ 
++	/** @gem_reclaim: GEM residency, using base.gem_lru_mutex for all LRUs. */
++	struct {
++		struct drm_gem_lru evictable;
++		struct drm_gem_lru dontneed;
++		struct drm_gem_lru pinned;
++		struct mutex scan_lock;
++		struct shrinker *shrinker;
++		bool stopped;
++		struct work_struct work;
++		atomic_long_t requested;
++		atomic64_t evicted_bytes;
++		atomic64_t scans, evicts, purges, restores, restore_fail;
++		atomic64_t skip[12];
++	} gem_reclaim;
++
+ 	/** @gpu_id: GPU ID detected at runtime. */
+ 	struct pvr_gpu_id gpu_id;
+ 
+diff --git a/drivers/gpu/drm/imagination/pvr_gem.c b/drivers/gpu/drm/imagination/pvr_gem.c
+index 0129c8d..cf061a5 100644
+--- a/drivers/gpu/drm/imagination/pvr_gem.c
++++ b/drivers/gpu/drm/imagination/pvr_gem.c
+@@ -18,6 +18,7 @@
+ #include <linux/iosys-map.h>
+ #include <linux/log2.h>
+ #include <linux/mutex.h>
++#include <linux/mm.h>
+ #include <linux/pagemap.h>
+ #include <linux/property.h>
+ #include <linux/refcount.h>
+@@ -27,6 +28,11 @@ static void pvr_gem_object_free(struct drm_gem_object *obj)
+ {
+ 	struct drm_gem_shmem_object *shmem_obj = to_drm_gem_shmem_obj(obj);
+ 
++	struct pvr_gem_object *bo = gem_to_pvr_gem(obj);
++
++	drm_gem_lru_remove(obj);
++	if (bo->pages_evicted)
++		atomic64_sub(obj->size, &to_pvr_device(obj->dev)->gem_reclaim.evicted_bytes);
+ 	shmem_obj->pages_mark_dirty_on_put = true;
+ 	drm_gem_shmem_free(shmem_obj);
+ }
+@@ -38,6 +44,11 @@ static struct dma_buf *pvr_gem_export(struct drm_gem_object *obj, int flags)
+ 	if (pvr_obj->flags & DRM_PVR_BO_PM_FW_PROTECT)
+ 		return ERR_PTR(-EPERM);
+ 
++	/* Serialize the transition, including the gap before core sets dma_buf. */
++	dma_resv_lock(obj->resv, NULL);
++	pvr_obj->exported = true;
++	pvr_gem_lru_update_locked(pvr_obj);
++	dma_resv_unlock(obj->resv);
+ 	return drm_gem_prime_export(obj, flags);
+ }
+ 
+@@ -100,16 +111,54 @@ static const struct vm_operations_struct pvr_gem_vm_ops = {
+ 	.close = drm_gem_vm_close,
+ };
+ 
++static int pvr_gem_pin(struct drm_gem_object *obj)
++{
++	struct pvr_gem_object *bo = gem_to_pvr_gem(obj);
++	int err = PTR_ERR_OR_ZERO(pvr_gem_get_pages_sgt_locked(bo));
++
++	if (!err)
++		err = drm_gem_shmem_pin_locked(&bo->base);
++	pvr_gem_lru_update_locked(bo);
++	return err;
++}
++
++static void pvr_gem_unpin(struct drm_gem_object *obj)
++{
++	struct pvr_gem_object *bo = gem_to_pvr_gem(obj);
++
++	drm_gem_shmem_unpin_locked(&bo->base);
++	pvr_gem_lru_update_locked(bo);
++}
++
++static int pvr_gem_vmap(struct drm_gem_object *obj, struct iosys_map *map)
++{
++	struct pvr_gem_object *bo = gem_to_pvr_gem(obj);
++	int err = PTR_ERR_OR_ZERO(pvr_gem_get_pages_sgt_locked(bo));
++
++	if (!err)
++		err = drm_gem_shmem_vmap_locked(&bo->base, map);
++	pvr_gem_lru_update_locked(bo);
++	return err;
++}
++
++static void pvr_gem_vunmap(struct drm_gem_object *obj, struct iosys_map *map)
++{
++	struct pvr_gem_object *bo = gem_to_pvr_gem(obj);
++
++	drm_gem_shmem_vunmap_locked(&bo->base, map);
++	pvr_gem_lru_update_locked(bo);
++}
++
+ static const struct drm_gem_object_funcs pvr_gem_object_funcs = {
+ 	.free = pvr_gem_object_free,
+ 	.status = pvr_gem_object_status,
+ 	.print_info = drm_gem_shmem_object_print_info,
+ 	.export = pvr_gem_export,
+-	.pin = drm_gem_shmem_object_pin,
+-	.unpin = drm_gem_shmem_object_unpin,
++	.pin = pvr_gem_pin,
++	.unpin = pvr_gem_unpin,
+ 	.get_sg_table = drm_gem_shmem_object_get_sg_table,
+-	.vmap = drm_gem_shmem_object_vmap,
+-	.vunmap = drm_gem_shmem_object_vunmap,
++	.vmap = pvr_gem_vmap,
++	.vunmap = pvr_gem_vunmap,
+ 	.mmap = pvr_gem_mmap,
+ 	.vm_ops = &pvr_gem_vm_ops,
+ };
+@@ -269,7 +318,7 @@ pvr_gem_object_vmap(struct pvr_gem_object *pvr_obj)
+ 	if (err)
+ 		goto err_unlock;
+ 
+-	err = drm_gem_shmem_vmap_locked(shmem_obj, &map);
++	err = pvr_gem_vmap(obj, &map);
+ 	if (err)
+ 		goto err_unlock;
+ 
+@@ -323,7 +372,7 @@ pvr_gem_object_vunmap(struct pvr_gem_object *pvr_obj)
+ 			dma_sync_sgtable_for_device(dev, shmem_obj->sgt, DMA_BIDIRECTIONAL);
+ 	}
+ 
+-	drm_gem_shmem_vunmap_locked(shmem_obj, &map);
++	pvr_gem_vunmap(obj, &map);
+ 
+ 	dma_resv_unlock(obj->resv);
+ }
+@@ -529,8 +578,14 @@ struct sg_table *pvr_gem_get_pages_sgt_locked(struct pvr_gem_object *pvr_obj)
+ 	/* Transfer the temporary pin's page reference to the sgt. */
+ 	refcount_inc(&shmem->pages_use_count);
+ 	shmem->sgt = sgt;
++	if (pvr_obj->pages_evicted) {
++		pvr_obj->pages_evicted = false;
++		atomic64_sub(obj->size, &to_pvr_device(obj->dev)->gem_reclaim.evicted_bytes);
++	}
+ unpin:
+ 	drm_gem_shmem_unpin_locked(shmem);
++	if (!err)
++		pvr_gem_lru_update_locked(pvr_obj);
+ 	return err ? ERR_PTR(err) : sgt;
+ }
+ 
+@@ -547,3 +602,17 @@ struct sg_table *pvr_gem_object_get_pages_sgt(struct pvr_gem_object *pvr_obj)
+ 	dma_resv_unlock(obj->resv);
+ 	return sgt;
+ }
++
++void pvr_gem_release_pages_locked(struct pvr_gem_object *bo)
++{
++	struct drm_gem_object *obj = gem_from_pvr_gem(bo);
++
++	dma_resv_assert_held(obj->resv);
++	drm_vma_node_unmap(&obj->vma_node, obj->dev->anon_inode->i_mapping);
++	bo->base.pages_mark_dirty_on_put = true;
++	__drm_gem_shmem_free_sgt_locked(&bo->base);
++	drm_gem_shmem_put_pages_locked(&bo->base);
++	bo->pages_evicted = true;
++	atomic64_add(obj->size, &to_pvr_device(obj->dev)->gem_reclaim.evicted_bytes);
++	drm_gem_lru_remove(obj);
++}
+diff --git a/drivers/gpu/drm/imagination/pvr_gem.h b/drivers/gpu/drm/imagination/pvr_gem.h
+index 07bd602..c21b8e7 100644
+--- a/drivers/gpu/drm/imagination/pvr_gem.h
++++ b/drivers/gpu/drm/imagination/pvr_gem.h
+@@ -111,6 +111,11 @@ struct pvr_gem_object {
+ 	 */
+ 	u64 flags;
+ 
++	/** @exported: Latched before publishing a dma-buf, under the reservation. */
++	bool exported;
++	/** @pages_evicted: Backing pages released; protected by the reservation. */
++	bool pages_evicted;
++
+ };
+ 
+ static_assert(offsetof(struct pvr_gem_object, base) == 0,
+@@ -133,6 +138,12 @@ struct pvr_gem_object *pvr_gem_object_create(struct pvr_device *pvr_dev,
+ 
+ struct pvr_gem_object *pvr_gem_object_create_user(struct pvr_device *pvr_dev,
+ 						 size_t size, u64 flags);
++void pvr_gem_lru_update_locked(struct pvr_gem_object *bo);
++void pvr_gem_shrinker_debugfs_init(struct pvr_device *pvr_dev, struct dentry *root);
++int pvr_gem_shrinker_init(struct pvr_device *pvr_dev);
++void pvr_gem_shrinker_fini(struct pvr_device *pvr_dev);
++void pvr_gem_release_pages_locked(struct pvr_gem_object *bo);
++
+ struct sg_table *pvr_gem_get_pages_sgt_locked(struct pvr_gem_object *pvr_obj);
+ 
+ int pvr_gem_object_into_handle(struct pvr_gem_object *pvr_obj,
+diff --git a/drivers/gpu/drm/imagination/pvr_gem_shrinker.c b/drivers/gpu/drm/imagination/pvr_gem_shrinker.c
+new file mode 100644
+index 0000000..c43b558
+--- /dev/null
++++ b/drivers/gpu/drm/imagination/pvr_gem_shrinker.c
+@@ -0,0 +1,223 @@
++// SPDX-License-Identifier: GPL-2.0-only OR MIT
++/* Idle VM residency for faultless PowerVR devices. */
++#include "pvr_device.h"
++#include "pvr_gem.h"
++#include "pvr_vm.h"
++
++#include <drm/drm_debugfs.h>
++#include <drm/drm_managed.h>
++#include <drm/drm_print.h>
++#include <linux/debugfs.h>
++#include <linux/moduleparam.h>
++#include <linux/seq_file.h>
++#include <linux/swap.h>
++
++static bool evict = true;
++module_param(evict, bool, 0644);
++MODULE_PARM_DESC(evict, "Evict idle native BOs (default on)");
++static unsigned int evict_idle_ms = 1000;
++module_param(evict_idle_ms, uint, 0644);
++MODULE_PARM_DESC(evict_idle_ms, "Quiet time after VM retirement in milliseconds");
++static bool evict_log;
++module_param(evict_log, bool, 0644);
++MODULE_PARM_DESC(evict_log, "Log BO eviction");
++
++void pvr_gem_lru_update_locked(struct pvr_gem_object *bo)
++{
++	struct drm_gem_object *obj = gem_from_pvr_gem(bo);
++	struct pvr_device *dev = to_pvr_device(obj->dev);
++	struct drm_gem_lru *lru = &dev->gem_reclaim.evictable;
++
++	dma_resv_assert_held(obj->resv);
++	if (!bo->base.sgt || drm_gem_is_imported(obj))
++		return;
++	if ((bo->flags & (PVR_BO_KERNEL_PINNED | DRM_PVR_BO_PM_FW_PROTECT)) ||
++	    bo->exported || obj->dma_buf || refcount_read(&bo->base.vmap_use_count) ||
++	    refcount_read(&bo->base.pages_pin_count))
++		lru = &dev->gem_reclaim.pinned;
++	drm_gem_lru_move_tail(lru, obj);
++}
++
++static bool pvr_gem_evict(struct drm_gem_object *obj, struct ww_acquire_ctx *unused)
++{
++	struct pvr_device *dev = to_pvr_device(obj->dev);
++	struct pvr_gem_object *bo = gem_to_pvr_gem(obj);
++	struct drm_gem_shmem_object *shmem = &bo->base;
++	unsigned int reason;
++
++	if (drm_gem_is_imported(obj))
++		reason = 0;
++	else if (bo->exported || obj->dma_buf)
++		reason = 1;
++	else if (bo->flags & (PVR_BO_KERNEL_PINNED | DRM_PVR_BO_PM_FW_PROTECT))
++		reason = 2;
++	else if (refcount_read(&shmem->vmap_use_count) || refcount_read(&shmem->pages_pin_count))
++		reason = 3;
++	else if (!shmem->sgt || refcount_read(&shmem->pages_use_count) != 1)
++		reason = 4;
++	else if (!dma_resv_test_signaled(obj->resv, DMA_RESV_USAGE_BOOKKEEP))
++		reason = 5;
++	else if (pvr_vm_evict_bo(obj, READ_ONCE(evict_idle_ms), &reason)) {
++		pvr_gem_release_pages_locked(bo);
++		atomic64_inc(&dev->gem_reclaim.evicts);
++		if (READ_ONCE(evict_log))
++			drm_info(&dev->base, "evicted BO size=%zu\n", obj->size);
++		return true;
++	}
++	atomic64_inc(&dev->gem_reclaim.skip[reason]);
++	return false;
++}
++
++static unsigned long pvr_gem_reclaim(struct pvr_device *dev, unsigned long pages)
++{
++	unsigned long remaining = 0, freed = 0;
++
++	if (!READ_ONCE(evict) || !mutex_trylock(&dev->gem_reclaim.scan_lock))
++		return SHRINK_STOP;
++	if (dev->gem_reclaim.stopped) {
++		mutex_unlock(&dev->gem_reclaim.scan_lock);
++		return SHRINK_STOP;
++	}
++	atomic64_inc(&dev->gem_reclaim.scans);
++	if (get_nr_swap_pages() > 0)
++		freed = drm_gem_lru_scan(&dev->base, &dev->gem_reclaim.evictable,
++					min(pages, (unsigned long)UINT_MAX), &remaining,
++					pvr_gem_evict, NULL);
++	mutex_unlock(&dev->gem_reclaim.scan_lock);
++	return freed ? freed : SHRINK_STOP;
++}
++
++/* IMG's KCCB invalidation takes power/CCB locks and can reset firmware.
++ * Run that path outside direct reclaim; Apple publishes a RAM-only tag.
++ */
++static void pvr_gem_reclaim_work(struct work_struct *work)
++{
++	struct pvr_device *dev = container_of(work, struct pvr_device, gem_reclaim.work);
++	unsigned long pages = atomic_long_xchg(&dev->gem_reclaim.requested, 0);
++
++	if (pages)
++		pvr_gem_reclaim(dev, pages);
++}
++
++static unsigned long pvr_gem_count(struct shrinker *shrinker, struct shrink_control *sc)
++{
++	struct pvr_device *dev = shrinker->private_data;
++
++	if (!READ_ONCE(evict) || get_nr_swap_pages() <= 0)
++		return 0;
++	return READ_ONCE(dev->gem_reclaim.evictable.count) +
++	       READ_ONCE(dev->gem_reclaim.dontneed.count);
++}
++
++static unsigned long pvr_gem_scan(struct shrinker *shrinker, struct shrink_control *sc)
++{
++	struct pvr_device *dev = shrinker->private_data;
++
++	if (!current_is_kswapd() &&
++	    (sc->gfp_mask & (__GFP_FS | __GFP_IO)) != (__GFP_FS | __GFP_IO))
++		return SHRINK_STOP;
++	if (!pvr_device_is_apple(dev)) {
++		atomic_long_set(&dev->gem_reclaim.requested, sc->nr_to_scan);
++		schedule_work(&dev->gem_reclaim.work);
++		return SHRINK_STOP;
++	}
++	return pvr_gem_reclaim(dev, sc->nr_to_scan);
++}
++
++static int pvr_gem_evict_show(struct seq_file *m, void *unused)
++{
++	struct pvr_device *dev = m->private;
++	static const char *const reasons[] = {
++		"imported", "exported", "protected", "pinned", "pages", "bo-busy",
++		"vm-trylock", "vm-busy", "young", "chip-veto", "op-alloc", "mmu-flush",
++	};
++	unsigned long resident, dontneed;
++	unsigned int i;
++
++	mutex_lock(&dev->base.gem_lru_mutex);
++	dontneed = dev->gem_reclaim.dontneed.count << PAGE_SHIFT;
++	resident = (dev->gem_reclaim.evictable.count + dev->gem_reclaim.pinned.count +
++		    dev->gem_reclaim.dontneed.count) << PAGE_SHIFT;
++	mutex_unlock(&dev->base.gem_lru_mutex);
++	seq_printf(m, "resident=%lu evicted=%lld dontneed=%lu\n", resident,
++		   atomic64_read(&dev->gem_reclaim.evicted_bytes), dontneed);
++	seq_printf(m, "scan=%lld evict=%lld purge=%lld restore=%lld restore-fail=%lld\n",
++		   atomic64_read(&dev->gem_reclaim.scans), atomic64_read(&dev->gem_reclaim.evicts),
++		   atomic64_read(&dev->gem_reclaim.purges), atomic64_read(&dev->gem_reclaim.restores),
++		   atomic64_read(&dev->gem_reclaim.restore_fail));
++	for (i = 0; i < ARRAY_SIZE(reasons); i++)
++		seq_printf(m, "skip-%s=%lld\n", reasons[i], atomic64_read(&dev->gem_reclaim.skip[i]));
++	return 0;
++}
++
++static int pvr_gem_evict_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, pvr_gem_evict_show, inode->i_private);
++}
++
++static ssize_t pvr_gem_evict_write(struct file *file, const char __user *buf,
++				 size_t len, loff_t *pos)
++{
++	struct seq_file *m = file->private_data;
++	struct pvr_device *dev = m->private;
++	unsigned long mib;
++	int err = kstrtoul_from_user(buf, len, 0, &mib);
++
++	if (err)
++		return err;
++	if (mib > (UINT_MAX >> (20 - PAGE_SHIFT)))
++		return -ERANGE;
++	pvr_gem_reclaim(dev, mib << (20 - PAGE_SHIFT));
++	return len;
++}
++
++static const struct file_operations pvr_gem_evict_fops = {
++	.owner = THIS_MODULE,
++	.open = pvr_gem_evict_open,
++	.read = seq_read,
++	.write = pvr_gem_evict_write,
++	.llseek = seq_lseek,
++	.release = single_release,
++};
++
++void pvr_gem_shrinker_debugfs_init(struct pvr_device *dev, struct dentry *root)
++{
++	debugfs_create_file("gem_evict", 0600, root, dev, &pvr_gem_evict_fops);
++}
++
++void pvr_gem_shrinker_fini(struct pvr_device *dev)
++{
++	if (!dev->gem_reclaim.shrinker)
++		return;
++	mutex_lock(&dev->gem_reclaim.scan_lock);
++	dev->gem_reclaim.stopped = true;
++	mutex_unlock(&dev->gem_reclaim.scan_lock);
++	shrinker_free(dev->gem_reclaim.shrinker);
++	dev->gem_reclaim.shrinker = NULL;
++	cancel_work_sync(&dev->gem_reclaim.work);
++}
++
++static void pvr_gem_shrinker_release(struct drm_device *drm, void *data)
++{
++	pvr_gem_shrinker_fini(data);
++}
++
++int pvr_gem_shrinker_init(struct pvr_device *dev)
++{
++	struct shrinker *shrinker;
++
++	drm_gem_lru_init(&dev->gem_reclaim.evictable);
++	drm_gem_lru_init(&dev->gem_reclaim.dontneed);
++	drm_gem_lru_init(&dev->gem_reclaim.pinned);
++	mutex_init(&dev->gem_reclaim.scan_lock);
++	INIT_WORK(&dev->gem_reclaim.work, pvr_gem_reclaim_work);
++	shrinker = shrinker_alloc(0, "drm-powervr");
++	if (!shrinker)
++		return -ENOMEM;
++	dev->gem_reclaim.shrinker = shrinker;
++	shrinker->private_data = dev;
++	shrinker->count_objects = pvr_gem_count;
++	shrinker->scan_objects = pvr_gem_scan;
++	shrinker_register(shrinker);
++	return drmm_add_action_or_reset(&dev->base, pvr_gem_shrinker_release, dev);
++}
+diff --git a/drivers/gpu/drm/imagination/pvr_mmu.c b/drivers/gpu/drm/imagination/pvr_mmu.c
+index a4996b9..7f522fd 100644
+--- a/drivers/gpu/drm/imagination/pvr_mmu.c
++++ b/drivers/gpu/drm/imagination/pvr_mmu.c
+@@ -2654,3 +2654,21 @@ int pvr_mmu_map(struct pvr_mmu_op_context *op_ctx, u64 size, u64 flags,
+ 
+ 	return err;
+ }
++
++/* Reclaim only needs an unmap cursor, never preallocated page tables. */
++struct pvr_mmu_op_context *pvr_mmu_unmap_context_create(struct pvr_mmu_context *ctx)
++{
++	struct pvr_mmu_op_context *op_ctx = kzalloc(sizeof(*op_ctx), GFP_NOWAIT);
++
++	if (!op_ctx)
++		return ERR_PTR(-ENOMEM);
++	op_ctx->mmu_ctx = ctx;
++	return op_ctx;
++}
++
++int pvr_mmu_unmap_flush(struct pvr_mmu_op_context *op_ctx)
++{
++	pvr_mmu_op_context_sync(op_ctx);
++	pvr_mmu_flush_request_all(op_ctx->mmu_ctx->pvr_dev);
++	return pvr_mmu_flush_exec(op_ctx->mmu_ctx->pvr_dev, true);
++}
+diff --git a/drivers/gpu/drm/imagination/pvr_mmu.h b/drivers/gpu/drm/imagination/pvr_mmu.h
+index a8ecd46..a203336 100644
+--- a/drivers/gpu/drm/imagination/pvr_mmu.h
++++ b/drivers/gpu/drm/imagination/pvr_mmu.h
+@@ -103,6 +103,8 @@ pvr_mmu_op_context_create(struct pvr_mmu_context *ctx,
+ 
+ int pvr_mmu_map(struct pvr_mmu_op_context *op_ctx, u64 size, u64 flags,
+ 		u64 device_addr);
++struct pvr_mmu_op_context *pvr_mmu_unmap_context_create(struct pvr_mmu_context *ctx);
++int pvr_mmu_unmap_flush(struct pvr_mmu_op_context *op_ctx);
+ int pvr_mmu_unmap(struct pvr_mmu_op_context *op_ctx, u64 device_addr, u64 size);
+ 
+ #endif /* PVR_MMU_H */
+diff --git a/drivers/gpu/drm/imagination/pvr_vm.c b/drivers/gpu/drm/imagination/pvr_vm.c
+index 4988a62..b398d9e 100644
+--- a/drivers/gpu/drm/imagination/pvr_vm.c
++++ b/drivers/gpu/drm/imagination/pvr_vm.c
+@@ -131,6 +131,9 @@ struct dma_resv *pvr_vm_get_dma_resv(struct pvr_vm_context *vm_ctx)
+ struct pvr_vm_gpuva {
+ 	/** @base: The wrapped drm_gpuva object. */
+ 	struct drm_gpuva base;
++
++	/** @evicted: PTEs absent, even if another VA of this BO is resident. */
++	bool evicted;
+ };
+ 
+ #define to_pvr_vm_gpuva(va) container_of_const(va, struct pvr_vm_gpuva, base)
+@@ -1524,3 +1527,100 @@ struct drm_gem_object *pvr_vm_resv_obj(struct pvr_vm_context *vm_ctx)
+ {
+ 	return drm_gpuvm_resv_obj(&vm_ctx->gpuvm_mgr);
+ }
++
++static bool pvr_vm_quiet(struct pvr_vm_context *vm, unsigned int idle_ms)
++{
++	struct dma_resv_iter cursor;
++	struct dma_fence *fence;
++	bool idle = true;
++
++	lockdep_assert_held(&vm->lock);
++	dma_resv_iter_begin(&cursor, pvr_vm_get_dma_resv(vm), DMA_RESV_USAGE_BOOKKEEP);
++	dma_resv_for_each_fence_unlocked(&cursor, fence) {
++		/* The signalled bit can be set before the timestamp is published.
++		 * Do not spin or touch a job's lifetime from reclaim.
++		 */
++		if (!dma_fence_is_signaled(fence) ||
++		    !test_bit(DMA_FENCE_FLAG_TIMESTAMP_BIT, &fence->flags)) {
++			idle = false;
++			break;
++		}
++		vm->last_retired = max(vm->last_retired, dma_fence_timestamp(fence));
++	}
++	dma_resv_iter_end(&cursor);
++	return idle && ktime_ms_delta(ktime_get(), vm->last_retired) >= idle_ms;
++}
++
++/* BO resv stabilizes its vm_bo list; all VM locks are trylocked before edits. */
++bool pvr_vm_evict_bo(struct drm_gem_object *obj, unsigned int idle_ms,
++		     unsigned int *reason)
++{
++	struct drm_gpuvm_bo *vm_bo, *last = NULL;
++	bool success = false;
++
++	drm_gem_for_each_gpuvm_bo(vm_bo, obj) {
++		struct pvr_vm_context *vm = to_pvr_vm_context(vm_bo->vm);
++
++		if (!mutex_trylock(&vm->lock)) {
++			*reason = 6;
++			goto unlock;
++		}
++		last = vm_bo;
++		if (!vm->is_userspace_context ||
++		    !dma_resv_test_signaled(pvr_vm_get_dma_resv(vm), DMA_RESV_USAGE_BOOKKEEP)) {
++			*reason = 7;
++			goto unlock;
++		}
++		if (!pvr_vm_quiet(vm, idle_ms)) {
++			*reason = 8;
++			goto unlock;
++		}
++		if (pvr_device_is_apple(vm->pvr_dev) &&
++		    !pvr_apple_vm_evictable(vm->pvr_dev, vm)) {
++			*reason = 9;
++			goto unlock;
++		}
++	}
++
++	drm_gem_for_each_gpuvm_bo(vm_bo, obj) {
++		struct pvr_vm_context *vm = to_pvr_vm_context(vm_bo->vm);
++		struct pvr_mmu_op_context *op;
++		struct drm_gpuva *va;
++		int err = 0, flush_err;
++
++		op = pvr_mmu_unmap_context_create(vm->mmu_ctx);
++		if (IS_ERR(op)) {
++			*reason = 10;
++			goto unlock;
++		}
++		/* On any partial failure keep pages and validate all cleared VAs. */
++		drm_gpuvm_bo_evict(vm_bo, true);
++		drm_gpuvm_bo_for_each_va(va, vm_bo) {
++			struct pvr_vm_gpuva *pva = to_pvr_vm_gpuva(va);
++
++			if (pva->evicted)
++				continue;
++			/* Failed unmaps may have cleared a prefix. Restore the full VA. */
++			pva->evicted = true;
++			err = pvr_mmu_unmap(op, va->va.addr, va->va.range);
++			if (err)
++				break;
++		}
++		flush_err = pvr_mmu_unmap_flush(op);
++		pvr_mmu_op_context_destroy(op);
++		if (err || flush_err) {
++			*reason = 11;
++			goto unlock;
++		}
++	}
++	success = true;
++unlock:
++	if (last) {
++		drm_gem_for_each_gpuvm_bo(vm_bo, obj) {
++			mutex_unlock(&to_pvr_vm_context(vm_bo->vm)->lock);
++			if (vm_bo == last)
++				break;
++		}
++	}
++	return success;
++}
+diff --git a/drivers/gpu/drm/imagination/pvr_vm.h b/drivers/gpu/drm/imagination/pvr_vm.h
+index be5c99c..3270743 100644
+--- a/drivers/gpu/drm/imagination/pvr_vm.h
++++ b/drivers/gpu/drm/imagination/pvr_vm.h
+@@ -66,6 +66,8 @@ void pvr_vm_unmap_all(struct pvr_vm_context *vm_ctx);
+ dma_addr_t pvr_vm_get_page_table_root_addr(struct pvr_vm_context *vm_ctx);
+ struct dma_resv *pvr_vm_get_dma_resv(struct pvr_vm_context *vm_ctx);
+ struct drm_gem_object *pvr_vm_resv_obj(struct pvr_vm_context *vm_ctx);
++bool pvr_vm_evict_bo(struct drm_gem_object *obj, unsigned int idle_ms,
++		     unsigned int *reason);
+ 
+ int pvr_static_data_areas_get(const struct pvr_device *pvr_dev,
+ 			      struct drm_pvr_ioctl_dev_query_args *args);
