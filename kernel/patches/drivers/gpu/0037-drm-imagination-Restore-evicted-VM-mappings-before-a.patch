@@ -1,0 +1,517 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 23:40:55 +0100
+Subject: [PATCH 37/38] drm/imagination: Restore evicted VM mappings before
+ arming jobs
+
+A faultless GPU must never start work with a hole left by reclaim.
+The first render on the iPad 5 hung before firmware boot when the HWRT
+dependency walk reacquired a reservation already owned by drm_exec.
+Assert ownership there instead of taking a NULL-ticket recursive lock.
+Lock each distinct submission VM before taking any reservation, validate
+the GPUVM evict list, and retain VM locks through arming, VM fence
+publication and queueing. Serialize submissions with the existing order
+mutex, now common, as the nesting anchor for multiple VM locks. Map and
+unmap only take one VM lock, then reservations; reclaim only trylocks.
+
+PowerVR uses GPUVM flags zero and does not populate its extobj list.
+Keep the internally spinlocked evict list, add vm_bo_validate, and use
+drm_gpuvm_prepare_range over the actual VA tree in the drm_exec retry
+pass. Restore every marked VA from its new DMA-mapped sgt, publish the
+flush, clear eviction and refresh LRU recency. Keep prior restores on a
+failure and return -ENOMEM before prepare_job_syncs can arm anything.
+
+Track eviction per VA for mixed resident/evicted mappings and splits.
+Unmap skips cleared PTEs. Repair a partial eviction by clearing its full
+range before remapping. Move VM_MAP's page acquisition and MMU cursor
+creation under the VM and BO locks: a bare sgt obtained before either
+lock could otherwise be freed by reclaim before MAP uses it.
+
+Native validation defers context and HWRT reservations until its MMU
+flush completes: the flush error path resets and vmaps firmware objects.
+Reinitialize exec for the full reservation pass before dependencies; VM
+mutexes keep residency protected across both passes. Apple uses its
+RAM-only invalidation with the complete reservation set held.
+
+Affects: every PowerVR device
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_job.c |  93 ++++++++++----
+ drivers/gpu/drm/imagination/pvr_vm.c  | 171 ++++++++++++++++++++++----
+ drivers/gpu/drm/imagination/pvr_vm.h  |   5 +
+ 3 files changed, 219 insertions(+), 50 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_job.c b/drivers/gpu/drm/imagination/pvr_job.c
+index bd0dc2d..b4c26ee 100644
+--- a/drivers/gpu/drm/imagination/pvr_job.c
++++ b/drivers/gpu/drm/imagination/pvr_job.c
+@@ -367,10 +367,10 @@ prepare_job_syncs(struct pvr_file *pvr_file,
+ 			dma_resv_usage_rw(job_data->job->type ==
+ 					  DRM_PVR_JOB_TYPE_GEOMETRY);
+ 
+-		dma_resv_lock(obj->resv, NULL);
++		/* prepare_job_resvs_for_each() already locked this with drm_exec. */
++		dma_resv_assert_held(obj->resv);
+ 		err = drm_sched_job_add_resv_dependencies(&job_data->job->base,
+ 							  obj->resv, usage);
+-		dma_resv_unlock(obj->resv);
+ 		if (err)
+ 			return err;
+ 	}
+@@ -561,7 +561,7 @@ push_jobs(struct pvr_job_data *job_data, u32 job_count)
+ 
+ static int
+ jobs_lock_all_objs(struct drm_exec *exec, struct pvr_job_data *job_data,
+-		   u32 job_count)
++		   u32 job_count, bool vm_only)
+ {
+ 	for (u32 i = 0; i < job_count; i++) {
+ 		struct pvr_job *job = job_data[i].job;
+@@ -572,17 +572,20 @@ jobs_lock_all_objs(struct drm_exec *exec, struct pvr_job_data *job_data,
+ 		 * concurrent submission to the same queue. Apple contexts have
+ 		 * no firmware object; their queue's scheduler entity orders jobs.
+ 		 */
+-		if (job->ctx->fw_obj) {
++		if (!vm_only && job->ctx->fw_obj) {
+ 			err = drm_exec_lock_obj(exec, gem_from_pvr_gem(job->ctx->fw_obj->gem));
+ 			if (err)
+ 				return err;
+ 		}
+ 
+ 		err = drm_exec_prepare_obj(exec, pvr_vm_resv_obj(job->ctx->vm_ctx), job_count);
++		if (err)
++			return err;
++		err = pvr_vm_prepare_objects(job->ctx->vm_ctx, exec);
+ 		if (err)
+ 			return err;
+ 
+-		if (job->hwrt) {
++		if (!vm_only && job->hwrt) {
+ 			err = drm_exec_prepare_obj(exec, pvr_hwrt_data_resv_obj(job->hwrt), 1);
+ 			if (err)
+ 				return err;
+@@ -594,10 +597,10 @@ jobs_lock_all_objs(struct drm_exec *exec, struct pvr_job_data *job_data,
+ 
+ static int
+ prepare_job_resvs_for_each(struct drm_exec *exec, struct pvr_job_data *job_data,
+-			   u32 job_count)
++			   u32 job_count, bool vm_only)
+ {
+ 	drm_exec_until_all_locked(exec) {
+-		int err = jobs_lock_all_objs(exec, job_data, job_count);
++		int err = jobs_lock_all_objs(exec, job_data, job_count, vm_only);
+ 
+ 		drm_exec_retry_on_contention(exec);
+ 		if (err)
+@@ -737,8 +740,8 @@ pvr_jobs_link_geom_frag(struct pvr_job_data *job_data, u32 *job_count)
+  *  * -%EINVAL on invalid arguments, or
+  *  * Any other error.
+  */
+-/* Apple GPUs: one submission arms its jobs at a time (pvr_submit_jobs()) */
+-static DEFINE_MUTEX(apple_submit_order);
++/* Nest all submission VM locks outside reservation locking and job arming. */
++static DEFINE_MUTEX(pvr_submit_order);
+ 
+ int
+ pvr_submit_jobs(struct pvr_device *pvr_dev, struct pvr_file *pvr_file,
+@@ -749,6 +752,8 @@ pvr_submit_jobs(struct pvr_device *pvr_dev, struct pvr_file *pvr_file,
+ 	struct xarray signal_array;
+ 	u32 jobs_alloced = 0;
+ 	struct drm_exec exec;
++	struct pvr_vm_context **vms = NULL;
++	u32 vm_count = 0;
+ 	int err;
+ 
+ 	if (!args->jobs.count)
+@@ -772,14 +777,6 @@ pvr_submit_jobs(struct pvr_device *pvr_dev, struct pvr_file *pvr_file,
+ 
+ 	jobs_alloced = args->jobs.count;
+ 
+-	/*
+-	 * Flush MMU if needed - this has been deferred until now to avoid
+-	 * overuse of this expensive operation.
+-	 */
+-	err = pvr_mmu_flush_exec(pvr_dev, false);
+-	if (err)
+-		goto out_job_data_cleanup;
+-
+ 	drm_exec_init(&exec, DRM_EXEC_INTERRUPTIBLE_WAIT | DRM_EXEC_IGNORE_DUPLICATES, 0);
+ 
+ 	xa_init_flags(&signal_array, XA_FLAGS_ALLOC);
+@@ -792,18 +789,59 @@ pvr_submit_jobs(struct pvr_device *pvr_dev, struct pvr_file *pvr_file,
+ 	 * its fragment job, which then rendered the other scene and hung the GPU.
+ 	 * Submissions are made whole under one lock.
+ 	 */
+-	if (pvr_device_is_apple(pvr_dev)) {
+-		err = mutex_lock_interruptible(&apple_submit_order);
++	vms = kvmalloc_array(jobs_alloced, sizeof(*vms), GFP_KERNEL);
++	if (!vms) {
++		err = -ENOMEM;
++		goto out_exec_fini_unlocked;
++	}
++	err = mutex_lock_interruptible(&pvr_submit_order);
++	if (err)
++		goto out_exec_fini_unlocked;
++	for (u32 i = 0; i < jobs_alloced; i++) {
++		struct pvr_vm_context *vm = job_data[i].job->ctx->vm_ctx;
++		u32 j;
++
++		for (j = 0; j < vm_count && vms[j] != vm; j++)
++			;
++		if (j != vm_count)
++			continue;
++		pvr_vm_submit_lock(vm, &pvr_submit_order);
++		vms[vm_count++] = vm;
++	}
++
++	err = prepare_job_resvs_for_each(&exec, job_data, args->jobs.count,
++					 !pvr_device_is_apple(pvr_dev));
++	if (err)
++		goto out_exec_fini;
++	for (u32 i = 0; i < vm_count; i++) {
++		err = pvr_vm_validate(vms[i], &exec);
+ 		if (err)
+-			goto out_exec_fini_unlocked;
++			goto out_exec_fini;
+ 	}
+ 
+-	err = prepare_job_syncs_for_each(pvr_file, job_data, &args->jobs.count,
+-					 &signal_array);
++	/*
++	 * Flush MMU if needed - this has been deferred until now to avoid
++	 * overuse of this expensive operation.
++	 */
++	err = pvr_mmu_flush_exec(pvr_dev, false);
+ 	if (err)
+ 		goto out_exec_fini;
+ 
+-	err = prepare_job_resvs_for_each(&exec, job_data, args->jobs.count);
++	if (!pvr_device_is_apple(pvr_dev)) {
++		/* A failed IMG flush resets and vmaps firmware objects. Do not
++		 * hold context/HWRT reservations until that path has completed.
++		 * VM mutexes span both exec passes, so backing cannot be evicted.
++		 */
++		drm_exec_fini(&exec);
++		drm_exec_init(&exec, DRM_EXEC_INTERRUPTIBLE_WAIT | DRM_EXEC_IGNORE_DUPLICATES, 0);
++		err = prepare_job_resvs_for_each(&exec, job_data, args->jobs.count, false);
++		if (err)
++			goto out_exec_fini;
++	}
++
++	/* prepare_job_syncs arms jobs: residency failures must precede it. */
++	err = prepare_job_syncs_for_each(pvr_file, job_data, &args->jobs.count,
++					 &signal_array);
+ 	if (err)
+ 		goto out_exec_fini;
+ 
+@@ -820,10 +858,15 @@ pvr_submit_jobs(struct pvr_device *pvr_dev, struct pvr_file *pvr_file,
+ 	err = 0;
+ 
+ out_exec_fini:
+-	if (pvr_device_is_apple(pvr_dev))
+-		mutex_unlock(&apple_submit_order);
++	drm_exec_fini(&exec);
++	while (vm_count)
++		pvr_vm_submit_unlock(vms[--vm_count]);
++	mutex_unlock(&pvr_submit_order);
++	goto out_sync_cleanup;
+ out_exec_fini_unlocked:
+ 	drm_exec_fini(&exec);
++out_sync_cleanup:
++	kvfree(vms);
+ 	pvr_sync_signal_array_cleanup(&signal_array);
+ 
+ out_job_data_cleanup:
+diff --git a/drivers/gpu/drm/imagination/pvr_vm.c b/drivers/gpu/drm/imagination/pvr_vm.c
+index b398d9e..4f6d67f 100644
+--- a/drivers/gpu/drm/imagination/pvr_vm.c
++++ b/drivers/gpu/drm/imagination/pvr_vm.c
+@@ -234,7 +234,16 @@ static int pvr_vm_bind_op_exec(struct pvr_vm_bind_op *bind_op)
+ 
+ static void pvr_vm_bind_op_fini(struct pvr_vm_bind_op *bind_op)
+ {
+-	drm_gpuvm_bo_put(bind_op->gpuvm_bo);
++	if (bind_op->gpuvm_bo) {
++		struct drm_gem_object *obj = bind_op->gpuvm_bo->obj;
++
++		/* Last put removes vm_bo from the BO's GPUVA list. */
++		drm_gem_object_get(obj);
++		dma_resv_lock(obj->resv, NULL);
++		drm_gpuvm_bo_put(bind_op->gpuvm_bo);
++		dma_resv_unlock(obj->resv);
++		drm_gem_object_put(obj);
++	}
+ 
+ 	kfree(bind_op->new_va);
+ 	kfree(bind_op->prev_va);
+@@ -256,7 +265,6 @@ pvr_vm_bind_op_map_init(struct pvr_vm_bind_op *bind_op,
+ 	struct drm_gem_object *obj = gem_from_pvr_gem(pvr_obj);
+ 	const bool is_user = vm_ctx->is_userspace_context;
+ 	const u64 pvr_obj_size = pvr_gem_object_size(pvr_obj);
+-	struct sg_table *sgt;
+ 	u64 offset_plus_size;
+ 	int err;
+ 
+@@ -289,20 +297,6 @@ pvr_vm_bind_op_map_init(struct pvr_vm_bind_op *bind_op,
+ 		goto err_bind_op_fini;
+ 	}
+ 
+-	/* Pin pages so they're ready for use. */
+-	sgt = pvr_gem_object_get_pages_sgt(pvr_obj);
+-	err = PTR_ERR_OR_ZERO(sgt);
+-	if (err)
+-		goto err_bind_op_fini;
+-
+-	bind_op->mmu_op_ctx =
+-		pvr_mmu_op_context_create(vm_ctx->mmu_ctx, sgt, offset, size);
+-	err = PTR_ERR_OR_ZERO(bind_op->mmu_op_ctx);
+-	if (err) {
+-		bind_op->mmu_op_ctx = NULL;
+-		goto err_bind_op_fini;
+-	}
+-
+ 	bind_op->pvr_obj = pvr_obj;
+ 	bind_op->vm_ctx = vm_ctx;
+ 	bind_op->device_addr = device_addr;
+@@ -358,6 +352,16 @@ err_bind_op_fini:
+ 	return err;
+ }
+ 
++static void pvr_vm_gpuva_unlink(struct drm_gpuva *va)
++{
++	struct drm_gpuvm_bo *vm_bo = va->vm_bo;
++
++	/* prepare_range() only locks objects with a live VA. */
++	if (vm_bo->evicted && list_is_singular(&vm_bo->list.gpuva))
++		drm_gpuvm_bo_evict(vm_bo, false);
++	drm_gpuva_unlink(va);
++}
++
+ /**
+  * pvr_vm_gpuva_map() - Insert a mapping into a memory context.
+  * @op: gpuva op containing the remap details.
+@@ -409,14 +413,17 @@ pvr_vm_gpuva_unmap(struct drm_gpuva_op *op, void *op_ctx)
+ {
+ 	struct pvr_vm_bind_op *ctx = op_ctx;
+ 
+-	int err = pvr_mmu_unmap(ctx->mmu_op_ctx, op->unmap.va->va.addr,
+-				op->unmap.va->va.range);
++	int err = 0;
++
++	if (!to_pvr_vm_gpuva(op->unmap.va)->evicted)
++		err = pvr_mmu_unmap(ctx->mmu_op_ctx, op->unmap.va->va.addr,
++				    op->unmap.va->va.range);
+ 
+ 	if (err)
+ 		return err;
+ 
+ 	drm_gpuva_unmap(&op->unmap);
+-	drm_gpuva_unlink(op->unmap.va);
++	pvr_vm_gpuva_unlink(op->unmap.va);
+ 	kfree(to_pvr_vm_gpuva(op->unmap.va));
+ 
+ 	return 0;
+@@ -443,9 +450,13 @@ pvr_vm_gpuva_remap(struct drm_gpuva_op *op, void *op_ctx)
+ 	int err;
+ 
+ 	drm_gpuva_op_remap_to_unmap_range(&op->remap, &va_start, &va_range);
+-	err = pvr_mmu_unmap(ctx->mmu_op_ctx, va_start, va_range);
+-	if (err)
+-		return err;
++	if (!to_pvr_vm_gpuva(op->remap.unmap->va)->evicted) {
++		err = pvr_mmu_unmap(ctx->mmu_op_ctx, va_start, va_range);
++		if (err)
++			return err;
++	}
++	ctx->prev_va->evicted = to_pvr_vm_gpuva(op->remap.unmap->va)->evicted;
++	ctx->next_va->evicted = ctx->prev_va->evicted;
+ 
+ 	/* No actual remap required: the page table tree depth is fixed to 3,
+ 	 * and we use 4k page table entries only for now.
+@@ -464,7 +475,7 @@ pvr_vm_gpuva_remap(struct drm_gpuva_op *op, void *op_ctx)
+ 		ctx->next_va = NULL;
+ 	}
+ 
+-	drm_gpuva_unlink(op->remap.unmap->va);
++	pvr_vm_gpuva_unlink(op->remap.unmap->va);
+ 	kfree(to_pvr_vm_gpuva(op->remap.unmap->va));
+ 
+ 	return 0;
+@@ -529,7 +540,10 @@ static void pvr_gpuvm_free(struct drm_gpuvm *gpuvm)
+ 	kfree(to_pvr_vm_context(gpuvm));
+ }
+ 
++static int pvr_vm_bo_validate(struct drm_gpuvm_bo *vm_bo, struct drm_exec *exec);
++
+ static const struct drm_gpuvm_ops pvr_vm_gpuva_ops = {
++	.vm_bo_validate = pvr_vm_bo_validate,
+ 	.vm_free = pvr_gpuvm_free,
+ 	.sm_step_map = pvr_vm_gpuva_map,
+ 	.sm_step_remap = pvr_vm_gpuva_remap,
+@@ -832,8 +846,26 @@ __pvr_vm_map(struct pvr_vm_context *vm_ctx, struct pvr_gem_object *pvr_obj,
+ 	if (err)
+ 		goto err_cleanup;
+ 
+-	err = pvr_vm_bind_op_exec(&bind_op);
++	{
++		struct sg_table *sgt = pvr_gem_get_pages_sgt_locked(pvr_obj);
+ 
++		err = PTR_ERR_OR_ZERO(sgt);
++		if (!err) {
++			bind_op.mmu_op_ctx = pvr_mmu_op_context_create(vm_ctx->mmu_ctx, sgt,
++								   pvr_obj_offset, size);
++			err = PTR_ERR_OR_ZERO(bind_op.mmu_op_ctx);
++			if (err)
++				bind_op.mmu_op_ctx = NULL;
++		}
++		if (!err)
++			err = pvr_vm_bind_op_exec(&bind_op);
++	}
++
++	/* Publish table edits while both VM and BO reservations still exclude reclaim. */
++	if (bind_op.mmu_op_ctx) {
++		pvr_mmu_op_context_destroy(bind_op.mmu_op_ctx);
++		bind_op.mmu_op_ctx = NULL;
++	}
+ 	drm_gpuvm_exec_unlock(&vm_exec);
+ 
+ err_cleanup:
+@@ -915,6 +947,11 @@ pvr_vm_unmap_obj_locked(struct pvr_vm_context *vm_ctx,
+ 
+ 	err = pvr_vm_bind_op_exec(&bind_op);
+ 
++	/* Publish table edits while both VM and BO reservations still exclude reclaim. */
++	if (bind_op.mmu_op_ctx) {
++		pvr_mmu_op_context_destroy(bind_op.mmu_op_ctx);
++		bind_op.mmu_op_ctx = NULL;
++	}
+ 	drm_gpuvm_exec_unlock(&vm_exec);
+ 
+ err_cleanup:
+@@ -1588,13 +1625,16 @@ bool pvr_vm_evict_bo(struct drm_gem_object *obj, unsigned int idle_ms,
+ 		struct drm_gpuva *va;
+ 		int err = 0, flush_err;
+ 
++		if (list_empty(&vm_bo->list.gpuva))
++			continue;
+ 		op = pvr_mmu_unmap_context_create(vm->mmu_ctx);
+ 		if (IS_ERR(op)) {
+ 			*reason = 10;
+ 			goto unlock;
+ 		}
+ 		/* On any partial failure keep pages and validate all cleared VAs. */
+-		drm_gpuvm_bo_evict(vm_bo, true);
++		if (!vm_bo->evicted)
++			drm_gpuvm_bo_evict(vm_bo, true);
+ 		drm_gpuvm_bo_for_each_va(va, vm_bo) {
+ 			struct pvr_vm_gpuva *pva = to_pvr_vm_gpuva(va);
+ 
+@@ -1624,3 +1664,84 @@ unlock:
+ 	}
+ 	return success;
+ }
++
++int pvr_vm_submit_lock(struct pvr_vm_context *vm, struct mutex *nest)
++{
++	mutex_lock_nest_lock(&vm->lock, nest);
++	return 0;
++}
++
++void pvr_vm_submit_unlock(struct pvr_vm_context *vm)
++{
++	/* Fence reservation may prune completed fences even on a failed submit.
++	 * Keep a conservative quiet-period floor before releasing the VM lock.
++	 */
++	vm->last_retired = max(vm->last_retired, ktime_get());
++	mutex_unlock(&vm->lock);
++}
++
++int pvr_vm_prepare_objects(struct pvr_vm_context *vm, struct drm_exec *exec)
++{
++	lockdep_assert_held(&vm->lock);
++	/* PowerVR does not register extobjs. Prepare its actual VA tree instead. */
++	return drm_gpuvm_prepare_range(&vm->gpuvm_mgr, exec, 0,
++				      vm->gpuvm_mgr.mm_range, 0);
++}
++
++static int pvr_vm_bo_validate(struct drm_gpuvm_bo *vm_bo, struct drm_exec *exec)
++{
++	struct pvr_vm_context *vm = to_pvr_vm_context(vm_bo->vm);
++	struct pvr_gem_object *bo = gem_to_pvr_gem(vm_bo->obj);
++	struct drm_gpuva *va;
++	struct sg_table *sgt;
++
++	lockdep_assert_held(&vm->lock);
++	dma_resv_assert_held(vm_bo->obj->resv);
++	sgt = pvr_gem_get_pages_sgt_locked(bo);
++	if (IS_ERR(sgt))
++		return -ENOMEM;
++	drm_gpuvm_bo_for_each_va(va, vm_bo) {
++		struct pvr_vm_gpuva *pva = to_pvr_vm_gpuva(va);
++		struct pvr_mmu_op_context *op;
++		int err;
++
++		if (!pva->evicted)
++			continue;
++		op = pvr_mmu_op_context_create(vm->mmu_ctx, sgt, va->gem.offset, va->va.range);
++		if (IS_ERR(op))
++			return -ENOMEM;
++		/* Also repair an eviction that stopped after clearing only a prefix. */
++		err = pvr_mmu_unmap(op, va->va.addr, va->va.range);
++		if (!err)
++			err = pvr_mmu_map(op, va->va.range, bo->flags, va->va.addr);
++		pvr_mmu_op_context_destroy(op);
++		if (err)
++			return -ENOMEM;
++		pva->evicted = false;
++	}
++	/* A failed flush leaves vm_bo evicted, so a retry must flush again. */
++	pvr_mmu_flush_request_all(vm->pvr_dev);
++	if (pvr_mmu_flush_exec(vm->pvr_dev, false))
++		return -ENOMEM;
++	drm_gpuvm_bo_evict(vm_bo, false);
++	pvr_gem_lru_update_locked(bo);
++	atomic64_inc(&vm->pvr_dev->gem_reclaim.restores);
++	return 0;
++}
++
++int pvr_vm_validate(struct pvr_vm_context *vm, struct drm_exec *exec)
++{
++	struct drm_gpuva *va;
++	int err;
++
++	lockdep_assert_held(&vm->lock);
++	err = drm_gpuvm_validate(&vm->gpuvm_mgr, exec);
++	if (err) {
++		atomic64_inc(&vm->pvr_dev->gem_reclaim.restore_fail);
++		return -ENOMEM;
++	}
++	drm_gpuvm_for_each_va(va, &vm->gpuvm_mgr)
++		if (va->gem.obj)
++			pvr_gem_lru_update_locked(gem_to_pvr_gem(va->gem.obj));
++	return 0;
++}
+diff --git a/drivers/gpu/drm/imagination/pvr_vm.h b/drivers/gpu/drm/imagination/pvr_vm.h
+index 3270743..15ee067 100644
+--- a/drivers/gpu/drm/imagination/pvr_vm.h
++++ b/drivers/gpu/drm/imagination/pvr_vm.h
+@@ -26,6 +26,7 @@ struct drm_pvr_ioctl_get_heap_info_args;
+ 
+ /* Forward declaration from <drm/drm_exec.h> */
+ struct drm_exec;
++struct mutex;
+ 
+ /**
+  * struct pvr_vm_pin - Device-virtual range whose mappings must not change
+@@ -66,6 +67,10 @@ void pvr_vm_unmap_all(struct pvr_vm_context *vm_ctx);
+ dma_addr_t pvr_vm_get_page_table_root_addr(struct pvr_vm_context *vm_ctx);
+ struct dma_resv *pvr_vm_get_dma_resv(struct pvr_vm_context *vm_ctx);
+ struct drm_gem_object *pvr_vm_resv_obj(struct pvr_vm_context *vm_ctx);
++int pvr_vm_submit_lock(struct pvr_vm_context *vm_ctx, struct mutex *nest);
++void pvr_vm_submit_unlock(struct pvr_vm_context *vm_ctx);
++int pvr_vm_prepare_objects(struct pvr_vm_context *vm_ctx, struct drm_exec *exec);
++int pvr_vm_validate(struct pvr_vm_context *vm_ctx, struct drm_exec *exec);
+ bool pvr_vm_evict_bo(struct drm_gem_object *obj, unsigned int idle_ms,
+ 		     unsigned int *reason);
+ 
