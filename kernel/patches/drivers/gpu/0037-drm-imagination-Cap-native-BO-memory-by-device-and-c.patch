@@ -8,21 +8,26 @@ Native creation pins all backing pages, so a client can exhaust memory
 needed to recover. Charge before taking pages and refuse above device
 and per-TGID budgets with -ENOMEM and a ratelimited diagnostic. Share
 accounting across the creator's DRM files, uncharge at free and exclude
-imports. Defaults are 50 percent of RAM and 75 percent of that device
-budget per client. Create-time charging counts real backing here; it
+imports. S8003 defaults are 50 percent of RAM and 75 percent of that device
+budget per client. Other devices default to no cap. Create-time charging counts real backing here; it
 can move to residency when eviction becomes available.
+
+Select automatic defaults per device: S8003 retains 50/75; all other
+chips have no cap. Explicit percentages override the defaults and zero
+disables a limit. -1 selects automatic defaults. With the device cap off,
+skip accounting allocation as well as refusals.
 
 Affects: every PowerVR device
 Assisted-by: LLM
 ---
- drivers/gpu/drm/imagination/pvr_device.c |   3 +
- drivers/gpu/drm/imagination/pvr_device.h |   7 ++
- drivers/gpu/drm/imagination/pvr_gem.c    | 120 ++++++++++++++++++++++-
- drivers/gpu/drm/imagination/pvr_gem.h    |   4 +
- 4 files changed, 133 insertions(+), 1 deletion(-)
+ drivers/gpu/drm/imagination/pvr_device.c |    3 +
+ drivers/gpu/drm/imagination/pvr_device.h |    7 ++
+ drivers/gpu/drm/imagination/pvr_gem.c    |  137 ++++++++++++++++++++++++++++++
+ drivers/gpu/drm/imagination/pvr_gem.h    |    4 +
+ 4 files changed, 150 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/gpu/drm/imagination/pvr_device.c b/drivers/gpu/drm/imagination/pvr_device.c
-index 2c06a4a..c13a1b6 100644
+index 2c06a4ac117be0b954ecd7eb5a471efd142beb42..c13a1b648929ee7d2030f17ef2093a81725984e4 100644
 --- a/drivers/gpu/drm/imagination/pvr_device.c
 +++ b/drivers/gpu/drm/imagination/pvr_device.c
 @@ -804,6 +804,9 @@ pvr_device_init(struct pvr_device *pvr_dev)
@@ -36,7 +41,7 @@ index 2c06a4a..c13a1b6 100644
  	pvr_dev->device_data = of_device_get_match_data(dev);
  
 diff --git a/drivers/gpu/drm/imagination/pvr_device.h b/drivers/gpu/drm/imagination/pvr_device.h
-index 26b589e..da999d4 100644
+index 26b589ee72b9c261fbb10803fd3ddd9999e95f8c..da999d480bce7c34aef8d34ddedf3517d4c4bb09 100644
 --- a/drivers/gpu/drm/imagination/pvr_device.h
 +++ b/drivers/gpu/drm/imagination/pvr_device.h
 @@ -92,6 +92,13 @@ struct pvr_device {
@@ -54,14 +59,15 @@ index 26b589e..da999d4 100644
  	struct pvr_gpu_id gpu_id;
  
 diff --git a/drivers/gpu/drm/imagination/pvr_gem.c b/drivers/gpu/drm/imagination/pvr_gem.c
-index 817b47d..7604c59 100644
+index 817b47df763fd8dc0e3603360f8fabbe1b672bb5..44626d14f92e85b145f9447b952202eb068fd402 100644
 --- a/drivers/gpu/drm/imagination/pvr_gem.c
 +++ b/drivers/gpu/drm/imagination/pvr_gem.c
-@@ -17,17 +17,130 @@
+@@ -17,17 +17,147 @@
  #include <linux/gfp.h>
  #include <linux/iosys-map.h>
  #include <linux/log2.h>
 +#include <linux/moduleparam.h>
++#include <linux/of.h>
  #include <linux/mutex.h>
 +#include <linux/pid.h>
 +#include <linux/sched.h>
@@ -73,13 +79,13 @@ index 817b47d..7604c59 100644
  #include <linux/scatterlist.h>
  
 +/* Creation-time reservation; resident-page accounting can replace this later. */
-+static unsigned int pinned_device_pct = 50;
-+module_param(pinned_device_pct, uint, 0644);
-+MODULE_PARM_DESC(pinned_device_pct, "Maximum native BO memory as a percentage of RAM (default 50)");
++static int pinned_device_pct = -1;
++module_param(pinned_device_pct, int, 0644);
++MODULE_PARM_DESC(pinned_device_pct, "Native BO RAM percentage (0 off, -1 auto: S8003 50, other chips 0)");
 +
-+static unsigned int pinned_client_pct = 75;
-+module_param(pinned_client_pct, uint, 0644);
-+MODULE_PARM_DESC(pinned_client_pct, "Maximum per-process share of the device BO cap (default 75)");
++static int pinned_client_pct = -1;
++module_param(pinned_client_pct, int, 0644);
++MODULE_PARM_DESC(pinned_client_pct, "Per-process share of the BO cap (0 off, -1 auto: S8003 75, other chips 0)");
 +
 +/* A held struct pid prevents PID reuse from merging unrelated clients' charges. */
 +struct pvr_gem_account {
@@ -89,18 +95,33 @@ index 817b47d..7604c59 100644
 +	unsigned int objects;
 +};
 +
++/* Defaults are per device; explicit module parameters override either limit. */
++static unsigned int pvr_gem_pin_limit(struct pvr_device *pvr_dev, int pct,
++				    unsigned int s8003_default)
++{
++	if (pct < 0)
++		return of_device_is_compatible(from_pvr_device(pvr_dev)->dev->of_node,
++					      "apple,s8003-gpu") ? s8003_default : 0;
++	return min((unsigned int)pct, 100U);
++}
++
 +static int pvr_gem_pin_charge(struct pvr_gem_object *pvr_obj)
 +{
 +	struct drm_gem_object *obj = gem_from_pvr_gem(pvr_obj);
 +	struct pvr_device *pvr_dev = to_pvr_device(obj->dev);
 +	struct pvr_gem_account *account, *found, *fresh = NULL;
 +	struct pid *tgid = task_tgid(current);
-+	u64 cap = div_u64(((u64)totalram_pages() << PAGE_SHIFT) *
-+			 min(READ_ONCE(pinned_device_pct), 100U), 100);
-+	u64 client_cap = div_u64(cap * min(READ_ONCE(pinned_client_pct), 100U), 100);
++	unsigned int device_pct = pvr_gem_pin_limit(pvr_dev, READ_ONCE(pinned_device_pct), 50);
++	unsigned int client_pct = pvr_gem_pin_limit(pvr_dev, READ_ONCE(pinned_client_pct), 75);
++	u64 cap = div_u64(((u64)totalram_pages() << PAGE_SHIFT) * device_pct, 100);
++	u64 client_cap = div_u64(cap * client_pct, 100);
 +	u64 device_bytes, client_bytes;
 +	unsigned long flags;
 +	int err = 0;
++
++	/* No accounting allocation or refusal on chips whose cap is off. */
++	if (!device_pct)
++		return 0;
 +
 +	for (;;) {
 +		spin_lock_irqsave(&pvr_dev->gem_pin_lock, flags);
@@ -114,7 +135,8 @@ index 817b47d..7604c59 100644
 +		device_bytes = pvr_dev->gem_pin_bytes;
 +		client_bytes = found ? found->bytes : 0;
 +		if (device_bytes > cap || obj->size > cap - device_bytes ||
-+		    client_bytes > client_cap || obj->size > client_cap - client_bytes) {
++		    (client_pct && (client_bytes > client_cap ||
++				    obj->size > client_cap - client_bytes))) {
 +			spin_unlock_irqrestore(&pvr_dev->gem_pin_lock, flags);
 +			err = -ENOMEM;
 +			break;
@@ -188,7 +210,7 @@ index 817b47d..7604c59 100644
  	drm_gem_shmem_free(shmem_obj);
  }
  
-@@ -381,6 +494,11 @@ pvr_gem_object_create(struct pvr_device *pvr_dev, size_t size, u64 flags)
+@@ -381,6 +511,11 @@ pvr_gem_object_create(struct pvr_device *pvr_dev, size_t size, u64 flags)
  	pvr_obj = shmem_gem_to_pvr_gem(shmem_obj);
  	pvr_obj->flags = flags;
  
@@ -200,7 +222,7 @@ index 817b47d..7604c59 100644
  	sgt = drm_gem_shmem_get_pages_sgt(shmem_obj);
  	if (IS_ERR(sgt)) {
  		err = PTR_ERR(sgt);
-@@ -398,7 +516,7 @@ pvr_gem_object_create(struct pvr_device *pvr_dev, size_t size, u64 flags)
+@@ -398,7 +533,7 @@ pvr_gem_object_create(struct pvr_device *pvr_dev, size_t size, u64 flags)
  	return pvr_obj;
  
  err_shmem_object_free:
@@ -210,7 +232,7 @@ index 817b47d..7604c59 100644
  	return ERR_PTR(err);
  }
 diff --git a/drivers/gpu/drm/imagination/pvr_gem.h b/drivers/gpu/drm/imagination/pvr_gem.h
-index efcd270..2e7cf2c 100644
+index efcd270ffa5a75e035d81a9dd87325d9bc7d3eb7..2e7cf2c9a6a435f3a1a0b06d6c3927b6296c8782 100644
 --- a/drivers/gpu/drm/imagination/pvr_gem.h
 +++ b/drivers/gpu/drm/imagination/pvr_gem.h
 @@ -27,6 +27,7 @@
