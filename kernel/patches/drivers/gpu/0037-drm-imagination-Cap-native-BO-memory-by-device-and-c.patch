@@ -1,0 +1,233 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 02:57:20 +0100
+Subject: [PATCH 37/40] drm/imagination: Cap native BO memory by device and
+ creator
+
+Native creation pins all backing pages, so a client can exhaust memory
+needed to recover. Charge before taking pages and refuse above device
+and per-TGID budgets with -ENOMEM and a ratelimited diagnostic. Share
+accounting across the creator's DRM files, uncharge at free and exclude
+imports. Defaults are 50 percent of RAM and 75 percent of that device
+budget per client. Create-time charging counts real backing here; it
+can move to residency when eviction becomes available.
+
+Affects: every PowerVR device
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_device.c |   3 +
+ drivers/gpu/drm/imagination/pvr_device.h |   7 ++
+ drivers/gpu/drm/imagination/pvr_gem.c    | 120 ++++++++++++++++++++++-
+ drivers/gpu/drm/imagination/pvr_gem.h    |   4 +
+ 4 files changed, 133 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_device.c b/drivers/gpu/drm/imagination/pvr_device.c
+index 2c06a4a..c13a1b6 100644
+--- a/drivers/gpu/drm/imagination/pvr_device.c
++++ b/drivers/gpu/drm/imagination/pvr_device.c
+@@ -804,6 +804,9 @@ pvr_device_init(struct pvr_device *pvr_dev)
+ 	struct device *dev = drm_dev->dev;
+ 	int err;
+ 
++	spin_lock_init(&pvr_dev->gem_pin_lock);
++	INIT_LIST_HEAD(&pvr_dev->gem_pin_accounts);
++
+ 	/* Get the platform-specific data based on the compatible string. */
+ 	pvr_dev->device_data = of_device_get_match_data(dev);
+ 
+diff --git a/drivers/gpu/drm/imagination/pvr_device.h b/drivers/gpu/drm/imagination/pvr_device.h
+index 26b589e..da999d4 100644
+--- a/drivers/gpu/drm/imagination/pvr_device.h
++++ b/drivers/gpu/drm/imagination/pvr_device.h
+@@ -92,6 +92,13 @@ struct pvr_device {
+ 	 */
+ 	struct drm_device base;
+ 
++	/** @gem_pin_lock: Protects the GEM pin budget and per-process accounts. */
++	spinlock_t gem_pin_lock;
++	/** @gem_pin_accounts: Live BO owners, keyed by their TGID's struct pid. */
++	struct list_head gem_pin_accounts;
++	/** @gem_pin_bytes: Native BO bytes reserved before backing pages exist. */
++	u64 gem_pin_bytes;
++
+ 	/** @gpu_id: GPU ID detected at runtime. */
+ 	struct pvr_gpu_id gpu_id;
+ 
+diff --git a/drivers/gpu/drm/imagination/pvr_gem.c b/drivers/gpu/drm/imagination/pvr_gem.c
+index 817b47d..7604c59 100644
+--- a/drivers/gpu/drm/imagination/pvr_gem.c
++++ b/drivers/gpu/drm/imagination/pvr_gem.c
+@@ -17,17 +17,130 @@
+ #include <linux/gfp.h>
+ #include <linux/iosys-map.h>
+ #include <linux/log2.h>
++#include <linux/moduleparam.h>
+ #include <linux/mutex.h>
++#include <linux/pid.h>
++#include <linux/sched.h>
++#include <linux/sched/task.h>
++#include <linux/spinlock.h>
+ #include <linux/pagemap.h>
+ #include <linux/property.h>
+ #include <linux/refcount.h>
+ #include <linux/scatterlist.h>
+ 
++/* Creation-time reservation; resident-page accounting can replace this later. */
++static unsigned int pinned_device_pct = 50;
++module_param(pinned_device_pct, uint, 0644);
++MODULE_PARM_DESC(pinned_device_pct, "Maximum native BO memory as a percentage of RAM (default 50)");
++
++static unsigned int pinned_client_pct = 75;
++module_param(pinned_client_pct, uint, 0644);
++MODULE_PARM_DESC(pinned_client_pct, "Maximum per-process share of the device BO cap (default 75)");
++
++/* A held struct pid prevents PID reuse from merging unrelated clients' charges. */
++struct pvr_gem_account {
++	struct list_head link;
++	struct pid *tgid;
++	u64 bytes;
++	unsigned int objects;
++};
++
++static int pvr_gem_pin_charge(struct pvr_gem_object *pvr_obj)
++{
++	struct drm_gem_object *obj = gem_from_pvr_gem(pvr_obj);
++	struct pvr_device *pvr_dev = to_pvr_device(obj->dev);
++	struct pvr_gem_account *account, *found, *fresh = NULL;
++	struct pid *tgid = task_tgid(current);
++	u64 cap = div_u64(((u64)totalram_pages() << PAGE_SHIFT) *
++			 min(READ_ONCE(pinned_device_pct), 100U), 100);
++	u64 client_cap = div_u64(cap * min(READ_ONCE(pinned_client_pct), 100U), 100);
++	u64 device_bytes, client_bytes;
++	unsigned long flags;
++	int err = 0;
++
++	for (;;) {
++		spin_lock_irqsave(&pvr_dev->gem_pin_lock, flags);
++		found = NULL;
++		list_for_each_entry(account, &pvr_dev->gem_pin_accounts, link) {
++			if (account->tgid == tgid) {
++				found = account;
++				break;
++			}
++		}
++		device_bytes = pvr_dev->gem_pin_bytes;
++		client_bytes = found ? found->bytes : 0;
++		if (device_bytes > cap || obj->size > cap - device_bytes ||
++		    client_bytes > client_cap || obj->size > client_cap - client_bytes) {
++			spin_unlock_irqrestore(&pvr_dev->gem_pin_lock, flags);
++			err = -ENOMEM;
++			break;
++		}
++		if (!found && !fresh) {
++			spin_unlock_irqrestore(&pvr_dev->gem_pin_lock, flags);
++			fresh = kzalloc_obj(*fresh);
++			if (!fresh)
++				return -ENOMEM;
++			fresh->tgid = get_pid(tgid);
++			continue;
++		}
++		if (!found) {
++			found = fresh;
++			fresh = NULL;
++			list_add_tail(&found->link, &pvr_dev->gem_pin_accounts);
++		}
++		pvr_dev->gem_pin_bytes += obj->size;
++		found->bytes += obj->size;
++		found->objects++;
++		pvr_obj->pin_account = found;
++		spin_unlock_irqrestore(&pvr_dev->gem_pin_lock, flags);
++		break;
++	}
++	if (fresh) {
++		put_pid(fresh->tgid);
++		kfree(fresh);
++	}
++	if (err) {
++		char comm[TASK_COMM_LEN];
++
++		get_task_comm(comm, current->group_leader);
++		dev_warn_ratelimited(obj->dev->dev,
++			"pin cap refused BO=%zuK client=%s[%d] device=%lluK/%lluK client=%lluK/%lluK\n",
++			obj->size >> 10, comm, task_tgid_nr(current), device_bytes >> 10,
++			cap >> 10, client_bytes >> 10, client_cap >> 10);
++	}
++	return err;
++}
++
++static void pvr_gem_pin_uncharge(struct pvr_gem_object *pvr_obj)
++{
++	struct drm_gem_object *obj = gem_from_pvr_gem(pvr_obj);
++	struct pvr_device *pvr_dev = to_pvr_device(obj->dev);
++	struct pvr_gem_account *account = pvr_obj->pin_account;
++	unsigned long flags;
++	bool last;
++
++	if (!account)
++		return;
++	spin_lock_irqsave(&pvr_dev->gem_pin_lock, flags);
++	pvr_dev->gem_pin_bytes -= obj->size;
++	account->bytes -= obj->size;
++	last = !--account->objects;
++	if (last)
++		list_del(&account->link);
++	pvr_obj->pin_account = NULL;
++	spin_unlock_irqrestore(&pvr_dev->gem_pin_lock, flags);
++	if (last) {
++		put_pid(account->tgid);
++		kfree(account);
++	}
++}
++
+ static void pvr_gem_object_free(struct drm_gem_object *obj)
+ {
+ 	struct drm_gem_shmem_object *shmem_obj = to_drm_gem_shmem_obj(obj);
+ 
+ 	shmem_obj->pages_mark_dirty_on_put = true;
++	pvr_gem_pin_uncharge(gem_to_pvr_gem(obj));
+ 	drm_gem_shmem_free(shmem_obj);
+ }
+ 
+@@ -381,6 +494,11 @@ pvr_gem_object_create(struct pvr_device *pvr_dev, size_t size, u64 flags)
+ 	pvr_obj = shmem_gem_to_pvr_gem(shmem_obj);
+ 	pvr_obj->flags = flags;
+ 
++	/* Imports also use gem_create_object; only native BOs reserve pages here. */
++	err = pvr_gem_pin_charge(pvr_obj);
++	if (err)
++		goto err_shmem_object_free;
++
+ 	sgt = drm_gem_shmem_get_pages_sgt(shmem_obj);
+ 	if (IS_ERR(sgt)) {
+ 		err = PTR_ERR(sgt);
+@@ -398,7 +516,7 @@ pvr_gem_object_create(struct pvr_device *pvr_dev, size_t size, u64 flags)
+ 	return pvr_obj;
+ 
+ err_shmem_object_free:
+-	drm_gem_shmem_free(shmem_obj);
++	pvr_gem_object_put(pvr_obj);
+ 
+ 	return ERR_PTR(err);
+ }
+diff --git a/drivers/gpu/drm/imagination/pvr_gem.h b/drivers/gpu/drm/imagination/pvr_gem.h
+index efcd270..2e7cf2c 100644
+--- a/drivers/gpu/drm/imagination/pvr_gem.h
++++ b/drivers/gpu/drm/imagination/pvr_gem.h
+@@ -27,6 +27,7 @@
+ /* Forward declaration from "pvr_device.h". */
+ struct pvr_device;
+ struct pvr_file;
++struct pvr_gem_account;
+ 
+ /**
+  * DOC: Flags for DRM_IOCTL_PVR_CREATE_BO (kernel-only)
+@@ -109,6 +110,9 @@ struct pvr_gem_object {
+ 	 */
+ 	u64 flags;
+ 
++	/** @pin_account: Creating process's budget, retained until the BO is freed. */
++	struct pvr_gem_account *pin_account;
++
+ };
+ 
+ static_assert(offsetof(struct pvr_gem_object, base) == 0,
