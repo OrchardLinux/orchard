@@ -27,6 +27,7 @@ status = "supported"
 
 # States: working, untested, missing, none (features.toml).
 [features]
+# Display DART/SMMU scanout is enabled behind the pipe-CRC gate; untested on A10.
 display = "working"
 screen_off = "working"
 backlight = "working"
