@@ -58,10 +58,20 @@ jobs:
       - run: python -m unittest discover -s tests -v
   changed:
     # A scheduled run builds only when main moved since the last nightly.
+    # A pull request compiles the kernel of every platform whose sources or
+    # build scripts it changes (ci/changed_kernels.py), and publishes nothing.
     runs-on: ubuntu-24.04
     outputs:
       nightly: ${{ steps.check.outputs.nightly }}
+      kernels: ${{ steps.check.outputs.kernels }}
+      kernel_exclude: ${{ steps.check.outputs.kernel_exclude }}
     steps:
+      # The merge commit and its first parent, the branch it merges into.
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          persist-credentials: false
+          fetch-depth: 2
       - id: check
         env:
           GH_TOKEN: ${{ github.token }}
@@ -76,6 +86,12 @@ jobs:
             echo nightly=true >> "$GITHUB_OUTPUT"
           else
             echo nightly=false >> "$GITHUB_OUTPUT"
+          fi
+          if [[ "$EVENT" == pull_request ]]; then
+            git worktree add --detach "$RUNNER_TEMP/base" HEAD^1
+            python3 ci/changed_kernels.py "$RUNNER_TEMP/base" apple-16k apple-4k apple-armv7 | tee -a "$GITHUB_OUTPUT"
+          else
+            printf 'kernels=[]\nkernel_exclude=[]\n' >> "$GITHUB_OUTPUT"
           fi
   native-smoke:
     runs-on: ubuntu-24.04-arm
@@ -101,7 +117,7 @@ jobs:
   # The compile jobs start beside the tests, not after them: a failed test costs
   # some compiling, and `assets` (so every draft and nightly) still waits for both.
   kernel:
-    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changed.outputs.nightly == 'true'
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changed.outputs.nightly == 'true' || needs.changed.outputs.kernels != '[]'
     needs: changed
     runs-on: ubuntu-24.04-arm
     container: debian:bookworm
@@ -110,6 +126,8 @@ jobs:
       matrix:
         # Every platform with a kernel series; distribution releases cover all of them.
         platform: [apple-16k, apple-4k, apple-armv7]
+        # A pull request leaves out the platforms whose kernel it doesn't change.
+        exclude: ${{ fromJSON(needs.changed.outputs.kernel_exclude) }}
     defaults:
       run:
         shell: bash
@@ -138,9 +156,16 @@ jobs:
         run: bash kernel/install-toolchain
       # The compiler cache of this platform's last build: a changed patch then
       # compiles only what it changes. One cache per kernel state; a new state
-      # starts from the newest older one.
+      # starts from the newest older one. A pull request only reads it, so its
+      # states don't push main's out of the repository's cache space.
       - uses: actions/cache@v4
-        if: steps.reuse.outputs.reused == ''
+        if: steps.reuse.outputs.reused == '' && github.event_name != 'pull_request'
+        with:
+          path: out/cache/ccache/kernel
+          key: kernel-ccache-v1-${{ matrix.platform }}-${{ steps.reuse.outputs.key }}
+          restore-keys: kernel-ccache-v1-${{ matrix.platform }}-
+      - uses: actions/cache/restore@v4
+        if: steps.reuse.outputs.reused == '' && github.event_name == 'pull_request'
         with:
           path: out/cache/ccache/kernel
           key: kernel-ccache-v1-${{ matrix.platform }}-${{ steps.reuse.outputs.key }}
@@ -157,12 +182,14 @@ jobs:
           # Keep only what this build used, so the saved cache stays one build large.
           ccache --evict-older-than "$(( $(date +%s) - started + 60 ))s" >/dev/null
           { echo "Compiler cache, $PLATFORM:"; echo '```'; ccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      # A pull request's kernel only has to compile; nothing assembles it.
       - name: Archive components and corresponding kernel source
-        if: steps.reuse.outputs.reused == ''
+        if: steps.reuse.outputs.reused == '' && github.event_name != 'pull_request'
         run: |
           tar -C out -czf "out/kernel-components-$PLATFORM.tar.gz" components
           tar -C out/kernel-work/source --exclude=.git --use-compress-program=pigz -cf "out/kernel-source-$PLATFORM.tar.gz" .
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           name: orchard-kernel-${{ matrix.platform }}
           path: |
