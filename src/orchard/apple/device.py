@@ -104,7 +104,7 @@ class Device:
                                        board=self.BOARD, product=self.PRODUCT, entry=entries.select(self._descriptor))
 
     def start_loader(self, device: SelectedDevice, loader: Dict[str, Path], progress: Progress,
-                     quiet: bool = False) -> str:
+                     quiet: bool = False, proxy: bool = True) -> Optional[str]:
         return apple_boot.start_loader(device, loader, progress, profile=self.PROFILE,
                                        chip=self.CHIP, board=self.BOARD, product=self.PRODUCT, quiet=quiet,
-                                       entry=entries.select(self._descriptor))
+                                       proxy=proxy, entry=entries.select(self._descriptor))

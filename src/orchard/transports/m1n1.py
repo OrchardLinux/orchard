@@ -167,7 +167,9 @@ class M1n1Proxy:
     def boot_entries(self, devicetree=None):
         """m1n1's own reading of the boot partition: (id, keys, problems) per entry, in BLS order.
 
-        Needs storage_init first. The reply format is in docs/boot-contract.md.
+        Needs storage_init first. The reply format is in docs/boot-contract.md; the default entry
+        has the key `default` (orchard m1n1 0016). Without DEVICETREE m1n1 checks the entries
+        against the board it runs on.
         """
         out = self.memalign(8, 16)
         name = self.string(devicetree) if devicetree else 0

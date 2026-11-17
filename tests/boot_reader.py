@@ -1,11 +1,13 @@
 """Test-side boot contract reader: GPT, the XBOOTLDR FAT32 partition and BLS entries.
 
 Not part of orchard: on a device m1n1 reads and checks the entries itself
-(boot/m1n1/patches/orchard/0007, docs/boot-contract.md). The tests use this
+and picks the default (boot/m1n1/patches/orchard/0007, 0016,
+docs/boot-contract.md). The tests use this
 as an independent reading of the contract: to check what the installer
 writes (tests/linux/install_vm.py) and to model m1n1's listing in the launch
 tests. Everything goes through a block-read callable; nothing here writes.
 """
+import fnmatch
 import re
 import struct
 import uuid
@@ -267,6 +269,33 @@ def read_boot(disk: Disk, devicetree: Optional[str] = None):
         validate(entry, fat, roots, devicetree)
         entries.append(entry)
     return parts, fat, sort_entries(entries)
+
+
+def loader_default(fat: Fat32) -> Optional[str]:
+    """loader.conf's `default` pattern, as systemd-boot reads it: the last one wins."""
+    try:
+        text = fat.read_file('/loader/loader.conf', MAX_ENTRY_FILE).decode('utf-8')
+    except BootDiskError:
+        return None
+    pattern = None
+    for line in text.splitlines():
+        key, _, value = line.strip().partition(' ')
+        if key == 'default':
+            value = value.strip()
+            if len(value) > 1 and value[0] == value[-1] == '"':
+                value = value[1:-1]
+            pattern = value or None
+    return pattern
+
+
+def default_entry(entries: List[Entry], pattern: Optional[str]) -> Optional[Entry]:
+    """The first entry in BLS order whose id (with or without .conf) matches PATTERN, bootable
+    or not; without a pattern or a match the first bootable entry."""
+    if pattern:
+        for entry in entries:
+            if any(fnmatch.fnmatchcase(name.lower(), pattern.lower()) for name in (entry.id, entry.id + '.conf')):
+                return entry
+    return next((entry for entry in entries if not entry.problems), None)
 
 
 def validate(entry: Entry, fat: Fat32, roots, devicetree: Optional[str]) -> None:

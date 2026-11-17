@@ -298,6 +298,8 @@ class Finish(unittest.TestCase):
                          f'PARTUUID={LINUX_ID} / ext4 rw,relatime 0 1\n'
                          'PARTUUID=44444444-0000-4000-8000-000000000001 /boot vfat rw,relatime,fmask=0077,dmask=0077 0 2\n')
         self.assertIn('architecture aa64\n', (root / 'boot/loader/entries/omarchy-33333333-6.12.conf').read_text())
+        # The system just installed starts next.
+        self.assertEqual((root / 'boot/loader/loader.conf').read_text(), 'default omarchy-33333333-*\n')
 
 
 class InstalledBundle(unittest.TestCase):

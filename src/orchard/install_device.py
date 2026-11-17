@@ -541,6 +541,37 @@ def write_entry(boot_root, root, version, entry, partuuid):
     return token
 
 
+def set_default(boot_root, token):
+    """Make TOKEN's system the default: `default TOKEN-*` in /loader/loader.conf.
+
+    The format is systemd-boot's, one key per line, and m1n1 picks the default
+    the same way: the first entry in BLS order that the pattern matches, that
+    is the system's newest kernel (docs/boot-contract.md). Every other line
+    stays; a `default` line is replaced in place, further ones go.
+    """
+    path = boot_root / 'loader/loader.conf'
+    line = f'default {token}-*'
+    lines, done = [], False
+    if path.is_file():
+        for old in path.read_text(errors='replace').splitlines():
+            if old.strip().split(None, 1)[:1] == ['default']:
+                if not done:
+                    lines.append(line)
+                done = True
+            else:
+                lines.append(old)
+    if not done:
+        lines.append(line)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name('loader.conf.tmp')
+    with temporary.open('w') as output:
+        output.write('\n'.join(lines) + '\n')
+        output.flush()
+        os.fsync(output.fileno())
+    os.replace(temporary, path)
+    return line
+
+
 def architecture(kernel):
     """The entry's BLS architecture: arm for a 32-bit ARM zImage, aa64 for everything else."""
     with kernel.open('rb') as data:
@@ -791,9 +822,11 @@ def finish(plan, target, present, secrets):
     if account:
         emit('step', step='account', state='done', user=set_account(target, account, *(secrets or (None, None))))
     version = kernel_version(target)
-    write_entry(boot_mount, target, version, entry, plan['root']['partuuid'])
+    token = write_entry(boot_mount, target, version, entry, plan['root']['partuuid'])
     name = check_entry(boot_mount, plan['root']['partuuid'], entry['devicetree'])
     emit('step', step='boot-entry', state='done', entry=name)
+    # The system just installed is what starts next, as on a PC after installing an OS.
+    emit('step', step='boot-default', state='done', default=set_default(boot_mount, token))
 
 
 def install(plan, stream):

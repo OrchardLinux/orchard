@@ -97,4 +97,5 @@ STEPS = {
     'remove-old-entries': 'Old boot entries removed',
     'account': 'User set up',
     'boot-entry': 'Boot entry written',
+    'boot-default': 'Set to start by default',
 }

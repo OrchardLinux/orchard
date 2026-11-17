@@ -2,7 +2,7 @@ import unittest
 import uuid
 
 from boot_image import ROOT_ARM64, XBOOTLDR, fat32, gpt_disk
-from boot_reader import BootDiskError, Disk, read_boot
+from boot_reader import BootDiskError, Disk, default_entry, loader_default, read_boot
 
 ROOT = uuid.UUID('4d6c1a2e-0000-4000-8000-000000000001')
 ENTRY = f"""# Omarchy
@@ -80,6 +80,24 @@ class BootDisk(unittest.TestCase):
         disk, _ = disk_for(content)
         _, _, entries = read_boot(disk)
         self.assertEqual([e.get('version') for e in entries], ['6.18.2-orchard', '6.17.9-orchard'])
+
+    def test_loader_conf_default_picks_the_newest_kernel_of_one_system(self):
+        older = ENTRY.replace('6.18.2-orchard', '6.17.9-orchard')
+        other = ENTRY.replace('sort-key   omarchy', 'sort-key   arch').replace('title      Omarchy', 'title Arch')
+        content = {**files(), **files(older, 'omarchy-6a1f-6.17.9.conf'),
+                   **files(other, 'arch-77aa-6.18.2.conf')}
+        del content['/loader/entries/omarchy-6.18.2.conf']
+        content['/loader/entries/omarchy-6a1f-6.18.2.conf'] = ENTRY.encode()
+        disk, _ = disk_for(content)
+        _, fat, entries = read_boot(disk)
+        self.assertIsNone(loader_default(fat))
+        self.assertEqual(default_entry(entries, None).id, 'arch-77aa-6.18.2')
+        content['/loader/loader.conf'] = b'timeout 3\ndefault arch-*\ndefault "omarchy-6a1f-*"\n'
+        disk, _ = disk_for(content)
+        _, fat, entries = read_boot(disk)
+        self.assertEqual(loader_default(fat), 'omarchy-6a1f-*')
+        self.assertEqual(default_entry(entries, 'omarchy-6a1f-*').id, 'omarchy-6a1f-6.18.2')
+        self.assertEqual(default_entry(entries, 'gone-*').id, 'arch-77aa-6.18.2')
 
 
 if __name__ == '__main__':

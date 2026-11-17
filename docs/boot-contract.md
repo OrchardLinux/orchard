@@ -8,7 +8,9 @@ two standards, applied with as few additions as possible:
 
 Status (2026-11-01): implemented. The installer writes it, and `orchard launch`
 boots it through m1n1's boot manager (orchard m1n1 patches 0007-0010, see
-[Host and m1n1](#host-and-m1n1)); hardware-tested on J71b. It replaces the old layout (root directory on an "OmarchySystems"
+[Host and m1n1](#host-and-m1n1)); hardware-tested on J71b. The default entry
+from `loader.conf` and m1n1's autoboot (patches 0016-0018, 2026-11-17) are
+unit-tested only so far. It replaces the old layout (root directory on an "OmarchySystems"
 ext4 partition, launcher kernel, `switch_root`). Old installs are not migrated.
 
 ## Who does what
@@ -16,7 +18,7 @@ ext4 partition, launcher kernel, `switch_root`). Old installs are not migrated.
 | Part | Does | Never does |
 |---|---|---|
 | Bootloader (m1n1 + host) | Reads the boot partition, lists the entries, loads the chosen entry's kernel, initrd and DTB, applies the ADT fill-ins, boots | Mount or read a root filesystem, write to storage |
-| Installer | Creates the boot partition once; creates a root partition per system; unpacks the system's root image and orchard's platform layer into it; writes the system's entry and its files from the layer | Touch APFS beyond the agreed resize; touch another system's partition or files |
+| Installer | Creates the boot partition once; creates a root partition per system; unpacks the system's root image and orchard's platform layer into it; writes the system's entry and its files from the layer; makes the new system the default in `loader.conf` | Touch APFS beyond the agreed resize; touch another system's partition or files |
 | Installed system | Owns its root partition | Install a kernel, initrd or boot entry; touch another system's files |
 
 ## Kernel, DTBs and modules
@@ -67,7 +69,8 @@ placed where iOS's boot chain finds it.
 
 The layout follows BLS:
 - one file per entry under `/loader/entries/<entry-id>.conf` on the boot partition;
-- the entry's files under `/<entry-token>/<version>/`.
+- the entry's files under `/<entry-token>/<version>/`;
+- the default in `/loader/loader.conf`, as systemd-boot keeps it (see [Selection](#selection)).
 
 The entry token is the system's id and the first group of its root's PARTUUID, for example `omarchy-4d6c1a2b`. It keeps systems apart, two installs of one distribution too. The entry is `/loader/entries/<entry-token>-<version>.conf`.
 
@@ -116,17 +119,48 @@ mark.
 
 ## Selection
 
-The host lists every valid entry in BLS order and boots the one the user picks. Invalid entries are listed with the reason and never hidden. Reasons include:
+Like a PC with systemd-boot. m1n1 is the device's boot loader: it reads the
+entries and `loader.conf` and boots the default by itself. It can't live on
+the device yet, so the host puts it there for every start; that is the only
+thing the host adds (see [Start](#start)). Every entry is listed in BLS order;
+invalid entries are listed with the reason and never hidden. Reasons include:
 - missing files;
-- a `devicetree` whose name doesn't match the board;
+- a `devicetree` that isn't this board's (`*-BOARD.dtb` for the board in m1n1's ADT, or the name the host gives);
 - a missing `root=PARTUUID`.
 
-Without a choice, the host boots the first entry in BLS order. A remembered default, like systemd-boot's `loader.conf`, can come later.
+The default comes from `/loader/loader.conf` on the boot partition, in
+systemd-boot's format (one `key value` per line, `#` comments):
+
+```
+default omarchy-4d6c1a2b-*
+```
+
+- `default` is a glob (`*`, `?`, `[...]`, ASCII case ignored), matched against each entry id with or without `.conf`. The first match in BLS order is the default: with the pattern `<entry-token>-*` that is the newest kernel of that system. The last `default` line counts.
+- Without `loader.conf`, without a `default` line, or if it matches nothing, the default is the first bootable entry in BLS order.
+- A matching entry is the default even if it can't boot. Then m1n1 shows why and waits; it starts no other system by itself.
+- Other keys (`timeout`, `editor`, `@saved` and so on) are ignored: there is no menu on the device yet. An unreadable `loader.conf` is ignored with a line on m1n1's console.
+
+Who writes it: the installer sets `default <entry-token>-*` for the system it
+has just installed, keeping every other line; a system's own tools may set the
+same line to make itself the default. The bootloader only reads it.
+
+## Start
+
+| Command | m1n1 starts with | Then |
+|---|---|---|
+| `orchard launch` | `autoboot=1` | m1n1 boots the default by itself. The host hands it over and exits, like pressing power. If the default fails, the reason is on the device's screen and m1n1 waits in its proxy, where `--list` and `--entry` find it. |
+| `orchard launch --list` | nothing (waits) | The host reads the entries (`P_BOOT_ENTRIES`) and shows a picker, default preselected and marked `(default)`, unbootable entries with their reason and not selectable. Enter sends one `P_BOOT_START`; Esc leaves m1n1 waiting. Without a terminal the list is printed and m1n1 waits. |
+| `orchard launch --entry ID` | nothing (waits), unless one already waits | One `P_BOOT_START ID`: exactly that entry or m1n1's reason, never another one. |
+
+The choice at start, autoboot or wait, is what holding a key at power-on is on
+a PC. `autoboot=1` is m1n1's own appended-variable form (like
+`chosen.bootargs=`), written after the image; zero bytes end the payloads.
+With a kernel in the payload (RAM boots) it changes nothing.
 
 ## Host and m1n1
 
-m1n1 does the storage boot and the host only chooses (bootloader decision of
-2026-10-29). This section is the interface between them; the Rust launcher and
+m1n1 does the storage boot and the host only starts m1n1 and, when asked,
+chooses (bootloader decision of 2026-10-29; autoboot 2026-11-17). This section is the interface between them; the Rust launcher and
 `transports/m1n1.py` implement the host side against it. Status per item:
 **done** (in `boot/m1n1/patches/orchard`) or **open**.
 
@@ -145,12 +179,12 @@ sends today.
 
 | m1n1 | Host |
 |---|---|
-| Reads storage (read-only), finds XBOOTLDR, parses and checks the entries, sorts them | Chooses an entry, or takes the first one |
+| Reads storage (read-only), finds XBOOTLDR, parses and checks the entries, sorts them, picks the default from `loader.conf`, boots it with `autoboot=1` | Puts m1n1 on the device with or without `autoboot=1`; without, shows the entries and sends the chosen id |
 | Paints the splash, loads the entry, applies the DT fill-ins, shuts storage down, boots | Shows entries, problems and progress |
 | Reports problems as text | Writes nothing, parses no disk structures, doesn't touch the framebuffer |
 
-Nothing here needs a host: m1n1 can later boot the first (or a remembered)
-entry by itself, as in Asahi's model.
+With `autoboot=1` nothing here needs a host, as in Asahi's model; once m1n1
+can stay on the device, autoboot becomes its normal start.
 
 ### Operations
 
@@ -160,15 +194,16 @@ proper numbers when they go upstream.
 | Op | Status | Arguments | Result |
 |---|---|---|---|
 | `P_MAIN_STORAGE_INIT`, `_SHUTDOWN` (`0xf08`, `0xf09`) | exists | – | ok or error |
-| `P_BOOT_ENTRIES` (`0x1500`) | **done** (0007) | `args[0]`: a 16-byte buffer; `args[1]`: the board's DTB file name, or 0 | m1n1 writes the text's address and size into the buffer |
+| `P_BOOT_ENTRIES` (`0x1500`) | **done** (0007, default 0016) | `args[0]`: a 16-byte buffer; `args[1]`: the board's DTB file name, or 0 for any `*-BOARD.dtb` of the board m1n1 runs on | m1n1 writes the text's address and size into the buffer |
 | `P_BOOT_ENTRIES_FREE` (`0x1501`) | **done** (0007) | `args[0]`: the same buffer | – |
-| `P_BOOT_START` (`0x1502`) | **done** (0008, splash 0009) | `args[0]`: the entry id; `args[1]`: the board's DTB file name, or 0; `args[2]`: flags, bit 0 = no splash | replies OK, then starts the kernel; on failure -1, the reason as a `bls:` or `bootmgr:` line on m1n1's console, and the proxy stays |
+| `P_BOOT_START` (`0x1502`) | **done** (0008, splash 0009) | `args[0]`: the entry id (required; the default is for autoboot); `args[1]`: the board's DTB file name, or 0 as above; `args[2]`: flags, bit 0 = no splash | replies OK, then starts the kernel; on failure -1, the reason as a `bls:` or `bootmgr:` line on m1n1's console, and the proxy stays |
 
 `P_BOOT_ENTRIES` needs `P_MAIN_STORAGE_INIT` first. Its text is BLS syntax:
 
 ```
 contract 1
 entry omarchy-4d6c1a2b-6.18.2-orchard
+default yes
 title Omarchy
 version 6.18.2-orchard
 sort-key omarchy
@@ -184,16 +219,17 @@ problem devicetree is not t8010-j71b.dtb
 - The first line is `contract N`. A host refuses a contract it doesn't know.
 - Then one block per entry, in boot order, each ended by an empty line:
   - the `entry` id: the file name without `.conf` and without a boot counter;
+  - `default yes` in the default entry's block (0016; see [Selection](#selection)). It is an extra key, so hosts that keep keys they don't know read the text as before;
   - the entry's BLS keys in file order (keys BLS doesn't define are left out, so they can't pose as the lines below);
   - `root` if the options name a partition;
   - a `problem` line per reason the entry can't boot, using the rules of [Entries](#entries) and [Selection](#selection). An entry without problems is bootable.
 - If the disk itself can't be read (no GPT, not exactly one XBOOTLDR, no FAT), a single `error TEXT` line follows the contract line instead.
 - Order is systemd-boot's: entries with a sort-key first, by sort-key, machine-id and newest version (UAPI version comparison), then by id, newest first.
 
-`P_BOOT_START` (0008, 0009), in this order:
+`P_BOOT_START` (0008, 0009), in this order; autoboot (0018) does the same for the default entry, after bringing storage up:
 1. Paint the entry's splash (`splash` in the directory of its `linux`, see [Splash](#splash)) centred on black, unless flag bit 0 is set. A missing or broken splash only costs the picture.
-2. Check the entries again and load the bootable entry: linux (an Image at a 2 MiB boundary with room for its `image_size`, or gzip, uncompressed behind the heap), the initrds (concatenated) and the devicetree. The arguments are copied first, then m1n1 lifts any heap limit the host set (`P_HEAPBLOCK_SET_LIMIT`; today's client sets 128 MiB when it connects): an allocation past the limit panics m1n1, and memory above m1n1's heap is m1n1's from here on.
-3. Shut storage down. Only now, so a failure before it leaves storage up for another entry. A second `main_storage_init` in one m1n1 session hangs on A10 (J71b, 2026-11-01: the init answers, the next read never returns and m1n1 stops answering), so a host initialises storage once per session. The NVMe strap release (0006) stays the backend's job.
+2. Check the entries again and load the entry, if it is bootable: linux (an Image at a 2 MiB boundary with room for its `image_size`, or gzip, uncompressed behind the heap), the initrds (concatenated) and the devicetree. The arguments are copied first, then m1n1 lifts any heap limit the host set (`P_HEAPBLOCK_SET_LIMIT`; today's client sets 128 MiB when it connects): an allocation past the limit panics m1n1, and memory above m1n1's heap is m1n1's from here on.
+3. Shut storage down. Only now, so a failure before it leaves storage up for another entry. A second `main_storage_init` in one m1n1 session hangs on A10 (J71b, 2026-11-01: the init answers, the next read never returns and m1n1 stops answering), so m1n1 answers an init while storage is up with success (0017): after a failed autoboot or a failed start a host just initialises again. An init after the shutdown still reaches the hardware. The NVMe strap release (0006) stays the backend's job.
 4. Set the entry's options as bootargs, start cpufreq, the secondary CPUs and the mitigations (as m1n1's payload boot does), prepare the DT, reply OK, boot.
 
 Tested on J71b over Pongo (`orchard launch`) and iBoot (`launcher-kit`, `./launch boot --bare`): Linux runs the entry's kernel with its options and mounts its root from NVMe.

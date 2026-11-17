@@ -144,6 +144,21 @@ class BootEntry(unittest.TestCase):
             with self.assertRaisesRegex(D.InstallError, 'lacks /usr/lib/modules/7.3-orchard/initrd'):
                 D.write_entry(boot, work / 'root', '7.3-orchard', entry, partuuid)
 
+    def test_the_installed_system_becomes_the_default_like_systemd_boot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            boot = Path(directory)
+            self.assertEqual(D.set_default(boot, 'omarchy-4d6c1a2b'), 'default omarchy-4d6c1a2b-*')
+            conf = boot / 'loader/loader.conf'
+            self.assertEqual(conf.read_text(), 'default omarchy-4d6c1a2b-*\n')
+            # Another system installed later takes over; every other line stays where it was.
+            conf.write_text('# mine\ntimeout 3\ndefault omarchy-4d6c1a2b-*\neditor no\ndefault  other\n')
+            D.set_default(boot, 'arch-77aa0011')
+            self.assertEqual(conf.read_text(), '# mine\ntimeout 3\ndefault arch-77aa0011-*\neditor no\n')
+            conf.write_text('timeout 3')
+            D.set_default(boot, 'arch-77aa0011')
+            self.assertEqual(conf.read_text(), 'timeout 3\ndefault arch-77aa0011-*\n')
+            self.assertFalse((boot / 'loader/loader.conf.tmp').exists())
+
     def test_the_system_splash_goes_next_to_its_kernel(self):
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)

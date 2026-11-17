@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Tue, 17 Nov 2026 18:40:47 +0800
+Subject: [PATCH 17/18] storage: Make a second main storage init a no-op while
+ it is up
+
+m1n1 is about to bring main storage up by itself to boot the default
+entry, and if that fails it waits in the proxy, where a host initialises
+storage again before it lists or starts entries. On A10 a second init
+hangs the next read (J71b, 2026-11-01). Remember that storage is up
+between init and shutdown and answer a second init with success.
+
+Assisted-by: LLM
+---
+ src/utils.c | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/src/utils.c b/src/utils.c
+index 22c5b12..96e0116 100644
+--- a/src/utils.c
++++ b/src/utils.c
+@@ -302,7 +302,24 @@ void cpu_sleep(bool deep)
+     }
+ }
+ 
++/*
++ * Main storage stays up between init and shutdown; a second init in that
++ * time is a no-op. m1n1 may have brought it up itself (autoboot) before a
++ * host asks again, and on A10 a second init hangs the next read.
++ */
++static bool storage_up;
++
++static bool main_storage_start(void);
++
+ bool main_storage_init(void)
++{
++    if (storage_up)
++        return true;
++    storage_up = main_storage_start();
++    return storage_up;
++}
++
++static bool main_storage_start(void)
+ {
+     int ans_node = adt_path_offset(adt, "/arm-io/ans");
+ 
+@@ -366,6 +383,7 @@ void main_storage_shutdown(void)
+ {
+     if (!storage_type)
+         return;
++    storage_up = false;
+ 
+     switch (storage_type) {
+         case STORAGE_TYPE_ANS1:

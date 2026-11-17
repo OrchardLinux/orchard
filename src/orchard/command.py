@@ -81,7 +81,10 @@ def main():
                         "(default in a distribution checkout: its last build)")
     guided.add_argument('--manifest', '--release', dest='manifest', help='explicit index or installation manifest')
     launcher = commands.add_parser('launch', help="start an installed system from the device's boot entries")
-    launcher.add_argument('--entry', help='boot entry id to start without asking')
+    launch_choice = launcher.add_mutually_exclusive_group()
+    launch_choice.add_argument('--list', action='store_true', dest='list_entries',
+                               help='choose the entry to start from the list (m1n1 waits for the choice)')
+    launch_choice.add_argument('--entry', help="start exactly this boot entry id, once, instead of the default")
     distros = commands.add_parser('distros', help='list or register distro index locations')
     distros.add_argument('name', nargs='?')
     distros.add_argument('source', nargs='?')
@@ -233,7 +236,7 @@ def main():
                 result = install(source, progress=progress)
             elif args.action == 'launch':
                 from orchard.launch import launch
-                result = launch(entry=args.entry, progress=progress)
+                result = launch(entry=args.entry, list_entries=args.list_entries, progress=progress)
             elif args.action == 'distros':
                 if bool(args.name) != bool(args.source):
                     raise ValueError('Use orchard distros NAME INDEX_URL_OR_FILE, or orchard distros to list')
