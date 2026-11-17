@@ -31,8 +31,11 @@ class ModuleStaging(unittest.TestCase):
                     mock.patch.object(module.subprocess, 'run') as run:
                 module.main()
             which.assert_not_called()
-            run.assert_called_once_with(['depmod', '-b', str(output.resolve()), 'test-release'],
-                                        check=True)
+            self.assertEqual(run.call_args_list, [
+                mock.call(['llvm-strip-19', '--strip-debug',
+                           str(output / 'lib/modules/test-release/kernel/test.ko')], check=True),
+                mock.call(['depmod', '-b', str(output.resolve()), 'test-release'], check=True),
+            ])
             self.assertEqual((output / 'lib/modules/test-release/kernel/test.ko').read_bytes(),
                              b'test-module')
 

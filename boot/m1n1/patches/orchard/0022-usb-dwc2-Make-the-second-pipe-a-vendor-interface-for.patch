@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Fri, 6 Nov 2026 20:53:31 +0800
+Subject: [PATCH 22/22] usb: dwc2: Make the second pipe a vendor interface for
+ the proxy
+
+A host reaching the proxy through its serial driver is limited by that driver.
+Declare the second pipe as vendor class, which no host driver claims, so a host
+can use its bulk endpoints directly, and let the proxy listen on it too. The
+first pipe stays a serial port, and SET_CONTROL_LINE_STATE still opens either.
+
+Assisted-by: LLM
+---
+ src/usb.c      |  5 +++++
+ src/usb_dwc2.c | 10 ++++++----
+ 2 files changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/src/usb.c b/src/usb.c
+index fce0d5d..4297f4d 100644
+--- a/src/usb.c
++++ b/src/usb.c
+@@ -391,6 +391,11 @@ int usb_complex_init(struct usb_complex_config *config)
+     iodev_register_device(IODEV_USB0, usb_iodev);
+     printf("USB0: initialized at %p\n", opaque);
+ 
++    /* The proxy also listens on the second pipe, the host's raw way in. */
++    usb_type = USB_TYPE_DWC2;
++    usb_iodev_vuart_setup(IODEV_USB0);
++    iodev_usb_vuart.usage = USAGE_UARTPROXY;
++
+     usb_is_initialized = true;
+     set32(config->USB2Phy_Base + USBX_OTG_SIG, USBX_OTG_SIG_VBUSDET_FORCE_EN);
+ 
+diff --git a/src/usb_dwc2.c b/src/usb_dwc2.c
+index d1cd0f9..56117ed 100644
+--- a/src/usb_dwc2.c
++++ b/src/usb_dwc2.c
+@@ -285,7 +285,9 @@ static const struct cdc_dev_desc cdc_configuration_descriptor = {
+         },
+ 
+     /*
+-     * CDC ACM interface for virtual uart
++     * Second pipe: a vendor interface, so that no host serial driver sits
++     * between the proxy and the bulk endpoints. The class-specific descriptors
++     * stay, and hosts ignore them here; SET_CONTROL_LINE_STATE still opens it.
+      */
+ 
+     .sec_interface_management =
+@@ -295,8 +297,8 @@ static const struct cdc_dev_desc cdc_configuration_descriptor = {
+             .bInterfaceNumber = 2,
+             .bAlternateSetting = 0,
+             .bNumEndpoints = 1,
+-            .bInterfaceClass = CDC_INTERFACE_CLASS,
+-            .bInterfaceSubClass = CDC_INTERFACE_SUBCLASS_ACM,
++            .bInterfaceClass = 0xff,
++            .bInterfaceSubClass = 0,
+             .bInterfaceProtocol = CDC_INTERFACE_PROTOCOL_NONE,
+             .iInterface = 0,
+ 
+@@ -331,7 +333,7 @@ static const struct cdc_dev_desc cdc_configuration_descriptor = {
+             .bInterfaceNumber = 3,
+             .bAlternateSetting = 0,
+             .bNumEndpoints = 2,
+-            .bInterfaceClass = CDC_INTERFACE_CLASS_DATA,
++            .bInterfaceClass = 0xff,
+             .bInterfaceSubClass = 0, // unused
+             .bInterfaceProtocol = 0, // unused
+             .iInterface = 0,
+-- 
+2.54.0 (Apple Git-157)
+

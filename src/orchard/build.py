@@ -25,7 +25,7 @@ from . import explain, sources, kernel as kernels
 # src/orchard/kernel_sdk.py and orchard.kernel's build functions. Their text is
 # not part of the cache key, so a refactor rebuilds nothing; raise this when a
 # change alters what they produce (files, contents or layout of a kernel bundle).
-KERNEL_PRODUCER = 2  # 2: only modules.order is staged, not stale .ko files
+KERNEL_PRODUCER = 3  # 3: strip module debug sections from staged outputs
 
 
 PAYLOAD = 'payload.toml'

@@ -56,12 +56,23 @@ def main():
     for p in builtin:
         shutil.copyfile(p, dest / p.name)
     (dest / 'modules.order').write_text(''.join(n + '\n' for n in names))
+    # Debug sections belong in the build tree, not the boot filesystem.
+    modules = [str(dest / relative) for _, relative in rows]
     if buildenv.native():
+        if modules:
+            subprocess.run(['llvm-strip-19', '--strip-debug', *modules], check=True)
         subprocess.run(['depmod', '-b', str(args.output.resolve()), release], check=True)
     else:
         podman = shutil.which('podman')
         if podman is None:
             parser.error('Podman is required')
+        if modules:
+            subprocess.run([podman, 'run', '--rm', '--network', 'none', '--userns', 'keep-id',
+                            '-v', f'{args.output.resolve()}:/stage:rw,z',
+                            'localhost/orchard-hardware-kernel-toolchain:bookworm',
+                            'llvm-strip-19', '--strip-debug',
+                            *['/stage/' + str(Path(p).relative_to(args.output)) for p in modules]],
+                           check=True)
         subprocess.run([podman, 'run', '--rm', '--network', 'none', '--userns', 'keep-id',
                         '-v', f'{args.output.resolve()}:/stage:rw,z',
                         'localhost/orchard-hardware-kernel-toolchain:bookworm',

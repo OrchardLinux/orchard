@@ -39,7 +39,8 @@ coldplug() {
     done
     echo "$i" > /run/storage-fence
 ) &
-coldplug
+# Peripheral firmware loading must not hold up the USB shell and SSH.
+coldplug &
 
 # USB serial, USB network and SSH for `orchard shell/exec/push/pull`.
 sh /usr/libexec/orchard/usb-session || echo 'USB session failed; see above'
