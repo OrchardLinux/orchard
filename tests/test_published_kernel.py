@@ -29,6 +29,14 @@ def bundle():
 
 
 class PublishedKernel(unittest.TestCase):
+    def test_published_m1n1_lists_all_outputs_from_its_one_build(self):
+        with tempfile.TemporaryDirectory() as directory:
+            keys = published.write_keys(ROOT, [], Path(directory) / 'keys.json')
+        loader = keys['shared']['m1n1']
+        self.assertEqual(loader['asset'], 'm1n1.bin')
+        self.assertEqual(loader['files'],
+                         ['m1n1.bin', 'm1n1-idevice.macho', 'monitor-stub.macho'])
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
