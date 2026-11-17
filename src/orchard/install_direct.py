@@ -597,17 +597,18 @@ def mount_new_root(connection, node, boot_node):
 
 
 def kernel_package(connection, layer, directory):
-    """The root's kernel package, pacstrap's way: the newest published linux-orchard-PLATFORM of the root's base.
+    """The root's kernel package, pacstrap's way: the published linux-orchard-PLATFORM that wraps this layer.
 
     Downloaded here (kernel_packages.py), uploaded to /run/orchard, and installed by the root's own
-    pacman or apk (install_device.py). None when the root has neither or the repository publishes
-    no package for the platform yet: the layer's files are installed then.
+    pacman or apk (install_device.py). None when the root has neither or no published package wraps
+    exactly this layer (a nightly or local layer): the layer's files are installed then.
     """
     from . import kernel_packages
     base = shell(connection, kernel_packages.DETECT).decode().strip()
     if base not in kernel_packages.ARCH:
         return None
-    entry = kernel_packages.resolve(base, *kernel_packages.layer_platform(layer))
+    layer_sha256 = hashlib.sha256(Path(layer).read_bytes()).hexdigest()
+    entry = kernel_packages.resolve(base, *kernel_packages.layer_platform(layer), layer_sha256)
     if entry is None:
         return None
     path = kernel_packages.download(entry, directory)

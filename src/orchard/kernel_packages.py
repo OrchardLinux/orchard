@@ -25,6 +25,8 @@ import zlib
 from .http import open_url
 
 REPOSITORY = 'https://github.com/OrchardLinux/packages/releases/download'
+# The recipe's pin: which orchard release's layer (sha256) the published package wraps.
+PIN = 'https://raw.githubusercontent.com/OrchardLinux/packages/main/packages/linux-orchard-{platform}/source.json'
 # The repositories' architecture names for orchard's kernel architectures (platform.json).
 ARCH = {'pacman': {'arm64': 'aarch64', 'arm': 'armv7h'}, 'apk': {'arm64': 'aarch64', 'arm': 'armv7'}}
 INDEX = {'pacman': 'repo-{arch}/orchard.db', 'apk': '{arch}/APKINDEX.tar.gz'}
@@ -87,8 +89,13 @@ def apk_identity(data):
     raise ValueError('The apk package has no .PKGINFO')
 
 
-def resolve(base, platform, architecture):
-    """The repository's newest linux-orchard-PLATFORM for BASE: its entry and URL, or None if none is published."""
+def resolve(base, platform, architecture, layer_sha256):
+    """The published linux-orchard-PLATFORM for BASE if it wraps exactly this layer: its entry and URL, else None.
+
+    The package is the layer of an orchard release; installing another layer (a nightly, a local
+    build, another release) must not swap in a different kernel, so the recipe's pin has to name
+    this layer's sha256 and the published version has to be that pin's release.
+    """
     arch = ARCH[base][architecture]
     name = 'linux-orchard-' + platform
     directory = INDEX[base].format(arch=arch)
@@ -99,6 +106,13 @@ def resolve(base, platform, architecture):
         return None
     entry = (pacman_entry if base == 'pacman' else apk_entry)(index, name)
     if entry is None or not re.fullmatch(r'[A-Za-z0-9@._+-]+', entry['file'] or ''):
+        return None
+    try:
+        with open_url(PIN.format(platform=platform), timeout=60) as response:
+            pin = json.loads(response.read())
+    except (OSError, ValueError):
+        return None
+    if pin.get('sha256') != layer_sha256 or not str(entry['version']).startswith(f'{pin.get("orchard")}-'):
         return None
     release = directory.rsplit('/', 1)[0]
     return {**entry, 'name': name, 'base': base, 'url': f'{REPOSITORY}/{release}/{entry["file"]}'}

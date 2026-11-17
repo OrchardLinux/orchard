@@ -58,9 +58,12 @@ class Repository(unittest.TestCase):
         identity = 'Q1' + base64.b64encode(hashlib.sha1(control).digest()).decode()
         index = gzip.compress(tar({'APKINDEX': f'C:{identity}\nP:linux-orchard-apple-armv7\nV:0.4.0-r0\n\n'.encode()}))
         answers = {K.REPOSITORY + '/armv7/APKINDEX.tar.gz': index,
-                   K.REPOSITORY + '/armv7/linux-orchard-apple-armv7-0.4.0-r0.apk': data}
+                   K.REPOSITORY + '/armv7/linux-orchard-apple-armv7-0.4.0-r0.apk': data,
+                   K.PIN.format(platform='apple-armv7'): b'{"orchard": "0.4.0", "sha256": "aa"}'}
         with mock.patch.object(K, 'open_url', lambda url, timeout: io.BytesIO(answers[url])):
-            entry = K.resolve('apk', 'apple-armv7', 'arm')
+            # Another layer (a nightly, a local build) keeps its own kernel: no package.
+            self.assertIsNone(K.resolve('apk', 'apple-armv7', 'arm', 'bb'))
+            entry = K.resolve('apk', 'apple-armv7', 'arm', 'aa')
             self.assertEqual(entry['url'], K.REPOSITORY + '/armv7/linux-orchard-apple-armv7-0.4.0-r0.apk')
             with tempfile.TemporaryDirectory() as directory:
                 self.assertEqual(K.download(entry, directory).read_bytes(), data)
@@ -71,7 +74,7 @@ class Repository(unittest.TestCase):
 
     def test_an_unreachable_repository_is_no_package(self):
         with mock.patch.object(K, 'open_url', side_effect=OSError('offline')):
-            self.assertIsNone(K.resolve('pacman', 'apple-16k', 'arm64'))
+            self.assertIsNone(K.resolve('pacman', 'apple-16k', 'arm64', 'aa'))
 
     def test_the_layer_names_its_platform(self):
         with tempfile.TemporaryDirectory() as directory:
