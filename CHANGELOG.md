@@ -18,6 +18,15 @@ is missing or empty.
 - iPad 6 and 7: the headphone jack works; plugging in switches the sound to
   the headphones, unplugging switches back.
 
+### Install & launch
+
+- Several systems on one device boot like a multi-boot PC: `orchard launch`
+  no longer asks, m1n1 starts the default system by itself. Installing a
+  system makes it the default (systemd-boot's `loader.conf`, which a system
+  can also set). `orchard launch --list` picks an entry with the arrow keys,
+  `--entry ID` starts one entry once. If the default can't start, the iPad
+  shows why and waits for `--list` or `--entry`.
+
 ## [0.3.1] - 2026-11-15
 
 ### Devices
