@@ -211,6 +211,9 @@ unit to unit of the same model. Those units select it the same way everywhere:
 Wi-Fi works this way (brcmfmac: `module-instance`, vendor and antenna values),
 and so does the iPhone X touchscreen (`hid-merge-personality`, file
 `apple/d221-touch-<variant>.bin`).
+Bluetooth on the A10 boards whose Wi-Fi and Bluetooth share a module follows
+the Wi-Fi OTP: brcmfmac records the module vendor in the device tree, and
+hci_bcm loads `brcm/BCM.apple,<board>-MUR.hcd` or `-USI.hcd` for it.
 
 So adding a variant is one more output in the recipe, with no kernel change. A
 contribution delivers what it tested and doesn't have to cover other units, but
