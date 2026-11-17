@@ -29,7 +29,8 @@ status = "experimental"
 
 # States: working, untested, missing, none (features.toml).
 [features]
-display = "untested"
+# Display DART/SMMU pattern CRC and imported-plane scanout verified on J71t.
+display = "working"
 screen_off = "untested"
 backlight = "untested"
 touch = "untested"
