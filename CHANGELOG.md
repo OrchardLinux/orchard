@@ -23,6 +23,8 @@ is missing or empty.
 
 ### Devices
 
+- iPad mini 4: display, backlight, buttons, Wi-Fi, battery and the USB console
+  and network are marked working, as seen during its bring-up.
 - A10 iPads: if the video decoder firmware is missing, sound keeps working and
   the decoder just stays off.
 - iPad 6 and 7: the headphone jack works; plugging in switches the sound to
