@@ -40,6 +40,15 @@ implementation never does. The charger therefore keeps the input grant for
 any nonzero `0x18a`, including charge end, timeout and `0x40` (not
 charging), and treats `0x00` as no input.
 
+iOS's own presence test is `0x189`, not `0x18a`: `AppleD2365PMUPowerSource`
+(`…6bc0278`) reports "connected" from bit 0, and for a dock that was not
+connected it also requires bit 1. Events 16, 40–43, 72 and 77 (its only
+subscription, masks at `…5915d68`/`…5915d86`) are each handed to
+AppleARMPMUCharger as a power-source change (`causeChargerEvent`, flag 2),
+which debounces 50 ms and then reads that state again; the input limit is not
+touched on the way. The Linux charger still uses `0x18a` = 0 as no input; its
+development trace logs `0x189` to compare the two on the device.
+
 ## Input-limit encoding
 
 Nominal: **mA = code × 12.5 + 75**. Linux, rounding down:

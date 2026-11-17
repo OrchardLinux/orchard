@@ -40,12 +40,16 @@ unidentified gets 500 mA.
 
 Three more properties make a grant adaptive and not just a lookup:
 
-- **Start conservative.** Every attachment starts at the fallback. A higher
-  grant comes only after identification.
-- **Ramp with guards.** The limit rises in steps, and only inside a battery
-  window.
-- **Withdraw first.** Any sign that the source changed drops the grant
-  before anything else happens. Attribution comes afterwards.
+- **Start conservative.** Every attachment waits at the 100 mA attach
+  default until it is identified, as iOS does. A grant comes only after
+  identification.
+- **Ramp with guards.** The limit rises the way iOS 16 ramps it (100 mA held
+  for 100 ms, then 100 mA steps 10 ms apart), and only inside a battery window.
+- **Follow iOS on events.** Once the source is identified, a PMU source
+  event only pauses the ramp for 50 ms; the grant ends when the input is lost
+  or the allowance falls. Until 2026-11 the J71b driver withdrew first and
+  attributed afterwards; iOS does not, and that cost the battery up to
+  522 mA for seconds on every event 40 under load (see §2.5).
 
 **Why a fixed 1425 mA is not acceptable.** A USB 2.0 port only has to
 supply 500 mA to a configured device, and 100 mA before configuration.
@@ -88,8 +92,8 @@ exceeds what is allowed.
 | Phase | Entry | What happens |
 |---|---|---|
 | EMPTY | `0x18a` = 0 | Writes the handoff `0x02` and forgets the source, `usb_ma` included |
-| SETTLING | `0x18a` ≠ 0 with no source present → `tristar_new_attachment()` | Writes the fallback. Early look at 300 ms, before USB enumerates (0009). Identifies at 1000 ms (`tristar_run_identification()`) |
-| RAMPING | target above the fallback | `tristar_ramp_step()`: +500 mA every 500 ms. Before each step it reads the pack and falls back if the pack is outside the window |
+| SETTLING | `0x18a` ≠ 0 with no source present → `tristar_new_attachment()` | Writes the 100 mA handoff (iOS draws nothing more before the grant ramps). Early look at 300 ms, before USB enumerates (0009). Identifies at 1000 ms (`tristar_run_identification()`) |
+| RAMPING | target above the current limit | `tristar_ramp_step()`, as iOS 16: from the handoff, 100 mA held for 100 ms, then +100 mA steps, each waiting 1 ms per 10 mA of the previous step (10 ms). Steps pause for 50 ms after a PMU source event. Before each step it reads the pack and falls back if the pack is outside the window |
 | CHARGING | target reached | `tristar_guard()` once a second: `tristar_check_limit()` (0013), then the pack window |
 | FAULT | mux restore failed, limit write failed, event storm | Holds the fallback until reboot |
 
@@ -134,9 +138,9 @@ before enumeration. Background: `tristar-cbtl1610.md`, `brickid.md`,
 3. The J71b DT sets `usb-psy-name = "lightning"`. The iPad 7 DT deletes the
    property.
 4. `tristar_set_property()` stores `usb_ma` only while a source is present.
-   It also records the event epoch of the report. `tristar_usb_ma()` counts
-   the allowance only within that epoch, because the UDC does not always
-   notice the host going away. A PMU source event therefore ends it.
+   As in iOS 16 (IOUSBDeviceController), only the USB session (reset,
+   disconnect, suspend) or the end of the attachment changes it. A PMU
+   source event does not.
 5. `tristar_target_code()` takes max(source, host allowance), capped at the
    board maximum. Anything at or below 500 mA maps to the fallback. A lower
    allowance withdraws at once; a higher one ramps
@@ -155,15 +159,17 @@ The meaning of `0x62` is not established.
   hands out each event as an IRQ. This is the one-owner rule
   (`pmu-events.md`). The charger requests the line (240), ADC done (176)
   and the events the iPadOS charger subscribes to: 16, 40–43, 72 and 77.
-- `tristar_line_irq()` runs **before** the block is read. It writes the
-  fallback and reads it back without taking the policy lock. The block is
-  read only after that.
-- `tristar_source_irq()` withdraws again, bumps the epoch and kicks the
-  poll. A new epoch invalidates any ADC result, identification or host
-  allowance in flight. An ADC completion nobody asked for counts as a
-  source event.
-- When the line asserted but no source event followed, the poll ramps back
-  after 200 ms (`TRISTAR_LINE_SETTLE_MS`).
+- `tristar_line_irq()` runs **before** the block is read and does nothing:
+  iOS acts only on the events.
+- Once the source is identified, `tristar_source_irq()` does what iOS 16
+  does (AppleD2365PMUPowerSource hands each of these events to
+  AppleARMPMUCharger as a power-source change): it keeps the input limit and
+  the host allowance, holds the ramp, and the status is read again 50 ms
+  after the last event. A lost input then ends the grant through the
+  input-loss path.
+- Before that, it withdraws, bumps the epoch and kicks the poll. A new epoch
+  invalidates an ADC result or identification in flight. An ADC completion
+  nobody asked for counts as a source event.
 - More than 200 source events in one second means something is stuck. The
   driver then goes to FAULT and disables the source IRQs.
 - Event 73 is left out because it latches every few seconds near 2 A with
@@ -256,12 +262,12 @@ exports `online`, `status`, `charge_type` and `input_current_limit`.
 |---|---|---|
 | Source identification | BrickID, CC, BC1.2, host grant | None |
 | Grant | Per source, capped at the DT maximum | Fixed 1425 mA from match data |
-| Start | Fallback 500 mA, then ramp | Jumps 100 → 1425 mA |
-| Ramp | 500 mA every 500 ms, pack check before each step | None |
+| Start | Handoff 100 mA until identified, then ramp | Jumps 100 → 1425 mA |
+| Ramp | iOS 16: 100 mA held 100 ms, then 100 mA every 10 ms; pack check before each step | None |
 | Pack guards | 5–40 °C, 3.2–4.35 V, \|I\| ≤ 3 A; before each step and every 1 s | 10–40 °C, 3.0–4.35 V; no current check; every 5 s |
 | Limit read-back | Every 1 s; restore or lower (0013) | Every 5 s; `0x02` within 15 s is rewritten (0010), anything else stops the policy |
-| Withdrawal trigger | PMU line IRQ, write before attribution, about 1 ms | Bellatrix poll (≤ 1 s) → `power_supply_changed` → workqueue |
-| Swap without a VBUS gap | Event epoch catches it | Not seen (Bellatrix stays online) |
+| Withdrawal trigger | Input lost (`0x18a` = 0, poll ≤ 100 ms) or allowance lowered; PMU events are debounced 50 ms, as in iOS | Bellatrix poll (≤ 1 s) → `power_supply_changed` → workqueue |
+| Swap without a VBUS gap | Not seen by PMU events, as in iOS; a USB host change still ends its allowance through the USB session (reset, disconnect) | Not seen (Bellatrix stays online) |
 | Host grant | `usb-psy-name` → `set_property` | Not wired (`usb-psy-name` deleted on iPad 7) |
 | Unexplained limit at start | Lowered to the fallback | Policy refuses; limit left as found |
 | Suspend | Wakes on plug; keeps a charger, parks a USB host | Wakes on plug; keeps its limit |
