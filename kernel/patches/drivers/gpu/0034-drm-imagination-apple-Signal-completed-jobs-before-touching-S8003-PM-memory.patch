@@ -1,0 +1,48 @@
+From a6c0ea12f1712e9c17a642867025f7612fcef9cd Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 17:45:06 +0100
+Subject: [PATCH] drm/imagination: apple: Signal completed jobs before touching
+ S8003 PM memory
+
+The S8003 event callback reads firmware and PM cache lines before completed
+job fences are signalled. That host work delays the next scheduled job even
+though completion stamps are already visible through coherent mappings.
+
+Signal the fences and retire their runtime-PM references first, then run
+the chip event callback. Keep the A10 event acknowledgement before its
+retirement-watermark check, as before. No submission dependency changes.
+
+Affects: Apple A9 (S8003). The A10 acknowledgement order is unchanged.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_apple.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_apple.c b/drivers/gpu/drm/imagination/pvr_apple.c
+index 5a43e3f..6c72c88 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple.c
++++ b/drivers/gpu/drm/imagination/pvr_apple.c
+@@ -759,9 +759,7 @@ static void pvr_apple_poll_work(struct work_struct *work)
+ 	bool pending = false;
+ 	int engine;
+ 
+-	if (apple->chip->events)
+-		apple->chip->events(apple);
+-	else
++	if (!apple->chip->events)
+ 		pvr_apple_ack_events(apple);
+ 	spin_lock_irq(&apple->fence_lock);
+ 	for (engine = 0; engine < APPLE_ENGINES; engine++) {
+@@ -795,6 +793,11 @@ static void pvr_apple_poll_work(struct work_struct *work)
+ 	}
+ 	spin_unlock_irq(&apple->fence_lock);
+ 	pvr_apple_jobs_retired(apple, retired);
++	/* Completion stamps need no touch. Signal first, then let S8003
++	 * touch and drain its rings. A10 acknowledgement above is unchanged.
++	 */
++	if (apple->chip->events)
++		apple->chip->events(apple);
+ 
+ 	/* The firmware sends no completion message in this setup: poll. */
+ 	if (pending)
