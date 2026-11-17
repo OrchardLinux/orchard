@@ -1,0 +1,116 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 23:35:12 +0100
+Subject: [PATCH 33/38] drm/imagination: Keep a job's fence on its VM
+
+A VM_BIND client supplies no per-job buffer list. Its VM reservation must
+therefore retain every queued job before idle mappings can be reclaimed.
+Prepare the VM reservation in the existing drm_exec pass, reserving space
+for the whole submission even when several jobs share it. Add each armed
+finished fence with BOOKKEEP usage before queueing.
+
+Track the latest finished-fence retirement timestamp under the VM lock.
+Reclaim skips a signalled fence until its timestamp is published, and
+requires a full quiet period after the latest retirement. No job lifetime
+is extended into a fence-signalling callback.
+
+Affects: every PowerVR device
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_job.c | 10 ++++++++++
+ drivers/gpu/drm/imagination/pvr_job.h |  1 +
+ drivers/gpu/drm/imagination/pvr_vm.c  |  9 +++++++++
+ drivers/gpu/drm/imagination/pvr_vm.h  |  1 +
+ 4 files changed, 21 insertions(+)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_job.c b/drivers/gpu/drm/imagination/pvr_job.c
+index 48a1cbc..bd0dc2d 100644
+--- a/drivers/gpu/drm/imagination/pvr_job.c
++++ b/drivers/gpu/drm/imagination/pvr_job.c
+@@ -16,6 +16,7 @@
+ #include "pvr_stream_defs.h"
+ #include "pvr_sync.h"
+ #include "pvr_trace.h"
++#include "pvr_vm.h"
+ 
+ #include <drm/drm_exec.h>
+ #include <drm/drm_gem.h>
+@@ -577,6 +578,10 @@ jobs_lock_all_objs(struct drm_exec *exec, struct pvr_job_data *job_data,
+ 				return err;
+ 		}
+ 
++		err = drm_exec_prepare_obj(exec, pvr_vm_resv_obj(job->ctx->vm_ctx), job_count);
++		if (err)
++			return err;
++
+ 		if (job->hwrt) {
+ 			err = drm_exec_prepare_obj(exec, pvr_hwrt_data_resv_obj(job->hwrt), 1);
+ 			if (err)
+@@ -605,6 +610,11 @@ prepare_job_resvs_for_each(struct drm_exec *exec, struct pvr_job_data *job_data,
+ static void
+ update_job_resvs(struct pvr_job *job)
+ {
++	struct dma_fence *fence = &job->base.s_fence->finished;
++
++	dma_resv_add_fence(pvr_vm_get_dma_resv(job->ctx->vm_ctx), fence,
++			   DMA_RESV_USAGE_BOOKKEEP);
++
+ 	if (job->hwrt) {
+ 		enum dma_resv_usage usage = job->type == DRM_PVR_JOB_TYPE_GEOMETRY ?
+ 					    DMA_RESV_USAGE_WRITE : DMA_RESV_USAGE_READ;
+diff --git a/drivers/gpu/drm/imagination/pvr_job.h b/drivers/gpu/drm/imagination/pvr_job.h
+index 0ca003c..44ac047 100644
+--- a/drivers/gpu/drm/imagination/pvr_job.h
++++ b/drivers/gpu/drm/imagination/pvr_job.h
+@@ -31,6 +31,7 @@ struct pvr_job {
+ 	/** @base: drm_sched_job object. */
+ 	struct drm_sched_job base;
+ 
++
+ 	/** @ref_count: Refcount for job. */
+ 	struct kref ref_count;
+ 
+diff --git a/drivers/gpu/drm/imagination/pvr_vm.c b/drivers/gpu/drm/imagination/pvr_vm.c
+index bad2742..4988a62 100644
+--- a/drivers/gpu/drm/imagination/pvr_vm.c
++++ b/drivers/gpu/drm/imagination/pvr_vm.c
+@@ -55,6 +55,9 @@ struct pvr_vm_context {
+ 	/** @lock: Global lock on this VM. */
+ 	struct mutex lock;
+ 
++	/* Latest published job retirement, updated under lock when checking idle. */
++	ktime_t last_retired;
++
+ 	/**
+ 	 * @pins: Ranges that map and unmap requests must leave alone, as
+ 	 * &struct pvr_vm_pin. Protected by @lock.
+@@ -608,6 +611,7 @@ pvr_vm_create_context(struct pvr_device *pvr_dev, bool is_userspace_context)
+ 		       0, 1ULL << device_addr_bits, 0, 0, &pvr_vm_gpuva_ops);
+ 
+ 	mutex_init(&vm_ctx->lock);
++	vm_ctx->last_retired = ktime_get();
+ 	INIT_LIST_HEAD(&vm_ctx->pins);
+ 	kref_init(&vm_ctx->ref_count);
+ 
+@@ -1515,3 +1519,8 @@ pvr_vm_get_fw_mem_context(struct pvr_vm_context *vm_ctx)
+ {
+ 	return vm_ctx->fw_mem_ctx_obj;
+ }
++
++struct drm_gem_object *pvr_vm_resv_obj(struct pvr_vm_context *vm_ctx)
++{
++	return drm_gpuvm_resv_obj(&vm_ctx->gpuvm_mgr);
++}
+diff --git a/drivers/gpu/drm/imagination/pvr_vm.h b/drivers/gpu/drm/imagination/pvr_vm.h
+index f7a4f1c..be5c99c 100644
+--- a/drivers/gpu/drm/imagination/pvr_vm.h
++++ b/drivers/gpu/drm/imagination/pvr_vm.h
+@@ -65,6 +65,7 @@ void pvr_vm_unmap_all(struct pvr_vm_context *vm_ctx);
+ 
+ dma_addr_t pvr_vm_get_page_table_root_addr(struct pvr_vm_context *vm_ctx);
+ struct dma_resv *pvr_vm_get_dma_resv(struct pvr_vm_context *vm_ctx);
++struct drm_gem_object *pvr_vm_resv_obj(struct pvr_vm_context *vm_ctx);
+ 
+ int pvr_static_data_areas_get(const struct pvr_device *pvr_dev,
+ 			      struct drm_pvr_ioctl_dev_query_args *args);

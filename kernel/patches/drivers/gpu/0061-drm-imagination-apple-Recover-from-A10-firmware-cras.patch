@@ -1,0 +1,244 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Tue, 17 Nov 2026 17:54:54 +0800
+Subject: [PATCH] drm/imagination: apple: Recover from A10 firmware crashes as
+ from A9 faults
+
+The S8003 latched a firmware fault in its own data: its waits ended at
+once and the oldest bound job's scheduler reset the GPU within
+milliseconds. The T8010 reports the same condition through RTKit's
+crash callback, but only logged it, and every waiter ran into its
+timeout (5 s) before the GPU was reset.
+
+Move the latch into the shared state. pvr_apple_firmware_fault() sets it
+once per firmware boot, captures the MMU state and faults the oldest
+bound scheduler; the S8003 fault event and the T8010 crash callback both
+call it. The shared waits end with -EIO once it is set, like the S8003's
+own. The chip fault getter goes; debugfs reads the shared flag.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_apple.c       | 32 +++++++++++++------
+ drivers/gpu/drm/imagination/pvr_apple_chip.h  |  3 +-
+ drivers/gpu/drm/imagination/pvr_apple_s8003.c | 26 ++++-----------
+ drivers/gpu/drm/imagination/pvr_apple_t8010.c |  1 +
+ 4 files changed, 31 insertions(+), 31 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_apple.c b/drivers/gpu/drm/imagination/pvr_apple.c
+index 425105fb08..1eeaeb322b 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple.c
++++ b/drivers/gpu/drm/imagination/pvr_apple.c
+@@ -667,9 +667,12 @@ static u32 pvr_apple_completed_seq(struct pvr_apple *apple)
+ static int pvr_apple_wait(struct pvr_apple *apple, u32 seq, unsigned int timeout_us)
+ {
+ 	u32 done;
++	int err;
+ 
+-	return read_poll_timeout(pvr_apple_completed_seq, done, (s32)(done - seq) >= 0, 1000,
+-				 timeout_us, false, apple);
++	err = read_poll_timeout(pvr_apple_completed_seq, done,
++				(s32)(done - seq) >= 0 || READ_ONCE(apple->fault), 1000,
++				timeout_us, false, apple);
++	return !err && (s32)(done - seq) < 0 ? -EIO : err;
+ }
+ 
+ static u32 pvr_apple_engine_done(struct pvr_apple *apple, enum pvr_apple_engine engine)
+@@ -734,8 +737,7 @@ static int pvr_apple_jobs_show(struct seq_file *s, void *unused)
+ 		submitted[engine] = pvr_apple_engine_last(apple, engine);
+ 		done[engine] = pvr_apple_engine_done(apple, engine);
+ 	}
+-	if (apple->chip->fault)
+-		fault = apple->chip->fault(apple);
++	fault = READ_ONCE(apple->fault);
+ 	spin_lock_irqsave(&apple->fence_lock, flags);
+ 	for (engine = 0; engine < APPLE_ENGINES; engine++)
+ 		list_for_each_entry(fence, &apple->pending[engine], node)
+@@ -774,8 +776,7 @@ static int pvr_apple_jobs_show(struct seq_file *s, void *unused)
+ 		seq_printf(s, "%s submitted %u done %u pending %u\n", names[engine],
+ 			   submitted[engine], done[engine], pending[engine]);
+ 	seq_printf(s, "retired_total %llu\nbusy_ns %llu\n", retired_total, busy_ns);
+-	if (apple->chip->fault)
+-		seq_printf(s, "fault %u\n", fault);
++	seq_printf(s, "fault %u\n", fault);
+ 	seq_printf(s, "runtime_pm_status %s\n", runtime_status);
+ 	seq_printf(s, "fw_irq %s irqs %lld\n", !apple->fw_irq ? "none" : irq_on ? "on" : "off",
+ 		   atomic64_read(&apple->fw_irqs));
+@@ -812,8 +813,12 @@ static int pvr_apple_wait_engine(struct pvr_apple *apple, enum pvr_apple_engine
+ 	 * switch of GPU VM, for every engine; 1 ms steps cost a scene-heavy
+ 	 * WebGL page several milliseconds per frame
+ 	 */
+-	return read_poll_timeout(pvr_apple_engine_poll, done, (s32)(done - seq) >= 0, 20,
+-				 timeout_us, false, apple, engine);
++	int err;
++
++	err = read_poll_timeout(pvr_apple_engine_poll, done,
++				(s32)(done - seq) >= 0 || READ_ONCE(apple->fault), 20,
++				timeout_us, false, apple, engine);
++	return !err && (s32)(done - seq) < 0 ? -EIO : err;
+ }
+ 
+ /* Wait until every engine retired its submitted jobs; submit_lock held */
+@@ -1053,9 +1058,17 @@ void pvr_apple_report_mmu_fault(struct pvr_apple *apple)
+ 	}
+ }
+ 
+-/* Called once when a chip latches a fault, after capturing its MMU state. */
++/*
++ * A chip saw its firmware stop on a fault (an S8003 fault event, a T8010
++ * RTKit crash). Latch it once per boot: waits for the firmware end at once,
++ * the MMU state is captured, and the oldest bound job's scheduler resets
++ * the GPU instead of waiting for its timeout.
++ */
+ void pvr_apple_firmware_fault(struct pvr_apple *apple)
+ {
++	if (xchg(&apple->fault, true))
++		return;
++	pvr_apple_report_mmu_fault(apple);
+ 	atomic_set(&apple->fault_pending, 1);
+ 	pvr_apple_firmware_event(apple);
+ }
+@@ -1857,6 +1870,7 @@ static int pvr_apple_fw_start(struct pvr_apple *apple)
+ 	apple->frag_events = 0;
+ 	apple->geom_pending = false;
+ 	apple->fault_reported = false;
++	WRITE_ONCE(apple->fault, false);
+ 	return apple->chip->start(apple);
+ }
+ 
+diff --git a/drivers/gpu/drm/imagination/pvr_apple_chip.h b/drivers/gpu/drm/imagination/pvr_apple_chip.h
+index 687887d8f3..a95933618f 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple_chip.h
++++ b/drivers/gpu/drm/imagination/pvr_apple_chip.h
+@@ -99,6 +99,7 @@ struct pvr_apple {
+ 	bool stopping;		/* terminal shutdown forbids firmware restart */
+ 	bool booted;
+ 	bool fault_reported;		/* once per firmware boot */
++	bool fault;			/* the firmware stopped on a fault in this boot */
+ 	bool fw_ready;		/* init data handed over once: runtime PM restarts it */
+ 	ktime_t gate_off;		/* last successful runtime power-off */
+ 
+@@ -262,7 +263,6 @@ struct pvr_apple {
+  * @engine_done: The sequence number of the last finished job of @engine. No
+  *	lock held; may be called with interrupts off.
+  * @max_power_state: Highest state licensed for fault capture; optional.
+- * @fault: Read the chip firmware fault flag without waking the GPU.
+  * @events: Read what the firmware posted. Before @engine_done wherever a job
+  *	is waited for; may sleep.
+  * @vm_init: A userspace VM was created: map what the firmware needs in it.
+@@ -316,7 +316,6 @@ struct pvr_apple_chip {
+ 	int (*prepare_job)(struct pvr_apple *apple, struct pvr_job *job);
+ 	int (*submit)(struct pvr_apple *apple, struct pvr_job *job);
+ 	u32 (*engine_done)(struct pvr_apple *apple, enum pvr_apple_engine engine);
+-	bool (*fault)(struct pvr_apple *apple);
+ 	u32 (*max_power_state)(struct pvr_apple *apple);
+ 	void (*events)(struct pvr_apple *apple);
+ 	int (*vm_init)(struct pvr_apple *apple, struct pvr_vm_context *vm_ctx);
+diff --git a/drivers/gpu/drm/imagination/pvr_apple_s8003.c b/drivers/gpu/drm/imagination/pvr_apple_s8003.c
+index 0bbaea56f6..9584e03a5a 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple_s8003.c
++++ b/drivers/gpu/drm/imagination/pvr_apple_s8003.c
+@@ -281,7 +281,6 @@ struct pvr_apple_s8003 {
+ 	struct mutex event_lock;	/* the rings the firmware posts to */
+ 	ktime_t touched;		/* s8003_touch() */
+ 	bool failed;			/* its rings' indices are not ours any more */
+-	bool fault;			/* it posted an event that is neither "alive" nor a stamp */
+ 	bool stamped;			/* it posted a job's stamp since events() last looked */
+ 
+ 	/*
+@@ -1017,11 +1016,7 @@ static int s8003_drain(struct pvr_apple *apple, bool *alive)
+ 			dev_warn_ratelimited(apple_dev(apple), "firmware fault event type=%u slot=%u: %*ph\n",
+ 					     type, get_unaligned_le32(e + 0x0c),
+ 					     S8003_EVENT_SIZE - 4, e + 4);
+-			if (!READ_ONCE(s->fault)) {
+-				WRITE_ONCE(s->fault, true);
+-				pvr_apple_report_mmu_fault(apple);
+-				pvr_apple_firmware_fault(apple);
+-			}
++			pvr_apple_firmware_fault(apple);
+ 		}
+ 		consumer = (consumer + 1) % APPLE_RING_ENTRIES;
+ 		ring_consume(ctl, consumer);
+@@ -1354,12 +1349,11 @@ static u32 s8003_done_poll(struct pvr_apple *apple, enum pvr_apple_engine engine
+ 
+ static int s8003_wait_done(struct pvr_apple *apple, enum pvr_apple_engine engine, u32 seq)
+ {
+-	struct pvr_apple_s8003 *s = apple->chip_data;
+ 	u32 done;
+ 	int err;
+ 
+ 	err = read_poll_timeout(s8003_done_poll, done,
+-				(s32)(done - seq) >= 0 || READ_ONCE(s->fault), 20,
++				(s32)(done - seq) >= 0 || READ_ONCE(apple->fault), 20,
+ 				S8003_JOB_TIMEOUT_US, false, apple, engine);
+ 	if (!err && (s32)(done - seq) < 0) {
+ 		pvr_apple_report_mmu_fault(apple);
+@@ -2286,7 +2280,7 @@ static bool s8003_pm_clean(struct pvr_apple *apple, const struct s8003_pm *pm, u
+ 	struct pvr_apple_s8003 *s = apple->chip_data;
+ 
+ 	return pm->rec_seq && pm->clean && pm->built == s->gen && pm->blocks >= blocks &&
+-	       pm->scene == s->gen && pm->td_seq && !READ_ONCE(s->fault) &&
++	       pm->scene == s->gen && pm->td_seq && !READ_ONCE(apple->fault) &&
+ 	       (s32)(pvr_apple_s8003_engine_done(apple, APPLE_ENGINE_FRAG) - pm->td_seq) >= 0;
+ }
+ 
+@@ -2358,7 +2352,7 @@ static bool pvr_apple_s8003_vm_evictable(struct pvr_apple *apple,
+ 	unsigned int i;
+ 
+ 	lockdep_assert_held(&apple->submit_lock);
+-	if (!vm || READ_ONCE(s->fault))
++	if (!vm || READ_ONCE(apple->fault))
+ 		return false;
+ 	if (vm->attached != s->gen)
+ 		return true;
+@@ -2751,7 +2745,7 @@ static void pvr_apple_s8003_report_hang(struct pvr_apple *apple)
+ 	}
+ 	dev_err(apple_dev(apple),
+ 		"hang: firmware %s, device control %u/%u, Fender state %#x\n",
+-		s->failed ? "rings unreadable" : s->fault ? "posted a fault" : "posted no fault",
++		s->failed ? "rings unreadable" : READ_ONCE(apple->fault) ? "posted a fault" : "posted no fault",
+ 		get32(dc + S8003_RING_CONSUMER),
+ 		get32(dc + S8003_RING_PRODUCER), readl(apple->fender + FENDER_POWER_STATE));
+ }
+@@ -2792,7 +2786,7 @@ static void s8003_jobs_reset(struct pvr_apple_s8003 *s)
+ 		for (i = 0; i < ARRAY_SIZE(vm->pm); i++)
+ 			vm->pm[i].rec_seq = 0;
+ 	WRITE_ONCE(s->failed, false);
+-	WRITE_ONCE(s->fault, false);
++	WRITE_ONCE(s->apple->fault, false);
+ 	memset(s->set_geom, 0, sizeof(s->set_geom));
+ 	memset(s->set_frag, 0, sizeof(s->set_frag));
+ 	memset(s->pmsets.map, 0, s->pmsets.size);
+@@ -3034,13 +3028,6 @@ static u32 pvr_apple_s8003_max_power_state(struct pvr_apple *apple)
+ 	return get32(s8003_object(s, S8003_PLATFORM) + 0x710);
+ }
+ 
+-static bool pvr_apple_s8003_fault(struct pvr_apple *apple)
+-{
+-	struct pvr_apple_s8003 *s = apple->chip_data;
+-
+-	return READ_ONCE(s->fault);
+-}
+-
+ static void pvr_apple_s8003_debugfs_show(struct pvr_apple *apple, struct seq_file *m)
+ {
+ 	struct pvr_apple_s8003 *s = apple->chip_data;
+@@ -3082,7 +3069,6 @@ const struct pvr_apple_chip pvr_apple_chip_s8003 = {
+ 	.prepare_job = s8003_prepare_job,
+ 	.submit = pvr_apple_s8003_submit,
+ 	.engine_done = pvr_apple_s8003_engine_done,
+-	.fault = pvr_apple_s8003_fault,
+ 	.max_power_state = pvr_apple_s8003_max_power_state,
+ 	.events = pvr_apple_s8003_events,
+ 	.vm_init = pvr_apple_s8003_vm_init,
+diff --git a/drivers/gpu/drm/imagination/pvr_apple_t8010.c b/drivers/gpu/drm/imagination/pvr_apple_t8010.c
+index cc841c3067..c6a05d998b 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple_t8010.c
++++ b/drivers/gpu/drm/imagination/pvr_apple_t8010.c
+@@ -124,6 +124,7 @@ static void pvr_apple_crashed(void *cookie, const void *crashlog, size_t size)
+ 	if (crashlog)
+ 		print_hex_dump(KERN_ERR, "crashlog: ", DUMP_PREFIX_OFFSET, 16, 4, crashlog, size,
+ 			       false);
++	pvr_apple_firmware_fault(apple);
+ }
+ 
+ static const struct apple_rtkit_ops pvr_apple_rtkit_ops = {

@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 12:45:47 +0100
+Subject: [PATCH] drm/imagination: apple: Size an S8003 dataset's free list by
+ its initial pages
+
+On the iPad 5, vkCreateDevice() fails with VK_ERROR_INITIALIZATION_FAILED.
+CREATE_HWRT_DATASET returns -EINVAL without a log line when Mesa creates
+the dummy render target used during device creation.
+
+The A9 allocates the parameter manager's pages itself. Its free list is
+not grown by pvr_free_list_create(), so current_pages stays zero, but
+hwrt_init_kernel_structure() still checks it against the minimum.
+
+For chips with own_pm_pages, check initial_num_pages instead. This is
+the limit used to size the S8003 parameter manager's render blocks.
+
+Affects the Apple A9 (S8003). The A10 is unchanged.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_hwrt.c | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_hwrt.c b/drivers/gpu/drm/imagination/pvr_hwrt.c
+index ec50237..dd91ed9 100644
+--- a/drivers/gpu/drm/imagination/pvr_hwrt.c
++++ b/drivers/gpu/drm/imagination/pvr_hwrt.c
+@@ -1,6 +1,7 @@
+ // SPDX-License-Identifier: GPL-2.0-only OR MIT
+ /* Copyright (c) 2023 Imagination Technologies Ltd. */
+ 
++#include "pvr_apple.h"
+ #include "pvr_free_list.h"
+ #include "pvr_hwrt.h"
+ #include "pvr_gem.h"
+@@ -45,6 +46,7 @@ hwrt_init_kernel_structure(struct pvr_file *pvr_file,
+ 			   struct pvr_hwrt_dataset *hwrt)
+ {
+ 	struct pvr_device *pvr_dev = pvr_file->pvr_dev;
++	u32 local_pages;
+ 	int err;
+ 
+ 	hwrt->pvr_dev = pvr_dev;
+@@ -62,8 +64,16 @@ hwrt_init_kernel_structure(struct pvr_file *pvr_file,
+ 		}
+ 	}
+ 
+-	if (hwrt->free_lists[ROGUE_FW_LOCAL_FREELIST]->current_pages <
+-	    pvr_get_free_list_min_pages(pvr_dev)) {
++	/*
++	 * On a chip that allocates the parameter manager's pages itself, a
++	 * free list never holds pages (pvr_apple_free_list_has_pages()); its
++	 * initial size is how many a render may take.
++	 */
++	local_pages = hwrt->free_lists[ROGUE_FW_LOCAL_FREELIST]->current_pages;
++	if (pvr_device_is_apple(pvr_dev) && !pvr_apple_free_list_has_pages(pvr_dev))
++		local_pages = hwrt->free_lists[ROGUE_FW_LOCAL_FREELIST]->initial_num_pages;
++
++	if (local_pages < pvr_get_free_list_min_pages(pvr_dev)) {
+ 		err = -EINVAL;
+ 		goto err_put_free_lists;
+ 	}
+

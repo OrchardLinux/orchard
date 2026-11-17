@@ -52,13 +52,38 @@ class CIEfficiency(unittest.TestCase):
     def test_kernel_job_reuses_the_nightly_or_compiles_with_the_kept_compiler_cache(self):
         body = job((ROOT / '.github/workflows/build.yml').read_text(), 'kernel')
         self.assertIn('python3 ci/reuse_kernel.py "$PLATFORM" --output out', body)
-        # Everything after the question compiles only when the nightly had no answer.
-        self.assertEqual(body.count("if: steps.reuse.outputs.reused == ''"), 4)
+        # Everything after the question compiles only when the nightly had no answer
+        # (toolchain, saved or read-only compiler cache, build, archive).
+        self.assertEqual(body.count("if: steps.reuse.outputs.reused == ''"), 5)
         self.assertIn('path: out/cache/ccache/kernel', body)
         self.assertIn('key: kernel-ccache-v1-${{ matrix.platform }}-${{ steps.reuse.outputs.key }}', body)
         self.assertIn('restore-keys: kernel-ccache-v1-${{ matrix.platform }}-\n', body)
         self.assertIn('ORCHARD_CACHE_DIR="$PWD/out/cache"', body)
         self.assertLess(body.index('bash kernel/install-toolchain'), body.index('uses: actions/cache@v4'))
+
+    def test_pull_requests_compile_the_kernels_they_change_and_publish_nothing(self):
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        platforms = re.search(r'platform: \[([^\]]*)\]', job(workflow, 'kernel')).group(1).replace(',', '')
+        changed = job(workflow, 'changed')
+        self.assertIn('fetch-depth: 2', changed)
+        self.assertIn('python3 ci/changed_kernels.py "$RUNNER_TEMP/base" ' + platforms + ' |', changed)
+        self.assertIn("printf 'kernels=[]\\nkernel_exclude=[]\\n'", changed)
+        body = job(workflow, 'kernel')
+        self.assertIn("|| needs.changed.outputs.kernels != '[]'\n", body)
+        self.assertIn('exclude: ${{ fromJSON(needs.changed.outputs.kernel_exclude) }}', body)
+        # A pull request reads the compiler cache but never saves one.
+        self.assertIn("if: steps.reuse.outputs.reused == '' && github.event_name != 'pull_request'\n"
+                      "        with:\n          path: out/cache/ccache/kernel", body)
+        self.assertIn("uses: actions/cache/restore@v4\n"
+                      "        if: steps.reuse.outputs.reused == '' && github.event_name == 'pull_request'", body)
+        # Nor does it archive or upload a kernel; assets (and so publishing) needs tools and pongo,
+        # which a pull request never runs.
+        self.assertIn("Archive components and corresponding kernel source\n"
+                      "        if: steps.reuse.outputs.reused == '' && github.event_name != 'pull_request'", body)
+        self.assertIn("uses: actions/upload-artifact@v4\n        if: github.event_name != 'pull_request'", body)
+        for name in ('tools', 'pongo-check', 'pongo'):
+            self.assertNotIn('pull_request', job(workflow, name))
+            self.assertNotIn('kernels', job(workflow, name))
 
     def test_apple_build_has_exact_input_cache_and_one_compiler_invocation(self):
         body = job((ROOT / '.github/workflows/build.yml').read_text(), 'pongo')

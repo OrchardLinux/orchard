@@ -15,3 +15,4 @@ stages = ["iBSS"]
 page_size = "xnu-6153.141.1 osfmk/arm/proc_reg.h"
 platform = "J71b on hardware"
 stages = "J71b single-stage on hardware; iBSS and iBEC same size"
+display_dart = "J71b/J171 ADT display DART/SMMU; iPad 6 translation guarded by pipe CRC, untested on hardware"

@@ -30,6 +30,7 @@ status = "experimental"
 
 # States: working, untested, missing, none (features.toml).
 [features]
+# Display DART/SMMU scanout is enabled behind the pipe-CRC gate; untested on A10.
 display = "untested"
 screen_off = "untested"
 backlight = "untested"
