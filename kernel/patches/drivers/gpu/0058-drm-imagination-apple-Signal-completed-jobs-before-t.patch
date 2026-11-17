@@ -1,4 +1,4 @@
-From a6c0ea12f1712e9c17a642867025f7612fcef9cd Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
 Date: Mon, 16 Nov 2026 17:45:06 +0100
 Subject: [PATCH] drm/imagination: apple: Signal completed jobs before touching
@@ -20,22 +20,22 @@ Assisted-by: LLM
  1 file changed, 6 insertions(+), 3 deletions(-)
 
 diff --git a/drivers/gpu/drm/imagination/pvr_apple.c b/drivers/gpu/drm/imagination/pvr_apple.c
-index 5a43e3f..6c72c88 100644
+index 5badeebcbe..1556ba5a07 100644
 --- a/drivers/gpu/drm/imagination/pvr_apple.c
 +++ b/drivers/gpu/drm/imagination/pvr_apple.c
-@@ -759,9 +759,7 @@ static void pvr_apple_poll_work(struct work_struct *work)
- 	bool pending = false;
- 	int engine;
+@@ -1256,9 +1256,7 @@ static void pvr_apple_poll_work(struct work_struct *work)
  
+ 	if (READ_ONCE(apple->stopping))
+ 		return;
 -	if (apple->chip->events)
 -		apple->chip->events(apple);
 -	else
 +	if (!apple->chip->events)
  		pvr_apple_ack_events(apple);
- 	spin_lock_irq(&apple->fence_lock);
- 	for (engine = 0; engine < APPLE_ENGINES; engine++) {
-@@ -795,6 +793,11 @@ static void pvr_apple_poll_work(struct work_struct *work)
- 	}
+ 	if (atomic_xchg(&apple->fault_pending, 0))
+ 		pvr_apple_fault_pending(apple);
+@@ -1302,6 +1300,11 @@ static void pvr_apple_poll_work(struct work_struct *work)
+ 	irq_on = apple->fw_irq_on;
  	spin_unlock_irq(&apple->fence_lock);
  	pvr_apple_jobs_retired(apple, retired);
 +	/* Completion stamps need no touch. Signal first, then let S8003
@@ -44,5 +44,5 @@ index 5a43e3f..6c72c88 100644
 +	if (apple->chip->events)
 +		apple->chip->events(apple);
  
- 	/* The firmware sends no completion message in this setup: poll. */
- 	if (pending)
+ 	if (!pending || READ_ONCE(apple->stopping))
+ 		return;

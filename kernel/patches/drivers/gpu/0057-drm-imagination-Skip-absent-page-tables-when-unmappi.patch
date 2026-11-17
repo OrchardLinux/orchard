@@ -1,7 +1,7 @@
-From 8ca9202dc7360ec2296d7917698e9457e22b74dd Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
 Date: Mon, 16 Nov 2026 19:23:50 +0100
-Subject: [PATCH 2/2] drm/imagination: Skip absent page tables when unmapping
+Subject: [PATCH] drm/imagination: Skip absent page tables when unmapping
 
 pvr_mmu_op_context_unmap_curr_page() advances one device page at a
 time, even through a range whose page tables are absent. Unmapping a
@@ -32,10 +32,10 @@ Assisted-by: LLM
  1 file changed, 37 insertions(+), 22 deletions(-)
 
 diff --git a/drivers/gpu/drm/imagination/pvr_mmu.c b/drivers/gpu/drm/imagination/pvr_mmu.c
-index e9e6ccb..f6263da 100644
+index 80d93cb1ad..0d40c8a262 100644
 --- a/drivers/gpu/drm/imagination/pvr_mmu.c
 +++ b/drivers/gpu/drm/imagination/pvr_mmu.c
-@@ -2455,36 +2455,51 @@ static int
+@@ -2457,36 +2457,51 @@ static int
  pvr_mmu_op_context_unmap_curr_page(struct pvr_mmu_op_context *op_ctx,
  				   u64 nr_pages)
  {

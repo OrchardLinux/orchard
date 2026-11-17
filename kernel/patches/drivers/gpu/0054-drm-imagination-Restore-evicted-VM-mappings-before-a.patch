@@ -1,8 +1,8 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
 Date: Sun, 15 Nov 2026 23:40:55 +0100
-Subject: [PATCH 37/38] drm/imagination: Restore evicted VM mappings before
- arming jobs
+Subject: [PATCH] drm/imagination: Restore evicted VM mappings before arming
+ jobs
 
 A faultless GPU must never start work with a hole left by reclaim.
 The first render on the iPad 5 hung before firmware boot when the HWRT
@@ -38,12 +38,12 @@ Affects: every PowerVR device
 Assisted-by: LLM
 ---
  drivers/gpu/drm/imagination/pvr_job.c |  93 ++++++++++----
- drivers/gpu/drm/imagination/pvr_vm.c  | 171 ++++++++++++++++++++++----
+ drivers/gpu/drm/imagination/pvr_vm.c  | 173 ++++++++++++++++++++++----
  drivers/gpu/drm/imagination/pvr_vm.h  |   5 +
- 3 files changed, 219 insertions(+), 50 deletions(-)
+ 3 files changed, 221 insertions(+), 50 deletions(-)
 
 diff --git a/drivers/gpu/drm/imagination/pvr_job.c b/drivers/gpu/drm/imagination/pvr_job.c
-index bd0dc2d..b4c26ee 100644
+index bd0dc2d6d6..b4c26ee5f0 100644
 --- a/drivers/gpu/drm/imagination/pvr_job.c
 +++ b/drivers/gpu/drm/imagination/pvr_job.c
 @@ -367,10 +367,10 @@ prepare_job_syncs(struct pvr_file *pvr_file,
@@ -224,7 +224,7 @@ index bd0dc2d..b4c26ee 100644
  
  out_job_data_cleanup:
 diff --git a/drivers/gpu/drm/imagination/pvr_vm.c b/drivers/gpu/drm/imagination/pvr_vm.c
-index b398d9e..4f6d67f 100644
+index 2eb04a3a4e..37cf116ce0 100644
 --- a/drivers/gpu/drm/imagination/pvr_vm.c
 +++ b/drivers/gpu/drm/imagination/pvr_vm.c
 @@ -234,7 +234,16 @@ static int pvr_vm_bind_op_exec(struct pvr_vm_bind_op *bind_op)
@@ -264,7 +264,7 @@ index b398d9e..4f6d67f 100644
 -		goto err_bind_op_fini;
 -
 -	bind_op->mmu_op_ctx =
--		pvr_mmu_op_context_create(vm_ctx->mmu_ctx, sgt, offset, size);
+-		pvr_mmu_op_context_create(vm_ctx->mmu_ctx, sgt, device_addr, offset, size);
 -	err = PTR_ERR_OR_ZERO(bind_op->mmu_op_ctx);
 -	if (err) {
 -		bind_op->mmu_op_ctx = NULL;
@@ -274,7 +274,7 @@ index b398d9e..4f6d67f 100644
  	bind_op->pvr_obj = pvr_obj;
  	bind_op->vm_ctx = vm_ctx;
  	bind_op->device_addr = device_addr;
-@@ -358,6 +352,16 @@ err_bind_op_fini:
+@@ -358,6 +352,16 @@ pvr_vm_bind_op_unmap_init(struct pvr_vm_bind_op *bind_op,
  	return err;
  }
  
@@ -349,18 +349,19 @@ index b398d9e..4f6d67f 100644
  	.vm_free = pvr_gpuvm_free,
  	.sm_step_map = pvr_vm_gpuva_map,
  	.sm_step_remap = pvr_vm_gpuva_remap,
-@@ -832,8 +846,26 @@ __pvr_vm_map(struct pvr_vm_context *vm_ctx, struct pvr_gem_object *pvr_obj,
+@@ -832,8 +846,27 @@ __pvr_vm_map(struct pvr_vm_context *vm_ctx, struct pvr_gem_object *pvr_obj,
  	if (err)
  		goto err_cleanup;
  
 -	err = pvr_vm_bind_op_exec(&bind_op);
 +	{
 +		struct sg_table *sgt = pvr_gem_get_pages_sgt_locked(pvr_obj);
- 
++
 +		err = PTR_ERR_OR_ZERO(sgt);
 +		if (!err) {
 +			bind_op.mmu_op_ctx = pvr_mmu_op_context_create(vm_ctx->mmu_ctx, sgt,
-+								   pvr_obj_offset, size);
++								   device_addr, pvr_obj_offset,
++								   size);
 +			err = PTR_ERR_OR_ZERO(bind_op.mmu_op_ctx);
 +			if (err)
 +				bind_op.mmu_op_ctx = NULL;
@@ -368,7 +369,7 @@ index b398d9e..4f6d67f 100644
 +		if (!err)
 +			err = pvr_vm_bind_op_exec(&bind_op);
 +	}
-+
+ 
 +	/* Publish table edits while both VM and BO reservations still exclude reclaim. */
 +	if (bind_op.mmu_op_ctx) {
 +		pvr_mmu_op_context_destroy(bind_op.mmu_op_ctx);
@@ -377,7 +378,7 @@ index b398d9e..4f6d67f 100644
  	drm_gpuvm_exec_unlock(&vm_exec);
  
  err_cleanup:
-@@ -915,6 +947,11 @@ pvr_vm_unmap_obj_locked(struct pvr_vm_context *vm_ctx,
+@@ -915,6 +948,11 @@ pvr_vm_unmap_obj_locked(struct pvr_vm_context *vm_ctx,
  
  	err = pvr_vm_bind_op_exec(&bind_op);
  
@@ -389,7 +390,7 @@ index b398d9e..4f6d67f 100644
  	drm_gpuvm_exec_unlock(&vm_exec);
  
  err_cleanup:
-@@ -1588,13 +1625,16 @@ bool pvr_vm_evict_bo(struct drm_gem_object *obj, unsigned int idle_ms,
+@@ -1588,13 +1626,16 @@ bool pvr_vm_evict_bo(struct drm_gem_object *obj, unsigned int idle_ms,
  		struct drm_gpuva *va;
  		int err = 0, flush_err;
  
@@ -407,7 +408,7 @@ index b398d9e..4f6d67f 100644
  		drm_gpuvm_bo_for_each_va(va, vm_bo) {
  			struct pvr_vm_gpuva *pva = to_pvr_vm_gpuva(va);
  
-@@ -1624,3 +1664,84 @@ unlock:
+@@ -1624,3 +1665,85 @@ bool pvr_vm_evict_bo(struct drm_gem_object *obj, unsigned int idle_ms,
  	}
  	return success;
  }
@@ -454,7 +455,8 @@ index b398d9e..4f6d67f 100644
 +
 +		if (!pva->evicted)
 +			continue;
-+		op = pvr_mmu_op_context_create(vm->mmu_ctx, sgt, va->gem.offset, va->va.range);
++		op = pvr_mmu_op_context_create(vm->mmu_ctx, sgt, va->va.addr,
++					       va->gem.offset, va->va.range);
 +		if (IS_ERR(op))
 +			return -ENOMEM;
 +		/* Also repair an eviction that stopped after clearing only a prefix. */
@@ -493,7 +495,7 @@ index b398d9e..4f6d67f 100644
 +	return 0;
 +}
 diff --git a/drivers/gpu/drm/imagination/pvr_vm.h b/drivers/gpu/drm/imagination/pvr_vm.h
-index 3270743..15ee067 100644
+index 3270743f60..15ee067cca 100644
 --- a/drivers/gpu/drm/imagination/pvr_vm.h
 +++ b/drivers/gpu/drm/imagination/pvr_vm.h
 @@ -26,6 +26,7 @@ struct drm_pvr_ioctl_get_heap_info_args;

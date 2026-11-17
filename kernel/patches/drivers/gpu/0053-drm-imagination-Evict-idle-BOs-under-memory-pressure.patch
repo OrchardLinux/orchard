@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
 Date: Sun, 15 Nov 2026 23:39:24 +0100
-Subject: [PATCH 36/38] drm/imagination: Evict idle BOs under memory pressure
+Subject: [PATCH] drm/imagination: Evict idle BOs under memory pressure
 
 Idle clients keep every mapped BO unswappable on small-memory systems.
 Use the GEM LRUs and shrinker to release native shmem backing while
@@ -37,25 +37,26 @@ Affects: Apple A9 (S8003); other Apple chips opt in per chip
 
 Assisted-by: LLM
 ---
- drivers/gpu/drm/imagination/Makefile           |    1 
- drivers/gpu/drm/imagination/pvr_apple.c        |   13 +
- drivers/gpu/drm/imagination/pvr_apple.h        |    7 +
- drivers/gpu/drm/imagination/pvr_apple_chip.h   |    1 
- drivers/gpu/drm/imagination/pvr_apple_s8003.c  |   30 +++
- drivers/gpu/drm/imagination/pvr_debugfs.c      |    3 
- drivers/gpu/drm/imagination/pvr_device.c       |    7 +
- drivers/gpu/drm/imagination/pvr_device.h       |   17 ++
- drivers/gpu/drm/imagination/pvr_gem.c          |   81 ++++++++-
- drivers/gpu/drm/imagination/pvr_gem.h          |   11 +
- drivers/gpu/drm/imagination/pvr_gem_shrinker.c |  223 ++++++++++++++++++++++++
- drivers/gpu/drm/imagination/pvr_mmu.c          |   18 ++
- drivers/gpu/drm/imagination/pvr_mmu.h          |    2 
- drivers/gpu/drm/imagination/pvr_vm.c           |  100 +++++++++++
- drivers/gpu/drm/imagination/pvr_vm.h           |    2 
- 15 files changed, 510 insertions(+), 6 deletions(-)
+ drivers/gpu/drm/imagination/Makefile          |   1 +
+ drivers/gpu/drm/imagination/pvr_apple.c       |  13 +
+ drivers/gpu/drm/imagination/pvr_apple.h       |   7 +
+ drivers/gpu/drm/imagination/pvr_apple_chip.h  |   1 +
+ drivers/gpu/drm/imagination/pvr_apple_s8003.c |  21 ++
+ drivers/gpu/drm/imagination/pvr_debugfs.c     |   2 +
+ drivers/gpu/drm/imagination/pvr_device.c      |   7 +
+ drivers/gpu/drm/imagination/pvr_device.h      |  16 ++
+ drivers/gpu/drm/imagination/pvr_gem.c         |  81 ++++++-
+ drivers/gpu/drm/imagination/pvr_gem.h         |  10 +
+ .../gpu/drm/imagination/pvr_gem_shrinker.c    | 223 ++++++++++++++++++
+ drivers/gpu/drm/imagination/pvr_mmu.c         |  18 ++
+ drivers/gpu/drm/imagination/pvr_mmu.h         |   2 +
+ drivers/gpu/drm/imagination/pvr_vm.c          | 100 ++++++++
+ drivers/gpu/drm/imagination/pvr_vm.h          |   2 +
+ 15 files changed, 498 insertions(+), 6 deletions(-)
+ create mode 100644 drivers/gpu/drm/imagination/pvr_gem_shrinker.c
 
 diff --git a/drivers/gpu/drm/imagination/Makefile b/drivers/gpu/drm/imagination/Makefile
-index 08181ce8df32cbd22de6e83253afd72268c51772..2e250a4cc7cc8fa6f0ffd7bb5c133b8e860d1aae 100644
+index 08181ce8df..2e250a4cc7 100644
 --- a/drivers/gpu/drm/imagination/Makefile
 +++ b/drivers/gpu/drm/imagination/Makefile
 @@ -18,6 +18,7 @@ powervr-y := \
@@ -67,10 +68,10 @@ index 08181ce8df32cbd22de6e83253afd72268c51772..2e250a4cc7cc8fa6f0ffd7bb5c133b8e
  	pvr_job.o \
  	pvr_mmu.o \
 diff --git a/drivers/gpu/drm/imagination/pvr_apple.c b/drivers/gpu/drm/imagination/pvr_apple.c
-index 5a43e3fde89dff351c9427a19884aefb2de8c926..d0e0c13029168d468df08d7293cd25d72c0d3dce 100644
+index 1108abd27e..29fbe0d350 100644
 --- a/drivers/gpu/drm/imagination/pvr_apple.c
 +++ b/drivers/gpu/drm/imagination/pvr_apple.c
-@@ -1666,3 +1666,16 @@ u32 pvr_apple_stream_musthave(struct pvr_device *pvr_dev, enum pvr_stream_type t
+@@ -2244,3 +2244,16 @@ u32 pvr_apple_stream_musthave(struct pvr_device *pvr_dev, enum pvr_stream_type t
  	*ext_type = 0;
  	return 0;
  }
@@ -88,10 +89,10 @@ index 5a43e3fde89dff351c9427a19884aefb2de8c926..d0e0c13029168d468df08d7293cd25d7
 +	return allowed;
 +}
 diff --git a/drivers/gpu/drm/imagination/pvr_apple.h b/drivers/gpu/drm/imagination/pvr_apple.h
-index d1de0ad773238914ab4e50e6881ec5141e81389c..fe3c7a5556a61e5d54e41a4ad36bb644fcdd06c4 100644
+index e0ccb1343c..4dea520059 100644
 --- a/drivers/gpu/drm/imagination/pvr_apple.h
 +++ b/drivers/gpu/drm/imagination/pvr_apple.h
-@@ -179,6 +179,7 @@ void pvr_apple_report_hang(struct pvr_device *pvr_dev, struct dma_fence *fence);
+@@ -181,6 +181,7 @@ void pvr_apple_report_hang(struct pvr_device *pvr_dev, struct dma_fence *fence);
  void pvr_apple_wait_file_jobs(struct pvr_device *pvr_dev);
  int pvr_apple_job_add_deps(struct pvr_job *job);
  void pvr_apple_job_armed(struct pvr_job *job, struct dma_fence *finished);
@@ -99,7 +100,7 @@ index d1de0ad773238914ab4e50e6881ec5141e81389c..fe3c7a5556a61e5d54e41a4ad36bb644
  int pvr_apple_vm_init(struct pvr_device *pvr_dev, struct pvr_vm_context *vm_ctx);
  void pvr_apple_mmu_flush(struct pvr_device *pvr_dev);
  void pvr_apple_vm_fini(struct pvr_device *pvr_dev, struct pvr_vm_context *vm_ctx);
-@@ -209,6 +210,12 @@ static inline u32 pvr_apple_stream_musthave(struct pvr_device *pvr_dev,
+@@ -214,6 +215,12 @@ static inline u32 pvr_apple_stream_musthave(struct pvr_device *pvr_dev,
  	*ext_type = 0;
  	return 0;
  }
@@ -113,42 +114,23 @@ index d1de0ad773238914ab4e50e6881ec5141e81389c..fe3c7a5556a61e5d54e41a4ad36bb644
  {
  	return -ENODEV;
 diff --git a/drivers/gpu/drm/imagination/pvr_apple_chip.h b/drivers/gpu/drm/imagination/pvr_apple_chip.h
-index d524415bd771047a2f06398dc51ef849666234e1..1cec40e1daf4040d38924c6c7465570861153946 100644
+index 992d0e8a23..18ede48864 100644
 --- a/drivers/gpu/drm/imagination/pvr_apple_chip.h
 +++ b/drivers/gpu/drm/imagination/pvr_apple_chip.h
-@@ -271,6 +271,7 @@ struct pvr_apple_chip {
+@@ -320,6 +320,7 @@ struct pvr_apple_chip {
  	void (*events)(struct pvr_apple *apple);
  	int (*vm_init)(struct pvr_apple *apple, struct pvr_vm_context *vm_ctx);
  	void (*vm_fini)(struct pvr_apple *apple, struct pvr_vm_context *vm_ctx);
 +	bool (*vm_evictable)(struct pvr_apple *apple, struct pvr_vm_context *vm_ctx);
  	unsigned int (*vm_scenes)(struct pvr_apple *apple, struct pvr_vm_context *vm_ctx);
  	void (*mmu_flush)(struct pvr_apple *apple);
- };
+ 	/* Acknowledge the firmware's interrupt at its source; hard IRQ context */
 diff --git a/drivers/gpu/drm/imagination/pvr_apple_s8003.c b/drivers/gpu/drm/imagination/pvr_apple_s8003.c
-index bc6f30096419b0196eb1930450b9f6942ba252a7..238917843acf8f04e86d511efc739c0888bb8fa3 100644
+index ff208b4baa..6cbf50ac04 100644
 --- a/drivers/gpu/drm/imagination/pvr_apple_s8003.c
 +++ b/drivers/gpu/drm/imagination/pvr_apple_s8003.c
-@@ -261,6 +261,7 @@ struct s8003_vm {
- 
- struct pvr_apple_s8003 {
- 	struct pvr_apple *apple;
-+	struct s8003_vm *pm_last, *pm_prev;
- 	struct delayed_work drain_work;	/* reads the rings while the firmware runs */
- 	struct mutex event_lock;	/* the rings the firmware posts to */
- 	ktime_t touched;		/* s8003_touch() */
-@@ -1521,6 +1522,10 @@ static void pvr_apple_s8003_vm_fini(struct pvr_apple *apple, struct pvr_vm_conte
- 		__set_bit(vm->slot[0], s->parked);
- 		__set_bit(vm->slot[1], s->parked);
+@@ -2336,6 +2336,26 @@ static void s8003_pm_feedback(struct pvr_apple *apple, struct s8003_vm *vm)
  	}
-+	if (s->pm_last == vm)
-+		s->pm_last = NULL;
-+	if (s->pm_prev == vm)
-+		s->pm_prev = NULL;
- 	for (e = 0; e < 2; e++) {
- 		if (vm->slot[e])
- 			__clear_bit(vm->slot[e], s->slots);
-@@ -2101,6 +2106,26 @@ static bool s8003_pm_idle(struct pvr_apple *apple, const struct s8003_pm *pm)
- 	return false;
  }
  
 +static bool pvr_apple_s8003_vm_evictable(struct pvr_apple *apple,
@@ -174,47 +156,36 @@ index bc6f30096419b0196eb1930450b9f6942ba252a7..238917843acf8f04e86d511efc739c08
  static int s8003_submit_error(struct pvr_apple *apple, struct s8003_vm *vm,
  			      const char *engine, int err, const char *reason)
  {
-@@ -2158,6 +2183,10 @@ static int s8003_submit_geom(struct pvr_apple *apple, struct s8003_vm *vm, struc
- 			s8003_meta_addr(s8003_pm_set_va(pm, 0)), pm->set + 1, vm->slot[0], false,
- 			seq, 0, 0);
- 	pm->hwrt = job->hwrt;
-+	if (s->pm_last != vm) {
-+		s->pm_prev = s->pm_last;
-+		s->pm_last = vm;
-+	}
- 	pm->scene = s->gen;
- 	pm->ta_seq = seq;
- 	pm->td_seq = 0;
-@@ -2589,5 +2618,6 @@ const struct pvr_apple_chip pvr_apple_chip_s8003 = {
+@@ -2940,6 +2960,7 @@ const struct pvr_apple_chip pvr_apple_chip_s8003 = {
  	.vm_init = pvr_apple_s8003_vm_init,
  	.vm_fini = pvr_apple_s8003_vm_fini,
  	.vm_scenes = pvr_apple_s8003_vm_scenes,
 +	.vm_evictable = pvr_apple_s8003_vm_evictable,
  	.mmu_flush = pvr_apple_s8003_mmu_flush,
- };
+ 	.irq_ack = pvr_apple_s8003_irq_ack,
+ 	.debugfs_show = pvr_apple_s8003_debugfs_show,
 diff --git a/drivers/gpu/drm/imagination/pvr_debugfs.c b/drivers/gpu/drm/imagination/pvr_debugfs.c
-index ebdb05de4072856ee95e68d6349725ee0e8cacb6..cc966315682bc8695227c31710189f773fe9e38b 100644
+index 21c5f0de4d..8151d81228 100644
 --- a/drivers/gpu/drm/imagination/pvr_debugfs.c
 +++ b/drivers/gpu/drm/imagination/pvr_debugfs.c
-@@ -4,6 +4,7 @@
- #include "pvr_debugfs.h"
+@@ -5,6 +5,7 @@
  
+ #include "pvr_apple.h"
  #include "pvr_device.h"
 +#include "pvr_gem.h"
  #include "pvr_fw_trace.h"
  
  #include <linux/dcache.h>
-@@ -27,6 +28,8 @@ pvr_debugfs_init(struct drm_minor *minor)
- 	struct pvr_device *pvr_dev = to_pvr_device(drm_dev);
+@@ -29,6 +30,7 @@ pvr_debugfs_init(struct drm_minor *minor)
  	struct dentry *root = minor->debugfs_root;
  
+ 	pvr_apple_debugfs_init(pvr_dev, root);
 +	pvr_gem_shrinker_debugfs_init(pvr_dev, root);
-+
+ 
  	for (size_t i = 0; i < ARRAY_SIZE(pvr_debugfs_entries); ++i) {
  		const struct pvr_debugfs_entry *entry = &pvr_debugfs_entries[i];
- 		struct dentry *dir;
 diff --git a/drivers/gpu/drm/imagination/pvr_device.c b/drivers/gpu/drm/imagination/pvr_device.c
-index 2c06a4ac117be0b954ecd7eb5a471efd142beb42..8c1bb336d3bc64273c02fee796ef785a422f6792 100644
+index c13a1b6489..c160763a3a 100644
 --- a/drivers/gpu/drm/imagination/pvr_device.c
 +++ b/drivers/gpu/drm/imagination/pvr_device.c
 @@ -3,6 +3,7 @@
@@ -225,7 +196,7 @@ index 2c06a4ac117be0b954ecd7eb5a471efd142beb42..8c1bb336d3bc64273c02fee796ef785a
  #include "pvr_device_info.h"
  
  #include "pvr_fw.h"
-@@ -807,6 +808,10 @@ pvr_device_init(struct pvr_device *pvr_dev)
+@@ -810,6 +811,10 @@ pvr_device_init(struct pvr_device *pvr_dev)
  	/* Get the platform-specific data based on the compatible string. */
  	pvr_dev->device_data = of_device_get_match_data(dev);
  
@@ -236,7 +207,7 @@ index 2c06a4ac117be0b954ecd7eb5a471efd142beb42..8c1bb336d3bc64273c02fee796ef785a
  	/* Enable and initialize clocks required for the device to operate. */
  	err = pvr_device_clk_init(pvr_dev);
  	if (err)
-@@ -858,6 +863,8 @@ err_pm_runtime_put:
+@@ -861,6 +866,8 @@ pvr_device_init(struct pvr_device *pvr_dev)
  void
  pvr_device_fini(struct pvr_device *pvr_dev)
  {
@@ -246,7 +217,7 @@ index 2c06a4ac117be0b954ecd7eb5a471efd142beb42..8c1bb336d3bc64273c02fee796ef785a
  	 * Deinitialization stages are performed in reverse order compared to
  	 * the initialization stages in pvr_device_init().
 diff --git a/drivers/gpu/drm/imagination/pvr_device.h b/drivers/gpu/drm/imagination/pvr_device.h
-index 26b589ee72b9c261fbb10803fd3ddd9999e95f8c..015719016a56934d59feecb22605a85ec7ac4ba8 100644
+index da999d480b..24b4dd03d5 100644
 --- a/drivers/gpu/drm/imagination/pvr_device.h
 +++ b/drivers/gpu/drm/imagination/pvr_device.h
 @@ -11,6 +11,8 @@
@@ -258,10 +229,10 @@ index 26b589ee72b9c261fbb10803fd3ddd9999e95f8c..015719016a56934d59feecb22605a85e
  #include <drm/drm_file.h>
  #include <drm/drm_mm.h>
  
-@@ -92,6 +94,21 @@ struct pvr_device {
- 	 */
- 	struct drm_device base;
- 
+@@ -98,6 +100,20 @@ struct pvr_device {
+ 	struct list_head gem_pin_accounts;
+ 	/** @gem_pin_bytes: Native BO bytes reserved before backing pages exist. */
+ 	u64 gem_pin_bytes;
 +	/** @gem_reclaim: GEM residency, using base.gem_lru_mutex for all LRUs. */
 +	struct {
 +		struct drm_gem_lru evictable;
@@ -276,23 +247,22 @@ index 26b589ee72b9c261fbb10803fd3ddd9999e95f8c..015719016a56934d59feecb22605a85e
 +		atomic64_t scans, evicts, purges, restores, restore_fail;
 +		atomic64_t skip[12];
 +	} gem_reclaim;
-+
+ 
  	/** @gpu_id: GPU ID detected at runtime. */
  	struct pvr_gpu_id gpu_id;
- 
 diff --git a/drivers/gpu/drm/imagination/pvr_gem.c b/drivers/gpu/drm/imagination/pvr_gem.c
-index 0129c8d9e21c593392e206e44f39c2e57d140986..cf061a5d5e6434b2ee36416399b4e76df817a005 100644
+index ff912e039b..f21a91a716 100644
 --- a/drivers/gpu/drm/imagination/pvr_gem.c
 +++ b/drivers/gpu/drm/imagination/pvr_gem.c
-@@ -18,6 +18,7 @@
- #include <linux/iosys-map.h>
- #include <linux/log2.h>
- #include <linux/mutex.h>
+@@ -24,6 +24,7 @@
+ #include <linux/sched.h>
+ #include <linux/sched/task.h>
+ #include <linux/spinlock.h>
 +#include <linux/mm.h>
  #include <linux/pagemap.h>
  #include <linux/property.h>
  #include <linux/refcount.h>
-@@ -27,6 +28,11 @@ static void pvr_gem_object_free(struct drm_gem_object *obj)
+@@ -156,6 +157,11 @@ static void pvr_gem_object_free(struct drm_gem_object *obj)
  {
  	struct drm_gem_shmem_object *shmem_obj = to_drm_gem_shmem_obj(obj);
  
@@ -302,9 +272,9 @@ index 0129c8d9e21c593392e206e44f39c2e57d140986..cf061a5d5e6434b2ee36416399b4e76d
 +	if (bo->pages_evicted)
 +		atomic64_sub(obj->size, &to_pvr_device(obj->dev)->gem_reclaim.evicted_bytes);
  	shmem_obj->pages_mark_dirty_on_put = true;
+ 	pvr_gem_pin_uncharge(gem_to_pvr_gem(obj));
  	drm_gem_shmem_free(shmem_obj);
- }
-@@ -38,6 +44,11 @@ static struct dma_buf *pvr_gem_export(struct drm_gem_object *obj, int flags)
+@@ -168,6 +174,11 @@ static struct dma_buf *pvr_gem_export(struct drm_gem_object *obj, int flags)
  	if (pvr_obj->flags & DRM_PVR_BO_PM_FW_PROTECT)
  		return ERR_PTR(-EPERM);
  
@@ -316,7 +286,7 @@ index 0129c8d9e21c593392e206e44f39c2e57d140986..cf061a5d5e6434b2ee36416399b4e76d
  	return drm_gem_prime_export(obj, flags);
  }
  
-@@ -100,16 +111,54 @@ static const struct vm_operations_struct pvr_gem_vm_ops = {
+@@ -230,16 +241,54 @@ static const struct vm_operations_struct pvr_gem_vm_ops = {
  	.close = drm_gem_vm_close,
  };
  
@@ -375,7 +345,7 @@ index 0129c8d9e21c593392e206e44f39c2e57d140986..cf061a5d5e6434b2ee36416399b4e76d
  	.mmap = pvr_gem_mmap,
  	.vm_ops = &pvr_gem_vm_ops,
  };
-@@ -269,7 +318,7 @@ pvr_gem_object_vmap(struct pvr_gem_object *pvr_obj)
+@@ -399,7 +448,7 @@ pvr_gem_object_vmap(struct pvr_gem_object *pvr_obj)
  	if (err)
  		goto err_unlock;
  
@@ -384,7 +354,7 @@ index 0129c8d9e21c593392e206e44f39c2e57d140986..cf061a5d5e6434b2ee36416399b4e76d
  	if (err)
  		goto err_unlock;
  
-@@ -323,7 +372,7 @@ pvr_gem_object_vunmap(struct pvr_gem_object *pvr_obj)
+@@ -453,7 +502,7 @@ pvr_gem_object_vunmap(struct pvr_gem_object *pvr_obj)
  			dma_sync_sgtable_for_device(dev, shmem_obj->sgt, DMA_BIDIRECTIONAL);
  	}
  
@@ -393,7 +363,7 @@ index 0129c8d9e21c593392e206e44f39c2e57d140986..cf061a5d5e6434b2ee36416399b4e76d
  
  	dma_resv_unlock(obj->resv);
  }
-@@ -529,8 +578,14 @@ struct sg_table *pvr_gem_get_pages_sgt_locked(struct pvr_gem_object *pvr_obj)
+@@ -667,8 +716,14 @@ struct sg_table *pvr_gem_get_pages_sgt_locked(struct pvr_gem_object *pvr_obj)
  	/* Transfer the temporary pin's page reference to the sgt. */
  	refcount_inc(&shmem->pages_use_count);
  	shmem->sgt = sgt;
@@ -408,7 +378,7 @@ index 0129c8d9e21c593392e206e44f39c2e57d140986..cf061a5d5e6434b2ee36416399b4e76d
  	return err ? ERR_PTR(err) : sgt;
  }
  
-@@ -547,3 +602,17 @@ struct sg_table *pvr_gem_object_get_pages_sgt(struct pvr_gem_object *pvr_obj)
+@@ -685,3 +740,17 @@ struct sg_table *pvr_gem_object_get_pages_sgt(struct pvr_gem_object *pvr_obj)
  	dma_resv_unlock(obj->resv);
  	return sgt;
  }
@@ -427,22 +397,21 @@ index 0129c8d9e21c593392e206e44f39c2e57d140986..cf061a5d5e6434b2ee36416399b4e76d
 +	drm_gem_lru_remove(obj);
 +}
 diff --git a/drivers/gpu/drm/imagination/pvr_gem.h b/drivers/gpu/drm/imagination/pvr_gem.h
-index 07bd602e9307e80df80b350ff1b9061757ec3ccd..c21b8e77ee01dee3dd7eae19398b49959979f66c 100644
+index ac9a38301a..efb40d6b0b 100644
 --- a/drivers/gpu/drm/imagination/pvr_gem.h
 +++ b/drivers/gpu/drm/imagination/pvr_gem.h
-@@ -111,6 +111,11 @@ struct pvr_gem_object {
- 	 */
- 	u64 flags;
+@@ -114,6 +114,10 @@ struct pvr_gem_object {
  
+ 	/** @pin_account: Creating process's budget, retained until the BO is freed. */
+ 	struct pvr_gem_account *pin_account;
 +	/** @exported: Latched before publishing a dma-buf, under the reservation. */
 +	bool exported;
 +	/** @pages_evicted: Backing pages released; protected by the reservation. */
 +	bool pages_evicted;
-+
+ 
  };
  
- static_assert(offsetof(struct pvr_gem_object, base) == 0,
-@@ -133,6 +138,12 @@ struct pvr_gem_object *pvr_gem_object_create(struct pvr_device *pvr_dev,
+@@ -137,6 +141,12 @@ struct pvr_gem_object *pvr_gem_object_create(struct pvr_device *pvr_dev,
  
  struct pvr_gem_object *pvr_gem_object_create_user(struct pvr_device *pvr_dev,
  						 size_t size, u64 flags);
@@ -457,7 +426,7 @@ index 07bd602e9307e80df80b350ff1b9061757ec3ccd..c21b8e77ee01dee3dd7eae19398b4995
  int pvr_gem_object_into_handle(struct pvr_gem_object *pvr_obj,
 diff --git a/drivers/gpu/drm/imagination/pvr_gem_shrinker.c b/drivers/gpu/drm/imagination/pvr_gem_shrinker.c
 new file mode 100644
-index 0000000000000000000000000000000000000000..c43b5586573819d30b3ce450c371acac00472f44
+index 0000000000..c43b558657
 --- /dev/null
 +++ b/drivers/gpu/drm/imagination/pvr_gem_shrinker.c
 @@ -0,0 +1,223 @@
@@ -685,10 +654,10 @@ index 0000000000000000000000000000000000000000..c43b5586573819d30b3ce450c371acac
 +	return drmm_add_action_or_reset(&dev->base, pvr_gem_shrinker_release, dev);
 +}
 diff --git a/drivers/gpu/drm/imagination/pvr_mmu.c b/drivers/gpu/drm/imagination/pvr_mmu.c
-index a4996b99784a630ec1d8b3db3ab5a46e044cb6ea..7f522fd3755328c8f71ff31c7d0b5654814d7ff1 100644
+index e06d4b61ef..c9e89e1940 100644
 --- a/drivers/gpu/drm/imagination/pvr_mmu.c
 +++ b/drivers/gpu/drm/imagination/pvr_mmu.c
-@@ -2654,3 +2654,21 @@ int pvr_mmu_map(struct pvr_mmu_op_context *op_ctx, u64 size, u64 flags,
+@@ -2656,3 +2656,21 @@ int pvr_mmu_map(struct pvr_mmu_op_context *op_ctx, u64 size, u64 flags,
  
  	return err;
  }
@@ -711,7 +680,7 @@ index a4996b99784a630ec1d8b3db3ab5a46e044cb6ea..7f522fd3755328c8f71ff31c7d0b5654
 +	return pvr_mmu_flush_exec(op_ctx->mmu_ctx->pvr_dev, true);
 +}
 diff --git a/drivers/gpu/drm/imagination/pvr_mmu.h b/drivers/gpu/drm/imagination/pvr_mmu.h
-index a8ecd460168dcd417f4369548f0757999e411a79..a203336a7b14e631fa418277373f39a6276264f4 100644
+index 2c02d61ba0..287ba4059f 100644
 --- a/drivers/gpu/drm/imagination/pvr_mmu.h
 +++ b/drivers/gpu/drm/imagination/pvr_mmu.h
 @@ -103,6 +103,8 @@ pvr_mmu_op_context_create(struct pvr_mmu_context *ctx,
@@ -724,7 +693,7 @@ index a8ecd460168dcd417f4369548f0757999e411a79..a203336a7b14e631fa418277373f39a6
  
  #endif /* PVR_MMU_H */
 diff --git a/drivers/gpu/drm/imagination/pvr_vm.c b/drivers/gpu/drm/imagination/pvr_vm.c
-index 4988a62d0c7a27c5b053c565fc3317fd673278cb..b398d9e658b52c1a640fb91d7d7ffb37cabf2f21 100644
+index 4116fe5c12..2eb04a3a4e 100644
 --- a/drivers/gpu/drm/imagination/pvr_vm.c
 +++ b/drivers/gpu/drm/imagination/pvr_vm.c
 @@ -131,6 +131,9 @@ struct dma_resv *pvr_vm_get_dma_resv(struct pvr_vm_context *vm_ctx)
@@ -839,7 +808,7 @@ index 4988a62d0c7a27c5b053c565fc3317fd673278cb..b398d9e658b52c1a640fb91d7d7ffb37
 +	return success;
 +}
 diff --git a/drivers/gpu/drm/imagination/pvr_vm.h b/drivers/gpu/drm/imagination/pvr_vm.h
-index be5c99cc72e398416b3f434ed6eacd94179f572b..3270743f609ffdb68a495cb27a1674193fe8b06e 100644
+index be5c99cc72..3270743f60 100644
 --- a/drivers/gpu/drm/imagination/pvr_vm.h
 +++ b/drivers/gpu/drm/imagination/pvr_vm.h
 @@ -66,6 +66,8 @@ void pvr_vm_unmap_all(struct pvr_vm_context *vm_ctx);

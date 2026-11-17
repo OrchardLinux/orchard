@@ -1,8 +1,7 @@
-From 86b0db6a8e6a28a4c33341cc69586327dd7d3ad6 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
 Date: Mon, 16 Nov 2026 19:22:29 +0100
-Subject: [PATCH 1/2] drm/imagination: Don't walk into an absent level 1 page
- table
+Subject: [PATCH] drm/imagination: Don't walk into an absent level 1 page table
 
 An unmap walk does not create page tables. When it loads a level 1
 table that is absent, pvr_mmu_op_context_load_tables() leaves
@@ -36,7 +35,7 @@ Assisted-by: LLM
  1 file changed, 15 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/gpu/drm/imagination/pvr_mmu.c b/drivers/gpu/drm/imagination/pvr_mmu.c
-index 7f522fd..e9e6ccb 100644
+index c9e89e1940..80d93cb1ad 100644
 --- a/drivers/gpu/drm/imagination/pvr_mmu.c
 +++ b/drivers/gpu/drm/imagination/pvr_mmu.c
 @@ -1787,9 +1787,11 @@ pvr_page_table_l1_get_or_insert(struct pvr_mmu_op_context *op_ctx,

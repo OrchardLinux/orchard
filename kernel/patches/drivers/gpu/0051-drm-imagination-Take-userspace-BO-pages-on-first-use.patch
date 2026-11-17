@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
 Date: Sun, 15 Nov 2026 23:35:12 +0100
-Subject: [PATCH 34/38] drm/imagination: Take userspace BO pages on first use
+Subject: [PATCH] drm/imagination: Take userspace BO pages on first use
 
 A large storage buffer consumes unswappable memory at CREATE_BO even if
 it is never used. Leave userspace shmem unbacked until VM_MAP, vmap or a
@@ -23,12 +23,12 @@ Affects: every PowerVR device
 Assisted-by: LLM
 ---
  drivers/gpu/drm/imagination/pvr_drv.c |  2 +-
- drivers/gpu/drm/imagination/pvr_gem.c | 79 +++++++++++++++++++++++++--
- drivers/gpu/drm/imagination/pvr_gem.h | 16 +++---
- 3 files changed, 85 insertions(+), 12 deletions(-)
+ drivers/gpu/drm/imagination/pvr_gem.c | 84 +++++++++++++++++++++++++--
+ drivers/gpu/drm/imagination/pvr_gem.h | 16 ++---
+ 3 files changed, 89 insertions(+), 13 deletions(-)
 
 diff --git a/drivers/gpu/drm/imagination/pvr_drv.c b/drivers/gpu/drm/imagination/pvr_drv.c
-index 206ee1f..697b705 100644
+index 7ad0b71f81..f27d9b3151 100644
 --- a/drivers/gpu/drm/imagination/pvr_drv.c
 +++ b/drivers/gpu/drm/imagination/pvr_drv.c
 @@ -115,7 +115,7 @@ pvr_ioctl_create_bo(struct drm_device *drm_dev, void *raw_args,
@@ -41,10 +41,10 @@ index 206ee1f..697b705 100644
  		err = PTR_ERR(pvr_obj);
  		goto err_drm_dev_exit;
 diff --git a/drivers/gpu/drm/imagination/pvr_gem.c b/drivers/gpu/drm/imagination/pvr_gem.c
-index 817b47d..0fffab7 100644
+index 44626d14f9..cca2f00ba0 100644
 --- a/drivers/gpu/drm/imagination/pvr_gem.c
 +++ b/drivers/gpu/drm/imagination/pvr_gem.c
-@@ -227,6 +227,10 @@ pvr_gem_object_vmap(struct pvr_gem_object *pvr_obj)
+@@ -357,6 +357,10 @@ pvr_gem_object_vmap(struct pvr_gem_object *pvr_obj)
  
  	dma_resv_lock(obj->resv, NULL);
  
@@ -55,7 +55,7 @@ index 817b47d..0fffab7 100644
  	err = drm_gem_shmem_vmap_locked(shmem_obj, &map);
  	if (err)
  		goto err_unlock;
-@@ -357,8 +361,8 @@ struct drm_gem_object *pvr_gem_create_object(struct drm_device *drm_dev, size_t
+@@ -487,8 +491,8 @@ struct drm_gem_object *pvr_gem_create_object(struct drm_device *drm_dev, size_t
   *  * -%ENOMEM if sufficient physical memory cannot be allocated, or
   *  * Any other error returned by drm_gem_create_mmap_offset().
   */
@@ -66,9 +66,18 @@ index 817b47d..0fffab7 100644
  {
  	struct drm_device *drm_dev = from_pvr_device(pvr_dev);
  	struct drm_gem_shmem_object *shmem_obj;
-@@ -381,7 +385,10 @@ pvr_gem_object_create(struct pvr_device *pvr_dev, size_t size, u64 flags)
+@@ -511,12 +515,18 @@ pvr_gem_object_create(struct pvr_device *pvr_dev, size_t size, u64 flags)
  	pvr_obj = shmem_gem_to_pvr_gem(shmem_obj);
  	pvr_obj->flags = flags;
+ 
+-	/* Imports also use gem_create_object; only native BOs reserve pages here. */
++	/*
++	 * Imports also use gem_create_object; only native BOs are charged, by
++	 * size, here. A userspace BO is charged before it has any backing.
++	 */
+ 	err = pvr_gem_pin_charge(pvr_obj);
+ 	if (err)
+ 		goto err_shmem_object_free;
  
 -	sgt = drm_gem_shmem_get_pages_sgt(shmem_obj);
 +	if (!(flags & PVR_BO_KERNEL_PINNED))
@@ -78,7 +87,7 @@ index 817b47d..0fffab7 100644
  	if (IS_ERR(sgt)) {
  		err = PTR_ERR(sgt);
  		goto err_shmem_object_free;
-@@ -423,7 +430,8 @@ pvr_gem_get_dma_addr(struct pvr_gem_object *pvr_obj, u32 offset,
+@@ -558,7 +568,8 @@ pvr_gem_get_dma_addr(struct pvr_gem_object *pvr_obj, u32 offset,
  	struct scatterlist *sgl;
  	unsigned int sgt_idx;
  
@@ -88,7 +97,7 @@ index 817b47d..0fffab7 100644
  	for_each_sgtable_dma_sg(shmem_obj->sgt, sgl, sgt_idx) {
  		u32 new_offset = accumulated_offset + sg_dma_len(sgl);
  
-@@ -438,3 +446,66 @@ pvr_gem_get_dma_addr(struct pvr_gem_object *pvr_obj, u32 offset,
+@@ -573,3 +584,66 @@ pvr_gem_get_dma_addr(struct pvr_gem_object *pvr_obj, u32 offset,
  
  	return -EINVAL;
  }
@@ -156,10 +165,10 @@ index 817b47d..0fffab7 100644
 +	return sgt;
 +}
 diff --git a/drivers/gpu/drm/imagination/pvr_gem.h b/drivers/gpu/drm/imagination/pvr_gem.h
-index efcd270..07bd602 100644
+index 2e7cf2c9a6..ac9a38301a 100644
 --- a/drivers/gpu/drm/imagination/pvr_gem.h
 +++ b/drivers/gpu/drm/imagination/pvr_gem.h
-@@ -63,10 +63,12 @@ struct pvr_file;
+@@ -64,10 +64,12 @@ struct pvr_gem_account;
  
  #define PVR_BO_DEVICE_CACHE_COHERENT BIT_ULL(61)
  
@@ -174,7 +183,7 @@ index efcd270..07bd602 100644
  /* Bits 2..0 are defined in the UAPI. */
  
  /* Other utilities. */
-@@ -129,16 +131,16 @@ struct drm_gem_object *pvr_gem_create_object(struct drm_device *drm_dev, size_t
+@@ -133,16 +135,16 @@ struct drm_gem_object *pvr_gem_create_object(struct drm_device *drm_dev, size_t
  struct pvr_gem_object *pvr_gem_object_create(struct pvr_device *pvr_dev,
  					     size_t size, u64 flags);
  
