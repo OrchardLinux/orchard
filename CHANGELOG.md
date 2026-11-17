@@ -11,12 +11,31 @@ is missing or empty.
 
 ## Unreleased
 
+### Install & launch
+
+- Kernel updates come as a package: the installer installs the kernel as
+  `linux-orchard-<platform>` from the Orchard package repository with the
+  system's own package manager (pacman or apk), so the system's ordinary
+  update takes each orchard release's kernel, and its boot entry follows. The kernel
+  before stays as a second entry to fall back to.
+- `/usr/lib/orchard/boot-entries default` makes this system the one that boots
+  when nobody picks.
+
 ### Devices
 
 - A10 iPads: if the video decoder firmware is missing, sound keeps working and
   the decoder just stays off.
 - iPad 6 and 7: the headphone jack works; plugging in switches the sound to
   the headphones, unplugging switches back.
+
+### Install & launch
+
+- Several systems on one device boot like a multi-boot PC: `orchard launch`
+  no longer asks, m1n1 starts the default system by itself. Installing a
+  system makes it the default (systemd-boot's `loader.conf`, which a system
+  can also set). `orchard launch --list` picks an entry with the arrow keys,
+  `--entry ID` starts one entry once. If the default can't start, the iPad
+  shows why and waits for `--list` or `--entry`.
 
 ## [0.3.1] - 2026-11-15
 

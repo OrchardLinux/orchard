@@ -42,7 +42,10 @@ def main(argv=None, *, core=None, origin=None):
     install.add_argument('source', nargs='?', help="an index (local or HTTPS) or a registered distro "
                          "(default: the release this installer carries)")
     launch = commands.add_parser('launch', help="start an installed system from the device's boot entries")
-    launch.add_argument('--entry', help='boot entry id to start without asking')
+    launch_choice = launch.add_mutually_exclusive_group()
+    launch_choice.add_argument('--list', action='store_true', dest='list_entries',
+                               help='choose the entry to start from the list (m1n1 waits for the choice)')
+    launch_choice.add_argument('--entry', help="start exactly this boot entry id, once, instead of the default")
     commands.add_parser('devices', help='list USB devices without modifying them')
     commands.add_parser('update', help="install the latest orchard release's core if it is newer")
     commands.add_parser('version', help="show this orchard's version")
@@ -88,7 +91,7 @@ def main(argv=None, *, core=None, origin=None):
             run(str(source), progress=progress)
         else:
             from .launch import launch as run
-            run(entry=args.entry, progress=progress)
+            run(entry=args.entry, list_entries=args.list_entries, progress=progress)
         with progress.lock:
             progress.end_line()
         if changed:

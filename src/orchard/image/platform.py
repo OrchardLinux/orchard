@@ -7,8 +7,12 @@ of `system/defaults` (vendor configuration, the sound cards' UCM profiles)
 complete it, and
 `usr/lib/orchard/platform.json` says what it is. The installer writes the
 layer into a root after the distro's root image, then writes the boot entry
-from it (docs/boot-contract.md). Root images carry no kernel, so one serves
-every platform, and a kernel change needs a new layer, not a new root image.
+with the layer's `usr/lib/orchard/boot-entries`, which every later kernel
+update runs too (docs/boot-contract.md). Root images carry no kernel, so one
+serves every platform, and a kernel change needs a new layer, not a new root
+image. The layer is distribution-neutral: OrchardLinux/packages installs a
+release's layer unchanged as each base's kernel package (pacman, apk), whose
+hooks or triggers call boot-entries.
 
 Members are regular files under `usr/` only, owned by root, with fixed
 times, so the same inputs give the same archive.
@@ -173,6 +177,8 @@ def files(bundle, platform, board_dtbs, *, busybox, hardware=None):
                 raise ValueError(f'System defaults belong under /usr/lib, /usr/share/alsa/ucm2 or '
                                  f'/usr/share/wireplumber: {name}')
             result[name] = (path.read_bytes(), 0o755 if path.stat().st_mode & 0o111 else 0o644)
+    # One implementation of the entries, for the installer and every later kernel update.
+    result['usr/lib/orchard/boot-entries'] = ((hardware / 'src/orchard/boot-entries').read_bytes(), 0o755)
     description = {'schema': SCHEMA, 'platform': platform, 'kernel_release': release,
                    'boards': dict(sorted(board_dtbs.items()))}
     if described['arch'] != ROOT_ARCH:

@@ -1,0 +1,116 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Tue, 17 Nov 2026 18:41:07 +0800
+Subject: [PATCH 18/18] bootmgr: Boot the default entry by itself with
+ autoboot=1
+
+On a PC the boot loader starts the default system at power-on, and a
+key held at start keeps it in its menu. m1n1 can't live on these devices
+yet, so a host starts it each time; let the host say which of the two it
+wants with the standard appended-variable mechanism: autoboot=1 after
+the image makes m1n1 bring up main storage and start the default entry
+(loader.conf's default, else the first bootable entry) with no proxy
+conversation. Without it, or with a kernel in the payload, nothing
+changes. If the default can't start, the reason is on the console, which
+goes to the screen as m1n1 falls back to the proxy, as it does for a
+payload that fails; storage stays up for a host to list the entries.
+
+Assisted-by: LLM
+---
+ src/bootmgr.c | 25 +++++++++++++++++++++++++
+ src/bootmgr.h |  1 +
+ src/payload.c |  8 ++++++++
+ 3 files changed, 34 insertions(+)
+
+diff --git a/src/bootmgr.c b/src/bootmgr.c
+index 6e5b82d..e307c15 100644
+--- a/src/bootmgr.c
++++ b/src/bootmgr.c
+@@ -158,6 +158,25 @@ int bootmgr_start(const char *id_arg, const char *devicetree_arg, u64 flags)
+     return kboot_boot(kernel);
+ }
+ 
++/*
++ * Boots the default entry with no host, as a boot loader does at power-on.
++ * On failure the reason is on the console, and the caller falls back to the
++ * proxy with storage still up if it got that far, so a host can list the
++ * entries and start another one.
++ */
++int bootmgr_autoboot(void)
++{
++    printf("bootmgr: autoboot: starting the default entry\n");
++    if (!main_storage_init()) {
++        printf("bootmgr: autoboot: main storage did not come up\n");
++        return -1;
++    }
++    if (bootmgr_start(NULL, NULL, 0) == 0)
++        return 0;
++    printf("bootmgr: autoboot failed; waiting for a host (orchard launch --list)\n");
++    return -1;
++}
++
+ #else
+ 
+ int bootmgr_start(const char *id, const char *devicetree, u64 flags)
+@@ -169,4 +188,10 @@ int bootmgr_start(const char *id, const char *devicetree, u64 flags)
+     return -1;
+ }
+ 
++int bootmgr_autoboot(void)
++{
++    printf("bootmgr: not supported in this build\n");
++    return -1;
++}
++
+ #endif
+diff --git a/src/bootmgr.h b/src/bootmgr.h
+index 8a03baa..56ce33f 100644
+--- a/src/bootmgr.h
++++ b/src/bootmgr.h
+@@ -8,5 +8,6 @@
+ #define BOOTMGR_NO_SPLASH BIT(0)
+ 
+ int bootmgr_start(const char *id, const char *devicetree, u64 flags);
++int bootmgr_autoboot(void);
+ 
+ #endif
+diff --git a/src/payload.c b/src/payload.c
+index 802b369..cbfe145 100644
+--- a/src/payload.c
++++ b/src/payload.c
+@@ -6,6 +6,7 @@
+ #include "payload.h"
+ #include "adt.h"
+ #include "assert.h"
++#include "bootmgr.h"
+ #include "chainload.h"
+ #include "cpufreq.h"
+ #include "display.h"
+@@ -184,6 +185,7 @@ static char *chosen[MAX_CHOSEN_VARS];
+ #endif
+ 
+ static bool enable_tso = false;
++static bool autoboot = false;
+ 
+ static bool check_var(u8 **p)
+ {
+@@ -213,6 +215,8 @@ static bool check_var(u8 **p)
+         mitigations_configure(val);
+     } else if (IS_VAR("tso=")) {
+         enable_tso = val[0] == '1';
++    } else if (IS_VAR("autoboot=")) {
++        autoboot = val[0] == '1';
+     } else {
+         printf("Unknown variable %s\n", *p);
+     }
+@@ -362,6 +366,10 @@ int payload_run(void)
+         return chainload_load(chainload_spec, chosen, chosen_cnt);
+     }
+ 
++    /* No kernel given: boot the default Boot Loader Specification entry from main storage. */
++    if (autoboot && !kernel && !fdt)
++        return bootmgr_autoboot();
++
+     if (kernel && fdt) {
+         cpufreq_init();
+         smp_start_secondaries();

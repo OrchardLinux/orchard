@@ -279,7 +279,7 @@ class Finish(unittest.TestCase):
                 'account': None, 'boot': boot,
                 'root': {'partuuid': LINUX_ID, 'fs_uuid': '5f0c2a1e-0000-4000-8000-000000000001'},
                 'entry': {'id': 'omarchy', 'title': 'Omarchy', 'options': 'rootwait', 'devicetree': 's5l8942x-p105.dtb'}}
-        with mock.patch.object(D, 'install_layer', return_value=0), mock.patch.object(D, 'emit'):
+        with mock.patch.object(D, 'install_kernel', return_value={'files': 0}), mock.patch.object(D, 'emit'):
             D.finish(plan, root, {SYSTEM_ID}, None)
         return root
 
@@ -298,6 +298,8 @@ class Finish(unittest.TestCase):
                          f'PARTUUID={LINUX_ID} / ext4 rw,relatime 0 1\n'
                          'PARTUUID=44444444-0000-4000-8000-000000000001 /boot vfat rw,relatime,fmask=0077,dmask=0077 0 2\n')
         self.assertIn('architecture aa64\n', (root / 'boot/loader/entries/omarchy-33333333-6.12.conf').read_text())
+        # The system just installed starts next.
+        self.assertEqual((root / 'boot/loader/loader.conf').read_text(), 'default omarchy-33333333-*\n')
 
 
 class InstalledBundle(unittest.TestCase):

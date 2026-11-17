@@ -153,8 +153,11 @@ def boot_payload(device, payload, pongo_image, progress, *, profile, chip, board
 
 
 def start_loader(device, loader, progress, *, profile, chip, board, product, seconds=30, quiet=False,
-                 entry=entries.DEFAULT):
-    """Boot the bare m1n1 loader ({'pongo', 'm1n1'} files) through Pongo; return its proxy serial port."""
+                 proxy=True, entry=entries.DEFAULT):
+    """Boot the m1n1 loader ({'pongo', 'm1n1'} files) through Pongo; return its proxy serial port.
+
+    PROXY=False: m1n1 boots by itself (an autoboot image) and nothing is waited for; returns None.
+    """
     if device['mode'] not in ('dfu', 'pongo'):
         raise ValueError('Put the device in DFU mode first; a running system is not rebooted')
     pongo_from_dfu(device, loader['pongo'], progress, profile=profile, chip=chip, board=board, product=product,
@@ -166,6 +169,8 @@ def start_loader(device, loader, progress, *, profile, chip, board, product, sec
     progress.reset_transfer()
     pongo.upload(loader['m1n1'], device['location'], digest(loader['m1n1']),
                  (lambda sent, total: None) if quiet else progress.transfer)
+    if not proxy:
+        return None
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         ports = [port for port in usb.m1n1_ports() if port not in before]

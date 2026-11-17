@@ -1,0 +1,883 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Tue, 17 Nov 2026 17:26:17 +0800
+Subject: [PATCH 16/18] bls: Pick the default entry from loader.conf
+
+m1n1 is the boot loader of these devices and should start the right
+system by itself, as systemd-boot does on a PC. Pick the default the way
+systemd-boot does without EFI variables: the default line of
+/loader/loader.conf is a glob (for example "default omarchy-4d6c1a2b-*",
+one system's entries), matched against each entry id with or without
+.conf; the first match in BLS order is the default, which is the newest
+kernel of that system, bootable or not. Without loader.conf, a default
+line or a match, the first bootable entry is. The last default line
+wins, a pair of quotes around the value goes, and every other key
+(timeout, editor and so on) is ignored: there is no menu on the device.
+An unreadable loader.conf is ignored with a line on the console.
+
+P_BOOT_ENTRIES marks the default with a "default yes" line in its block.
+The contract stays 1: hosts keep keys they don't know. Without a DTB
+file name from the caller, entries are now checked against the board
+m1n1 runs on, any *-BOARD.dtb for its ADT target-type, so m1n1 judges
+them the same with or without a host. P_BOOT_START refuses a missing
+entry id; the default is for m1n1 itself to start.
+
+Assisted-by: LLM
+---
+ rust/src/bls.rs | 506 ++++++++++++++++++++++++++++++++++++++++++------
+ src/bootmgr.c   |  32 ++-
+ src/proxy.c     |   9 +-
+ 3 files changed, 477 insertions(+), 70 deletions(-)
+
+diff --git a/rust/src/bls.rs b/rust/src/bls.rs
+index 35ddc1b..f5a6b77 100644
+--- a/rust/src/bls.rs
++++ b/rust/src/bls.rs
+@@ -3,7 +3,9 @@
+ //!
+ //! Finds the one XBOOTLDR partition in the GPT, reads its FAT file system,
+ //! parses `/loader/entries/*.conf`, checks every entry against the disk and
+-//! sorts them in BLS order (as systemd-boot does). Read-only.
++//! sorts them in BLS order (as systemd-boot does). The default entry follows
++//! the `default` pattern of `/loader/loader.conf`, as in systemd-boot.
++//! Read-only.
+ #![deny(unsafe_op_in_unsafe_fn)]
+ 
+ use crate::c_size_t;
+@@ -24,6 +26,7 @@ pub const ROOT_ARM64: Uuid = uuid!("b921b045-1df0-41c3-af44-4c6f280d3fae");
+ const ENTRIES_DIR: &str = "/loader/entries";
+ const MAX_ENTRIES: usize = 64;
+ const MAX_ENTRY_FILE: u64 = 64 * 1024;
++const LOADER_CONF: &str = "/loader/loader.conf";
+ 
+ pub struct Entry {
+     /// File name without `.conf` and without a boot counter.
+@@ -207,8 +210,132 @@ pub fn entry_cmp(a: &Entry, b: &Entry) -> Ordering {
+     version_cmp(&b.id, &a.id)
+ }
+ 
++/// The DTB this board needs: the file name the caller gives, or any
++/// `*-BOARD.dtb` for the board m1n1 runs on (its ADT `target-type`), so m1n1
++/// checks entries the same way with or without a host.
++#[derive(Clone, Copy)]
++pub enum Wanted<'a> {
++    File(&'a str),
++    Board(&'a str),
++    Any,
++}
++
+ pub struct Listing {
+     pub entries: Vec<Entry>,
++    /// The index of the default entry, see `default_entry`.
++    pub default: Option<usize>,
++    /// The `default` pattern of loader.conf, if it sets one.
++    pub pattern: Option<String>,
++    /// Why loader.conf could not be read; it is then ignored (console only).
++    pub loader_problem: Option<String>,
++}
++
++/// One character of a glob pattern at `p[pi]` (not `*`) against `c`: the index
++/// after it if it matches. ASCII case is ignored.
++fn glob_step(p: &[u8], pi: usize, c: u8) -> Option<usize> {
++    let c = c.to_ascii_lowercase();
++    match p[pi] {
++        b'?' => Some(pi + 1),
++        b'\\' if pi + 1 < p.len() => (p[pi + 1].to_ascii_lowercase() == c).then_some(pi + 2),
++        b'[' => {
++            let mut i = pi + 1;
++            let negate = i < p.len() && (p[i] == b'!' || p[i] == b'^');
++            if negate {
++                i += 1;
++            }
++            let (mut matched, mut first) = (false, true);
++            while i < p.len() && (first || p[i] != b']') {
++                first = false;
++                let lo = p[i].to_ascii_lowercase();
++                if i + 2 < p.len() && p[i + 1] == b'-' && p[i + 2] != b']' {
++                    matched |= lo <= c && c <= p[i + 2].to_ascii_lowercase();
++                    i += 3;
++                } else {
++                    matched |= lo == c;
++                    i += 1;
++                }
++            }
++            if i >= p.len() {
++                // No closing bracket: a literal `[`.
++                return (c == b'[').then_some(pi + 1);
++            }
++            (matched != negate).then_some(i + 1)
++        }
++        other => (other.to_ascii_lowercase() == c).then_some(pi + 1),
++    }
++}
++
++/// A shell glob as systemd-boot matches its `default`: `*`, `?`, `[...]` with
++/// ranges and `!` or `^`, and `\` escapes. ASCII case is ignored.
++pub fn glob_match(pattern: &str, text: &str) -> bool {
++    let (p, t) = (pattern.as_bytes(), text.as_bytes());
++    let (mut pi, mut ti) = (0, 0);
++    let mut star: Option<(usize, usize)> = None;
++    loop {
++        if pi < p.len() && p[pi] == b'*' {
++            pi += 1;
++            star = Some((pi, ti));
++            continue;
++        }
++        if ti == t.len() {
++            if pi == p.len() {
++                return true;
++            }
++        } else if pi < p.len() {
++            if let Some(next) = glob_step(p, pi, t[ti]) {
++                pi = next;
++                ti += 1;
++                continue;
++            }
++        }
++        // Let the last `*` take one more character, if there is one.
++        match star {
++            Some((sp, st)) if st < t.len() => {
++                star = Some((sp, st + 1));
++                pi = sp;
++                ti = st + 1;
++            }
++            _ => return false,
++        }
++    }
++}
++
++/// The `default` pattern of a loader.conf: one key per line, `#` comments, the
++/// last `default` wins and a pair of quotes around the value goes, as in
++/// systemd-boot. Every other key is ignored.
++pub fn loader_default(text: &str) -> Option<String> {
++    let mut pattern = None;
++    for line in text.lines() {
++        let line = line.trim_matches([' ', '\t', '\r']);
++        if line.starts_with('#') {
++            continue;
++        }
++        let (key, value) = line
++            .split_once([' ', '\t'])
++            .map_or((line, ""), |(k, v)| (k, v.trim_matches([' ', '\t'])));
++        if key == "default" {
++            let value = value
++                .strip_prefix('"')
++                .and_then(|v| v.strip_suffix('"'))
++                .unwrap_or(value);
++            pattern = (!value.is_empty()).then(|| value.to_string());
++        }
++    }
++    pattern
++}
++
++/// The default entry, as systemd-boot picks it without EFI variables: the
++/// first entry in BLS order whose id, with or without `.conf`, matches the
++/// pattern, bootable or not; without a pattern or a match, the first bootable
++/// entry.
++pub fn default_entry(entries: &[Entry], pattern: Option<&str>) -> Option<usize> {
++    pattern
++        .and_then(|p| {
++            entries
++                .iter()
++                .position(|e| glob_match(p, &e.id) || glob_match(p, &format!("{}.conf", e.id)))
++        })
++        .or_else(|| entries.iter().position(Entry::bootable))
+ }
+ 
+ fn fs_error<E>(path: &str, err: fatfs::Error<E>) -> String {
+@@ -228,22 +355,23 @@ fn valid_path(path: &str) -> bool {
+ }
+ 
+ /// Reads and checks every entry. `open(lba)` gives the disk from that block on;
+-/// `devicetree` is the DTB file name this board needs, if known.
+-pub fn read_entries<IO, F>(open: F, devicetree: Option<&str>) -> Result<Listing, String>
++/// `devicetree` is the DTB this board needs.
++pub fn read_entries<IO, F>(open: F, devicetree: Wanted) -> Result<Listing, String>
+ where
+     IO: ReadWriteSeek,
+     IO::Error: core::fmt::Debug,
+     F: Fn(u64) -> IO,
+ {
+-    with_entries(open, devicetree, |_, entries| Ok(Listing { entries }))
++    with_entries(open, devicetree, |_, listing| Ok(listing))
+ }
+ 
+-/// Opens the boot partition, reads and checks its entries in BLS order and
+-/// hands them to `then` along with the partition's root directory.
++/// Opens the boot partition, reads and checks its entries in BLS order, picks
++/// the default and hands the listing to `then` along with the partition's root
++/// directory.
+ fn with_entries<IO, F, R>(
+     open: F,
+-    devicetree: Option<&str>,
+-    then: impl FnOnce(&Dir<IO>, Vec<Entry>) -> Result<R, String>,
++    devicetree: Wanted,
++    then: impl FnOnce(&Dir<IO>, Listing) -> Result<R, String>,
+ ) -> Result<R, String>
+ where
+     IO: ReadWriteSeek,
+@@ -280,9 +408,19 @@ where
+     let fs = FileSystem::new(open(boot), opts)
+         .map_err(|_| "Boot partition has no FAT file system".to_string())?;
+     let root_dir = fs.root_dir();
++    let (pattern, loader_problem) = match read_loader_conf(&root_dir) {
++        Ok(pattern) => (pattern, None),
++        Err(problem) => (None, Some(problem)),
++    };
++    let mut listing = Listing {
++        entries: Vec::new(),
++        default: None,
++        pattern,
++        loader_problem,
++    };
+     let dir = match root_dir.open_dir(ENTRIES_DIR) {
+         Ok(dir) => dir,
+-        Err(fatfs::Error::NotFound) => return then(&root_dir, Vec::new()),
++        Err(fatfs::Error::NotFound) => return then(&root_dir, listing),
+         Err(err) => return Err(fs_error(ENTRIES_DIR, err)),
+     };
+ 
+@@ -325,7 +463,26 @@ where
+         entries.push(entry);
+     }
+     entries.sort_by(entry_cmp);
+-    then(&root_dir, entries)
++    listing.default = default_entry(&entries, listing.pattern.as_deref());
++    listing.entries = entries;
++    then(&root_dir, listing)
++}
++
++/// The `default` pattern of loader.conf; none if there is no loader.conf.
++fn read_loader_conf<IO: ReadWriteSeek>(dir: &Dir<IO>) -> Result<Option<String>, String> {
++    let size = match dir.open_file(LOADER_CONF) {
++        Ok(mut file) => file
++            .seek(SeekFrom::End(0))
++            .map_err(|_| format!("{}: read error", LOADER_CONF))?,
++        Err(fatfs::Error::NotFound) => return Ok(None),
++        Err(err) => return Err(fs_error(LOADER_CONF, err)),
++    };
++    if size > MAX_ENTRY_FILE {
++        return Err(format!("{}: too large", LOADER_CONF));
++    }
++    let data = read_file(dir, LOADER_CONF, size as usize)?;
++    let text = String::from_utf8(data).map_err(|_| format!("{}: not UTF-8", LOADER_CONF))?;
++    Ok(loader_default(&text))
+ }
+ 
+ /// An entry's files in memory, as `P_BOOT_START` needs them.
+@@ -337,6 +494,7 @@ pub struct Loaded {
+     pub initrd: (*mut u8, usize),
+     pub devicetree: (*mut u8, usize),
+     pub options: String,
++    pub id: String,
+ }
+ 
+ pub const KERNEL_ALIGN: usize = 2 << 20;
+@@ -368,14 +526,15 @@ fn read_splash<IO: ReadWriteSeek>(
+     Ok((data, width, height))
+ }
+ 
+-/// Checks the entries again and loads the bootable entry `id`. `alloc(size,
++/// Checks the entries again and loads the bootable entry `id`, or the default
++/// entry if `id` is `None`; the id it loaded is in `Loaded::id`. `alloc(size,
+ /// align)` gives memory that stays valid after this returns. If `paint` is
+ /// given, the entry's splash goes to it before anything else is loaded; a
+ /// missing or broken splash only costs the picture.
+ pub fn load_entry<IO, F, A>(
+     open: F,
+-    id: &str,
+-    devicetree: Option<&str>,
++    id: Option<&str>,
++    devicetree: Wanted,
+     mut alloc: A,
+     paint: Option<&mut dyn FnMut(Result<(&[u8], u32, u32), String>)>,
+ ) -> Result<Loaded, String>
+@@ -385,13 +544,20 @@ where
+     F: Fn(u64) -> IO,
+     A: FnMut(usize, usize) -> *mut u8,
+ {
+-    with_entries(open, devicetree, |dir, entries| {
+-        let entry = entries
+-            .iter()
+-            .find(|e| e.id == id)
+-            .ok_or_else(|| format!("No boot entry {}", id))?;
++    with_entries(open, devicetree, |dir, listing| {
++        let entry = match id {
++            Some(id) => listing
++                .entries
++                .iter()
++                .find(|e| e.id == id)
++                .ok_or_else(|| format!("No boot entry {}", id))?,
++            None => listing
++                .default
++                .map(|i| &listing.entries[i])
++                .ok_or_else(|| "No default boot entry".to_string())?,
++        };
+         if let Some(problem) = entry.problems.first() {
+-            return Err(format!("{} is not bootable: {}", id, problem));
++            return Err(format!("{} is not bootable: {}", entry.id, problem));
+         }
+         let mut alloc_slice = |size: usize, align: usize| -> Result<&mut [u8], String> {
+             let ptr = alloc(size.max(1), align);
+@@ -442,6 +608,7 @@ where
+             initrd,
+             devicetree: (tree.as_mut_ptr(), size),
+             options: entry.options(),
++            id: entry.id.clone(),
+         })
+     })
+ }
+@@ -474,12 +641,7 @@ fn probe<IO: ReadWriteSeek>(dir: &Dir<IO>, path: &str) -> Result<(u64, [u8; 64])
+     Ok((size, head))
+ }
+ 
+-fn check<IO: ReadWriteSeek>(
+-    entry: &mut Entry,
+-    dir: &Dir<IO>,
+-    roots: &[Uuid],
+-    devicetree: Option<&str>,
+-) {
++fn check<IO: ReadWriteSeek>(entry: &mut Entry, dir: &Dir<IO>, roots: &[Uuid], devicetree: Wanted) {
+     let mut problems = Vec::new();
+     for key in ["devicetree-overlay", "efi", "uki"] {
+         if entry.get(key).is_some() {
+@@ -511,10 +673,18 @@ fn check<IO: ReadWriteSeek>(
+             Err(problem) => problems.push(problem),
+         }
+         let name = path.rsplit('/').next().unwrap_or(path);
+-        if let Some(wanted) = devicetree {
+-            if !name.eq_ignore_ascii_case(wanted) {
+-                problems.push(format!("devicetree is not {}", wanted));
++        match devicetree {
++            Wanted::File(wanted) if !name.eq_ignore_ascii_case(wanted) => {
++                problems.push(format!("devicetree is not {}", wanted))
+             }
++            Wanted::Board(board)
++                if !name
++                    .to_ascii_lowercase()
++                    .ends_with(&format!("-{}.dtb", board.to_ascii_lowercase())) =>
++            {
++                problems.push(format!("devicetree is not for this board ({})", board))
++            }
++            _ => {}
+         }
+     }
+     for path in entry.all("initrd") {
+@@ -553,10 +723,10 @@ const BLS_KEYS: &[&str] = &[
+ pub const CONTRACT: u32 = 1;
+ 
+ /// The listing as text in BLS syntax, for the host: a `contract N` line, then
+-/// per entry an `entry ID`
+-/// line, its BLS keys in file order, `root PARTUUID` if it has one and a
+-/// `problem TEXT` line per problem, then an empty line. If the disk itself
+-/// can't be read, a single `error TEXT` line.
++/// per entry an `entry ID` line, `default yes` for the default entry, its BLS
++/// keys in file order, `root PARTUUID` if it has one and a `problem TEXT` line
++/// per problem, then an empty line. If the disk itself can't be read, a single
++/// `error TEXT` line.
+ pub fn render(listing: &Result<Listing, String>) -> String {
+     let mut out = format!("contract {}\n", CONTRACT);
+     match listing {
+@@ -564,8 +734,11 @@ pub fn render(listing: &Result<Listing, String>) -> String {
+             let _ = writeln!(out, "error {}", error);
+         }
+         Ok(listing) => {
+-            for entry in &listing.entries {
++            for (n, entry) in listing.entries.iter().enumerate() {
+                 let _ = writeln!(out, "entry {}", entry.id);
++                if listing.default == Some(n) {
++                    let _ = writeln!(out, "default yes");
++                }
+                 for (key, value) in entry
+                     .keys
+                     .iter()
+@@ -591,15 +764,26 @@ fn log(listing: &Result<Listing, String>) {
+         Err(error) => println!("bls: {}", error),
+         Ok(listing) => {
+             println!("bls: {} entries", listing.entries.len());
++            if let Some(problem) = &listing.loader_problem {
++                println!("bls: ignoring loader.conf: {}", problem);
++            } else if let Some(pattern) = &listing.pattern {
++                println!("bls: loader.conf default {}", pattern);
++            }
+             for (n, entry) in listing.entries.iter().enumerate() {
+                 let title = entry.get("title").unwrap_or(&entry.id);
++                let mark = if listing.default == Some(n) {
++                    ", default"
++                } else {
++                    ""
++                };
+                 match entry.problems.first() {
+-                    None => println!("bls: {}. {} ({})", n + 1, title, entry.id),
++                    None => println!("bls: {}. {} ({}{})", n + 1, title, entry.id, mark),
+                     Some(p) => println!(
+-                        "bls: {}. {} ({}): not bootable: {}",
++                        "bls: {}. {} ({}{}): not bootable: {}",
+                         n + 1,
+                         title,
+                         entry.id,
++                        mark,
+                         p
+                     ),
+                 }
+@@ -608,18 +792,29 @@ fn log(listing: &Result<Listing, String>) {
+     }
+ }
+ 
++/// The DTB to check entries against: the file name `devicetree` if it isn't
++/// NULL, else the board m1n1 runs on.
++unsafe fn wanted<'a>(devicetree: *const c_char) -> Wanted<'a> {
++    let text = |p: *const c_char| unsafe { CStr::from_ptr(p) }.to_str().ok();
++    if !devicetree.is_null() {
++        return text(devicetree).map_or(Wanted::Any, Wanted::File);
++    }
++    let board = unsafe { bootmgr_board() };
++    match board.is_null() {
++        true => Wanted::Any,
++        false => text(board).map_or(Wanted::Any, Wanted::Board),
++    }
++}
++
+ /// Lists the boot entries of main storage, which the caller has initialised.
+-/// `devicetree` may be NULL. Returns the text of `render` (NUL-terminated,
++/// `devicetree` may be NULL: then entries need a `*-BOARD.dtb` for this board. Returns the text of `render` (NUL-terminated,
+ /// `*size` without the NUL) or NULL; free it with `rust_free_boot_entries`.
+ #[no_mangle]
+ pub unsafe extern "C" fn rust_boot_entries(
+     devicetree: *const c_char,
+     size: *mut c_size_t,
+ ) -> *mut c_void {
+-    let devicetree = match devicetree.is_null() {
+-        true => None,
+-        false => unsafe { CStr::from_ptr(devicetree) }.to_str().ok(),
+-    };
++    let devicetree = unsafe { wanted(devicetree) };
+     let listing = read_entries(storage::MainStorage::new, devicetree);
+     log(&listing);
+     let mut text = render(&listing).into_bytes();
+@@ -643,11 +838,13 @@ pub struct BootFiles {
+ extern "C" {
+     fn heapblock_alloc_aligned(size: c_size_t, align: c_size_t) -> *mut c_void;
+     fn bootmgr_paint_splash(pixels: *const c_void, width: u32, height: u32);
++    fn bootmgr_board() -> *const c_char;
+ }
+ 
+-/// Loads the bootable entry `id` of main storage, which the caller has
+-/// initialised, into heapblock memory, after painting its splash with
+-/// `bootmgr_paint_splash` if `splash` is set. `devicetree` may be NULL.
++/// Loads the bootable entry `id` of main storage, or the default entry if `id`
++/// is NULL, which the caller has initialised, into heapblock memory, after
++/// painting its splash with `bootmgr_paint_splash` if `splash` is set.
++/// `devicetree` may be NULL, as for `rust_boot_entries`.
+ /// Returns 0, or -1 with the reason on the console.
+ #[no_mangle]
+ pub unsafe extern "C" fn rust_boot_entry_load(
+@@ -656,14 +853,17 @@ pub unsafe extern "C" fn rust_boot_entry_load(
+     splash: bool,
+     files: *mut BootFiles,
+ ) -> c_int {
+-    let Ok(id) = unsafe { CStr::from_ptr(id) }.to_str() else {
+-        println!("bls: the entry id is not UTF-8");
+-        return -1;
+-    };
+-    let devicetree = match devicetree.is_null() {
++    let id = match id.is_null() {
+         true => None,
+-        false => unsafe { CStr::from_ptr(devicetree) }.to_str().ok(),
++        false => match unsafe { CStr::from_ptr(id) }.to_str() {
++            Ok(id) => Some(id),
++            Err(_) => {
++                println!("bls: the entry id is not UTF-8");
++                return -1;
++            }
++        },
+     };
++    let devicetree = unsafe { wanted(devicetree) };
+     let alloc = |size, align| unsafe { heapblock_alloc_aligned(size, align) as *mut u8 };
+     let mut paint = |splash: Result<(&[u8], u32, u32), String>| match splash {
+         Ok((pixels, width, height)) => unsafe {
+@@ -681,7 +881,7 @@ pub unsafe extern "C" fn rust_boot_entry_load(
+         Ok(loaded) => {
+             println!(
+                 "bls: loaded {}: linux {} bytes, initrd {} bytes, devicetree {} bytes",
+-                id, loaded.linux.1, loaded.initrd.1, loaded.devicetree.1
++                loaded.id, loaded.linux.1, loaded.initrd.1, loaded.devicetree.1
+             );
+             let mut options = loaded.options.into_bytes();
+             options.retain(|&b| b != 0);
+@@ -836,7 +1036,7 @@ mod tests {
+         disk
+     }
+ 
+-    fn list(disk: &Rc<RefCell<Vec<u8>>>, dt: Option<&str>) -> Result<Listing, String> {
++    fn list(disk: &Rc<RefCell<Vec<u8>>>, dt: Wanted) -> Result<Listing, String> {
+         read_entries(
+             |lba| Mem {
+                 disk: disk.clone(),
+@@ -926,7 +1126,7 @@ mod tests {
+             ("/tok/6.18.2-orchard/t8010-j71b.dtb", DTB),
+         ];
+         let d = disk(&files, false);
+-        let listing = list(&d, Some("t8010-j71b.dtb")).unwrap();
++        let listing = list(&d, Wanted::File("t8010-j71b.dtb")).unwrap();
+         let ids: Vec<&str> = listing.entries.iter().map(|e| e.id.as_str()).collect();
+         // sort-key entries first, newest version first; then the rest by id.
+         assert_eq!(
+@@ -960,7 +1160,7 @@ mod tests {
+             ]
+         );
+ 
+-        let other = list(&d, Some("t8015-d22.dtb")).unwrap();
++        let other = list(&d, Wanted::File("t8015-d22.dtb")).unwrap();
+         let good = other
+             .entries
+             .iter()
+@@ -970,12 +1170,31 @@ mod tests {
+ 
+         let text = render(&Ok(listing));
+         assert!(
+-            text.starts_with("contract 1\nentry omarchy-4d6c1a2b-6.18.10-orchard\ntitle Omarchy\n")
++            text.starts_with("contract 1\nentry omarchy-4d6c1a2b-6.18.10-orchard\ntitle Omarchy\n"),
++            "{}",
++            text
+         );
+         assert!(text.contains(&format!("\nroot {}\n", ROOT)));
+         assert!(text.contains("\nproblem efi is not supported\n"));
+         assert!(!text.contains("problem none") && !text.contains("\nroot x\n"));
++        assert!(
++            text.contains("\nentry omarchy-4d6c1a2b-6.18.2-orchard\ndefault yes\ntitle Omarchy\n")
++        );
++        assert_eq!(text.matches("default yes").count(), 1);
+         assert!(text.ends_with("\n\n"));
++
++        // Without a file name: any *-BOARD.dtb of the board m1n1 runs on.
++        let board = list(&d, Wanted::Board("J71b")).unwrap();
++        assert!(
++            board.entries[1].bootable(),
++            "{:?}",
++            board.entries[1].problems
++        );
++        let board = list(&d, Wanted::Board("j71")).unwrap();
++        assert_eq!(
++            board.entries[1].problems,
++            ["devicetree is not for this board (j71)"]
++        );
+     }
+ 
+     #[test]
+@@ -1016,8 +1235,14 @@ mod tests {
+             let (p, w, h) = s.unwrap();
+             painted.push((p.to_vec(), w, h))
+         };
+-        let loaded =
+-            load_entry(open, "a", Some("t8010-j71b.dtb"), alloc, Some(&mut paint)).unwrap();
++        let loaded = load_entry(
++            open,
++            Some("a"),
++            Wanted::File("t8010-j71b.dtb"),
++            alloc,
++            Some(&mut paint),
++        )
++        .unwrap();
+         assert_eq!(painted, [(vec![1, 2, 3, 0, 4, 5, 6, 0], 2, 1)]);
+         let bytes =
+             |(p, n): (*mut u8, usize)| unsafe { core::slice::from_raw_parts(p, n) }.to_vec();
+@@ -1033,37 +1258,192 @@ mod tests {
+             base: lba * BLOCK,
+             pos: 0,
+         };
+-        let err = load_entry(open, "bad", None, |_, _| core::ptr::null_mut(), None)
++        let err = load_entry(
++            open,
++            Some("bad"),
++            Wanted::Any,
++            |_, _| core::ptr::null_mut(),
++            None,
++        )
++        .err()
++        .unwrap();
++        assert!(
++            err.starts_with("bad is not bootable: needs exactly one linux"),
++            "{}",
++            err
++        );
++        let open = |lba| Mem {
++            disk: d.clone(),
++            base: lba * BLOCK,
++            pos: 0,
++        };
++        let err = load_entry(
++            open,
++            Some("nope"),
++            Wanted::Any,
++            |_, _| core::ptr::null_mut(),
++            None,
++        )
++        .err()
++        .unwrap();
++        assert_eq!(err, "No boot entry nope");
++    }
++
++    #[test]
++    fn globs() {
++        let cases = [
++            (
++                "omarchy-4d6c1a2b-*",
++                "omarchy-4d6c1a2b-6.18.2-orchard",
++                true,
++            ),
++            (
++                "omarchy-4d6c1a2b-*",
++                "omarchy-4d6c1a2c-6.18.2-orchard",
++                false,
++            ),
++            ("omarchy-4d6c1a2b-*", "omarchy-4d6c1a2b-", true),
++            ("*", "", true),
++            ("", "", true),
++            ("", "a", false),
++            ("a*b*c", "aXbYbZc", true),
++            ("a*b*c", "aXbYbZ", false),
++            ("a?c", "abc", true),
++            ("a?c", "ac", false),
++            ("OMARCHY-*", "omarchy-1", true),
++            ("[a-c]x", "bx", true),
++            ("[!a-c]x", "bx", false),
++            ("[^a-c]x", "dx", true),
++            ("[]]", "]", true),
++            ("[a", "[a", true),
++            ("a\\*", "a*", true),
++            ("a\\*", "ab", false),
++            ("*.conf", "x.conf", true),
++        ];
++        for (pattern, text, want) in cases {
++            assert_eq!(glob_match(pattern, text), want, "{} vs {}", pattern, text);
++        }
++    }
++
++    #[test]
++    fn loader_conf() {
++        assert_eq!(loader_default("timeout 3\n"), None);
++        assert_eq!(
++            loader_default("# default x\ndefault a-*\ntimeout 0\n\tdefault  \"b-*\" \r\n"),
++            Some("b-*".to_string())
++        );
++        assert_eq!(loader_default("default a\ndefault\n"), None);
++    }
++
++    #[test]
++    fn picks_the_default() {
++        let img = image();
++        let entry = |title: &str, version: &str, key: &str| {
++            entry_text(title, version).replace("sort-key omarchy", &format!("sort-key {}", key))
++        };
++        let (a1, a2) = (entry("A", "6.18.2", "a"), entry("A", "6.18.3", "a"));
++        let b = entry("B", "6.18.2", "b");
++        let base: Vec<(&str, &[u8])> = vec![
++            ("/loader/entries/a-1111-6.18.2.conf", a1.as_bytes()),
++            ("/loader/entries/a-1111-6.18.3.conf", a2.as_bytes()),
++            ("/loader/entries/b-2222-6.18.2.conf", b.as_bytes()),
++            ("/tok/6.18.2/linux", &img),
++            ("/tok/6.18.2/initrd", b"070701"),
++            ("/tok/6.18.2/t8010-j71b.dtb", DTB),
++        ];
++        let pick = |conf: Option<&str>| {
++            let mut files = base.clone();
++            if let Some(conf) = conf {
++                files.push(("/loader/loader.conf", conf.as_bytes()));
++            }
++            let listing = list(&disk(&files, false), Wanted::File("t8010-j71b.dtb")).unwrap();
++            let default = listing.default.map(|i| listing.entries[i].id.clone());
++            (default, render(&Ok(listing)))
++        };
++        // No loader.conf: the first bootable entry (a-1111-6.18.3 lacks its files).
++        let (default, text) = pick(None);
++        assert_eq!(default.as_deref(), Some("a-1111-6.18.2"));
++        assert!(text.contains("\nentry a-1111-6.18.2\ndefault yes\n"));
++        // A pattern picks the first match in BLS order, bootable or not.
++        let (default, text) = pick(Some("timeout 3\ndefault a-1111-*\n"));
++        assert_eq!(default.as_deref(), Some("a-1111-6.18.3"));
++        assert!(text.starts_with("contract 1\nentry a-1111-6.18.3\ndefault yes\n"));
++        let (default, _) = pick(Some("default b-2222-*.conf\n"));
++        assert_eq!(default.as_deref(), Some("b-2222-6.18.2"));
++        // No match: the first bootable entry.
++        let (default, _) = pick(Some("default gone-*\n"));
++        assert_eq!(default.as_deref(), Some("a-1111-6.18.2"));
++        let mut bad = base.clone();
++        bad.push(("/loader/loader.conf", b"default \xff\n"));
++        let listing = list(&disk(&bad, false), Wanted::Any).unwrap();
++        assert_eq!(listing.default, Some(1));
++        assert_eq!(
++            listing.loader_problem.as_deref(),
++            Some("/loader/loader.conf: not UTF-8")
++        );
++        // Only the console hears of it; the text stays as hosts know it.
++        assert!(!render(&Ok(listing)).contains("loader"));
++
++        // Loading without an id loads the default; an unbootable default is refused.
++        let files = {
++            let mut files = base.clone();
++            files.push(("/loader/loader.conf", b"default a-1111-*"));
++            files
++        };
++        let d = disk(&files, false);
++        let open = |lba| Mem {
++            disk: d.clone(),
++            base: lba * BLOCK,
++            pos: 0,
++        };
++        let err = load_entry(open, None, Wanted::Any, |_, _| core::ptr::null_mut(), None)
+             .err()
+             .unwrap();
+         assert!(
+-            err.starts_with("bad is not bootable: needs exactly one linux"),
++            err.starts_with("a-1111-6.18.3 is not bootable: "),
+             "{}",
+             err
+         );
++        let d = disk(&base, false);
+         let open = |lba| Mem {
+             disk: d.clone(),
+             base: lba * BLOCK,
+             pos: 0,
+         };
+-        let err = load_entry(open, "nope", None, |_, _| core::ptr::null_mut(), None)
++        let alloc = |size: usize, align: usize| {
++            let block = vec![0u8; size + align].leak();
++            let at = block.as_ptr().align_offset(align);
++            block[at..].as_mut_ptr()
++        };
++        let loaded = load_entry(open, None, Wanted::Any, alloc, None).unwrap();
++        assert_eq!(loaded.id, "a-1111-6.18.2");
++        let empty = disk(&[], false);
++        let open = |lba| Mem {
++            disk: empty.clone(),
++            base: lba * BLOCK,
++            pos: 0,
++        };
++        let err = load_entry(open, None, Wanted::Any, |_, _| core::ptr::null_mut(), None)
+             .err()
+             .unwrap();
+-        assert_eq!(err, "No boot entry nope");
++        assert_eq!(err, "No default boot entry");
+     }
+ 
+     #[test]
+     fn disk_errors() {
+         let empty = disk(&[], false);
+-        assert!(list(&empty, None).unwrap().entries.is_empty());
++        assert!(list(&empty, Wanted::Any).unwrap().entries.is_empty());
+         let two = disk(&[], true);
+-        let err = list(&two, None).err().unwrap();
++        let err = list(&two, Wanted::Any).err().unwrap();
+         assert_eq!(err, "Expected exactly one XBOOTLDR boot partition, found 2");
+         assert_eq!(
+             render(&Err(err)),
+             "contract 1\nerror Expected exactly one XBOOTLDR boot partition, found 2\n"
+         );
+         let blank = Rc::new(RefCell::new(vec![0u8; 64 * 1024]));
+-        assert_eq!(list(&blank, None).err().unwrap(), "No GPT on this disk");
++        assert_eq!(
++            list(&blank, Wanted::Any).err().unwrap(),
++            "No GPT on this disk"
++        );
+     }
+ }
+diff --git a/src/bootmgr.c b/src/bootmgr.c
+index b91b6a6..6e5b82d 100644
+--- a/src/bootmgr.c
++++ b/src/bootmgr.c
+@@ -2,6 +2,7 @@
+ 
+ #include "../build/build_cfg.h"
+ 
++#include "adt.h"
+ #include "bootmgr.h"
+ #include "cpufreq.h"
+ #include "fb.h"
+@@ -30,6 +31,24 @@ struct boot_files {
+     char *options;
+ };
+ 
++/*
++ * Called from Rust: the board m1n1 runs on, its ADT target-type in lower case
++ * (j71b), or NULL. Entries checked without a DTB file name need a *-BOARD.dtb.
++ */
++const char *bootmgr_board(void)
++{
++    static char board[32];
++    const char *target = adt_getprop(adt, 0, "target-type", NULL);
++
++    if (!target)
++        return NULL;
++    size_t i;
++    for (i = 0; target[i] && i < sizeof(board) - 1; i++)
++        board[i] = tolower(target[i]);
++    board[i] = 0;
++    return board;
++}
++
+ int rust_boot_entry_load(const char *id, const char *devicetree, bool splash,
+                          struct boot_files *files);
+ 
+@@ -85,7 +104,9 @@ static void *unpack_kernel(void *image, size_t size)
+ }
+ 
+ /*
+- * Loads and boots the BLS entry `id` from main storage, which must be up.
++ * Loads and boots the BLS entry `id` from main storage, which must be up, or
++ * the default entry (loader.conf's `default`, else the first bootable one) if
++ * `id` is NULL.
+  * Storage is shut down only once everything is loaded, so a failure before
+  * that leaves it usable for another entry. Returns 0 when the kernel is set
+  * up to run after the proxy reply, -1 with the reason on the console.
+@@ -95,7 +116,8 @@ int bootmgr_start(const char *id_arg, const char *devicetree_arg, u64 flags)
+     char id[MAX_NAME], devicetree[MAX_NAME];
+ 
+     /* The arguments live in host memory above m1n1's heap; copy them first. */
+-    if (!copy_name(id, id_arg) || (devicetree_arg && !copy_name(devicetree, devicetree_arg))) {
++    if ((id_arg && !copy_name(id, id_arg)) ||
++        (devicetree_arg && !copy_name(devicetree, devicetree_arg))) {
+         printf("bootmgr: argument too long\n");
+         return -1;
+     }
+@@ -108,8 +130,8 @@ int bootmgr_start(const char *id_arg, const char *devicetree_arg, u64 flags)
+     heapblock_set_limit(NULL);
+ 
+     struct boot_files files;
+-    if (rust_boot_entry_load(id, devicetree_arg ? devicetree : NULL, !(flags & BOOTMGR_NO_SPLASH),
+-                             &files) < 0)
++    if (rust_boot_entry_load(id_arg ? id : NULL, devicetree_arg ? devicetree : NULL,
++                             !(flags & BOOTMGR_NO_SPLASH), &files) < 0)
+         return -1;
+     void *kernel = unpack_kernel(files.kernel, files.kernel_size);
+     if (!kernel)
+@@ -132,7 +154,7 @@ int bootmgr_start(const char *id_arg, const char *devicetree_arg, u64 flags)
+         printf("bootmgr: could not prepare the device tree; storage is shut down\n");
+         return -1;
+     }
+-    printf("bootmgr: starting %s\n", id);
++    printf("bootmgr: starting %s\n", id_arg ? id : "the default entry");
+     return kboot_boot(kernel);
+ }
+ 
+diff --git a/src/proxy.c b/src/proxy.c
+index b238b9e..57360ba 100644
+--- a/src/proxy.c
++++ b/src/proxy.c
+@@ -700,9 +700,14 @@ int proxy_process(ProxyRequest *request, ProxyReply *reply)
+             break;
+         }
+ #endif
+-        /* args: entry id, DTB file name or 0, flags (0). On success the reply goes out, then
+-         * the kernel runs. */
++        /* args: entry id, DTB file name or 0, flags. On success the reply goes out, then the
++         * kernel runs. */
+         case P_BOOT_START:
++            if (!request->args[0]) {
++                printf("bootmgr: no entry id\n");
++                reply->retval = -1;
++                break;
++            }
+             if (bootmgr_start((const char *)request->args[0], (const char *)request->args[1],
+                               request->args[2]) == 0)
+                 return 1;

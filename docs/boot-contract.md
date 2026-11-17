@@ -6,9 +6,12 @@ two standards, applied with as few additions as possible:
 - [Boot Loader Specification](https://uapi-group.org/specifications/specs/boot_loader_specification/) (BLS), Type #1 entries;
 - [Discoverable Partitions Specification](https://uapi-group.org/specifications/specs/discoverable_partitions_specification/) (DPS), for partition types.
 
-Status (2026-11-01): implemented. The installer writes it, and `orchard launch`
+Status (2026-11-01): implemented. The installer writes it (since 2026-11-17 with
+`boot-entries`, which the kernel packages run on every update), and `orchard launch`
 boots it through m1n1's boot manager (orchard m1n1 patches 0007-0010, see
-[Host and m1n1](#host-and-m1n1)); hardware-tested on J71b. It replaces the old layout (root directory on an "OmarchySystems"
+[Host and m1n1](#host-and-m1n1)); hardware-tested on J71b. The default entry
+from `loader.conf` and m1n1's autoboot (patches 0016-0018, 2026-11-17) are
+unit-tested only so far. It replaces the old layout (root directory on an "OmarchySystems"
 ext4 partition, launcher kernel, `switch_root`). Old installs are not migrated.
 
 ## Who does what
@@ -16,21 +19,85 @@ ext4 partition, launcher kernel, `switch_root`). Old installs are not migrated.
 | Part | Does | Never does |
 |---|---|---|
 | Bootloader (m1n1 + host) | Reads the boot partition, lists the entries, loads the chosen entry's kernel, initrd and DTB, applies the ADT fill-ins, boots | Mount or read a root filesystem, write to storage |
-| Installer | Creates the boot partition once; creates a root partition per system; unpacks the system's root image and orchard's platform layer into it; writes the system's entry and its files from the layer | Touch APFS beyond the agreed resize; touch another system's partition or files |
-| Installed system | Owns its root partition | Install a kernel, initrd or boot entry; touch another system's files |
+| Installer | Creates the boot partition once; creates a root partition per system; unpacks the system's root image into it and installs orchard's kernel package from the Orchard package repository with the root's package manager (or the platform layer's files); writes `/etc/orchard/boot-entry` and runs `boot-entries sync` and `boot-entries default` once, so the new system is the default | Touch APFS beyond the agreed resize; touch another system's partition or files |
+| Installed system | Owns its root partition and its own entries: orchard's `boot-entries`, run by the kernel package's hooks or triggers, keeps them in step with its kernels | Install a kernel, initrd or entry by any other means (kernel-install, mkinitcpio); touch another system's entries or files; keep an entry whose kernel's modules are gone |
 
 ## Kernel, DTBs and modules
 
 They are orchard's, not the distribution's. A distribution's root image holds no
 `/usr/lib/modules`; one image serves every platform. orchard's platform layer
 (`orchard.image.platform`, one per platform) holds `/usr/lib/modules/RELEASE/`
-with `vmlinuz`, the DTB of every board of the platform under `dtb/` and the
-modules, plus the regulatory database and hardware defaults under `/usr/lib`
-(orchard's `system/`). The installer writes it into the new root after the root
-image and refuses a file the image already has. Then it writes the entry below
-itself: the kernel, orchard's initrd and the board's DTB from the layer. So no
-distribution needs `kernel-install`, mkinitcpio or dracut, and every init system
-works the same way.
+with `vmlinuz`, orchard's `initrd`, the DTB of every board of the platform under
+`dtb/` and the modules, plus the regulatory database and hardware defaults under
+`/usr/lib` (orchard's `system/`) and `/usr/lib/orchard/boot-entries`, the one
+program that writes a system's entries. The layer is a plain tarball for every
+distribution; each base's kernel package installs it unchanged. So no distribution needs `kernel-install`, mkinitcpio or dracut,
+and every init system works the same way.
+
+### Install
+
+The installer installs the kernel the way pacstrap installs `linux`: the host
+downloads the newest published `linux-orchard-PLATFORM` of the root's base from
+the Orchard package repository, checks it against the repository's index,
+uploads it, and the root's own `pacman -U` or `apk add` installs it. So every
+system owns its kernel through its package manager from the start. A root with
+neither, or a platform the repository publishes nothing for yet, gets the
+layer's files as they are (refusing a file the image already has). Before
+that the installer writes `/etc/orchard/boot-entry` (below); the package's
+hook or trigger, and then the installer once more, run `boot-entries sync`,
+which writes the entry.
+
+### Kernel packages
+
+[OrchardLinux/packages](https://github.com/OrchardLinux/packages) builds
+`linux-orchard-PLATFORM` (`apple-16k` and `apple-4k` for aarch64, `apple-armv7`
+for armv7) with plain makepkg and abuild: each recipe fetches an orchard
+release's platform layer by checksum and installs it unchanged, with pacman
+hooks, or apk pre-upgrade and pre-deinstall scripts and a trigger, that run
+`boot-entries`. Its version is the orchard release's (`0.4.0-1`, apk
+`0.4.0-r0`); a release of orchard is a version bump of those recipes, and
+nightlies publish nothing. orchard itself publishes only the neutral layer. A
+system installed before kernel packages switches once with
+`pacman -S --overwrite '/usr/*' linux-orchard-PLATFORM` or
+`apk add linux-orchard-PLATFORM`.
+
+### Kernel updates
+
+`/usr/lib/orchard/boot-entries` (POSIX sh) works on this system's entries only:
+
+- `sync`: for every kernel in `/usr/lib/modules` with `vmlinuz`, `initrd` and the
+  board's DTB, copies them and the system's splash to `/TOKEN/VERSION/` and writes
+  `/loader/entries/TOKEN-VERSION.conf`, exactly as below. Then it removes this
+  system's entries (its token in the paths, its `root=PARTUUID` in the options) for
+  kernels that are gone, entry first, then their files. Other systems' entries and
+  files are never touched.
+- `save`: before the package manager replaces or removes a kernel, it keeps that
+  kernel's modules directory aside (hard links). `sync` puts it back if the
+  package took it away and marks it `.orchard-kept`, so the kernel that booted
+  stays as the fallback entry. A system keeps two kernels: the package's and the
+  last one kept, the running kernel first. Only directories marked this way are
+  ever deleted, and an entry never outlives its modules.
+- `default`: sets `default TOKEN-*` in `/loader/loader.conf` (systemd-boot's
+  format), keeping its other lines.
+
+A package manager runs `save` before a kernel package is upgraded or removed
+(pacman: a PreTransaction hook; apk: the package's pre-upgrade and
+pre-deinstall scripts) and `sync` after any change to a kernel, initrd, DTB, the
+splash or the script (pacman: a PostTransaction hook; apk: a trigger on
+`/usr/lib/modules/*`, `/usr/share/orchard` and `/usr/lib/orchard`).
+
+`/etc/orchard/boot-entry` describes the system, one `key=value` per line:
+`token`, `title`, `sort_key`, `devicetree`, `options` (with `root=PARTUUID=`) and
+`boot_partuuid` (empty without a boot partition). A system installed before the
+file existed is found by `root=PARTUUID=` on its kernel command line in its
+existing entry, and the file is written from that entry. Without the file or such
+an entry (a container, a system Orchard did not install) `boot-entries` does
+nothing.
+
+The boot partition is mounted at `/boot` (the installer's fstab names it by
+PARTUUID, `vfat`, `fmask=0077,dmask=0077`). If it is not mounted, `boot-entries`
+mounts it first, by fstab or by `boot_partuuid`. Without a boot partition (LwVM)
+`/boot` is a directory of the root.
 
 orchard's initrd (`boot/initramfs/root`) holds BusyBox and the platform's storage
 modules only. It loads them, waits up to 30 s for the partition that
@@ -67,7 +134,8 @@ placed where iOS's boot chain finds it.
 
 The layout follows BLS:
 - one file per entry under `/loader/entries/<entry-id>.conf` on the boot partition;
-- the entry's files under `/<entry-token>/<version>/`.
+- the entry's files under `/<entry-token>/<version>/`;
+- the default in `/loader/loader.conf`, as systemd-boot keeps it (see [Selection](#selection)).
 
 The entry token is the system's id and the first group of its root's PARTUUID, for example `omarchy-4d6c1a2b`. It keeps systems apart, two installs of one distribution too. The entry is `/loader/entries/<entry-token>-<version>.conf`.
 
@@ -87,7 +155,7 @@ options    root=PARTUUID=4d6c…-… rw quiet
 |---|---|
 | `linux` | Required. arm64 `Image`, raw or gzip-compressed |
 | `initrd` | Optional and repeatable. Several are concatenated in order, as BLS specifies |
-| `devicetree` | **Required.** The DTB for this board. m1n1 applies the ADT fill-ins (MAC addresses, calibration, memory, CPUs) to it, so the plain DTB from the kernel build is used. The installer copies the board's DTB from the platform layer. |
+| `devicetree` | **Required.** The DTB for this board. m1n1 applies the ADT fill-ins (MAC addresses, calibration, memory, CPUs) to it, so the plain DTB from the kernel build is used. `boot-entries` copies the board's DTB from the kernel's `dtb/`. |
 | `options` | Required. It must contain `root=PARTUUID=…` of the system's own root partition. Root discovery without `root=` is not used, because one device can hold several roots. |
 | `title`, `version`, `sort-key` | As BLS: shown in the host's list and used for its order. |
 | `machine-id`, `architecture` | Optional. If `architecture` is present, it must be `aa64`. |
@@ -97,8 +165,8 @@ options    root=PARTUUID=4d6c…-… rw quiet
 
 ## Splash
 
-A system's boot splash ships in its root as `/usr/share/orchard/splash`; the
-installer copies it next to the entry's kernel (`/TOKEN/VERSION/splash`).
+A system's boot splash ships in its root as `/usr/share/orchard/splash`;
+`boot-entries` copies it next to each entry's kernel (`/TOKEN/VERSION/splash`).
 When an entry starts, m1n1 paints it centred on black before it loads the
 kernel. Nothing paints it again: the picture stays on the screen until the
 system draws over it. Entries start quiet (`fbcon=map:9`), as the recovery
@@ -116,17 +184,49 @@ mark.
 
 ## Selection
 
-The host lists every valid entry in BLS order and boots the one the user picks. Invalid entries are listed with the reason and never hidden. Reasons include:
+Like a PC with systemd-boot. m1n1 is the device's boot loader: it reads the
+entries and `loader.conf` and boots the default by itself. It can't live on
+the device yet, so the host puts it there for every start; that is the only
+thing the host adds (see [Start](#start)). Every entry is listed in BLS order;
+invalid entries are listed with the reason and never hidden. Reasons include:
 - missing files;
-- a `devicetree` whose name doesn't match the board;
+- a `devicetree` that isn't this board's (`*-BOARD.dtb` for the board in m1n1's ADT, or the name the host gives);
 - a missing `root=PARTUUID`.
 
-Without a choice, the host boots the first entry in BLS order. A remembered default, like systemd-boot's `loader.conf`, can come later.
+The default comes from `/loader/loader.conf` on the boot partition, in
+systemd-boot's format (one `key value` per line, `#` comments):
+
+```
+default omarchy-4d6c1a2b-*
+```
+
+- `default` is a glob (`*`, `?`, `[...]`, ASCII case ignored), matched against each entry id with or without `.conf`. The first match in BLS order is the default: with the pattern `<entry-token>-*` that is the newest kernel of that system. The last `default` line counts.
+- Without `loader.conf`, without a `default` line, or if it matches nothing, the default is the first bootable entry in BLS order.
+- A matching entry is the default even if it can't boot. Then m1n1 shows why and waits; it starts no other system by itself.
+- Other keys (`timeout`, `editor`, `@saved` and so on) are ignored: there is no menu on the device yet. An unreadable `loader.conf` is ignored with a line on m1n1's console.
+
+Who writes it: `boot-entries default` sets `default <entry-token>-*`, keeping
+every other line. The installer runs it for the system it has just installed;
+the system can run it again to make itself the default. The bootloader only
+reads it.
+
+## Start
+
+| Command | m1n1 starts with | Then |
+|---|---|---|
+| `orchard launch` | `autoboot=1` | m1n1 boots the default by itself. The host hands it over and exits, like pressing power. If the default fails, the reason is on the device's screen and m1n1 waits in its proxy, where `--list` and `--entry` find it. |
+| `orchard launch --list` | nothing (waits) | The host reads the entries (`P_BOOT_ENTRIES`) and shows a picker, default preselected and marked `(default)`, unbootable entries with their reason and not selectable. Enter sends one `P_BOOT_START`; Esc leaves m1n1 waiting. Without a terminal the list is printed and m1n1 waits. |
+| `orchard launch --entry ID` | nothing (waits), unless one already waits | One `P_BOOT_START ID`: exactly that entry or m1n1's reason, never another one. |
+
+The choice at start, autoboot or wait, is what holding a key at power-on is on
+a PC. `autoboot=1` is m1n1's own appended-variable form (like
+`chosen.bootargs=`), written after the image; zero bytes end the payloads.
+With a kernel in the payload (RAM boots) it changes nothing.
 
 ## Host and m1n1
 
-m1n1 does the storage boot and the host only chooses (bootloader decision of
-2026-10-29). This section is the interface between them; the Rust launcher and
+m1n1 does the storage boot and the host only starts m1n1 and, when asked,
+chooses (bootloader decision of 2026-10-29; autoboot 2026-11-17). This section is the interface between them; the Rust launcher and
 `transports/m1n1.py` implement the host side against it. Status per item:
 **done** (in `boot/m1n1/patches/orchard`) or **open**.
 
@@ -145,12 +245,12 @@ sends today.
 
 | m1n1 | Host |
 |---|---|
-| Reads storage (read-only), finds XBOOTLDR, parses and checks the entries, sorts them | Chooses an entry, or takes the first one |
+| Reads storage (read-only), finds XBOOTLDR, parses and checks the entries, sorts them, picks the default from `loader.conf`, boots it with `autoboot=1` | Puts m1n1 on the device with or without `autoboot=1`; without, shows the entries and sends the chosen id |
 | Paints the splash, loads the entry, applies the DT fill-ins, shuts storage down, boots | Shows entries, problems and progress |
 | Reports problems as text | Writes nothing, parses no disk structures, doesn't touch the framebuffer |
 
-Nothing here needs a host: m1n1 can later boot the first (or a remembered)
-entry by itself, as in Asahi's model.
+With `autoboot=1` nothing here needs a host, as in Asahi's model; once m1n1
+can stay on the device, autoboot becomes its normal start.
 
 ### Operations
 
@@ -160,15 +260,16 @@ proper numbers when they go upstream.
 | Op | Status | Arguments | Result |
 |---|---|---|---|
 | `P_MAIN_STORAGE_INIT`, `_SHUTDOWN` (`0xf08`, `0xf09`) | exists | – | ok or error |
-| `P_BOOT_ENTRIES` (`0x1500`) | **done** (0007) | `args[0]`: a 16-byte buffer; `args[1]`: the board's DTB file name, or 0 | m1n1 writes the text's address and size into the buffer |
+| `P_BOOT_ENTRIES` (`0x1500`) | **done** (0007, default 0016) | `args[0]`: a 16-byte buffer; `args[1]`: the board's DTB file name, or 0 for any `*-BOARD.dtb` of the board m1n1 runs on | m1n1 writes the text's address and size into the buffer |
 | `P_BOOT_ENTRIES_FREE` (`0x1501`) | **done** (0007) | `args[0]`: the same buffer | – |
-| `P_BOOT_START` (`0x1502`) | **done** (0008, splash 0009) | `args[0]`: the entry id; `args[1]`: the board's DTB file name, or 0; `args[2]`: flags, bit 0 = no splash | replies OK, then starts the kernel; on failure -1, the reason as a `bls:` or `bootmgr:` line on m1n1's console, and the proxy stays |
+| `P_BOOT_START` (`0x1502`) | **done** (0008, splash 0009) | `args[0]`: the entry id (required; the default is for autoboot); `args[1]`: the board's DTB file name, or 0 as above; `args[2]`: flags, bit 0 = no splash | replies OK, then starts the kernel; on failure -1, the reason as a `bls:` or `bootmgr:` line on m1n1's console, and the proxy stays |
 
 `P_BOOT_ENTRIES` needs `P_MAIN_STORAGE_INIT` first. Its text is BLS syntax:
 
 ```
 contract 1
 entry omarchy-4d6c1a2b-6.18.2-orchard
+default yes
 title Omarchy
 version 6.18.2-orchard
 sort-key omarchy
@@ -184,16 +285,17 @@ problem devicetree is not t8010-j71b.dtb
 - The first line is `contract N`. A host refuses a contract it doesn't know.
 - Then one block per entry, in boot order, each ended by an empty line:
   - the `entry` id: the file name without `.conf` and without a boot counter;
+  - `default yes` in the default entry's block (0016; see [Selection](#selection)). It is an extra key, so hosts that keep keys they don't know read the text as before;
   - the entry's BLS keys in file order (keys BLS doesn't define are left out, so they can't pose as the lines below);
   - `root` if the options name a partition;
   - a `problem` line per reason the entry can't boot, using the rules of [Entries](#entries) and [Selection](#selection). An entry without problems is bootable.
 - If the disk itself can't be read (no GPT, not exactly one XBOOTLDR, no FAT), a single `error TEXT` line follows the contract line instead.
 - Order is systemd-boot's: entries with a sort-key first, by sort-key, machine-id and newest version (UAPI version comparison), then by id, newest first.
 
-`P_BOOT_START` (0008, 0009), in this order:
+`P_BOOT_START` (0008, 0009), in this order; autoboot (0018) does the same for the default entry, after bringing storage up:
 1. Paint the entry's splash (`splash` in the directory of its `linux`, see [Splash](#splash)) centred on black, unless flag bit 0 is set. A missing or broken splash only costs the picture.
-2. Check the entries again and load the bootable entry: linux (an Image at a 2 MiB boundary with room for its `image_size`, or gzip, uncompressed behind the heap), the initrds (concatenated) and the devicetree. The arguments are copied first, then m1n1 lifts any heap limit the host set (`P_HEAPBLOCK_SET_LIMIT`; today's client sets 128 MiB when it connects): an allocation past the limit panics m1n1, and memory above m1n1's heap is m1n1's from here on.
-3. Shut storage down. Only now, so a failure before it leaves storage up for another entry. A second `main_storage_init` in one m1n1 session hangs on A10 (J71b, 2026-11-01: the init answers, the next read never returns and m1n1 stops answering), so a host initialises storage once per session. The NVMe strap release (0006) stays the backend's job.
+2. Check the entries again and load the entry, if it is bootable: linux (an Image at a 2 MiB boundary with room for its `image_size`, or gzip, uncompressed behind the heap), the initrds (concatenated) and the devicetree. The arguments are copied first, then m1n1 lifts any heap limit the host set (`P_HEAPBLOCK_SET_LIMIT`; today's client sets 128 MiB when it connects): an allocation past the limit panics m1n1, and memory above m1n1's heap is m1n1's from here on.
+3. Shut storage down. Only now, so a failure before it leaves storage up for another entry. A second `main_storage_init` in one m1n1 session hangs on A10 (J71b, 2026-11-01: the init answers, the next read never returns and m1n1 stops answering), so m1n1 answers an init while storage is up with success (0017): after a failed autoboot or a failed start a host just initialises again. An init after the shutdown still reaches the hardware. The NVMe strap release (0006) stays the backend's job.
 4. Set the entry's options as bootargs, start cpufreq, the secondary CPUs and the mitigations (as m1n1's payload boot does), prepare the DT, reply OK, boot.
 
 Tested on J71b over Pongo (`orchard launch`) and iBoot (`launcher-kit`, `./launch boot --bare`): Linux runs the entry's kernel with its options and mounts its root from NVMe.

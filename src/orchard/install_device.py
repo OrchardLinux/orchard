@@ -9,8 +9,9 @@ standard library and the recovery's sfdisk, blkid, mke2fs, blockdev and
 mount only. `inspect` is read-only. `run` installs top to bottom: it
 re-checks the live partition table against the plan (made from an earlier
 inspect, see install_layout.py), changes only the ranges the plan names,
-and writes the boot entry last. It never touches APFS or any partition the
-plan does not name. Every step reports one JSON line on stdout and in
+and writes the boot entry last, with boot-entries (uploaded beside this
+file; the script the installed system's kernel package runs too). It never
+touches APFS or any partition the plan does not name. Every step reports one JSON line on stdout and in
 /run/orchard/install.log; a run interrupted after its partition-table
 write is rerun from a fresh inspect, which then sees the new partitions.
 
@@ -495,57 +496,46 @@ def remove_old_entries(boot_root, present):
     return removed
 
 
-# A distribution's boot splash in its root; m1n1 paints it when the entry starts (OSPL: docs/boot-contract.md).
-SPLASH = 'usr/share/orchard/splash'
+# The system's boot entry, which /usr/lib/orchard/boot-entries reads (docs/boot-contract.md).
+BOOT_CONFIG = 'etc/orchard/boot-entry'
+# The entries' one implementation: the platform layer's copy, and this one, uploaded beside this file.
+BOOT_ENTRIES = Path(__file__).with_name('boot-entries')
+
 
 def entry_token(entry, partuuid):
     """The BLS entry token: the system's id and its root, so two installs never share files."""
     return f'{entry["id"]}-{partuuid.split("-")[0]}'
 
 
-def write_entry(boot_root, root, version, entry, partuuid):
-    """Copy the platform layer's kernel, initrd and the board's DTB to the boot partition; write the entry.
+def boot_config(entry, partuuid, boot_partuuid):
+    """/etc/orchard/boot-entry: what boot-entries writes into each of this system's entries."""
+    fields = {'token': entry_token(entry, partuuid), 'title': entry['title'], 'sort_key': entry['id'],
+              'devicetree': entry['devicetree'],
+              'options': f'root=PARTUUID={partuuid} rw {entry.get("options", "")}'.strip(),
+              'boot_partuuid': boot_partuuid or ''}
+    if any('\n' in str(value) or '\r' in str(value) for value in fields.values()):
+        raise InstallError('entry-invalid', 'A boot entry field spans lines')
+    return ("# This system's boot entry: read by /usr/lib/orchard/boot-entries (docs/boot-contract.md).\n" +
+            ''.join(f'{key}={value}\n' for key, value in fields.items()))
 
-    orchard owns the kernel side of every installed system, so the entry
-    comes from the layer and not from the system's kernel-install
-    (docs/boot-contract.md). Files go to /TOKEN/VERSION/ and the entry to
-    /loader/entries/TOKEN-VERSION.conf, as the Boot Loader Specification
-    lays them out.
+
+def sync_entries(root, boot_root):
+    """The system's entries from its kernels: boot-entries sync, the same as every later kernel update.
+
+    Copies each kernel's linux, initrd and the board's DTB from /usr/lib/modules/VERSION
+    (and the system's splash) to /TOKEN/VERSION/ and writes /loader/entries/TOKEN-VERSION.conf,
+    as the Boot Loader Specification lays them out.
     """
-    source = root / 'usr/lib/modules' / version
-    token = entry_token(entry, partuuid)
-    files = {'linux': source / 'vmlinuz', 'initrd': source / 'initrd',
-             entry['devicetree']: source / 'dtb' / entry['devicetree']}
-    # The system's boot splash (docs/boot-contract.md), if it ships one.
-    splash = root / SPLASH
-    extra = {'splash': splash} if splash.is_file() and not splash.is_symlink() else {}
-    for name, path in files.items():
-        if path.is_symlink() or not path.is_file():
-            raise InstallError('no-kernel', f'The platform layer lacks /{path.relative_to(root)}')
-    directory = boot_root / token / version
-    directory.mkdir(parents=True, exist_ok=True)
-    for name, path in {**files, **extra}.items():
-        with path.open('rb') as data, (directory / name).open('wb') as output:
-            while chunk := data.read(1 << 20):
-                output.write(chunk)
-            output.flush()
-            os.fsync(output.fileno())
-    options = f'root=PARTUUID={partuuid} rw {entry.get("options", "")}'.strip()
-    text = (f'title {entry["title"]}\nversion {version}\nsort-key {entry["id"]}\n'
-            f'linux /{token}/{version}/linux\ninitrd /{token}/{version}/initrd\n'
-            f'devicetree /{token}/{version}/{entry["devicetree"]}\noptions {options}\n'
-            f'architecture {architecture(files["linux"])}\n')
-    entries = boot_root / 'loader/entries'
-    entries.mkdir(parents=True, exist_ok=True)
-    write_text(entries / f'{token}-{version}.conf', text)
-    return token
+    script = BOOT_ENTRIES if BOOT_ENTRIES.is_file() else root / 'usr/lib/orchard/boot-entries'
+    return run('sh', str(script), '--root', str(root), '--boot', str(boot_root), 'sync', timeout=600).decode()
 
 
-def architecture(kernel):
-    """The entry's BLS architecture: arm for a 32-bit ARM zImage, aa64 for everything else."""
-    with kernel.open('rb') as data:
-        head = data.read(0x28)
-    return 'arm' if len(head) == 0x28 and struct.unpack_from('<I', head, 0x24)[0] == 0x016f2818 else 'aa64'
+def set_default(root, boot_root):
+    """Make this system the default, `default TOKEN-*` in /loader/loader.conf: boot-entries default."""
+    script = BOOT_ENTRIES if BOOT_ENTRIES.is_file() else root / 'usr/lib/orchard/boot-entries'
+    run('sh', str(script), '--root', str(root), '--boot', str(boot_root), 'default', timeout=60)
+    text = (boot_root / 'loader/loader.conf').read_text(errors='replace')
+    return next((line.strip() for line in text.splitlines() if line.split(None, 1)[:1] == ['default']), '')
 
 
 def check_entry(boot_root, partuuid, devicetree):
@@ -614,6 +604,56 @@ def install_layer(path, root, *, size, sha256, expanded_limit):
     finally:
         os.close(root_fd)
     return count
+
+
+def root_base(root):
+    """The root's package manager: pacman, apk or None (kernel_packages.DETECT asks the same)."""
+    if (root / 'usr/bin/pacman').is_file():
+        return 'pacman'
+    if any((root / path).is_file() for path in ('sbin/apk', 'usr/sbin/apk', 'usr/bin/apk')):
+        return 'apk'
+    return None
+
+
+def install_kernel(path, root, *, size, sha256, expanded_limit, package=None):
+    """orchard's kernel into the new root: the root's own kernel package, the way pacstrap installs `linux`.
+
+    PACKAGE ({'path', 'base', 'bytes', 'sha256'}) is linux-orchard-PLATFORM from the Orchard
+    package repository, which the host downloaded and uploaded (kernel_packages.py); the
+    root's pacman or apk installs it, so the system owns its kernel through its package
+    manager. Without one (a root with neither, or no published package for the platform yet)
+    the platform layer's files go in as they are (install_layer). Returns what the step reports.
+    """
+    if package is not None:
+        base = root_base(root)
+        if base != package['base']:
+            raise InstallError('kernel-package', f'The root has no {package["base"]} for the kernel package')
+        digest, count = hashlib.sha256(), 0
+        with open(package['path'], 'rb') as stream:
+            while chunk := stream.read(1 << 20):
+                digest.update(chunk)
+                count += len(chunk)
+        if count != package['bytes'] or digest.hexdigest() != package['sha256']:
+            raise InstallError('kernel-package', 'The kernel package differs from the plan')
+        name = Path(package['path']).name
+        inside = root / 'var/tmp' / name
+        inside.parent.mkdir(parents=True, exist_ok=True)
+        with open(package['path'], 'rb') as source, inside.open('wb') as output:
+            while chunk := source.read(1 << 20):
+                output.write(chunk)
+        chroot = [] if root == Path('/') else ['chroot', str(root)]
+        try:
+            if base == 'pacman':
+                run(*chroot, 'pacman', '-U', '--noconfirm', '/var/tmp/' + name, timeout=900)
+            else:
+                # The host checked it against the signed repository's index.
+                run(*chroot, 'apk', 'add', '--allow-untrusted', '--no-network', '--no-cache', '/var/tmp/' + name,
+                    timeout=900)
+        finally:
+            inside.unlink(missing_ok=True)
+        Path(package['path']).unlink()
+        return {'package': name, 'base': base}
+    return {'files': install_layer(path, root, size=size, sha256=sha256, expanded_limit=expanded_limit)}
 
 
 def install_firmware(bundle, root, *, size, sha256):
@@ -757,16 +797,11 @@ def kernel_version(root):
 
 
 def finish(plan, target, present, secrets):
-    """Everything after the root's files: platform layer, firmware, account, boot entry.
+    """Everything after the root's files: firmware, account, the kernel (package or layer), boot entries.
 
     TARGET has /boot, /proc, /sys and /dev mounted; it is / when this runs inside the new root.
     PRESENT holds the PARTUUIDs of the partitions that stay.
     """
-    layer = plan['layer']
-    files = install_layer(layer['path'], target, size=layer['bytes'], sha256=layer['sha256'],
-                          expanded_limit=layer['expanded_bytes'])
-    Path(layer['path']).unlink()
-    emit('step', step='platform-layer', state='done', files=files)
     firmware = plan.get('firmware')
     if firmware:
         with open(firmware['path'], 'rb') as bundle:
@@ -790,10 +825,19 @@ def finish(plan, target, present, secrets):
     account = plan.get('account')
     if account:
         emit('step', step='account', state='done', user=set_account(target, account, *(secrets or (None, None))))
-    version = kernel_version(target)
-    write_entry(boot_mount, target, version, entry, plan['root']['partuuid'])
+    # The configuration first: the kernel package's hook or trigger writes the entries from it.
+    write_text(target / BOOT_CONFIG, boot_config(entry, plan['root']['partuuid'], (boot or {}).get('partuuid')))
+    layer = plan['layer']
+    installed = install_kernel(layer['path'], target, size=layer['bytes'], sha256=layer['sha256'],
+                               expanded_limit=layer['expanded_bytes'], package=plan.get('kernel_package'))
+    Path(layer['path']).unlink()
+    emit('step', step='platform-layer', state='done', **installed)
+    kernel_version(target)
+    sync_entries(target, boot_mount)
     name = check_entry(boot_mount, plan['root']['partuuid'], entry['devicetree'])
     emit('step', step='boot-entry', state='done', entry=name)
+    # The system just installed is what starts next, as on a PC after installing an OS.
+    emit('step', step='boot-default', state='done', default=set_default(target, boot_mount))
 
 
 def install(plan, stream):

@@ -49,8 +49,11 @@ orchard 0.2 install with the released Orchard 0.1.10
 
 To start an installed system again, connect the device in DFU mode and run
 `orchard launch`. The host sends only Pongo and m1n1; m1n1 reads the boot entries
-from the device's boot partition and starts the one you choose (`--entry ID` picks
-one without asking). Any computer with Orchard can launch any installed system.
+from the device's boot partition and starts the default system by itself, as a
+PC's boot loader does: the one installed last, or whichever a system made the
+default since. `orchard launch --list` lets you pick an entry, `--entry ID`
+starts one entry once. Any computer with Orchard can launch any installed
+system.
 
 ## Connect to a running system
 
