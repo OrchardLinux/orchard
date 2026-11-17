@@ -10,13 +10,13 @@ and nest its VM locks: make it a member of the device.
 
 Assisted-by: LLM
 ---
- drivers/gpu/drm/imagination/pvr_device.c | 4 ++++
+ drivers/gpu/drm/imagination/pvr_device.c | 5 +++++
  drivers/gpu/drm/imagination/pvr_device.h | 6 ++++++
  drivers/gpu/drm/imagination/pvr_job.c    | 9 +++------
- 3 files changed, 13 insertions(+), 6 deletions(-)
+ 3 files changed, 14 insertions(+), 6 deletions(-)
 
 diff --git a/drivers/gpu/drm/imagination/pvr_device.c b/drivers/gpu/drm/imagination/pvr_device.c
-index c160763a3a..81c0b4f095 100644
+index 8c1bb336d3..e5065f8042 100644
 --- a/drivers/gpu/drm/imagination/pvr_device.c
 +++ b/drivers/gpu/drm/imagination/pvr_device.c
 @@ -13,6 +13,7 @@
@@ -27,18 +27,19 @@ index c160763a3a..81c0b4f095 100644
  #include <drm/drm_print.h>
  
  #include <linux/bitfield.h>
-@@ -805,6 +806,9 @@ pvr_device_init(struct pvr_device *pvr_dev)
+@@ -805,6 +806,10 @@ pvr_device_init(struct pvr_device *pvr_dev)
  	struct device *dev = drm_dev->dev;
  	int err;
  
 +	err = drmm_mutex_init(drm_dev, &pvr_dev->submit_order);
 +	if (err)
 +		return err;
- 	spin_lock_init(&pvr_dev->gem_pin_lock);
- 	INIT_LIST_HEAD(&pvr_dev->gem_pin_accounts);
++
+ 	/* Get the platform-specific data based on the compatible string. */
+ 	pvr_dev->device_data = of_device_get_match_data(dev);
  
 diff --git a/drivers/gpu/drm/imagination/pvr_device.h b/drivers/gpu/drm/imagination/pvr_device.h
-index 24b4dd03d5..e5414e8ca4 100644
+index 015719016a..98be4c27b5 100644
 --- a/drivers/gpu/drm/imagination/pvr_device.h
 +++ b/drivers/gpu/drm/imagination/pvr_device.h
 @@ -94,6 +94,12 @@ struct pvr_device {
@@ -51,9 +52,9 @@ index 24b4dd03d5..e5414e8ca4 100644
 +	 */
 +	struct mutex submit_order;
 +
- 	/** @gem_pin_lock: Protects the GEM pin budget and per-process accounts. */
- 	spinlock_t gem_pin_lock;
- 	/** @gem_pin_accounts: Live BO owners, keyed by their TGID's struct pid. */
+ 	/** @gem_reclaim: GEM residency, using base.gem_lru_mutex for all LRUs. */
+ 	struct {
+ 		struct drm_gem_lru evictable;
 diff --git a/drivers/gpu/drm/imagination/pvr_job.c b/drivers/gpu/drm/imagination/pvr_job.c
 index 0d9b9aaf29..d4e7e8869c 100644
 --- a/drivers/gpu/drm/imagination/pvr_job.c
