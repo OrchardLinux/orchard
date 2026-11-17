@@ -46,8 +46,16 @@ connected it also requires bit 1. Events 16, 40–43, 72 and 77 (its only
 subscription, masks at `…5915d68`/`…5915d86`) are each handed to
 AppleARMPMUCharger as a power-source change (`causeChargerEvent`, flag 2),
 which debounces 50 ms and then reads that state again; the input limit is not
-touched on the way. The Linux charger still uses `0x18a` = 0 as no input; its
-development trace logs `0x189` to compare the two on the device.
+touched on the way.
+
+The device comparison settled it (J71t, 2026-11-17, powered Lightning camera
+adapter): during the input-current ramp `0x18a` alternated between `0x40`
+and `0x00` every 100–300 ms while `0x189` stayed `0x87`/`0x83` (bit 0 set),
+and every `0x00` withdrew the grant to 100 mA. A real unplug clears `0x189`
+bit 0. The charger now takes presence from `0x189` as iOS does on boards
+whose match data says the PMIC reports it (J71t): bit 0 keeps a connection,
+and a new one also needs bit 1 (`0x87` at boot with a cable in). Other boards
+keep the nonzero-`0x18a` rule.
 
 ## Input-limit encoding
 
