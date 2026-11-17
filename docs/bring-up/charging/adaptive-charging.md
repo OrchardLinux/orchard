@@ -88,8 +88,7 @@ exceeds what is allowed.
 | Phase | Entry | What happens |
 |---|---|---|
 | EMPTY | `0x18a` = 0 | Writes the handoff `0x02` and forgets the source, `usb_ma` included |
-| (transitional) | `0x18a` ≠ 0 and ≠ `0x42` (for example `0x40` during attach, `0x62` in PR #51) | No grant: withdraws to the fallback |
-| SETTLING | `0x18a` = `0x42` with no source present → `tristar_new_attachment()` | Writes the fallback. Early look at 300 ms, before USB enumerates (0009). Identifies at 1000 ms (`tristar_run_identification()`) |
+| SETTLING | `0x18a` ≠ 0 with no source present → `tristar_new_attachment()` | Writes the fallback. Early look at 300 ms, before USB enumerates (0009). Identifies at 1000 ms (`tristar_run_identification()`) |
 | RAMPING | target above the fallback | `tristar_ramp_step()`: +500 mA every 500 ms. Before each step it reads the pack and falls back if the pack is outside the window |
 | CHARGING | target reached | `tristar_guard()` once a second: `tristar_check_limit()` (0013), then the pack window |
 | FAULT | mux restore failed, limit write failed, event storm | Holds the fallback until reboot |

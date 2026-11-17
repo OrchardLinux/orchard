@@ -32,9 +32,13 @@ input. On J71b, `0x18a` always went to `0x00` on unplug in our tests.
 Treat `0x18a` as one input to presence, not a source identity. It does not
 change on a quick swap (see [pmu-events.md](pmu-events.md)).
 
-Earlier Orchard code's "online" rule for `0x18a`: bit 4 clear, bits 1:0
-nonzero, high bits = `0x40`. The prototype requires exactly `0x42` to
-identify and treats `0x40` as transitional (no grant).
+These bits describe the battery charger, not the input. iOS 16 reads them
+in `AppleD2365PMUPowerSource`'s status method for its charging and fully
+charged state only. Its input-current ramp follows the source's allowance
+and backs off only when the PMIC reports input limiting, which the D2365
+implementation never does. The charger therefore keeps the input grant for
+any nonzero `0x18a`, including charge end, timeout and `0x40` (not
+charging), and treats `0x00` as no input.
 
 ## Input-limit encoding
 
