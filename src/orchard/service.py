@@ -274,9 +274,12 @@ def install_direct(adapter, device, name, files, firmware_files, boot_files, cha
                 progress.mark('Grown to the partition')
                 direct.mount_new_root(connection, root_node, boot_node)
                 progress.mark('Root mounted')
+                # The kernel as the root's own package, from the Orchard package repository.
+                plan['kernel_package'] = direct.kernel_package(connection, assets['layer'], directory)
+                progress.mark('Kernel package ' + ('ready' if plan['kernel_package'] else 'not published; layer files'))
                 replaced = (plan.get('remove') or {}).get('partuuid')
                 plan['present'] = [p['partuuid'] for p in partitions if p['partuuid'] != replaced]
-                remote.put(connection, remote.SCRIPT.read_bytes(), remote.SCRIPT.name)
+                remote.put_scripts(connection)
                 remote.put(connection, json.dumps(plan).encode(), 'plan.json')
                 if secrets is not None:
                     remote.put(connection, json.dumps(secrets).encode(), 'secrets.json')
@@ -387,7 +390,7 @@ def install(manifest=None, *, input_fn=input, secrets_fn=ask_secrets, progress=N
         status = Client(connection, progress).call('status')
         if status['release'] != boot_record['release']:
             raise ValueError('Running recovery is not the selected release.\n' + adapter.REBOOT_MESSAGE)
-        remote.put(connection, remote.SCRIPT.read_bytes(), remote.SCRIPT.name)
+        remote.put_scripts(connection)
         (layout,) = [e for e in remote.run(connection, ['inspect']) if e['event'] == 'layout']
         progress.done()
         option = choose_target(layout, clock, name=name, input_fn=input_fn, output=progress.say)

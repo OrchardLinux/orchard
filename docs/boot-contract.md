@@ -6,7 +6,8 @@ two standards, applied with as few additions as possible:
 - [Boot Loader Specification](https://uapi-group.org/specifications/specs/boot_loader_specification/) (BLS), Type #1 entries;
 - [Discoverable Partitions Specification](https://uapi-group.org/specifications/specs/discoverable_partitions_specification/) (DPS), for partition types.
 
-Status (2026-11-01): implemented. The installer writes it, and `orchard launch`
+Status (2026-11-01): implemented. The installer writes it (since 2026-11-17 with
+`boot-entries`, which the kernel packages run on every update), and `orchard launch`
 boots it through m1n1's boot manager (orchard m1n1 patches 0007-0010, see
 [Host and m1n1](#host-and-m1n1)); hardware-tested on J71b. The default entry
 from `loader.conf` and m1n1's autoboot (patches 0016-0018, 2026-11-17) are
@@ -18,21 +19,85 @@ ext4 partition, launcher kernel, `switch_root`). Old installs are not migrated.
 | Part | Does | Never does |
 |---|---|---|
 | Bootloader (m1n1 + host) | Reads the boot partition, lists the entries, loads the chosen entry's kernel, initrd and DTB, applies the ADT fill-ins, boots | Mount or read a root filesystem, write to storage |
-| Installer | Creates the boot partition once; creates a root partition per system; unpacks the system's root image and orchard's platform layer into it; writes the system's entry and its files from the layer; makes the new system the default in `loader.conf` | Touch APFS beyond the agreed resize; touch another system's partition or files |
-| Installed system | Owns its root partition | Install a kernel, initrd or boot entry; touch another system's files |
+| Installer | Creates the boot partition once; creates a root partition per system; unpacks the system's root image into it and installs orchard's kernel package from the Orchard package repository with the root's package manager (or the platform layer's files); writes `/etc/orchard/boot-entry` and runs `boot-entries sync` and `boot-entries default` once, so the new system is the default | Touch APFS beyond the agreed resize; touch another system's partition or files |
+| Installed system | Owns its root partition and its own entries: orchard's `boot-entries`, run by the kernel package's hooks or triggers, keeps them in step with its kernels | Install a kernel, initrd or entry by any other means (kernel-install, mkinitcpio); touch another system's entries or files; keep an entry whose kernel's modules are gone |
 
 ## Kernel, DTBs and modules
 
 They are orchard's, not the distribution's. A distribution's root image holds no
 `/usr/lib/modules`; one image serves every platform. orchard's platform layer
 (`orchard.image.platform`, one per platform) holds `/usr/lib/modules/RELEASE/`
-with `vmlinuz`, the DTB of every board of the platform under `dtb/` and the
-modules, plus the regulatory database and hardware defaults under `/usr/lib`
-(orchard's `system/`). The installer writes it into the new root after the root
-image and refuses a file the image already has. Then it writes the entry below
-itself: the kernel, orchard's initrd and the board's DTB from the layer. So no
-distribution needs `kernel-install`, mkinitcpio or dracut, and every init system
-works the same way.
+with `vmlinuz`, orchard's `initrd`, the DTB of every board of the platform under
+`dtb/` and the modules, plus the regulatory database and hardware defaults under
+`/usr/lib` (orchard's `system/`) and `/usr/lib/orchard/boot-entries`, the one
+program that writes a system's entries. The layer is a plain tarball for every
+distribution; each base's kernel package installs it unchanged. So no distribution needs `kernel-install`, mkinitcpio or dracut,
+and every init system works the same way.
+
+### Install
+
+The installer installs the kernel the way pacstrap installs `linux`: the host
+downloads the newest published `linux-orchard-PLATFORM` of the root's base from
+the Orchard package repository, checks it against the repository's index,
+uploads it, and the root's own `pacman -U` or `apk add` installs it. So every
+system owns its kernel through its package manager from the start. A root with
+neither, or a platform the repository publishes nothing for yet, gets the
+layer's files as they are (refusing a file the image already has). Before
+that the installer writes `/etc/orchard/boot-entry` (below); the package's
+hook or trigger, and then the installer once more, run `boot-entries sync`,
+which writes the entry.
+
+### Kernel packages
+
+[OrchardLinux/packages](https://github.com/OrchardLinux/packages) builds
+`linux-orchard-PLATFORM` (`apple-16k` and `apple-4k` for aarch64, `apple-armv7`
+for armv7) with plain makepkg and abuild: each recipe fetches an orchard
+release's platform layer by checksum and installs it unchanged, with pacman
+hooks, or apk pre-upgrade and pre-deinstall scripts and a trigger, that run
+`boot-entries`. Its version is the orchard release's (`0.4.0-1`, apk
+`0.4.0-r0`); a release of orchard is a version bump of those recipes, and
+nightlies publish nothing. orchard itself publishes only the neutral layer. A
+system installed before kernel packages switches once with
+`pacman -S --overwrite '/usr/*' linux-orchard-PLATFORM` or
+`apk add linux-orchard-PLATFORM`.
+
+### Kernel updates
+
+`/usr/lib/orchard/boot-entries` (POSIX sh) works on this system's entries only:
+
+- `sync`: for every kernel in `/usr/lib/modules` with `vmlinuz`, `initrd` and the
+  board's DTB, copies them and the system's splash to `/TOKEN/VERSION/` and writes
+  `/loader/entries/TOKEN-VERSION.conf`, exactly as below. Then it removes this
+  system's entries (its token in the paths, its `root=PARTUUID` in the options) for
+  kernels that are gone, entry first, then their files. Other systems' entries and
+  files are never touched.
+- `save`: before the package manager replaces or removes a kernel, it keeps that
+  kernel's modules directory aside (hard links). `sync` puts it back if the
+  package took it away and marks it `.orchard-kept`, so the kernel that booted
+  stays as the fallback entry. A system keeps two kernels: the package's and the
+  last one kept, the running kernel first. Only directories marked this way are
+  ever deleted, and an entry never outlives its modules.
+- `default`: sets `default TOKEN-*` in `/loader/loader.conf` (systemd-boot's
+  format), keeping its other lines.
+
+A package manager runs `save` before a kernel package is upgraded or removed
+(pacman: a PreTransaction hook; apk: the package's pre-upgrade and
+pre-deinstall scripts) and `sync` after any change to a kernel, initrd, DTB, the
+splash or the script (pacman: a PostTransaction hook; apk: a trigger on
+`/usr/lib/modules/*`, `/usr/share/orchard` and `/usr/lib/orchard`).
+
+`/etc/orchard/boot-entry` describes the system, one `key=value` per line:
+`token`, `title`, `sort_key`, `devicetree`, `options` (with `root=PARTUUID=`) and
+`boot_partuuid` (empty without a boot partition). A system installed before the
+file existed is found by `root=PARTUUID=` on its kernel command line in its
+existing entry, and the file is written from that entry. Without the file or such
+an entry (a container, a system Orchard did not install) `boot-entries` does
+nothing.
+
+The boot partition is mounted at `/boot` (the installer's fstab names it by
+PARTUUID, `vfat`, `fmask=0077,dmask=0077`). If it is not mounted, `boot-entries`
+mounts it first, by fstab or by `boot_partuuid`. Without a boot partition (LwVM)
+`/boot` is a directory of the root.
 
 orchard's initrd (`boot/initramfs/root`) holds BusyBox and the platform's storage
 modules only. It loads them, waits up to 30 s for the partition that
@@ -90,7 +155,7 @@ options    root=PARTUUID=4d6c…-… rw quiet
 |---|---|
 | `linux` | Required. arm64 `Image`, raw or gzip-compressed |
 | `initrd` | Optional and repeatable. Several are concatenated in order, as BLS specifies |
-| `devicetree` | **Required.** The DTB for this board. m1n1 applies the ADT fill-ins (MAC addresses, calibration, memory, CPUs) to it, so the plain DTB from the kernel build is used. The installer copies the board's DTB from the platform layer. |
+| `devicetree` | **Required.** The DTB for this board. m1n1 applies the ADT fill-ins (MAC addresses, calibration, memory, CPUs) to it, so the plain DTB from the kernel build is used. `boot-entries` copies the board's DTB from the kernel's `dtb/`. |
 | `options` | Required. It must contain `root=PARTUUID=…` of the system's own root partition. Root discovery without `root=` is not used, because one device can hold several roots. |
 | `title`, `version`, `sort-key` | As BLS: shown in the host's list and used for its order. |
 | `machine-id`, `architecture` | Optional. If `architecture` is present, it must be `aa64`. |
@@ -100,8 +165,8 @@ options    root=PARTUUID=4d6c…-… rw quiet
 
 ## Splash
 
-A system's boot splash ships in its root as `/usr/share/orchard/splash`; the
-installer copies it next to the entry's kernel (`/TOKEN/VERSION/splash`).
+A system's boot splash ships in its root as `/usr/share/orchard/splash`;
+`boot-entries` copies it next to each entry's kernel (`/TOKEN/VERSION/splash`).
 When an entry starts, m1n1 paints it centred on black before it loads the
 kernel. Nothing paints it again: the picture stays on the screen until the
 system draws over it. Entries start quiet (`fbcon=map:9`), as the recovery
@@ -140,9 +205,10 @@ default omarchy-4d6c1a2b-*
 - A matching entry is the default even if it can't boot. Then m1n1 shows why and waits; it starts no other system by itself.
 - Other keys (`timeout`, `editor`, `@saved` and so on) are ignored: there is no menu on the device yet. An unreadable `loader.conf` is ignored with a line on m1n1's console.
 
-Who writes it: the installer sets `default <entry-token>-*` for the system it
-has just installed, keeping every other line; a system's own tools may set the
-same line to make itself the default. The bootloader only reads it.
+Who writes it: `boot-entries default` sets `default <entry-token>-*`, keeping
+every other line. The installer runs it for the system it has just installed;
+the system can run it again to make itself the default. The bootloader only
+reads it.
 
 ## Start
 

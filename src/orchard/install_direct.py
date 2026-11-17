@@ -9,6 +9,7 @@ partition and nothing else on the disk is written (install_layout.py).
 """
 import base64
 from contextlib import contextmanager
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -593,6 +594,27 @@ def mount_new_root(connection, node, boot_node):
                       'mkdir -p /newroot/run/orchard /newroot/boot && mount --bind /run/orchard /newroot/run/orchard && '
                       f'{boot}cp /newroot/etc/os-release /run/orchard/os-release',
           timeout=60)
+
+
+def kernel_package(connection, layer, directory):
+    """The root's kernel package, pacstrap's way: the newest published linux-orchard-PLATFORM of the root's base.
+
+    Downloaded here (kernel_packages.py), uploaded to /run/orchard, and installed by the root's own
+    pacman or apk (install_device.py). None when the root has neither or the repository publishes
+    no package for the platform yet: the layer's files are installed then.
+    """
+    from . import kernel_packages
+    base = shell(connection, kernel_packages.DETECT).decode().strip()
+    if base not in kernel_packages.ARCH:
+        return None
+    entry = kernel_packages.resolve(base, *kernel_packages.layer_platform(layer))
+    if entry is None:
+        return None
+    path = kernel_packages.download(entry, directory)
+    data = path.read_bytes()
+    remote.put(connection, data, path.name, timeout=600)
+    return {'path': f'{remote.DIRECTORY}/{path.name}', 'base': base, 'bytes': len(data),
+            'sha256': hashlib.sha256(data).hexdigest(), 'version': entry['version']}
 
 
 def unmount_new_root(connection, root_partuuid, boot=True):

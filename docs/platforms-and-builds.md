@@ -463,7 +463,11 @@ distribution release bundles its platform layer for now, so a kernel fix or a
 new board waits for a distribution release. The installer and an update step
 then combine a distribution's root with the newest compatible platform bundle.
 That needs a compatibility check between root and platform, mainly modules and
-firmware, and comes after the switch.
+firmware, and comes after the switch. Installed systems already update it on
+their own: OrchardLinux/packages publishes each orchard release's layer as the
+`linux-orchard-PLATFORM` package of every base (pacman, apk), the installer
+installs it with the root's package manager, and its hooks rewrite the
+system's boot entries ([boot contract](boot-contract.md#kernel-packages)).
 
 ## Build caching (planned, last)
 

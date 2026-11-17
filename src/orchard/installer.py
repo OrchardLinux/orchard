@@ -138,6 +138,8 @@ def build(output, *, loaders, boards=None, release=None, hardware=None):
     hardware = Path(hardware or ROOT)
     boards = sorted(boards) if boards is not None else profiles(hardware)
     members = core_files()
+    # The boot entries' script, which the install runs beside install_device.py.
+    members['src/orchard/boot-entries'] = PACKAGE / 'boot-entries'
     # What the install adds to a kernel's initrd (install_direct.py).
     for name in ('run', 'udhcpd.conf'):
         members[f'boot/initramfs/install/{name}'] = hardware / 'boot/initramfs/install' / name

@@ -11,6 +11,8 @@ import threading
 
 DIRECTORY = '/run/orchard'
 SCRIPT = Path(__file__).with_name('install_device.py')
+# The boot entries' one implementation (also in the platform layer); install_device.py runs it.
+BOOT_ENTRIES = Path(__file__).with_name('boot-entries')
 
 
 class RemoteError(RuntimeError):
@@ -28,6 +30,12 @@ def put(connection, data, name, timeout=120):
     if result.returncode:
         raise RemoteError(f'Could not copy {name} to the device: ' +
                           result.stderr.decode(errors='replace').strip()[-500:])
+
+
+def put_scripts(connection):
+    """install_device.py and the boot-entries script it runs, from this CLI."""
+    put(connection, SCRIPT.read_bytes(), SCRIPT.name)
+    put(connection, BOOT_ENTRIES.read_bytes(), BOOT_ENTRIES.name)
 
 
 def run(connection, args, *, source=None, size=0, progress=None, timeout=3600):

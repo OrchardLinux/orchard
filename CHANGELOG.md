@@ -11,6 +11,16 @@ is missing or empty.
 
 ## Unreleased
 
+### Install & launch
+
+- Kernel updates come as a package: the installer installs the kernel as
+  `linux-orchard-<platform>` from the Orchard package repository with the
+  system's own package manager (pacman or apk), so the system's ordinary
+  update takes each orchard release's kernel, and its boot entry follows. The kernel
+  before stays as a second entry to fall back to.
+- `/usr/lib/orchard/boot-entries default` makes this system the one that boots
+  when nobody picks.
+
 ### Devices
 
 - A10 iPads: if the video decoder firmware is missing, sound keeps working and

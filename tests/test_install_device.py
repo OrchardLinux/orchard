@@ -1,6 +1,8 @@
 """install_device.py: the storage fence, and writing orchard's platform layer into a new root."""
 import hashlib
 from pathlib import Path
+import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -103,76 +105,190 @@ class PlatformLayer(unittest.TestCase):
         self.assertEqual(caught.exception.code, 'stream-too-long')
 
 
-class BootEntry(unittest.TestCase):
-    """orchard writes the entry from the platform layer; no kernel-install in the system."""
-    def test_the_entry_names_the_layer_kernel_initrd_and_board_dtb(self):
+PARTUUID = '4d6c1a2b-0000-4000-8000-000000000001'
+ENTRY = {'id': 'omarchy', 'title': 'Omarchy', 'options': 'rootwait', 'devicetree': 't8010-j71b.dtb'}
+
+
+class BootEntries(unittest.TestCase):
+    """boot-entries: the installer's entries and every later kernel update's, one script."""
+    def setUp(self):
+        work = tempfile.TemporaryDirectory()
+        self.addCleanup(work.cleanup)
+        self.work = Path(work.name)
+        self.root, self.boot = self.work / 'root', self.work / 'boot'
+        self.boot.mkdir()
+        (self.root / 'etc/orchard').mkdir(parents=True)
+        (self.root / D.BOOT_CONFIG).write_text(D.boot_config(ENTRY, PARTUUID, 'aaaa0000-0000-4000-8000-000000000002'))
+
+    def kernel(self, version, image=b'kernel', kept=None):
+        source = self.root / 'usr/lib/modules' / version
+        (source / 'dtb').mkdir(parents=True)
+        for name, data in (('vmlinuz', image), ('initrd', b'initrd ' + version.encode()),
+                           ('dtb/t8010-j71b.dtb', b'dtb'), ('dtb/t8010-j171.dtb', b'other'),
+                           ('modules.dep', b'')):
+            (source / name).write_bytes(data)
+        if kept is not None:
+            (source / '.orchard-kept').write_text(f'{kept}\n')
+        return source
+
+    def script(self, *args):
+        return subprocess.run(['sh', str(D.BOOT_ENTRIES), '--root', str(self.root), '--boot', str(self.boot), *args],
+                              capture_output=True, text=True, check=True).stdout
+
+    def entries(self):
+        return sorted(path.name for path in (self.boot / 'loader/entries').glob('*.conf'))
+
+    def test_the_entry_names_the_kernel_initrd_and_board_dtb(self):
+        self.kernel('7.3-orchard')
+        D.sync_entries(self.root, self.boot)
+        conf = (self.boot / 'loader/entries/omarchy-4d6c1a2b-7.3-orchard.conf').read_text()
+        self.assertEqual(conf, 'title Omarchy\nversion 7.3-orchard\nsort-key omarchy\n'
+                               'linux /omarchy-4d6c1a2b/7.3-orchard/linux\n'
+                               'initrd /omarchy-4d6c1a2b/7.3-orchard/initrd\n'
+                               'devicetree /omarchy-4d6c1a2b/7.3-orchard/t8010-j71b.dtb\n'
+                               f'options root=PARTUUID={PARTUUID} rw rootwait\narchitecture aa64\n')
+        self.assertEqual((self.boot / 'omarchy-4d6c1a2b/7.3-orchard/t8010-j71b.dtb').read_bytes(), b'dtb')
+        self.assertEqual((self.boot / 'omarchy-4d6c1a2b/7.3-orchard/linux').read_bytes(), b'kernel')
+        self.assertFalse((self.boot / 'omarchy-4d6c1a2b/7.3-orchard/t8010-j171.dtb').exists())
+        self.assertEqual(D.check_entry(self.boot, PARTUUID, 't8010-j71b.dtb'), 'omarchy-4d6c1a2b-7.3-orchard.conf')
+
+    def test_the_system_splash_goes_next_to_its_kernel(self):
+        self.kernel('7.3-orchard')
+        (self.root / 'usr/share/orchard').mkdir(parents=True)
+        (self.root / 'usr/share/orchard/splash').write_bytes(b'OSPL-image')
+        self.script('sync')
+        self.assertEqual((self.boot / 'omarchy-4d6c1a2b/7.3-orchard/splash').read_bytes(), b'OSPL-image')
+
+    def test_a_32_bit_zimage_is_an_arm_entry(self):
+        self.kernel('6.12', image=bytes(0x24) + b'\x18\x28\x6f\x01' + bytes(16))
+        self.script('sync')
+        self.assertIn('architecture arm\n', (self.boot / 'loader/entries/omarchy-4d6c1a2b-6.12.conf').read_text())
+
+    def test_gone_kernels_lose_their_entries_and_other_systems_keep_theirs(self):
+        self.kernel('7.3-orchard')
+        self.kernel('7.4-orchard')
+        self.script('sync')
+        self.assertEqual(self.entries(), ['omarchy-4d6c1a2b-7.3-orchard.conf', 'omarchy-4d6c1a2b-7.4-orchard.conf'])
+        other = self.boot / 'loader/entries/omarchy-99999999-7.3-orchard.conf'
+        other.write_text('linux /omarchy-99999999/7.3-orchard/linux\noptions root=PARTUUID=99999999-x rw\n')
+        (self.boot / 'omarchy-99999999/7.3-orchard').mkdir(parents=True)
+        (self.boot / 'omarchy-99999999/7.3-orchard/linux').write_bytes(b'theirs')
+        # Same token, another root (a copied entry): not this system's either.
+        copied = self.boot / 'loader/entries/omarchy-4d6c1a2b-6.0.conf'
+        copied.write_text('version 6.0\nlinux /omarchy-4d6c1a2b/6.0/linux\noptions root=PARTUUID=elsewhere rw\n')
+        shutil.rmtree(self.root / 'usr/lib/modules/7.3-orchard')
+        output = self.script('sync')
+        self.assertIn('removed the entry omarchy-4d6c1a2b-7.3-orchard.conf', output)
+        self.assertEqual(self.entries(), ['omarchy-4d6c1a2b-6.0.conf', 'omarchy-4d6c1a2b-7.4-orchard.conf',
+                                          'omarchy-99999999-7.3-orchard.conf'])
+        self.assertFalse((self.boot / 'omarchy-4d6c1a2b/7.3-orchard').exists())
+        self.assertEqual((self.boot / 'omarchy-99999999/7.3-orchard/linux').read_bytes(), b'theirs')
+
+    def test_a_kernel_without_the_board_dtb_gets_no_entry(self):
+        source = self.kernel('7.3-orchard')
+        (source / 'dtb/t8010-j71b.dtb').unlink()
+        self.assertIn('t8010-j71b.dtb is missing', self.script('sync'))
+        self.assertFalse((self.boot / 'loader/entries').exists() and self.entries())
+
+    def test_an_upgrade_keeps_the_previous_kernel_and_prunes_to_two(self):
+        self.kernel('7.3-orchard')
+        self.script('sync')
+        # pacman: save before, then the old version's files go and the new one's come.
+        self.script('save')
+        shutil.rmtree(self.root / 'usr/lib/modules/7.3-orchard')
+        self.kernel('7.4-orchard')
+        self.assertIn('keeping 7.3-orchard as the fallback kernel', self.script('sync'))
+        modules = self.root / 'usr/lib/modules'
+        self.assertTrue((modules / '7.3-orchard/.orchard-kept').is_file())
+        self.assertEqual((modules / '7.3-orchard/initrd').read_bytes(), b'initrd 7.3-orchard')
+        self.assertFalse((modules / '.orchard-saved').exists())
+        self.assertEqual(self.entries(), ['omarchy-4d6c1a2b-7.3-orchard.conf', 'omarchy-4d6c1a2b-7.4-orchard.conf'])
+        # The next upgrade keeps 7.4 and drops 7.3, which this script kept.
+        self.script('save')
+        shutil.rmtree(modules / '7.4-orchard')
+        self.kernel('7.5-orchard')
+        self.script('sync')
+        self.assertEqual(sorted(p.name for p in modules.iterdir()), ['7.4-orchard', '7.5-orchard'])
+        self.assertEqual(self.entries(), ['omarchy-4d6c1a2b-7.4-orchard.conf', 'omarchy-4d6c1a2b-7.5-orchard.conf'])
+        self.assertFalse((self.boot / 'omarchy-4d6c1a2b/7.3-orchard').exists())
+
+    def test_the_same_version_replaced_in_place_is_not_kept_twice(self):
+        self.kernel('7.3-orchard')
+        self.script('save')
+        (self.root / 'usr/lib/modules/7.3-orchard/vmlinuz').unlink()
+        (self.root / 'usr/lib/modules/7.3-orchard/vmlinuz').write_bytes(b'rebuilt')
+        self.script('sync')
+        self.assertFalse((self.root / 'usr/lib/modules/7.3-orchard/.orchard-kept').exists())
+        self.assertEqual((self.boot / 'omarchy-4d6c1a2b/7.3-orchard/linux').read_bytes(), b'rebuilt')
+
+    def test_only_kept_kernels_are_ever_removed(self):
+        self.kernel('7.1-orchard', kept=100)
+        self.kernel('7.2-orchard', kept=200)
+        self.kernel('7.3-orchard')
+        self.kernel('7.4-orchard')
+        self.script('sync')
+        self.assertEqual(sorted(p.name for p in (self.root / 'usr/lib/modules').iterdir()),
+                         ['7.3-orchard', '7.4-orchard'])
+        self.kernel('7.1-orchard', kept=100)
+        self.kernel('7.2-orchard', kept=200)
+        shutil.rmtree(self.root / 'usr/lib/modules/7.4-orchard')
+        self.script('sync')
+        self.assertEqual(sorted(p.name for p in (self.root / 'usr/lib/modules').iterdir()),
+                         ['7.2-orchard', '7.3-orchard'])
+
+    def test_save_does_nothing_on_a_system_orchard_did_not_install(self):
+        (self.root / D.BOOT_CONFIG).unlink()
+        self.kernel('7.3-orchard')
+        self.script('save')
+        self.assertFalse((self.root / 'usr/lib/modules/.orchard-saved').exists())
+
+    def test_default_names_this_system_and_keeps_the_other_lines(self):
+        self.kernel('7.3-orchard')
+        self.script('default')
+        self.assertEqual((self.boot / 'loader/loader.conf').read_text(), 'default omarchy-4d6c1a2b-*\n')
+        (self.boot / 'loader/loader.conf').write_text('timeout 3\ndefault other-*\n# note\n')
+        self.script('default')
+        self.assertEqual((self.boot / 'loader/loader.conf').read_text(),
+                         'timeout 3\ndefault omarchy-4d6c1a2b-*\n# note\n')
+
+    def test_a_config_without_a_root_is_refused(self):
+        (self.root / D.BOOT_CONFIG).write_text('token=omarchy-4d6c1a2b\ndevicetree=t8010-j71b.dtb\noptions=rw\n')
+        self.kernel('7.3-orchard')
+        result = subprocess.run(['sh', str(D.BOOT_ENTRIES), '--root', str(self.root), '--boot', str(self.boot), 'sync'],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('options lack root=PARTUUID=', result.stderr)
+
+    def test_the_config_holds_what_every_entry_needs(self):
+        self.assertEqual((self.root / D.BOOT_CONFIG).read_text().splitlines()[1:], [
+            'token=omarchy-4d6c1a2b', 'title=Omarchy', 'sort_key=omarchy', 'devicetree=t8010-j71b.dtb',
+            f'options=root=PARTUUID={PARTUUID} rw rootwait', 'boot_partuuid=aaaa0000-0000-4000-8000-000000000002'])
+        with self.assertRaises(D.InstallError):
+            D.boot_config({**ENTRY, 'title': 'two\nlines'}, PARTUUID, None)
+
+
+class RemoveOldEntries(unittest.TestCase):
+    def test_entries_of_roots_that_are_gone_and_the_files_only_they_name(self):
         with tempfile.TemporaryDirectory() as directory:
-            work = Path(directory)
-            source = work / 'root/usr/lib/modules/7.3-orchard'
-            (source / 'dtb').mkdir(parents=True)
-            for name, data in (('vmlinuz', b'kernel'), ('initrd', b'initrd'), ('dtb/t8010-j71b.dtb', b'dtb'),
-                               ('dtb/t8010-j171.dtb', b'other')):
-                (source / name).write_bytes(data)
-            boot = work / 'boot'
-            boot.mkdir()
-            partuuid = '4d6c1a2b-0000-4000-8000-000000000001'
-            entry = {'id': 'omarchy', 'title': 'Omarchy', 'options': 'rootwait', 'devicetree': 't8010-j71b.dtb'}
-            token = D.write_entry(boot, work / 'root', '7.3-orchard', entry, partuuid)
-            self.assertEqual(token, 'omarchy-4d6c1a2b')
-            conf = (boot / 'loader/entries/omarchy-4d6c1a2b-7.3-orchard.conf').read_text()
-            self.assertIn('linux /omarchy-4d6c1a2b/7.3-orchard/linux\n', conf)
-            self.assertIn('initrd /omarchy-4d6c1a2b/7.3-orchard/initrd\n', conf)
-            self.assertIn(f'options root=PARTUUID={partuuid} rw rootwait\n', conf)
-            self.assertEqual((boot / 'omarchy-4d6c1a2b/7.3-orchard/t8010-j71b.dtb').read_bytes(), b'dtb')
-            self.assertFalse((boot / 'omarchy-4d6c1a2b/7.3-orchard/t8010-j171.dtb').exists())
-            self.assertEqual(D.check_entry(boot, partuuid, 't8010-j71b.dtb'), 'omarchy-4d6c1a2b-7.3-orchard.conf')
-            # Replacing that root removes its entry and the files only it names.
+            boot = Path(directory)
+            (boot / 'loader/entries').mkdir(parents=True)
+            (boot / 'omarchy-4d6c1a2b/7.3').mkdir(parents=True)
+            (boot / 'omarchy-4d6c1a2b/7.3/linux').write_bytes(b'k')
+            (boot / 'loader/entries/omarchy-4d6c1a2b-7.3.conf').write_text(
+                f'linux /omarchy-4d6c1a2b/7.3/linux\noptions root=PARTUUID={PARTUUID} rw\n')
             other = boot / 'loader/entries/other.conf'
             other.write_text('linux /shared/linux\noptions root=PARTUUID=other\n')
             (boot / 'shared').mkdir()
             (boot / 'shared/linux').write_bytes(b'k')
             elsewhere = boot / 'loader/entries/by-label.conf'
             elsewhere.write_text('linux /shared/linux\noptions root=LABEL=other\n')
-            self.assertEqual(D.remove_old_entries(boot, {'OTHER'}), ['omarchy-4d6c1a2b-7.3-orchard.conf'])
+            self.assertEqual(D.remove_old_entries(boot, {'OTHER'}), ['omarchy-4d6c1a2b-7.3.conf'])
             self.assertFalse((boot / 'omarchy-4d6c1a2b').exists())
             self.assertTrue((boot / 'shared/linux').exists())
             # An entry an earlier install left for a root that is gone goes too; one named another way stays.
             self.assertEqual(D.remove_old_entries(boot, {'new-root'}), ['other.conf'])
             self.assertTrue(elsewhere.exists())
             self.assertTrue((boot / 'shared/linux').exists())
-            (source / 'initrd').unlink()
-            with self.assertRaisesRegex(D.InstallError, 'lacks /usr/lib/modules/7.3-orchard/initrd'):
-                D.write_entry(boot, work / 'root', '7.3-orchard', entry, partuuid)
-
-    def test_the_installed_system_becomes_the_default_like_systemd_boot(self):
-        with tempfile.TemporaryDirectory() as directory:
-            boot = Path(directory)
-            self.assertEqual(D.set_default(boot, 'omarchy-4d6c1a2b'), 'default omarchy-4d6c1a2b-*')
-            conf = boot / 'loader/loader.conf'
-            self.assertEqual(conf.read_text(), 'default omarchy-4d6c1a2b-*\n')
-            # Another system installed later takes over; every other line stays where it was.
-            conf.write_text('# mine\ntimeout 3\ndefault omarchy-4d6c1a2b-*\neditor no\ndefault  other\n')
-            D.set_default(boot, 'arch-77aa0011')
-            self.assertEqual(conf.read_text(), '# mine\ntimeout 3\ndefault arch-77aa0011-*\neditor no\n')
-            conf.write_text('timeout 3')
-            D.set_default(boot, 'arch-77aa0011')
-            self.assertEqual(conf.read_text(), 'timeout 3\ndefault arch-77aa0011-*\n')
-            self.assertFalse((boot / 'loader/loader.conf.tmp').exists())
-
-    def test_the_system_splash_goes_next_to_its_kernel(self):
-        with tempfile.TemporaryDirectory() as directory:
-            work = Path(directory)
-            source = work / 'root/usr/lib/modules/7.3-orchard'
-            (source / 'dtb').mkdir(parents=True)
-            for name in ('vmlinuz', 'initrd', 'dtb/t8010-j71b.dtb'):
-                (source / name).write_bytes(b'x')
-            (work / 'root' / D.SPLASH).parent.mkdir(parents=True)
-            (work / 'root' / D.SPLASH).write_bytes(b'OSPL-image')
-            boot = work / 'boot'
-            boot.mkdir()
-            entry = {'id': 'omarchy', 'title': 'Omarchy', 'options': '', 'devicetree': 't8010-j71b.dtb'}
-            D.write_entry(boot, work / 'root', '7.3-orchard', entry, '4d6c1a2b-0000-4000-8000-000000000001')
-            self.assertEqual((boot / 'omarchy-4d6c1a2b/7.3-orchard/splash').read_bytes(), b'OSPL-image')
 
 
 if __name__ == '__main__':

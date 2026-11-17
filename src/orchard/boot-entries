@@ -1,0 +1,348 @@
+#!/bin/sh
+# This system's Boot Loader Specification entries on the shared boot partition
+# (docs/boot-contract.md). orchard ships it in the platform layer as
+# /usr/lib/orchard/boot-entries; the installer runs it once and the kernel
+# packages (OrchardLinux/packages) run it on every kernel change. POSIX sh, so
+# every base calls the same file: pacman hooks, apk scripts and trigger, by hand.
+#
+#   boot-entries [--root DIR] [--boot DIR] sync
+#       An entry per kernel in /usr/lib/modules: /TOKEN/VERSION/{linux,initrd,DTB,splash}
+#       and /loader/entries/TOKEN-VERSION.conf. This system's entries for kernels
+#       that are gone are removed. Other systems' entries and files are never touched.
+#   boot-entries [--root DIR] save
+#       Before a package replaces or removes a kernel: keep its modules directory
+#       aside, so sync can keep it as the fallback.
+#   boot-entries [--root DIR] [--boot DIR] default
+#       Boot this system when nobody chooses: `default TOKEN-*` in /loader/loader.conf.
+#
+# --root: the system's root, when it is not / (the installer). --boot: where its
+# boot partition is mounted; without it /boot is used, and mounted first if
+# fstab or the configuration names a boot partition. Without a boot partition
+# (32-bit LwVM disks) /boot is a directory of the root.
+#
+# This system is /etc/orchard/boot-entry, which the installer writes:
+#   token=omarchy-4d6c1a2b  title=Omarchy  sort_key=omarchy  devicetree=t8010-j71b.dtb
+#   options=root=PARTUUID=... rw ...  boot_partuuid=PARTUUID of the boot partition, or empty
+# one per line. A system installed before it existed is found by its root
+# (root=PARTUUID= on the kernel command line) in its existing entry, and the
+# file is written from that entry.
+#
+# Kernels: those a package installed, plus at most one kept from before
+# (KEEP in all), the running one first, then the most recently kept. Only directories this script kept
+# (they carry .orchard-kept) are ever removed.
+set -eu
+export PATH="/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
+KEEP=2
+MARKER=.orchard-kept
+
+say() { printf 'boot-entries: %s\n' "$*"; }
+die() { printf 'boot-entries: %s\n' "$*" >&2; exit 1; }
+
+root=/ boot=
+while [ $# -gt 1 ]; do
+    case $1 in
+        --root) root=$2; shift 2 ;;
+        --boot) boot=$2; shift 2 ;;
+        *) break ;;
+    esac
+done
+[ $# -eq 1 ] || die 'usage: boot-entries [--root DIR] [--boot DIR] sync | save | default'
+command=$1
+r=${root%/}
+modules=$r/usr/lib/modules
+saved=$modules/.orchard-saved
+config=$r/etc/orchard/boot-entry
+splash=$r/usr/share/orchard/splash
+
+check_config() {
+    case $token in ''|*[!A-Za-z0-9._-]*) die "$config: token must be letters, digits, '.', '_' or '-'" ;; esac
+    case $devicetree in ''|*[!A-Za-z0-9._,+-]*) die "$config: devicetree must be a file name" ;; esac
+    case " $options " in *' root=PARTUUID='*) ;; *) die "$config: options lack root=PARTUUID=" ;; esac
+    case $boot_partuuid in *[!A-Fa-f0-9-]*) die "$config: boot_partuuid is not a PARTUUID" ;; esac
+    [ -n "$title" ] || title=$token
+    [ -n "$sort_key" ] || sort_key=$token
+    partuuid=${options#*root=PARTUUID=}
+    partuuid=${partuuid%%[ 	]*}
+}
+
+load_config() {
+    token='' title='' sort_key='' devicetree='' options='' boot_partuuid=''
+    [ -f "$config" ] || return 1
+    while IFS= read -r line || [ -n "$line" ]; do
+        case $line in
+            token=*) token=${line#token=} ;;
+            title=*) title=${line#title=} ;;
+            sort_key=*) sort_key=${line#sort_key=} ;;
+            devicetree=*) devicetree=${line#devicetree=} ;;
+            options=*) options=${line#options=} ;;
+            boot_partuuid=*) boot_partuuid=${line#boot_partuuid=} ;;
+        esac
+    done < "$config"
+    check_config
+}
+
+write_config() {
+    mkdir -p "${config%/*}"
+    {
+        echo "# This system's boot entry: read by /usr/lib/orchard/boot-entries (docs/boot-contract.md)."
+        printf 'token=%s\ntitle=%s\nsort_key=%s\ndevicetree=%s\noptions=%s\nboot_partuuid=%s\n' \
+            "$token" "$title" "$sort_key" "$devicetree" "$options" "$boot_partuuid"
+    } > "$config.new"
+    mv -f "$config.new" "$config"
+}
+
+# The fields of one BLS entry file.
+read_entry() {
+    e_title='' e_sort='' e_version='' e_linux='' e_dtb='' e_options=''
+    while read -r key value || [ -n "$key" ]; do
+        case $key in
+            title) e_title=$value ;;
+            sort-key) e_sort=$value ;;
+            version) e_version=$value ;;
+            linux) e_linux=$value ;;
+            devicetree) e_dtb=$value ;;
+            options) e_options=$value ;;
+        esac
+    done < "$1"
+}
+
+# A system installed before /etc/orchard/boot-entry: its entry names its root.
+derive_config() {
+    [ "$root" = / ] || return 1
+    found=
+    set -f
+    # shellcheck disable=SC2013  # words, not lines
+    for word in $(cat /proc/cmdline 2>/dev/null); do
+        case $word in root=PARTUUID=*) found=${word#root=PARTUUID=} ;; esac
+    done
+    set +f
+    [ -n "$found" ] || return 1
+    for entry in "$boot"/loader/entries/*.conf; do
+        [ -f "$entry" ] || continue
+        read_entry "$entry"
+        case " $e_options " in *" root=PARTUUID=$found "*) ;; *) continue ;; esac
+        case $e_linux in /?*/?*/linux) ;; *) continue ;; esac
+        token=${e_linux#/}
+        token=${token%%/*}
+        title=$e_title sort_key=$e_sort devicetree=${e_dtb##*/} options=$e_options
+        boot_partuuid=$(awk '!/^[ \t]*#/ && $2 == "/boot" && $1 ~ /^PARTUUID=/ {sub(/^PARTUUID=/, "", $1); print $1; exit}' \
+            /etc/fstab 2>/dev/null || true)
+        check_config
+        write_config
+        say "recorded this system's entry ($token) in $config"
+        return 0
+    done
+    return 1
+}
+
+configured() { load_config || derive_config; }
+
+is_mounted() { [ -r /proc/self/mountinfo ] && awk -v p="$1" '$5 == p {found = 1} END {exit !found}' /proc/self/mountinfo; }
+in_fstab() { [ -r /etc/fstab ] && awk -v p="$1" '!/^[ \t]*#/ && $2 == p {found = 1} END {exit !found}' /etc/fstab; }
+
+# Where this system's boot partition is: mounted, or mounted now.
+find_boot() {
+    [ -z "$boot" ] || return 0
+    boot=$r/boot
+    [ "$root" = / ] || return 0
+    is_mounted /boot && return 0
+    if in_fstab /boot; then
+        mount /boot || die 'could not mount /boot as /etc/fstab names it'
+    elif [ -n "$boot_partuuid" ]; then
+        mount -t vfat -o rw,fmask=0077,dmask=0077 "/dev/disk/by-partuuid/$boot_partuuid" /boot ||
+            die "could not mount the boot partition $boot_partuuid at /boot"
+    fi
+    return 0
+}
+
+# Kernels whose modules a package took away since `save`: back, as the fallback.
+restore() {
+    [ -d "$saved" ] || return 0
+    # Markers count upwards: the newest kept kernel has the largest.
+    order=$(cat "$modules"/*/"$MARKER" 2>/dev/null | awk '$1 ~ /^[0-9]+$/ && $1 > max {max = $1} END {print max + 0}')
+    for directory in "$saved"/*/; do
+        [ -d "$directory" ] || continue
+        version=${directory%/}
+        version=${version##*/}
+        if [ -f "$modules/$version/vmlinuz" ]; then
+            rm -rf "${saved:?}/$version"            # still there, or replaced by the same version
+            continue
+        fi
+        if [ -e "$modules/$version" ]; then
+            cp -Rp "$saved/$version/." "$modules/$version/"
+            rm -rf "${saved:?}/$version"
+        else
+            mv "$saved/$version" "$modules/$version"
+        fi
+        order=$((order + 1))
+        echo "$order" > "$modules/$version/$MARKER"
+        say "keeping $version as the fallback kernel"
+    done
+    rm -rf "$saved"
+}
+
+# At most KEEP kernels: every one a package owns, then the kept ones, the running one first.
+prune() {
+    running=
+    [ "$root" != / ] || running=$(uname -r)
+    owned=0 kept=
+    for directory in "$modules"/*/; do
+        version=${directory%/}
+        version=${version##*/}
+        [ -f "$modules/$version/vmlinuz" ] || continue
+        if [ -f "$modules/$version/$MARKER" ]; then
+            when=$(head -n 1 "$modules/$version/$MARKER" 2>/dev/null || true)
+            case $when in ''|*[!0-9]*) when=0 ;; esac
+            first=0
+            [ "$version" != "$running" ] || first=1
+            kept="$kept$first $when $version
+"
+        else
+            owned=$((owned + 1))
+        fi
+    done
+    room=$((KEEP - owned))
+    [ "$room" -ge 0 ] || room=0
+    printf '%s' "$kept" | sort -k1,1nr -k2,2nr | awk -v room="$room" 'NF == 3 && NR > room {print $3}' |
+        while read -r version; do
+            rm -rf "${modules:?}/$version"
+            say "removed the old kernel $version"
+        done
+}
+
+# Copy only what changed: the boot partition is FAT, written for every kernel.
+same() {
+    [ -f "$2" ] || return 1
+    if command -v cmp > /dev/null 2>&1; then
+        cmp -s "$1" "$2"
+    elif command -v sha256sum > /dev/null 2>&1; then
+        [ "$(sha256sum < "$1")" = "$(sha256sum < "$2")" ]
+    else
+        return 1
+    fi
+}
+
+put() {
+    ! same "$1" "$2" || return 0
+    cp "$1" "$2.new"
+    mv -f "$2.new" "$2"
+}
+
+# The BLS architecture: arm for a 32-bit ARM zImage (magic 0x016f2818 at 0x24), aa64 otherwise.
+architecture() {
+    magic=$(od -An -tx1 -j 36 -N 4 "$1" 2>/dev/null | tr -d ' \n')
+    if [ "$magic" = 18286f01 ]; then echo arm; else echo aa64; fi
+}
+
+write_entry() {
+    version=$1
+    source=$modules/$version
+    for file in vmlinuz initrd "dtb/$devicetree"; do
+        if [ ! -f "$source/$file" ] || [ -L "$source/$file" ]; then
+            say "no entry for $version: /usr/lib/modules/$version/$file is missing"
+            return 1
+        fi
+    done
+    directory=$boot/$token/$version
+    mkdir -p "$directory" "$boot/loader/entries"
+    put "$source/vmlinuz" "$directory/linux"
+    put "$source/initrd" "$directory/initrd"
+    put "$source/dtb/$devicetree" "$directory/$devicetree"
+    if [ -f "$splash" ] && [ ! -L "$splash" ]; then
+        put "$splash" "$directory/splash"
+    else
+        rm -f "$directory/splash"
+    fi
+    entry=$boot/loader/entries/$token-$version.conf
+    printf 'title %s\nversion %s\nsort-key %s\nlinux /%s/%s/linux\ninitrd /%s/%s/initrd\ndevicetree /%s/%s/%s\noptions %s\narchitecture %s\n' \
+        "$title" "$version" "$sort_key" "$token" "$version" "$token" "$version" \
+        "$token" "$version" "$devicetree" "$options" "$(architecture "$source/vmlinuz")" > "$entry.tmp"
+    put "$entry.tmp" "$entry"
+    rm -f "$entry.tmp"
+    return 0
+}
+
+# This system's own entry: its files under /TOKEN/ and its root in the options.
+ours() {
+    read_entry "$1"
+    case $e_linux in "/$token/"*) ;; *) return 1 ;; esac
+    case " $e_options " in *" root=PARTUUID=$partuuid "*) return 0 ;; esac
+    return 1
+}
+
+sync_entries() {
+    restore
+    prune
+    written=
+    for directory in "$modules"/*/; do
+        version=${directory%/}
+        version=${version##*/}
+        [ -f "$modules/$version/vmlinuz" ] || continue
+        if write_entry "$version"; then
+            written="$written $version"
+            say "entry $token-$version"
+        fi
+    done
+    # Then what is gone: the entry first, so no entry ever names missing files.
+    for entry in "$boot"/loader/entries/"$token"-*.conf; do
+        [ -f "$entry" ] || continue
+        ours "$entry" || continue
+        case " $written " in *" $e_version "*) continue ;; esac
+        rm -f "$entry"
+        say "removed the entry ${entry##*/}"
+    done
+    for directory in "$boot/$token"/*/; do
+        [ -d "$directory" ] || continue
+        version=${directory%/}
+        version=${version##*/}
+        case " $written " in *" $version "*) continue ;; esac
+        rm -rf "${boot:?}/$token/$version"
+    done
+    [ -n "$written" ] || say 'warning: no kernel in /usr/lib/modules; this system has no boot entry'
+    sync
+}
+
+set_default() {
+    conf=$boot/loader/loader.conf
+    mkdir -p "$boot/loader"
+    line="default $token-*"
+    if [ -f "$conf" ]; then
+        awk -v line="$line" '$1 == "default" {if (!done) print line; done = 1; next} {print} END {if (!done) print line}' \
+            "$conf" > "$conf.new"
+    else
+        echo "$line" > "$conf.new"
+    fi
+    mv -f "$conf.new" "$conf"
+    sync
+    say "$line"
+}
+
+case $command in
+    sync)
+        load_config || true
+        find_boot
+        if ! configured; then
+            say 'this system was not installed by Orchard (no /etc/orchard/boot-entry); nothing to do'
+            exit 0
+        fi
+        sync_entries ;;
+    save)
+        load_config || exit 0
+        mkdir -p "$saved"
+        for directory in "$modules"/*/; do
+            version=${directory%/}
+            version=${version##*/}
+            [ -f "$modules/$version/vmlinuz" ] || continue
+            [ ! -e "$modules/$version/$MARKER" ] || continue
+            [ ! -e "$saved/$version" ] || continue
+            cp -al "$modules/$version" "$saved/$version" 2>/dev/null ||
+                { rm -rf "${saved:?}/$version"; cp -Rp "$modules/$version" "$saved/$version"; }
+        done ;;
+    default)
+        load_config || true
+        find_boot
+        configured || die 'this system has no boot entry yet'
+        set_default ;;
+    *)
+        die 'usage: boot-entries [--root DIR] [--boot DIR] sync | save | default' ;;
+esac
