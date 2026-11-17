@@ -1,0 +1,268 @@
+From dbb68f39764e51b6cea88ae046c05c0d170de0aa Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 17:47:09 +0100
+Subject: [PATCH] drm/imagination: apple: Let a chip's firmware interrupt drive
+ job completion
+
+The poll work re-arms a 100 us timer for as long as any job is pending:
+about 10,000 wakeups a second whenever the GPU is busy, and a finished
+job is seen up to 100 us late.
+
+Let a chip hand the backend its firmware's interrupt. The hard IRQ handler
+acknowledges it at the source through the new irq_ack() op and kicks the
+poll work, which drains the firmware's rings and signals fences as
+before. The interrupt is requested with IRQF_NO_AUTOEN and enabled only
+while fences are pending, because firmware that is up but idle raises it
+as well. While it is enabled the poll work re-checks every irq_poll_us,
+except for PVR_APPLE_FAST_US after a chip reported a finished job
+(pvr_apple_firmware_progress()). The stamps and ring watermarks that
+make a job done do not all reach memory at the same moment, so those
+re-checks keep apple_poll_us.
+
+pvr_apple_firmware_event() is the one place that kicks the poll work for
+the firmware. The A10's RTKit receive callback now calls it as well,
+with the same behaviour as before. The A10 takes no interrupt here and
+keeps polling, because none of its firmware messages is known to mean
+completion.
+
+Affects: Apple A9 (S8003) and A10 (T8010); the A10 keeps polling, no behaviour change
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_apple.c       | 110 ++++++++++++++++--
+ drivers/gpu/drm/imagination/pvr_apple_chip.h  |  17 +++
+ drivers/gpu/drm/imagination/pvr_apple_t8010.c |   2 +-
+ 3 files changed, 119 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_apple.c b/drivers/gpu/drm/imagination/pvr_apple.c
+index b779060..0fa3264 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple.c
++++ b/drivers/gpu/drm/imagination/pvr_apple.c
+@@ -37,6 +37,7 @@
+ #include <linux/dma-mapping.h>
+ #include <linux/firmware.h>
+ #include <linux/hrtimer.h>
++#include <linux/interrupt.h>
+ #include <linux/io.h>
+ #include <linux/iopoll.h>
+ #include <linux/module.h>
+@@ -64,6 +65,13 @@ static unsigned int pvr_apple_poll_us = 100;
+ module_param_named(apple_poll_us, pvr_apple_poll_us, uint, 0644);
+ MODULE_PARM_DESC(apple_poll_us, "Apple A10: microseconds between job completion checks (default 100)");
+ 
++/*
++ * With the firmware's interrupt taken, checks stay apple_poll_us apart for
++ * this long after the firmware announced a completion: the stamps and ring
++ * watermarks that make a job done are not all in memory at once.
++ */
++#define PVR_APPLE_FAST_US	1000
++
+ /* Idle time before runtime PM powers the GPU off; tunable in sysfs. */
+ #define PVR_APPLE_AUTOSUSPEND_MS	1000
+ 
+@@ -905,7 +913,7 @@ void pvr_apple_report_mmu_fault(struct pvr_apple *apple)
+ void pvr_apple_firmware_fault(struct pvr_apple *apple)
+ {
+ 	atomic_set(&apple->fault_pending, 1);
+-	mod_delayed_work(system_highpri_wq, &apple->poll_work, 0);
++	pvr_apple_firmware_event(apple);
+ }
+ 
+ /* A reset cancels every engine: fault only the oldest bound scheduler. */
+@@ -1016,13 +1024,85 @@ static void pvr_apple_jobs_retired(struct pvr_apple *apple, unsigned int n)
+ 		pm_runtime_put_autosuspend(dev);
+ }
+ 
+-/* Signal the fences of retired jobs; poll again while any are pending. */
++/**
++ * pvr_apple_firmware_event() - The firmware posted something: look now
++ * @apple: Apple firmware state.
++ *
++ * Any context, hard IRQ included.
++ */
++void pvr_apple_firmware_event(struct pvr_apple *apple)
++{
++	/* After a terminal shutdown nothing may run the poll work again */
++	if (!READ_ONCE(apple->stopping))
++		mod_delayed_work(system_highpri_wq, &apple->poll_work, 0);
++}
++
++/**
++ * pvr_apple_firmware_progress() - The firmware announced a finished job
++ * @apple: Apple firmware state.
++ *
++ * For a chip's events(): check again soon, until the job is done in memory.
++ */
++void pvr_apple_firmware_progress(struct pvr_apple *apple)
++{
++	WRITE_ONCE(apple->fast_until, ktime_add_us(ktime_get(), PVR_APPLE_FAST_US));
++}
++
++static irqreturn_t pvr_apple_firmware_irq(int irq, void *data)
++{
++	struct pvr_apple *apple = data;
++
++	/* At its source first, as Apple's kext does before it reads the rings */
++	apple->chip->irq_ack(apple);
++	pvr_apple_firmware_event(apple);
++	return IRQ_HANDLED;
++}
++
++/**
++ * pvr_apple_firmware_irq_init() - Take the firmware's interrupt
++ * @apple: Apple firmware state.
++ * @irq: Its Linux interrupt number.
++ *
++ * For a chip's init(), with &pvr_apple_chip.irq_ack set. The interrupt is
++ * enabled only while jobs are pending: an idle firmware raises it too.
++ *
++ * Return: 0 or a negative error; on error the jobs are polled for.
++ */
++int pvr_apple_firmware_irq_init(struct pvr_apple *apple, int irq)
++{
++	struct device *dev = apple_dev(apple);
++	int err;
++
++	if (!apple->chip->irq_ack || !apple->chip->irq_poll_us)
++		return -EINVAL;
++	err = devm_request_irq(dev, irq, pvr_apple_firmware_irq, IRQF_NO_AUTOEN,
++			       "apple-gfx-fw", apple);
++	if (err)
++		return err;
++	apple->fw_irq = irq;
++	return 0;
++}
++
++/* Enable the firmware's interrupt while jobs are pending; fence_lock held */
++static void pvr_apple_fw_irq_set_locked(struct pvr_apple *apple, bool on)
++{
++	lockdep_assert_held(&apple->fence_lock);
++	if (!apple->fw_irq || apple->fw_irq_on == on)
++		return;
++	apple->fw_irq_on = on;
++	if (on)
++		enable_irq(apple->fw_irq);
++	else
++		disable_irq_nosync(apple->fw_irq);
++}
++
++/* Signal the fences of retired jobs; check again while any are pending. */
+ static void pvr_apple_poll_work(struct work_struct *work)
+ {
+ 	struct pvr_apple *apple = container_of(work, struct pvr_apple, poll_work.work);
+ 	struct pvr_apple_fence *fence, *tmp;
+-	unsigned int retired = 0;
+-	bool pending = false;
++	unsigned int retired = 0, us;
++	bool pending = false, irq_on;
+ 	int engine;
+ 
+ 	if (READ_ONCE(apple->stopping))
+@@ -1063,13 +1143,23 @@ static void pvr_apple_poll_work(struct work_struct *work)
+ 		apple->busy_ns += ktime_to_ns(ktime_sub(ktime_get(), apple->busy_since));
+ 		apple->busy_since = 0;
+ 	}
++	pvr_apple_fw_irq_set_locked(apple, pending);
++	irq_on = apple->fw_irq_on;
+ 	spin_unlock_irq(&apple->fence_lock);
+ 	pvr_apple_jobs_retired(apple, retired);
+ 
+-	/* The firmware sends no completion message in this setup: poll. */
+-	if (pending && !READ_ONCE(apple->stopping))
+-		hrtimer_start(&apple->poll_timer, us_to_ktime(max(pvr_apple_poll_us, 10U)),
+-			      HRTIMER_MODE_REL);
++	if (!pending || READ_ONCE(apple->stopping))
++		return;
++	/*
++	 * Without the firmware's interrupt (the A10's firmware sends no
++	 * completion message in this setup) poll. With it, check again
++	 * soon only after an announced completion; otherwise the slower
++	 * period backs the interrupt up.
++	 */
++	us = READ_ONCE(pvr_apple_poll_us);
++	if (irq_on && !ktime_before(ktime_get(), READ_ONCE(apple->fast_until)))
++		us = apple->chip->irq_poll_us;
++	hrtimer_start(&apple->poll_timer, us_to_ktime(max(us, 10U)), HRTIMER_MODE_REL);
+ }
+ 
+ static enum hrtimer_restart pvr_apple_poll_timer(struct hrtimer *timer)
+@@ -1152,6 +1242,7 @@ static unsigned int pvr_apple_cancel_fences(struct pvr_apple *apple, int error)
+ 			cancelled++;
+ 		}
+ 	}
++	pvr_apple_fw_irq_set_locked(apple, false);
+ 	spin_unlock_irq(&apple->fence_lock);
+ 	pvr_apple_jobs_retired(apple, cancelled);
+ 	return cancelled;
+@@ -1182,8 +1273,9 @@ static struct dma_fence *pvr_apple_job_fence(struct pvr_apple *apple, struct pvr
+ 	if (!apple->busy_since)
+ 		apple->busy_since = ktime_get();
+ 	list_add_tail(&fence->node, &apple->pending[engine]);
++	pvr_apple_fw_irq_set_locked(apple, true);
+ 	spin_unlock_irq(&apple->fence_lock);
+-	mod_delayed_work(system_highpri_wq, &apple->poll_work, 0);
++	pvr_apple_firmware_event(apple);
+ 	return &fence->base;
+ }
+ 
+diff --git a/drivers/gpu/drm/imagination/pvr_apple_chip.h b/drivers/gpu/drm/imagination/pvr_apple_chip.h
+index 09571e6..3b954d3 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple_chip.h
++++ b/drivers/gpu/drm/imagination/pvr_apple_chip.h
+@@ -116,6 +116,16 @@ struct pvr_apple {
+ 	atomic_t fault_pending;		/* a chip latched a new firmware fault */
+ 	struct delayed_work poll_work;
+ 	struct hrtimer poll_timer;	/* rearms poll_work while jobs are pending */
++	/*
++	 * The firmware's interrupt, if the chip has one the host can take
++	 * (0: none). It is enabled while fences are pending (@fw_irq_on,
++	 * under fence_lock) and kicks poll_work; poll_work then checks again
++	 * every &pvr_apple_chip.irq_poll_us, and every apple_poll_us until
++	 * @fast_until, which a completion the firmware announced sets.
++	 */
++	int fw_irq;
++	bool fw_irq_on;
++	ktime_t fast_until;
+ 	/*
+ 	 * The last fragment job pushed: the next geometry job waits for it, as
+ 	 * the firmware keeps one parameter-manager scene at a time.
+@@ -260,6 +270,8 @@ struct pvr_apple_chip {
+ 	unsigned int scenes;
+ 	bool own_pm_pages;
+ 	unsigned int gate_off_ms;
++	/* With the firmware's interrupt taken: microseconds between checks while jobs are pending */
++	unsigned int irq_poll_us;
+ 
+ 	int (*init)(struct pvr_apple *apple);
+ 	int (*boot)(struct pvr_apple *apple);
+@@ -284,6 +296,8 @@ struct pvr_apple_chip {
+ 	void (*vm_fini)(struct pvr_apple *apple, struct pvr_vm_context *vm_ctx);
+ 	unsigned int (*vm_scenes)(struct pvr_apple *apple, struct pvr_vm_context *vm_ctx);
+ 	void (*mmu_flush)(struct pvr_apple *apple);
++	/* Acknowledge the firmware's interrupt at its source; hard IRQ context */
++	void (*irq_ack)(struct pvr_apple *apple);
+ };
+ 
+ /* A new host tag must be nonzero and differ from the firmware's cached tag. */
+@@ -316,5 +330,8 @@ int pvr_apple_wait_idle(struct pvr_apple *apple, unsigned int timeout_us);
+ int pvr_apple_request_power_state(struct pvr_apple *apple, u32 state);
+ u32 pvr_apple_start_power_state(struct pvr_apple *apple);
+ int pvr_apple_fender_power_on(struct pvr_apple *apple);
++int pvr_apple_firmware_irq_init(struct pvr_apple *apple, int irq);
++void pvr_apple_firmware_event(struct pvr_apple *apple);
++void pvr_apple_firmware_progress(struct pvr_apple *apple);
+ 
+ #endif /* PVR_APPLE_CHIP_H */
+diff --git a/drivers/gpu/drm/imagination/pvr_apple_t8010.c b/drivers/gpu/drm/imagination/pvr_apple_t8010.c
+index 19be745..cc841c3 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple_t8010.c
++++ b/drivers/gpu/drm/imagination/pvr_apple_t8010.c
+@@ -113,7 +113,7 @@ static void pvr_apple_recv_message(void *cookie, u8 endpoint, u64 message)
+ 
+ 	dev_dbg(apple_dev(apple), "firmware ep %#x: %#016llx\n", endpoint, message);
+ 	/* none is known to mean completion, but a check costs little */
+-	mod_delayed_work(system_highpri_wq, &apple->poll_work, 0);
++	pvr_apple_firmware_event(apple);
+ }
+ 
+ static void pvr_apple_crashed(void *cookie, const void *crashlog, size_t size)
