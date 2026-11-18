@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Duke Eagleman <301139544+jerricky26@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 18:08:27 -0500
+Subject: [PATCH] wifi: brcmfmac: pcie: Record the Apple module vendor in the
+ device tree
+
+On Apple boards the module vendor in the OTP chooses the Wi-Fi NVRAM.
+Bluetooth on the same module needs the vendor too, to pick its
+Patchram, but its controller can't read the OTP. Once the OTP is
+parsed, add the vendor to the Wi-Fi device's node as
+apple,module-vendor, where hci_bcm finds it through apple,wlan.
+
+Assisted-by: LLM
+---
+ .../broadcom/brcm80211/brcmfmac/pcie.c        | 35 +++++++++++++++++++
+ 1 file changed, 35 insertions(+)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
+index 9c52f50d8ae3..af8af4b45905 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
+@@ -6,6 +6,7 @@
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+ #include <linux/firmware.h>
++#include <linux/of.h>
+ #include <linux/pci.h>
+ #include <linux/vmalloc.h>
+ #include <linux/delay.h>
+@@ -2004,6 +2005,39 @@ brcmf_pcie_parse_otp_sys_vendor(struct brcmf_pciedev_info *devinfo,
+ 	return 0;
+ }
+ 
++/*
++ * Apple's Wi-Fi and Bluetooth share one module, and the Bluetooth Patchram
++ * differs per module vendor, which only the Wi-Fi OTP tells. Record the
++ * vendor in this device's DT node so that hci_bcm can pick its Patchram.
++ */
++static void brcmf_pcie_publish_otp_vendor(struct brcmf_pciedev_info *devinfo)
++{
++	struct device_node *np = devinfo->pdev->dev.of_node;
++	struct property *prop;
++
++	if (!np || !devinfo->otp.valid ||
++	    of_property_present(np, "apple,module-vendor"))
++		return;
++
++	prop = kzalloc(sizeof(*prop), GFP_KERNEL);
++	if (!prop)
++		return;
++
++	prop->name = kstrdup("apple,module-vendor", GFP_KERNEL);
++	prop->value = kstrdup(devinfo->otp.vendor, GFP_KERNEL);
++	if (!prop->name || !prop->value)
++		goto free;
++	prop->length = strlen(prop->value) + 1;
++
++	if (!of_add_property(np, prop))
++		return;
++
++free:
++	kfree(prop->value);
++	kfree(prop->name);
++	kfree(prop);
++}
++
+ static int
+ brcmf_pcie_parse_otp(struct brcmf_pciedev_info *devinfo, u8 *otp, size_t size)
+ {
+@@ -2557,6 +2591,7 @@ brcmf_pcie_probe(struct pci_dev *pdev, const struct pci_device_id *id)
+ 			brcmf_err(bus, "failed to parse OTP\n");
+ 			goto fail_brcmf;
+ 		}
++		brcmf_pcie_publish_otp_vendor(devinfo);
+ 		break;
+ 	case BRCMF_FWVENDOR_CYW:
+ 	default:

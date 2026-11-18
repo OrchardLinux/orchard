@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Duke Eagleman <301139544+jerricky26@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 18:08:27 -0500
+Subject: [PATCH] dt-bindings: net: bluetooth: brcm: Add apple,wlan
+
+Apple fits the Wi-Fi and Bluetooth combo modules of its phones and
+tablets from more than one vendor (Murata, USI), and the Bluetooth
+Patchram differs per vendor. The controller's ROM doesn't report the
+vendor; only the Wi-Fi function's OTP does. Add a phandle from the
+Bluetooth node to the Wi-Fi function of the same module, so that the
+Patchram can follow the vendor the Wi-Fi driver read.
+
+Assisted-by: LLM
+---
+ .../devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml b/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml
+index b815e3615567..793857de0daa 100644
+--- a/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml
++++ b/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml
+@@ -122,6 +122,14 @@ properties:
+       if the device's initial baud rate in normal mode is not supported by the
+       host or if the device requires autobaud mode startup before loading FW.
+ 
++  apple,wlan:
++    $ref: /schemas/types.yaml#/definitions/phandle
++    description:
++      The Wi-Fi function of the same Apple module. Apple fits modules from
++      several vendors, each needing its own Patchram, and only the Wi-Fi
++      function can read the module vendor from its OTP. The Patchram is
++      chosen by the vendor that the Wi-Fi driver reads.
++
+   interrupts:
+     items:
+       - description: Handle to the line HOST_WAKE used to wake
