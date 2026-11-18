@@ -1,0 +1,132 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 16:04:40 +0100
+Subject: [PATCH] arm64: traps: Emulate the CRC32 instructions on CPUs without
+ them
+
+The CRC32 instructions are optional in ARMv8.0 and mandatory from
+ARMv8.1. The Apple A7, A8 and A9 implement ARMv8.0 without them, and
+HWCAP_CRC32 is clear there. User space built for armv8-a+crc runs them
+anyway: Bun, the runtime inside Claude Code and opencode, targets that
+baseline, and its gzip runs CRC32W through its bundled libdeflate. On an
+iPad 5 every such program was killed:
+
+  Thread 1 "claude" received signal SIGILL, Illegal instruction.
+  => 0x2f35fe8:   crc32w  w21, w21, w9
+
+When an EL0 instruction is undefined and it is a 64-bit CRC32 or
+CRC32C instruction, compute the result with crc32_le() or crc32c(),
+which implement the same bit-reflected update without inversion, write
+it to Wd and step over the instruction. The data is the low
+1 << sz bytes of Xm in little-endian order; only the X form takes
+sf == 1, and other encodings still raise SIGILL. Each emulated
+instruction costs a trap, so this is for programs that should not have
+used them, not a replacement: HWCAP_CRC32 stays clear, and code that
+checks keeps its own fallback and never traps here. On CPUs that have
+the instructions this code is never reached.
+
+Assisted-by: LLM
+---
+ arch/arm64/Kconfig        | 18 +++++++++++++++++
+ arch/arm64/kernel/traps.c | 42 +++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 60 insertions(+)
+
+diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
+index d7db4c493..11bc39bc1 100644
+--- a/arch/arm64/Kconfig
++++ b/arch/arm64/Kconfig
+@@ -1975,6 +1975,24 @@ endif # ARMV8_DEPRECATED
+ 
+ endif # COMPAT
+ 
++config ARM64_CRC32_EMULATION
++	bool "Emulate the CRC32 instructions on CPUs without them"
++	select CRC32
++	default y
++	help
++	  The CRC32 instructions are optional in ARMv8.0 and mandatory from
++	  ARMv8.1. A few ARMv8.0 cores lack them, such as the Apple A7, A8
++	  and A9. Some user space is built for armv8-a+crc and executes them
++	  without checking HWCAP_CRC32, and is killed with SIGILL on such a
++	  core.
++
++	  Say Y to emulate them for 64-bit tasks on such cores instead. Each
++	  emulated instruction costs a trap into the kernel. HWCAP_CRC32 stays
++	  clear, so code that checks for the instructions keeps using its own
++	  fallback. On cores that have the instructions this does nothing.
++
++	  If unsure, say Y
++
+ menu "ARMv8.1 architectural features"
+ 
+ config ARM64_HW_AFDBM
+diff --git a/arch/arm64/kernel/traps.c b/arch/arm64/kernel/traps.c
+index fc9f4214c..b55059dea 100644
+--- a/arch/arm64/kernel/traps.c
++++ b/arch/arm64/kernel/traps.c
+@@ -8,6 +8,7 @@
+ 
+ #include <linux/bug.h>
+ #include <linux/context_tracking.h>
++#include <linux/crc32.h>
+ #include <linux/signal.h>
+ #include <linux/kallsyms.h>
+ #include <linux/kprobes.h>
+@@ -453,6 +454,44 @@ void arm64_notify_segfault(unsigned long addr)
+ 	force_signal_inject(SIGSEGV, code, addr, 0);
+ }
+ 
++/*
++ * CRC32{B,H,W,X} and CRC32C{B,H,W,X}: sf 0 0 11010110 Rm 010 C sz Rn Rd. The
++ * accumulator is Wn, the data is the low 1 << sz bytes of Rm in little-endian
++ * order, and the result in Wd is the bit-reflected CRC without inversion,
++ * which is what crc32_le() and crc32c() compute.
++ */
++#define CRC32_INSN_MASK		0x7fe0e000
++#define CRC32_INSN_VALUE	0x1ac04000
++
++static bool try_emulate_crc32(struct pt_regs *regs, u32 insn)
++{
++	unsigned int sz = (insn >> 10) & 3;
++	unsigned int rd = insn & 0x1f;
++	unsigned int rn = (insn >> 5) & 0x1f;
++	unsigned int rm = (insn >> 16) & 0x1f;
++	bool castagnoli = insn & BIT(12);
++	bool sf = insn & BIT(31);
++	__le64 data;
++	u32 acc;
++
++	if (!IS_ENABLED(CONFIG_ARM64_CRC32_EMULATION) ||
++	    cpu_have_named_feature(CRC32) || compat_user_mode(regs))
++		return false;
++
++	/* Only the 64-bit form takes an X register, and only for sz == 3. */
++	if ((insn & CRC32_INSN_MASK) != CRC32_INSN_VALUE || sf != (sz == 3))
++		return false;
++
++	acc = pt_regs_read_reg(regs, rn);
++	data = cpu_to_le64(pt_regs_read_reg(regs, rm));
++	acc = castagnoli ? crc32c(acc, &data, 1 << sz) :
++			   crc32_le(acc, &data, 1 << sz);
++	pt_regs_write_reg(regs, rd, acc);
++
++	arm64_skip_faulting_instruction(regs, AARCH64_INSN_SIZE);
++	return true;
++}
++
+ void do_el0_undef(struct pt_regs *regs, unsigned long esr)
+ {
+ 	u32 insn;
+@@ -470,6 +509,9 @@ void do_el0_undef(struct pt_regs *regs, unsigned long esr)
+ 	if (try_emulate_armv8_deprecated(regs, insn))
+ 		return;
+ 
++	if (try_emulate_crc32(regs, insn))
++		return;
++
+ out_err:
+ 	force_signal_inject(SIGILL, ILL_ILLOPC, regs->pc, 0);
+ }
+-- 
+2.49.0
+
