@@ -35,8 +35,8 @@ user `tablet`, PIN 123456, a random password in `out/simulator/vm/credentials`
   the Apple drivers cannot run in a VM. So there is no GPU (the GPU desktop
   draws in software, slower than on the tablet), no Apple touch controller
   (QEMU's virtual multitouch stands in), no sleep (suspend is masked: a VM has
-  no wake source), and no panel backlight. Hardware behaviour still needs the
-  tablet.
+  no wake source), and a VM-only backlight stands in for the panel's (see How
+  it works). Hardware behaviour still needs the tablet.
 
 `simulator/run` prints which release the disk holds and says when a newer
 nightly is out. Nothing updates on its own; to move to it:
@@ -82,9 +82,11 @@ service (`vm-support/orchard-vm-bridge.py`) takes shutdown requests and
 reports the backlight. QMP sockets: `qmp.sock` (the window's input),
 `viewer.sock` (the window's display), `agent.sock` (scripts).
 
-Optional: `simulator/build-vm-backlight` and `vm-support/install-linux.sh`
-(in the Podman machine, VM stopped) add a VM-only backlight driver, so the
-Power button's screen blanking dims the window as it would the panel.
+`simulator/setup` also builds a VM-only backlight driver for the disk's kernel
+(`simulator/build-vm-backlight`, in the Podman machine) and installs it with
+`vm-support/install-linux.sh`, so the Power button's screen blanking dims the
+window as it would the panel. If that build fails, setup says so and the
+window stays lit.
 
 Orchard Simulator is not made or endorsed by Apple. iPad is a trademark of
 Apple Inc.; the frame only shows which device the display size and buttons

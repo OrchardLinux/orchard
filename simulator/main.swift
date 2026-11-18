@@ -43,6 +43,7 @@ final class SimulatorView: NSView {
     private var guestKeysDown = Set<String>()
     private var resignObserver: NSObjectProtocol?
     private var appResignObserver: NSObjectProtocol?
+    private var commandKeyUpMonitor: Any?
     private let displayRect = NSRect(x: 10.835, y: 21.45, width: 147.83, height: 197.10)
     // The inner half of the bezel is the screen's edge: a drag that starts
     // there is a finger sliding onto the screen (the keyboard from the
@@ -91,6 +92,18 @@ final class SimulatorView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        // While Command is held macOS sends the window no key-up for the other
+        // keys; the application still sees them. Without this the guest takes
+        // a released key for a held one and repeats it (Super+Shift+Space
+        // toggling the bar on and off for as long as Command and Shift stay down).
+        if commandKeyUpMonitor == nil {
+            commandKeyUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyUp) { [weak self] event in
+                guard let self, event.window === self.window, event.modifierFlags.contains(.command),
+                      self.guestFocused, let key = Self.qcodes[event.keyCode], self.guestKeysDown.contains(key) else { return event }
+                self.sendGuestKey(key, down: false)
+                return nil
+            }
+        }
         if let observer = resignObserver { NotificationCenter.default.removeObserver(observer) }
         resignObserver = nil
         if let window {
@@ -101,6 +114,7 @@ final class SimulatorView: NSView {
     }
 
     deinit {
+        if let monitor = commandKeyUpMonitor { NSEvent.removeMonitor(monitor) }
         if let observer = resignObserver { NotificationCenter.default.removeObserver(observer) }
         if let observer = appResignObserver { NotificationCenter.default.removeObserver(observer) }
     }
@@ -392,7 +406,13 @@ final class SimulatorView: NSView {
     override func keyDown(with event: NSEvent) {
         if guestFocused, let key = Self.qcodes[event.keyCode] {
             if let command = heldCommand, !commandSent { sendGuestKey(command, down: true); commandSent = true }
-            if !event.isARepeat { sendGuestKey(key, down: true) }
+            if !event.isARepeat {
+                // While Command is held macOS sends no key-up to the window, so a
+                // key still marked down was let go unseen: release it first, or
+                // the guest takes this press for a held key's repeat.
+                if guestKeysDown.contains(key) { sendGuestKey(key, down: false) }
+                sendGuestKey(key, down: true)
+            }
         }
         else { super.keyDown(with: event) }
     }
@@ -407,6 +427,9 @@ final class SimulatorView: NSView {
             heldCommand = key
             commandSent = false
         } else if heldCommand == key {
+            // The keys pressed with Command never got their key-up (see keyDown).
+            let modifiers: Set<String> = ["shift", "shift_r", "ctrl", "ctrl_r", "alt", "alt_r", "meta_l", "meta_r"]
+            for held in guestKeysDown.subtracting(modifiers) { sendGuestKey(held, down: false) }
             if commandSent { sendGuestKey(key, down: false) }
             else {
                 let tap = DispatchWorkItem { [weak self] in
