@@ -88,12 +88,14 @@ def default_version(now=None):
     return now.strftime('dev-%Y%m%d-%H%M%S')
 
 
-def build(root, *, version=None, platforms=None, kernel_tree=None):
+def build(root, *, version=None, platforms=None, kernel_tree=None, packages=None):
     """Run ROOT's build entry into out/releases/VERSION, check the release, record it; returns its index.
 
     PLATFORMS: a list of platform names or 'all', passed as --platform to an
     entry that selects platforms (orchard.toml [release] selects-platform = true); None
-    for an entry that builds every platform.
+    for an entry that builds every platform. PACKAGES: a checkout of the Orchard
+    package repository, passed as ORCHARD_PACKAGES: the entry builds from it
+    what its image would take from the published [orchard].
     """
     from .hardware import ROOT
     from .manifests import resolve_local, verify_local_receipts
@@ -126,6 +128,12 @@ def build(root, *, version=None, platforms=None, kernel_tree=None):
         environment['ORCHARD_KERNEL_TREE'] = str(kernel_tree)
         print(f'Kernel from the tree {kernel_tree}', flush=True)
         tree = f'ORCHARD_KERNEL_TREE={shlex.quote(str(kernel_tree))} '
+    if packages is not None:
+        # The entry builds its image's [orchard] packages from this checkout (the distribution's own step).
+        environment['ORCHARD_PACKAGES'] = str(packages)
+        print(f'Orchard packages: recipes that differ from the published ones are built from {packages} '
+              '(packages = false in orchard.local.toml: published only)', flush=True)
+        tree += f'ORCHARD_PACKAGES={shlex.quote(str(packages))} '
     # What orchard runs, as the plain command: the distribution composes the rest itself.
     (output.parent / f'{version}.commands.sh').write_text(
         '#!/bin/sh\n# What orchard build ran for this release (--explain prints it); the build script\n'
@@ -164,7 +172,7 @@ def latest(root):
     return index
 
 
-def run(root, *, build_first=True, version=None, yes=False, progress=None, kernel_tree=None):
+def run(root, *, build_first=True, version=None, yes=False, progress=None, kernel_tree=None, packages=None):
     """Build (unless BUILD_FIRST is false), then boot the release's installer system on the attached board from RAM.
 
     Nothing is installed: its session (USB network, SSH) is how to look
@@ -185,7 +193,7 @@ def run(root, *, build_first=True, version=None, yes=False, progress=None, kerne
             if board is None:
                 raise ValueError('No described device is attached: connect it, then run again')
             platforms = [ram.resolve_platform(root, ROOT, device=board)]
-        index = build(root, version=version, platforms=platforms, kernel_tree=kernel_tree)
+        index = build(root, version=version, platforms=platforms, kernel_tree=kernel_tree, packages=packages)
     else:
         index = latest(root)
     with operation_lock():
