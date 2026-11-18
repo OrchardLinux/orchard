@@ -128,20 +128,29 @@ def resolve_kernel_tree(directory, tree=None):
 
 
 def resolve_packages(directory, packages=None):
-    """--packages, else this checkout's packages (orchard.local.toml, relative to it); or None.
+    """--packages, else orchard.local.toml's packages, else a sibling ../packages checkout; or None.
 
     A checkout of the Orchard package repository (OrchardLinux/packages): a
-    distribution's build compiles from it what its image installs from [orchard].
+    distribution's build compiles from it what its image installs from [orchard]
+    and differs from the published repository. A checkout beside the
+    distribution's is used without a setting, and the build says so;
+    packages = false in orchard.local.toml builds from the published packages only.
     """
     if packages is not None:
         found, where = Path(packages).expanduser().resolve(), '--packages'
     else:
         settings, path = local_settings(directory)
-        if 'packages' not in settings:
-            return None
-        if not isinstance(settings['packages'], str) or not settings['packages']:
-            raise ValueError(f'{path}: packages must be a path')
-        found, where = (path.parent / Path(settings['packages']).expanduser()).resolve(), f'{path}: packages'
+        if 'packages' in settings:
+            if settings['packages'] is False:
+                return None
+            if not isinstance(settings['packages'], str) or not settings['packages']:
+                raise ValueError(f'{path}: packages must be a path, or false')
+            found, where = (path.parent / Path(settings['packages']).expanduser()).resolve(), f'{path}: packages'
+        else:
+            sibling = (Path(directory).resolve().parent / 'packages')
+            if not ((sibling / 'tools/pkgrepo').is_file() and (sibling / 'packages').is_dir()):
+                return None
+            return sibling
     if not (found / 'tools/pkgrepo').is_file() or not (found / 'packages').is_dir():
         raise ValueError(f'{where}: {found} is not a checkout of the Orchard package repository '
                          '(OrchardLinux/packages: tools/pkgrepo, packages/)')

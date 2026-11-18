@@ -131,7 +131,8 @@ def build(root, *, version=None, platforms=None, kernel_tree=None, packages=None
     if packages is not None:
         # The entry builds its image's [orchard] packages from this checkout (the distribution's own step).
         environment['ORCHARD_PACKAGES'] = str(packages)
-        print(f'Orchard packages from the checkout {packages}', flush=True)
+        print(f'Orchard packages: recipes that differ from the published ones are built from {packages} '
+              '(packages = false in orchard.local.toml: published only)', flush=True)
         tree += f'ORCHARD_PACKAGES={shlex.quote(str(packages))} '
     # What orchard runs, as the plain command: the distribution composes the rest itself.
     (output.parent / f'{version}.commands.sh').write_text(

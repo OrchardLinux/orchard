@@ -199,7 +199,9 @@ In a distribution `orchard build` runs the script with `ORCHARD_CHECKOUT` (the
 snapshot whose producers it calls), with `--kernel-tree`,
 `ORCHARD_KERNEL_TREE`, which `orchard.inputs` builds the kernels from, and
 with `--packages`, `ORCHARD_PACKAGES`, a checkout of OrchardLinux/packages the
-distribution builds its image's changed `[orchard]` packages from; it
+distribution builds its image's changed `[orchard]` packages from (without
+a setting, a `packages` checkout beside the distribution's; the build prints
+which packages it built and `packages = false` turns it off); it
 records that call as `out/releases/VERSION.commands.sh`, which `--explain`
 prints. The script's own steps are the distribution's
 ([distribution-contract.md](distribution-contract.md)).

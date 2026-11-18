@@ -90,6 +90,18 @@ class ProjectFile(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '--packages'):
             build.resolve_packages(self.root, self.root / 'elsewhere')
 
+    def test_a_packages_checkout_beside_the_distribution_is_used_unless_turned_off(self):
+        sibling = self.root.parent / 'packages'
+        if sibling.exists():
+            self.skipTest('a packages directory already sits beside the test checkout')
+        self.addCleanup(shutil.rmtree, sibling, True)
+        (sibling / 'tools').mkdir(parents=True)
+        (sibling / 'packages').mkdir()
+        (sibling / 'tools/pkgrepo').write_text('')
+        self.assertEqual(build.resolve_packages(self.root), sibling.resolve())
+        (self.root / 'orchard.local.toml').write_text('packages = false\n')
+        self.assertIsNone(build.resolve_packages(self.root))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -44,7 +44,8 @@ def main():
                              'defconfig (default: kernel-tree in orchard.local.toml, else orchard\'s own kernel)')
         command.add_argument('--packages', type=Path, help='distribution checkouts: build the image\'s [orchard] '
                              'packages from this checkout of OrchardLinux/packages where it differs from the '
-                             'published repository (default: packages in orchard.local.toml, else the published ones)')
+                             'published repository (default: packages in orchard.local.toml, else a ../packages checkout beside '
+                             'this one, else the published ones; the build prints which; packages = false: published only)')
         for component in ('pongo', 'busybox', 'loader'):
             command.add_argument('--' + component, type=Path, help='reuse this local component')
     build.add_argument('--explain', action='store_true',
