@@ -1,0 +1,186 @@
+From 3b34ea727c90dcc383e5470107bc37b48bb88c34 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 12:01:15 +0100
+Subject: [PATCH] usb: dwc2: Refresh the host budget after a charger source
+ event
+
+An iPad can log a 2400 mA Apple host grant at boot while its charger
+stays at 500 mA with no current allowance. A source event invalidates
+the report without necessarily ending the USB session; an early report
+can also arrive before the charger accepts the attachment. No further
+host request is guaranteed.
+
+The Lightning charger notifies its power supply when its source epoch
+or the attachment's readiness changes. On that notification, have DWC2
+re-report its current live draw to its named power supply. Compare the
+allowance rather than the ramped input limit to avoid notification
+feedback. End the composite session on a soft-role hold so an earlier
+attachment cannot retain a grant. Suspend, reset and disconnect still
+replace the live draw, and notifier cleanup drains its work.
+
+Affects: Apple A9/A10 DWC2 controllers using a named TriStar power supply
+Assisted-by: LLM
+---
+ drivers/usb/dwc2/core.h   |  5 ++
+ drivers/usb/dwc2/drd.c    |  6 +-
+ drivers/usb/dwc2/gadget.c | 61 +++++++++++++++++++++++++++++++++++-
+ 3 files changed, 68 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/usb/dwc2/core.h b/drivers/usb/dwc2/core.h
+index ae563ca..820e28a 100644
+--- a/drivers/usb/dwc2/core.h
++++ b/drivers/usb/dwc2/core.h
+@@ -10,6 +10,7 @@
+ 
+ #include <linux/acpi.h>
+ #include <linux/device-id/pci.h>
++#include <linux/notifier.h>
+ #include <linux/phy/phy.h>
+ #include <linux/regulator/consumer.h>
+ #include <linux/usb/gadget.h>
+@@ -1062,6 +1063,8 @@ struct dwc2_hregs_backup {
+  *			the device to draw (vbus_draw), or NULL
+  * @vbus_draw_work:	Work passing @vbus_draw_ma to that power supply
+  * @vbus_draw_ma:	Current the gadget may draw, from vbus_draw
++ * @vbus_draw_pending:	A new vbus_draw report must reach the supply
++ * @usb_psy_nb:	Re-report the current allowance when the supply changes
+  *
+  */
+ struct dwc2_hsotg {
+@@ -1241,7 +1244,9 @@ struct dwc2_hsotg {
+ 	struct dwc2_hsotg_ep *eps_out[MAX_EPS_CHANNELS];
+ 	const char *usb_psy_name;
+ 	struct work_struct vbus_draw_work;
++	struct notifier_block usb_psy_nb;
+ 	unsigned int vbus_draw_ma;
++	bool vbus_draw_pending;
+ #endif /* CONFIG_USB_DWC2_PERIPHERAL || CONFIG_USB_DWC2_DUAL_ROLE */
+ };
+ 
+diff --git a/drivers/usb/dwc2/drd.c b/drivers/usb/dwc2/drd.c
+index c71b68b..d890ad8 100644
+--- a/drivers/usb/dwc2/drd.c
++++ b/drivers/usb/dwc2/drd.c
+@@ -113,9 +113,11 @@ static int dwc2_drd_set_soft_role(struct dwc2_hsotg *hsotg, enum usb_role role)
+ 	spin_lock_irqsave(&hsotg->lock, flags);
+ 	hsotg->role_sw_hold = role != USB_ROLE_DEVICE;
+ 	if (dwc2_is_device_enabled(hsotg)) {
+-		if (hsotg->role_sw_hold)
++		if (hsotg->role_sw_hold) {
+ 			dwc2_hsotg_core_disconnect(hsotg);
+-		else
++			/* End the old gadget session and its current allowance. */
++			dwc2_hsotg_disconnect(hsotg);
++		} else
+ 			dwc2_hsotg_core_connect(hsotg);
+ 	}
+ 	spin_unlock_irqrestore(&hsotg->lock, flags);
+diff --git a/drivers/usb/dwc2/gadget.c b/drivers/usb/dwc2/gadget.c
+index 05037d6..fbc5075 100644
+--- a/drivers/usb/dwc2/gadget.c
++++ b/drivers/usb/dwc2/gadget.c
+@@ -4787,22 +4787,56 @@ static void dwc2_hsotg_vbus_draw_work(struct work_struct *work)
+ {
+ 	struct dwc2_hsotg *hsotg = container_of(work, struct dwc2_hsotg,
+ 						vbus_draw_work);
+-	union power_supply_propval val;
++	union power_supply_propval val, allowed;
+ 	struct power_supply *psy;
++	bool pending;
+ 	int ret;
+ 
+ 	psy = power_supply_get_by_name(hsotg->usb_psy_name);
+ 	if (!psy)
+ 		return;
++	pending = xchg(&hsotg->vbus_draw_pending, false);
+ 	val.intval = READ_ONCE(hsotg->vbus_draw_ma) * 1000;
++	if (!pending &&
++	    !power_supply_get_property(psy, POWER_SUPPLY_PROP_CURRENT_MAX, &allowed) &&
++	    allowed.intval == val.intval)
++		goto put;
+ 	ret = power_supply_set_property(psy, POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
+ 					&val);
+ 	if (ret)
+ 		dev_dbg(hsotg->dev, "setting VBUS draw (%d uA) failed: %d\n",
+ 			val.intval, ret);
++put:
+ 	power_supply_put(psy);
+ }
+ 
++/*
++ * A charger can invalidate a report on a source event without ending the USB
++ * session. Send the current allowance again, not a saved Apple grant. The
++ * composite driver replaces it on reset, disconnect and suspend. Compare the
++ * allowance, not the ramped input limit, to avoid a notification feedback loop.
++ * The notifier must not call into the supply: queue the work that may sleep.
++ */
++static int dwc2_hsotg_psy_changed(struct notifier_block *nb,
++				unsigned long event, void *data)
++{
++	struct dwc2_hsotg *hsotg = container_of(nb, struct dwc2_hsotg, usb_psy_nb);
++	struct power_supply *psy = data;
++
++	if (event == PSY_EVENT_PROP_CHANGED &&
++	    !strcmp(psy->desc->name, hsotg->usb_psy_name))
++		schedule_work(&hsotg->vbus_draw_work);
++	return NOTIFY_OK;
++}
++
++static void dwc2_hsotg_psy_unregister(void *data)
++{
++	struct dwc2_hsotg *hsotg = data;
++
++	power_supply_unreg_notifier(&hsotg->usb_psy_nb);
++	cancel_work_sync(&hsotg->vbus_draw_work);
++}
++
+ static int dwc2_hsotg_vbus_draw(struct usb_gadget *gadget, unsigned int mA)
+ {
+ 	struct dwc2_hsotg *hsotg = to_hsotg(gadget);
+@@ -4814,6 +4848,7 @@ static int dwc2_hsotg_vbus_draw(struct usb_gadget *gadget, unsigned int mA)
+ 
+ 	/* Called in atomic context; the power supply may sleep. */
+ 	WRITE_ONCE(hsotg->vbus_draw_ma, mA);
++	WRITE_ONCE(hsotg->vbus_draw_pending, true);
+ 	schedule_work(&hsotg->vbus_draw_work);
+ 	return 0;
+ }
+@@ -5141,6 +5176,24 @@ int dwc2_gadget_init(struct dwc2_hsotg *hsotg)
+ 
+ 	dwc2_hsotg_dump(hsotg);
+ 
++	if (hsotg->usb_psy_name && IS_ERR_OR_NULL(hsotg->uphy)) {
++		hsotg->usb_psy_nb.notifier_call = dwc2_hsotg_psy_changed;
++		ret = power_supply_reg_notifier(&hsotg->usb_psy_nb);
++		if (ret) {
++			dwc2_hsotg_ep_free_request(&hsotg->eps_out[0]->ep,
++						 hsotg->ctrl_req);
++			return ret;
++		}
++		ret = devm_add_action_or_reset(dev, dwc2_hsotg_psy_unregister,
++					      hsotg);
++		if (ret) {
++			dwc2_hsotg_ep_free_request(&hsotg->eps_out[0]->ep,
++						 hsotg->ctrl_req);
++			return ret;
++		}
++		/* The named supply may already have registered. */
++		schedule_work(&hsotg->vbus_draw_work);
++	}
+ 	return 0;
+ }
+ 
+@@ -5152,8 +5205,12 @@ int dwc2_gadget_init(struct dwc2_hsotg *hsotg)
+ int dwc2_hsotg_remove(struct dwc2_hsotg *hsotg)
+ {
+ 	usb_del_gadget_udc(&hsotg->gadget);
+-	if (hsotg->usb_psy_name)
++	if (hsotg->usb_psy_name) {
++		if (IS_ERR_OR_NULL(hsotg->uphy))
++			devm_release_action(hsotg->dev, dwc2_hsotg_psy_unregister,
++					    hsotg);
+ 		cancel_work_sync(&hsotg->vbus_draw_work);
++	}
+ 	dwc2_hsotg_ep_free_request(&hsotg->eps_out[0]->ep, hsotg->ctrl_req);
+ 
+ 	return 0;

@@ -9,6 +9,7 @@ Use the corrected disassembly; the first listing was shifted by +0x80.
 
 | Register | Meaning | Evidence |
 |---|---|---|
+| `0x189` | Connection state, read without acknowledging. Bit 0: input connected; bit 1: a new connection. J71t: `0x87` at boot with a cable, `0x83`/`0x87` while connected, bit 0 clear after unplug. The charger's presence test, as in iOS | Firmware, J71t hardware |
 | `0x18a` | Charge/input status, read without acknowledging. J71b values: `0x42` with any source, `0x00` unplugged, `0x40` for about 0.1 s during reattach before `0x42` | Hardware |
 | `0xa00` | Input enable/hold bits. iPadOS clears and sets bit 1 around a limit change (`…6b8507c`). Linux does not need it; Paul's driver checks it reads `0x00` | Firmware, hardware |
 | `0xa03` | USB input-current limit code, one byte (read `…6b84f40`, write `…6b84f94`) | Firmware, hardware |
@@ -32,9 +33,35 @@ input. On J71b, `0x18a` always went to `0x00` on unplug in our tests.
 Treat `0x18a` as one input to presence, not a source identity. It does not
 change on a quick swap (see [pmu-events.md](pmu-events.md)).
 
-Earlier Orchard code's "online" rule for `0x18a`: bit 4 clear, bits 1:0
-nonzero, high bits = `0x40`. The prototype requires exactly `0x42` to
-identify and treats `0x40` as transitional (no grant).
+These bits describe the battery charger, not the input. iOS 16 reads them
+in `AppleD2365PMUPowerSource`'s status method for its charging and fully
+charged state only. Its input-current ramp follows the source's allowance
+and backs off only when the PMIC reports input limiting, which the D2365
+implementation never does. The charger therefore keeps the input grant for
+any nonzero `0x18a`, including charge end, timeout and `0x40` (not
+charging), and treats `0x00` as no input.
+
+iOS's own presence test is `0x189`, not `0x18a`: `AppleD2365PMUPowerSource`
+(`…6bc0278`) reports "connected" from bit 0, and for a dock that was not
+connected it also requires bit 1. Events 16, 40–43, 72 and 77 (its only
+subscription, masks at `…5915d68`/`…5915d86`) are each handed to
+AppleARMPMUCharger as a power-source change (`causeChargerEvent`, flag 2),
+which debounces 50 ms and then reads that state again; the input limit is not
+touched on the way.
+
+The device comparison settled it (J71t, 2026-11-17, powered Lightning camera
+adapter): during the input-current ramp `0x18a` alternated between `0x40`
+and `0x00` every 100–300 ms while `0x189` stayed `0x87`/`0x83` (bit 0 set),
+and every `0x00` withdrew the grant to 100 mA. A real unplug clears `0x189`
+bit 0. The charger now takes presence from `0x189` as iOS does: bit 0 keeps
+a connection, and a new one also needs bit 1 (`0x87` at boot with a cable
+in). This is a D2365 property, so it holds on every board the charger
+drives (iPad 5 and iPad 6): iOS uses the same test on both, and the charger's
+other registers are the D2365's on every board too. Measured on J71t only;
+the J71b values of `0x189` (bit 1 at boot with a cable in, bit 0 through a
+reattach) still need a device check. If bit 1 is missing at boot, the
+charger stays at the 100 mA handoff until a replug, and USB data still
+comes on after the 1 s hold.
 
 ## Input-limit encoding
 
@@ -115,7 +142,8 @@ conversion time.
 |---|---|---|
 | `0xa03` | `0x02` (or `0x1c` if an earlier Orchard owner ran) | Refuse to take ownership on anything else |
 | `0xa0c` | `0xf4` | Refuse if different |
-| `0x18a` | `0x42` / `0x00` | Present / absent |
+| `0x189` | bit 0 set / clear (J71t: `0x87` at boot with a cable) | Present / absent |
+| `0x18a` | `0x42` / `0x00` | Charger state, not presence |
 
 ## Not established
 

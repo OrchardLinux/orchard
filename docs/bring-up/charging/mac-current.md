@@ -37,8 +37,9 @@ uses that ID too.
 The identity alone is never current on the tablet. Only the host's real
 request reaches `composite_vbus_draw` -> DWC2 -> the Lightning charger. The
 charger caps the allowance at its board maximum and keeps its pack guards,
-stepped ramp, readback verification and source-epoch withdrawal. No request
-means the 500 mA fallback. BC1.2 detection exists separately: an SDP Mac port
+stepped ramp and readback verification. As in iOS 16, a PMU source event does
+not end the allowance; the USB session (reset, disconnect, suspend) and the
+end of the attachment do. No request means the 500 mA fallback. BC1.2 detection exists separately: an SDP Mac port
 must not be relabelled CDP to obtain 1.5 A.
 
 A grant arriving while suspended cannot select the active allowance. The
@@ -46,11 +47,9 @@ policy drops the active grant on suspend; resuming needs a fresh grant. Reset
 and disconnect clear it too. The suspend field is logged (debug) but never
 authorises an elevated suspend limit.
 
-`current_max=0` on a configured link can have three causes: a missing report,
-a report gated by the charger (not present, data off), or a report from an
-earlier source epoch. The charger's debug messages show reported and accepted
-current, present, data and the report epoch. Never replay an old allowance
-after a PMU event to make that number nonzero.
+`current_max=0` on a configured link can have two causes: a missing report, or
+a report gated by the charger (not present, data off). The charger's debug
+messages show reported and accepted current, present and data.
 
 ## Device acceptance check
 

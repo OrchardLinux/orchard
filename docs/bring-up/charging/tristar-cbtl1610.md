@@ -162,6 +162,26 @@ Linux writes `0x11`/`0x10` directly from an idle 0. This produced correct,
 orientation-tolerant signatures on every tested source. It is still not a
 replay of the vendor sequence. Verify on other boards rather than copy.
 
+### Digital ID first
+
+On iOS the digital ID always comes before a data-line measurement. The
+J71t pin-voltage operation (iOS 16.7.10 `fffffff005ff5a08`, also used for
+BC1.2) starts from the cached route, which only the ID's transport decode
+sets. It fails with `0xe00002d9` and writes nothing unless that route has
+USB on a pair. It changes only that pair's nibble, so the other pair keeps
+its transport (`urt0` for the camera adapter: `0xa1` → `0xad`). The iOS
+camera-adapter log shows the order: ID, ACC 0x02 = `0x30`, `dxctrl:0xad`,
+`readBrickID`, `reset(dxctrl:0xa1)`, then the ID-bus exchange.
+
+Linux samples from an idle route, so the order has to be kept explicitly.
+The Lightning camera adapter with its own power input feeds VBUS at plug.
+The charger then samples both pairs 300 ms later, while the accessory
+policy's first GetID is still due. In that order, every GetID timed out
+for minutes (J71t, 2026-11-17). Plugging the adapter first and its power
+last passed on 2026-11-13. The charger now leaves the mux alone from a plug edge until
+the policy's first GetID after it has finished, still within its 1 s hold
+(`tristar_accessory_identifying()`).
+
 ## Dispatch map (21H461, iPad7,5/7,6)
 
 | Slot | CBTL1610 (vtable `…6e58c18`, ctor `…61545a4`) | THS7383 base (vtable `…6e5a9c0`, ctor `…615be80`) |
