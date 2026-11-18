@@ -9,12 +9,12 @@ import tempfile
 import tomllib
 
 from . import version
-from .hardware import IMPLEMENTED_METHODS, device as hardware_device, method_implemented
+from .hardware import IMPLEMENTED_METHODS, device as hardware_device, method_implemented, root_architecture
 from .launcher import delivers as launcher_delivers
 from .cache import cache_root
 from .downloads import download
 from .http import open_url
-from .manifests import ManifestError, check_source, local_file, platform_for, validate, verify_file
+from .manifests import ManifestError, check_source, local_file, platform_for, release_for, validate, verify_file
 
 MAX_MANIFEST = 1024 * 1024
 
@@ -137,10 +137,13 @@ def select_manifest(source, profile, progress=None, clock=None, purpose='install
         elif not Path(source).expanduser().exists():
             raise ValueError('Unknown distro or manifest. Register an index with: orchard distros NAME INDEX_URL')
     document, bundle = read_document(source, progress, clock)
+    described = hardware_device(profile)
+    architecture = root_architecture(described)
     if document['kind'] == 'orchard.index':
         if expected_distro and document['distro'] != expected_distro:
             raise ValueError('Distro index identity differs from its registered name')
-        receipt = document['release']
+        # One release per root architecture: the board's chip picks it.
+        receipt = release_for(document, architecture)
         if receipt['bytes'] > MAX_MANIFEST:
             raise ValueError('Installation manifest exceeds size limit')
         path = materialize(receipt, bundle, None, clock)
@@ -154,10 +157,16 @@ def select_manifest(source, profile, progress=None, clock=None, purpose='install
     allowed = {'install': ('orchard.install',)}.get(purpose, ('orchard.install', 'orchard.boot'))
     if document['kind'] not in allowed:
         raise ValueError('Manifest is not compatible with this operation')
-    described = hardware_device(profile)
     if document['kind'] == 'orchard.install':
-        # One release serves every platform; the board picks its platform's files.
-        platform = platform_for(document, profile)
+        # One release serves every platform of its root's architecture; the board picks its platform's files.
+        try:
+            platform = platform_for(document, profile)
+        except ManifestError:
+            if any(_architecture(board) == architecture for row in document['platforms'].values()
+                   for board in row['boards']):
+                raise   # a root of the board's architecture that doesn't cover it (yet)
+            raise ValueError(f'This {document["distro"]} release has no {architecture} root, '
+                             f'which {profile} needs') from None
         if platform != described['kernel']['platform']:
             raise ValueError(f'This release lists {profile} under {platform}, '
                              f'but orchard describes it as {described["kernel"]["platform"]}')
@@ -177,6 +186,14 @@ def select_manifest(source, profile, progress=None, clock=None, purpose='install
     if purpose == 'install' and document['install']['default_root'] == '/':
         raise ValueError('Filesystem-root installation is not implemented; use a directory-root image')
     return document, bundle
+
+
+def _architecture(board):
+    """The root architecture of BOARD, or None for a board this orchard does not describe."""
+    try:
+        return root_architecture(hardware_device(board))
+    except ValueError:
+        return None
 
 
 def direct(document):

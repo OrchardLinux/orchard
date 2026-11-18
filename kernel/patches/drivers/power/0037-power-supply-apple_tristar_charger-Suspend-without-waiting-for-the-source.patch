@@ -1,4 +1,4 @@
-From 56499f34819629d2070ce5fed324d6d864d58827 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 18:27:02 +0100
 Subject: [PATCH] power: supply: apple_tristar_charger: Suspend without waiting
@@ -26,10 +26,10 @@ Assisted-by: LLM
  1 file changed, 12 insertions(+), 7 deletions(-)
 
 diff --git a/drivers/power/supply/apple_tristar_charger.c b/drivers/power/supply/apple_tristar_charger.c
-index e81ffae..608c6fd 100644
+index 4ff1fbf..5ac6491 100644
 --- a/drivers/power/supply/apple_tristar_charger.c
 +++ b/drivers/power/supply/apple_tristar_charger.c
-@@ -1593,7 +1593,16 @@ static void tristar_shutdown(struct platform_device *pdev)
+@@ -1583,7 +1583,16 @@ static void tristar_shutdown(struct platform_device *pdev)
   * identified charger keeps its limit: a tablet left on one charges at full
   * rate. A USB host may be asleep too and is owed no more than the handoff, so
   * it parks there and is identified again on resume, as is anything without a
@@ -47,7 +47,7 @@ index e81ffae..608c6fd 100644
   */
  static int tristar_suspend(struct device *dev)
  {
-@@ -1602,13 +1611,9 @@ static int tristar_suspend(struct device *dev)
+@@ -1592,13 +1601,9 @@ static int tristar_suspend(struct device *dev)
  	int ret = 0;
  
  	mutex_lock(&chg->lock);

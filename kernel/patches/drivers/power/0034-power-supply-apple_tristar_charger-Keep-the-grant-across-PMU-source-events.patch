@@ -1,4 +1,4 @@
-From 1be0e517914705a63206f217c536bfaf0f4adff7 Mon Sep 17 00:00:00 2001
+From 2bb83a6b310a7f5e3acc5e6ed7a4d940cec747f8 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 11:31:10 +0100
 Subject: [PATCH] power: supply: apple_tristar_charger: Keep the grant across
@@ -35,7 +35,7 @@ Assisted-by: LLM
  1 file changed, 122 insertions(+), 70 deletions(-)
 
 diff --git a/drivers/power/supply/apple_tristar_charger.c b/drivers/power/supply/apple_tristar_charger.c
-index f6ac2a7..697d526 100644
+index 3afbe9b..37c805a 100644
 --- a/drivers/power/supply/apple_tristar_charger.c
 +++ b/drivers/power/supply/apple_tristar_charger.c
 @@ -22,11 +22,12 @@
@@ -79,7 +79,7 @@ index f6ac2a7..697d526 100644
  
  enum tristar_phase {
  	TRISTAR_EMPTY,
-@@ -136,17 +143,16 @@ struct tristar_charger {
+@@ -135,17 +142,16 @@ struct tristar_charger {
  	struct mutex lock;
  
  	/*
@@ -101,7 +101,7 @@ index f6ac2a7..697d526 100644
  
  	enum tristar_phase phase;
  	bool online;
-@@ -157,9 +163,8 @@ struct tristar_charger {
+@@ -156,9 +162,8 @@ struct tristar_charger {
  	unsigned int source_ma;
  	/* USB data is on for this attachment: the mux must stay untouched. */
  	bool usb_on;
@@ -112,7 +112,7 @@ index f6ac2a7..697d526 100644
  	enum power_supply_usb_type usb_type;
  	/* The identified cable, to recognize it after a source event. */
  	bool cable_known;
-@@ -168,7 +173,8 @@ struct tristar_charger {
+@@ -167,7 +172,8 @@ struct tristar_charger {
  	char source[96];
  	u64 attach_ns;		/* next identification at attach_ns + LOOK_MS */
  	u64 hold_ns;		/* identification round started */
@@ -122,7 +122,7 @@ index f6ac2a7..697d526 100644
  	u64 guard_ns;
  	unsigned int epoch_seen;
  	/* Lightning accessory policy, on boards with a role switch */
-@@ -662,16 +668,13 @@ static int tristar_identify(struct tristar_charger *chg, struct tristar_ident *i
+@@ -661,16 +667,13 @@ static int tristar_identify(struct tristar_charger *chg, struct tristar_ident *i
  /* ---- Policy ---- */
  
  /*
@@ -143,7 +143,7 @@ index f6ac2a7..697d526 100644
  	return chg->usb_ma;
  }
  
-@@ -745,8 +748,10 @@ static void tristar_new_attachment(struct tristar_charger *chg, u64 now)
+@@ -744,8 +747,10 @@ static void tristar_new_attachment(struct tristar_charger *chg, u64 now)
  	chg->usb_type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
  	chg->cable_known = false;
  	chg->epoch_seen = READ_ONCE(chg->epoch);
@@ -156,7 +156,7 @@ index f6ac2a7..697d526 100644
  	dev_dbg(chg->dev, "power connected, identifying source\n");
  }
  
-@@ -759,20 +764,16 @@ static void tristar_mux_fault(struct tristar_charger *chg)
+@@ -758,20 +763,16 @@ static void tristar_mux_fault(struct tristar_charger *chg)
  	dev_err(chg->dev, "Tristar mux restore unverified; holding the fallback until reboot\n");
  }
  
@@ -184,7 +184,7 @@ index f6ac2a7..697d526 100644
  }
  
  /*
-@@ -858,12 +859,23 @@ static void tristar_run_identification(struct tristar_charger *chg, u64 now)
+@@ -857,12 +858,23 @@ static void tristar_run_identification(struct tristar_charger *chg, u64 now)
  	tristar_accept(chg, &id);
  }
  
@@ -210,7 +210,7 @@ index f6ac2a7..697d526 100644
  		return;
  	/* A read that fails says nothing about the battery: hold, and look again. */
  	if (tristar_read_pack(&pack))
-@@ -874,8 +886,15 @@ static void tristar_ramp_step(struct tristar_charger *chg, u64 now)
+@@ -873,8 +885,15 @@ static void tristar_ramp_step(struct tristar_charger *chg, u64 now)
  		dev_warn(chg->dev, "battery outside the charging window; holding the fallback\n");
  		return;
  	}
@@ -228,7 +228,7 @@ index f6ac2a7..697d526 100644
  	if (tristar_set_code(chg, next)) {
  		chg->phase = TRISTAR_FAULT;
  		tristar_withdraw(chg, TRISTAR_CHG_FALLBACK_CODE);
-@@ -883,10 +902,30 @@ static void tristar_ramp_step(struct tristar_charger *chg, u64 now)
+@@ -882,10 +901,30 @@ static void tristar_ramp_step(struct tristar_charger *chg, u64 now)
  		return;
  	}
  	chg->step_ns = now;
@@ -259,7 +259,7 @@ index f6ac2a7..697d526 100644
  /*
   * On the iPad 5 the PMIC returns the input limit to its attach default of
   * 100 mA some 25-400 ms after attach, after the fallback has been written.
-@@ -1005,6 +1044,7 @@ static bool tristar_input_present(unsigned int status)
+@@ -1004,6 +1043,7 @@ static bool tristar_input_present(unsigned int status)
  
  static void tristar_poll(struct work_struct *work)
  {
@@ -267,7 +267,7 @@ index f6ac2a7..697d526 100644
  	struct tristar_charger *chg = container_of(to_delayed_work(work),
  						   struct tristar_charger, poll_work);
  	unsigned int status, old_code;
-@@ -1053,9 +1093,8 @@ static void tristar_poll(struct work_struct *work)
+@@ -1054,9 +1094,8 @@ static void tristar_poll(struct work_struct *work)
  		goto again;
  	}
  	if (READ_ONCE(chg->epoch) != chg->epoch_seen && chg->phase != TRISTAR_SETTLING) {
@@ -278,7 +278,7 @@ index f6ac2a7..697d526 100644
  		chg->phase = TRISTAR_SETTLING;
  		chg->attach_ns = now;
  		chg->hold_ns = now;
-@@ -1063,19 +1102,11 @@ static void tristar_poll(struct work_struct *work)
+@@ -1064,19 +1103,11 @@ static void tristar_poll(struct work_struct *work)
  		goto again;
  	}
  	line_ns = READ_ONCE(chg->line_ns);
@@ -303,7 +303,7 @@ index f6ac2a7..697d526 100644
  	}
  	tristar_follow_accessory(chg, now);
  	switch (chg->phase) {
-@@ -1093,6 +1124,7 @@ static void tristar_poll(struct work_struct *work)
+@@ -1094,6 +1125,7 @@ static void tristar_poll(struct work_struct *work)
  		break;
  	}
  again:
@@ -311,7 +311,7 @@ index f6ac2a7..697d526 100644
  	tristar_accessory_report(chg->acc, chg->usb_ma, chg->phase == TRISTAR_FAULT);
  	mod_delayed_work(chg->wq, &chg->poll_work,
  			 msecs_to_jiffies(TRISTAR_POLL_MS));
-@@ -1100,6 +1132,8 @@ again:
+@@ -1102,6 +1134,8 @@ again:
  		power_supply_changed(chg->psy);
  out:
  	mutex_unlock(&chg->lock);
@@ -320,7 +320,7 @@ index f6ac2a7..697d526 100644
  }
  
  /* ---- PMU events ---- */
-@@ -1127,23 +1161,37 @@ static bool tristar_event_withdraw(struct tristar_charger *chg)
+@@ -1129,23 +1163,37 @@ static bool tristar_event_withdraw(struct tristar_charger *chg)
  
  /*
   * The PMU line asserted and the event controller has not read the events
@@ -368,7 +368,7 @@ index f6ac2a7..697d526 100644
   */
  static void tristar_source_event(struct tristar_charger *chg)
  {
-@@ -1151,11 +1199,17 @@ static void tristar_source_event(struct tristar_charger *chg)
+@@ -1153,6 +1201,11 @@ static void tristar_source_event(struct tristar_charger *chg)
  	unsigned int i;
  	u64 now;
  
@@ -379,6 +379,8 @@ index f6ac2a7..697d526 100644
 +
  	tristar_event_withdraw(chg);
  	WRITE_ONCE(chg->epoch, chg->epoch + 1);
+ 	/* The USB session may continue: ask its controller for a fresh report. */
+@@ -1160,6 +1213,7 @@ static void tristar_source_event(struct tristar_charger *chg)
  	mod_delayed_work(chg->wq, &chg->poll_work, 0);
  
  	now = ktime_get_ns();
@@ -386,7 +388,7 @@ index f6ac2a7..697d526 100644
  	if (now - chg->storm_start_ns > NSEC_PER_SEC) {
  		chg->storm_start_ns = now;
  		chg->storm_count = 0;
-@@ -1258,11 +1312,9 @@ static int tristar_set_property(struct power_supply *psy,
+@@ -1263,11 +1317,9 @@ static int tristar_set_property(struct power_supply *psy,
  	report_ma = max(val->intval, 0) / 1000;
  	chg->usb_ma = chg->present && chg->usb_on ?
  		min(report_ma, chg->max_ma) : 0;

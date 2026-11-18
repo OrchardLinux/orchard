@@ -120,14 +120,22 @@ def has_recovery(described, root=None):
     Recovery is built per platform with every board's device tree, on the arm64 root
     distributions build, so 32-bit boards have none until a root of their own exists.
     """
-    if 'kernel' not in described:
-        return False
+    return 'kernel' in described and chip_architecture(described, root) == 'arm64'
+
+
+def chip_architecture(described, root=None):
+    """The architecture of a board's chip (chips/*.toml: arm64 or arm), or None for an unknown chip."""
     chips = Path(root) if root else data_root()
     for path in (chips / 'chips').glob('*.toml'):
         chip = tomllib.loads(path.read_text())
-        if chip['cpid'] == described['match']['dfu']['chip']:
-            return chip['architecture'] == 'arm64'
-    return False
+        if chip['cpid'] == described.get('match', {}).get('dfu', {}).get('chip'):
+            return chip['architecture']
+    return None
+
+
+def root_architecture(described, root=None):
+    """The architecture of the root a board runs, as a distribution index names it: armv7 on a 32-bit chip, else aarch64."""
+    return 'armv7' if chip_architecture(described, root) == 'arm' else 'aarch64'
 
 
 def method_implemented(name):

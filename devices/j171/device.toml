@@ -30,6 +30,7 @@ status = "experimental"
 
 # States: working, untested, missing, none (features.toml).
 [features]
+# The display pipe driver adopts the boot framebuffer mode; translated scanout is untested.
 display = "working"
 screen_off = "untested"
 backlight = "working"
