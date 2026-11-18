@@ -1,15 +1,17 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
 Date: Sat, 14 Nov 2026 19:59:06 +0100
-Subject: [PATCH] usb: dwc2: gadget: Re-arm EP0 on a reset after a session
- event
+Subject: [PATCH 16/18] usb: dwc2: gadget: Re-arm EP0 on a reset after a
+ session event
 
 The USB reset handler re-initialises the device, and re-arms EP0, only
 if the device is still "connected". Two events clear that flag while
 the host still sees an attached device:
 - a VBUS session event: session end, or a session request on VBUS
   rising, both of which call dwc2_hsotg_disconnect();
-- a suspend, after which the core sits in L2, clock gated.
+- a suspend, after which the core sits in L2, clock gated. A host may
+  reset a suspended bus without resuming it first, and the reset
+  handler left the PHY clock and hclk gated.
 
 The host's next reset then skips the re-initialisation. Enum-done
 queues the EP0 setup request into a core outside L0, and
@@ -23,10 +25,11 @@ until the UDC is unbound and bound again. An Apple iPad 5 (A9) showed it
 and vendor requests.
 
 On a reset:
-- leave clock gating if the bus was suspended;
+- leave clock gating if the bus was suspended, as the RESETDET branch
+  does for partial power down;
 - re-initialise when the B-session is valid and the device was either
-  connected or out of L0. Apple's own device controller driver re-arms
-  EP0 on every reset.
+  connected or out of L0. Apple's own device controller driver ungates
+  its clocks and re-arms EP0 on every reset.
 
 Log the session events and a reset outside L0 (rate-limited; rare), so
 that a gadget that stops answering names its cause.
@@ -34,8 +37,8 @@ that a gadget that stops answering names its cause.
 Assisted-by: LLM
 ---
  drivers/usb/dwc2/core_intr.c |  8 ++++++++
- drivers/usb/dwc2/gadget.c    | 39 +++++++++++++++++++++---------------
- 2 files changed, 31 insertions(+), 16 deletions(-)
+ drivers/usb/dwc2/gadget.c    | 27 ++++++++++++++++++++++++++-
+ 2 files changed, 34 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/usb/dwc2/core_intr.c b/drivers/usb/dwc2/core_intr.c
 index 0be67f2..e3bb92d 100644
@@ -64,7 +67,7 @@ index 0be67f2..e3bb92d 100644
  			if (hsotg->in_ppd) {
  				ret = dwc2_exit_partial_power_down(hsotg, 0,
 diff --git a/drivers/usb/dwc2/gadget.c b/drivers/usb/dwc2/gadget.c
-index 0c6e60f..b5afa5e 100644
+index fbc5075..b5afa5e 100644
 --- a/drivers/usb/dwc2/gadget.c
 +++ b/drivers/usb/dwc2/gadget.c
 @@ -3761,6 +3761,7 @@ irq_retry:
@@ -75,36 +78,22 @@ index 0c6e60f..b5afa5e 100644
  
  		dev_dbg(hsotg->dev, "%s: USBRst\n", __func__);
  		dev_dbg(hsotg->dev, "GNPTXSTS=%08x\n",
-@@ -3769,22 +3770,13 @@ irq_retry:
+@@ -3768,14 +3769,38 @@ irq_retry:
+ 
  		dwc2_writel(hsotg, GINTSTS_USBRST, GINTSTS);
  
- 		/*
--		 * A reset of a suspended bus.  No resume came first, so a core
--		 * that entered clock gating on the suspend is still gated and
--		 * in L2, and dwc2_hsotg_ep_queue() refuses the EP0 setup
--		 * request that dwc2_hsotg_core_init_disconnected() queues
--		 * (-EAGAIN) on this and every later reset, until the UDC is
--		 * rebound.  Leave clock gating and return to L0 first, as the
--		 * RESETDET branch above does for partial power down.
++		/*
 +		 * A reset of a suspended bus: no resume came first, so a core
 +		 * that entered clock gating on the suspend is still gated.
- 		 */
--		if (hsotg->lx_state == DWC2_L2 && !hsotg->in_ppd) {
--			if (hsotg->params.power_down ==
--			    DWC2_POWER_DOWN_PARAM_NONE && hsotg->bus_suspended &&
--			    !hsotg->params.no_clock_gating)
--				dwc2_gadget_exit_clock_gating(hsotg, 0);
--			else
--				hsotg->lx_state = DWC2_L0;
--		}
++		 */
 +		if (lx == DWC2_L2 && !hsotg->in_ppd &&
 +		    hsotg->params.power_down == DWC2_POWER_DOWN_PARAM_NONE &&
 +		    hsotg->bus_suspended && !hsotg->params.no_clock_gating)
 +			dwc2_gadget_exit_clock_gating(hsotg, 0);
- 
++
  		/* Report disconnection if it is not already done. */
  		dwc2_hsotg_disconnect(hsotg);
-@@ -3792,8 +3784,23 @@ irq_retry:
+ 
  		/* Reset device address to zero */
  		dwc2_clear_bit(hsotg, DCFG, DCFG_DEVADDR_MASK);
  
@@ -129,6 +118,3 @@ index 0c6e60f..b5afa5e 100644
  	}
  
  	if (gintsts & GINTSTS_ENUMDONE) {
--- 
-2.49.0
-

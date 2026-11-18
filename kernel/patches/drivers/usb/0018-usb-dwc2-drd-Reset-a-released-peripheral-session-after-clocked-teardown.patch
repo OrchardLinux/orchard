@@ -1,38 +1,24 @@
-From b3ec1ed29d8d445904b1d9d35fd3453228731466 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
 Date: Mon, 16 Nov 2026 17:02:13 +0100
-Subject: [PATCH] usb: dwc2: drd: Reset a released peripheral session after
- clocked teardown
+Subject: [PATCH 18/18] usb: dwc2: drd: Reset a released peripheral session
+ after clocked teardown
 
 A peripheral role hold detached the pull-up before endpoint teardown and
 released a dirty core without resetting it. Run teardown with the PHY
 clock and pull-up on, detach afterward, and start a released session
-from a core soft reset. Track session generations so delayed recovery
-cannot reset a newer role-switch session.
+from a core soft reset.
 
 Assisted-by: LLM
 ---
- drivers/usb/dwc2/core.h |  1 +
- drivers/usb/dwc2/drd.c  | 26 ++++++++++++++++++++------
- 2 files changed, 21 insertions(+), 6 deletions(-)
+ drivers/usb/dwc2/drd.c | 19 +++++++++++++++----
+ 1 file changed, 15 insertions(+), 4 deletions(-)
 
-diff --git a/drivers/usb/dwc2/core.h b/drivers/usb/dwc2/core.h
-index 4b99b50..c73e8b4 100644
---- a/drivers/usb/dwc2/core.h
-+++ b/drivers/usb/dwc2/core.h
-@@ -1082,6 +1082,7 @@ struct dwc2_hsotg {
- 	struct delayed_work role_sw_fallback;
- 	bool role_sw_driven;
- 	bool role_sw_hold;
-+	unsigned int session_gen; /* invalidates recovery across session starts */
- 	unsigned int hcd_enabled:1;
- 	unsigned int gadget_enabled:1;
- 	unsigned int ll_hw_enabled:1;
 diff --git a/drivers/usb/dwc2/drd.c b/drivers/usb/dwc2/drd.c
-index 086d8f2..5971df9 100644
+index 086d8f2..63aa521 100644
 --- a/drivers/usb/dwc2/drd.c
 +++ b/drivers/usb/dwc2/drd.c
-@@ -106,22 +106,36 @@ static bool dwc2_drd_soft_role(struct dwc2_hsotg *hsotg)
+@@ -106,19 +106,30 @@ static bool dwc2_drd_soft_role(struct dwc2_hsotg *hsotg)
  static int dwc2_drd_set_soft_role(struct dwc2_hsotg *hsotg, enum usb_role role)
  {
  	unsigned long flags;
@@ -40,7 +26,7 @@ index 086d8f2..5971df9 100644
  
  	if (role == USB_ROLE_HOST)
  		return -EINVAL;
--
+ 
  	spin_lock_irqsave(&hsotg->lock, flags);
 +	was_held = hsotg->role_sw_hold;
  	hsotg->role_sw_hold = role != USB_ROLE_DEVICE;
@@ -50,8 +36,6 @@ index 086d8f2..5971df9 100644
 -			/* End the old gadget session and its current allowance. */
 +		if (dwc2_gadget_ungate_clock(hsotg))
 +			hsotg->bus_suspended = false;
-+		if (!hsotg->role_sw_hold && was_held)
-+			hsotg->session_gen++;
 +		if (hsotg->role_sw_hold && !was_held) {
 +			/* Stop the old session with its clock and pull-up still on. */
  			dwc2_hsotg_disconnect(hsotg);
@@ -62,16 +46,10 @@ index 086d8f2..5971df9 100644
 +			dwc2_hsotg_core_init_disconnected(hsotg, false);
 +			dwc2_enable_acg(hsotg);
  			dwc2_hsotg_core_connect(hsotg);
-+#if IS_ENABLED(CONFIG_USB_DWC2_PERIPHERAL) || IS_ENABLED(CONFIG_USB_DWC2_DUAL_ROLE)
-+			hsotg->stop_timeouts = 0;
-+#endif
 +			dev_info_ratelimited(hsotg->dev, "USB data released: core reset, reconnect\n");
 +		} else if (!hsotg->role_sw_hold) {
 +			dwc2_hsotg_core_connect(hsotg);
 +		}
  	}
  	spin_unlock_irqrestore(&hsotg->lock, flags);
--
- 	dev_dbg(hsotg->dev, "pull-up %s\n", hsotg->role_sw_hold ? "held off" : "released");
- 	return 0;
- }
+ 
