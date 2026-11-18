@@ -46,15 +46,18 @@ distributions). Each step waits until the one before is published:
    `tools/pkgrepo orchard-release vX.Y.Z` moves the `linux-orchard-*` recipes to
    that release; merge and let it publish. Installed systems take the new
    kernel with their next update.
-4. **Distributions.** Each releases with its own pull request (changelog
-   section, version) and tag. A tag build uses orchard's latest published
-   release (step 2), never a nightly: orchard removes nightlies after 14 days,
-   and a release links its files. Check the draft (the orchard release it
-   links, the package versions in its root) and publish it.
-5. **The distribution's own package.** For Omarchy A, move its recipe in the
-   package repository to the new tag (`tools/pkgrepo release omarchy-a
-   VERSION`, plus any pin that must land with that release), so installed
-   tablets update to it.
+4. **Distributions.** First land, in the package repository, any change the
+   distribution's recipe needs for this release (for Omarchy A a new upstream
+   Omarchy pin: its package step refuses a recipe that pins another upstream
+   Omarchy than `desktop/upstream.lock`). Then each distribution releases with
+   its own pull request (changelog section, version) and tag. A tag build uses
+   orchard's latest published release (step 2), never a nightly: orchard
+   removes nightlies after 14 days, and a release links its files. Check the
+   draft (the orchard release it links, the package versions its root
+   installed) and publish it.
+5. **The distribution's own package.** Omarchy A's recipe follows its
+   releases: *Follow sources* moves it to the new tag (run it with
+   `package=omarchy-a` to skip the wait), and installed tablets update to it.
 6. Qualify a fresh install and a cold restart on hardware before announcing.
 
 Cross-repository inputs must be published public releases, not drafts. The default repository token cannot read another repository's drafts. No broad personal access token is required for public dependencies.
