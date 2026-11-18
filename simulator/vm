@@ -20,7 +20,7 @@ case "${1:-status}" in
     nohup "$QEMU" -machine virt,accel=hvf -cpu host -m 4096 -smp 4 \
       -kernel "$D/vmlinuz" -append 'root=/dev/vda rootwait rw console=ttyAMA0 quiet fbcon=map:9 vt.global_cursor_default=0' \
       -drive "file=$D/root.raw,format=raw,if=virtio" \
-      -device virtio-gpu-pci,xres=768,yres=1024 -device qemu-xhci -device usb-tablet -device virtio-multitouch-pci -device virtio-keyboard-pci \
+      -device virtio-gpu-pci,xres=1536,yres=2048 -device qemu-xhci -device usb-tablet -device virtio-multitouch-pci -device virtio-keyboard-pci \
       -device virtio-serial-pci -chardev "socket,id=screen,path=$D/display.sock,server=on,wait=off" \
       -device virtserialport,chardev=screen,name=org.orchard.display \
       -chardev "socket,id=control,path=$D/control.sock,server=on,wait=off" \
