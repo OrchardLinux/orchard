@@ -30,6 +30,7 @@ status = "experimental"
 
 # States: working, untested, missing, none (features.toml).
 [features]
+# The display pipe driver adopts the 1620x2160 boot mode, as on the J171; untested here.
 display = "untested"
 screen_off = "untested"
 backlight = "untested"
