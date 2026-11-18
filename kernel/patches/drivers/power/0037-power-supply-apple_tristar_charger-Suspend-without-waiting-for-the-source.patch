@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 18:27:02 +0100
+Subject: [PATCH] power: supply: apple_tristar_charger: Suspend without waiting
+ for the source
+
+Suspend returned -EBUSY while a source was being identified or its grant
+was ramping, so that the identification could finish first. It never can:
+the poll work runs on a freezable workqueue, which is frozen before device
+suspend, so the phase stays where it was and every try of the sleep fails
+the same way. On an iPad 5 with a Mac cable, three rtcwake -m freeze in a
+row each ended with "platform_pm_suspend returns -16" from this driver.
+
+iOS 16 (AppleARMPMUCharger, sleep handler) cancels the ramp on sleep and
+leaves the input limit as written; after wake the ramp goes on from there.
+Do the same. A ramping grant is kept like a finished one, under the same
+conditions (a plug wake event, no USB host), and continues on resume: the
+limit it reached is never above the grant. An identification in progress
+is abandoned and parks at the handoff, which the source draws already;
+it runs within one poll, so the mux is restored by the time suspend can
+take the lock. The source is identified again on resume.
+
+Assisted-by: LLM
+---
+ drivers/power/supply/apple_tristar_charger.c | 19 ++++++++++++-------
+ 1 file changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/power/supply/apple_tristar_charger.c b/drivers/power/supply/apple_tristar_charger.c
+index 4ff1fbf..5ac6491 100644
+--- a/drivers/power/supply/apple_tristar_charger.c
++++ b/drivers/power/supply/apple_tristar_charger.c
+@@ -1583,7 +1583,16 @@ static void tristar_shutdown(struct platform_device *pdev)
+  * identified charger keeps its limit: a tablet left on one charges at full
+  * rate. A USB host may be asleep too and is owed no more than the handoff, so
+  * it parks there and is identified again on resume, as is anything without a
+- * plug event to rely on. An identification in progress finishes first.
++ * plug event to rely on.
++ *
++ * Sleep never waits for the charger. iOS 16 (AppleARMPMUCharger) cancels the
++ * ramp on sleep and leaves the limit as written; after wake the ramp goes on
++ * from there. So does this driver: a ramp in progress keeps the limit it has
++ * reached, which is never above the grant, and continues on resume. An
++ * identification in progress is abandoned: it runs within one poll, so the
++ * mux is back in place here, and the source draws the handoff it already
++ * has until it is identified again on resume. The poll work is frozen by
++ * now, so waiting for either would wait forever.
+  */
+ static int tristar_suspend(struct device *dev)
+ {
+@@ -1592,13 +1601,9 @@ static int tristar_suspend(struct device *dev)
+ 	int ret = 0;
+ 
+ 	mutex_lock(&chg->lock);
+-	if (chg->present && (chg->phase == TRISTAR_SETTLING ||
+-			     chg->phase == TRISTAR_RAMPING)) {
+-		mutex_unlock(&chg->lock);
+-		return -EBUSY;
+-	}
+ 	keep = chg->plug_irq && device_may_wakeup(dev) && chg->present &&
+-	       chg->phase == TRISTAR_CHARGING && !tristar_usb_ma(chg);
++	       (chg->phase == TRISTAR_RAMPING || chg->phase == TRISTAR_CHARGING) &&
++	       !tristar_usb_ma(chg);
+ 	chg->stopping = true;
+ 	if (!keep) {
+ 		chg->present = false;
