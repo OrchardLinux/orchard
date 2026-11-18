@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 23:07:27 +0100
+Subject: [PATCH] arm64: dts: apple: s8003: Give the display pipe the eDP
+ transmitter window
+
+The display pipe's driver trains the eDP link again after a sleep with the
+panel off. Add the DisplayPort transmitter's registers (ADT displayport,
+0x206700000, "displayport,s8003") to the pipe as its "dp" window. The
+transmitter is in the dp power domain the pipe already holds.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/s8003.dtsi | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/s8003.dtsi b/arch/arm64/boot/dts/apple/s8003.dtsi
+index f7c6c6f..08d053c 100644
+--- a/arch/arm64/boot/dts/apple/s8003.dtsi
++++ b/arch/arm64/boot/dts/apple/s8003.dtsi
+@@ -83,9 +83,10 @@
+ 		      <0x2 0x064c0000 0x0 0x8000>,
+ 		      <0x2 0x06500000 0x0 0x1c>,
+ 		      <0x2 0x06304000 0x0 0x4000>,
+-		      <0x2 0x06300000 0x0 0x4000>;
++		      <0x2 0x06300000 0x0 0x4000>,
++		      <0x2 0x06700000 0x0 0x1000>;
+ 		reg-names = "adp", "disp-a", "disp-b", "disp-c", "disp-d",
+-			    "side", "dart0", "dart1";
++			    "side", "dart0", "dart1", "dp";
+ 		interrupt-parent = <&aic>;
+ 		interrupts = <AIC_IRQ 140 IRQ_TYPE_LEVEL_HIGH>,
+ 			     <AIC_IRQ 143 IRQ_TYPE_LEVEL_HIGH>,
