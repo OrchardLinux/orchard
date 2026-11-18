@@ -15,7 +15,7 @@ Assisted-by: LLM
  1 file changed, 3 insertions(+), 2 deletions(-)
 
 diff --git a/arch/arm64/boot/dts/apple/s8003.dtsi b/arch/arm64/boot/dts/apple/s8003.dtsi
-index 205c93a..5a1abb7 100644
+index f7c6c6f..08d053c 100644
 --- a/arch/arm64/boot/dts/apple/s8003.dtsi
 +++ b/arch/arm64/boot/dts/apple/s8003.dtsi
 @@ -83,9 +83,10 @@

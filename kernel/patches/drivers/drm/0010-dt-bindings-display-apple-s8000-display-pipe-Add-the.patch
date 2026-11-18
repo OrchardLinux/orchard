@@ -8,20 +8,22 @@ On the A9, iOS switches the panel off whenever the display sleeps: the
 DisplayPort driver drops the panel's supply (the Apple device tree's
 function-lcd_ldo on the displayport node) and trains the eDP link again
 when it comes back. Allow the DisplayPort transmitter's register window as
-a ninth "dp" region, the panel supply as apple,lcd-ldo-gpios and the
+a last "dp" region, the panel supply as apple,lcd-ldo-gpios and the
 panel's backlight, so the display pipe's driver can do the same in system
-sleep. The A10's pipe has neither.
+sleep. The A10's pipe gets the same optional window and properties: its
+DisplayPort block and supply are not described yet, but nothing points to
+a different scheme there.
 
 Assisted-by: LLM
 ---
- .../display/apple,s8000-display-pipe.yaml     | 21 +++++++++++++++++--
- 1 file changed, 19 insertions(+), 2 deletions(-)
+ .../display/apple,s8000-display-pipe.yaml     | 25 +++++++++++++++++--
+ 1 file changed, 23 insertions(+), 2 deletions(-)
 
 diff --git a/Documentation/devicetree/bindings/display/apple,s8000-display-pipe.yaml b/Documentation/devicetree/bindings/display/apple,s8000-display-pipe.yaml
-index 4df755c..2ce5b7d 100644
+index 103344b..43d3e54 100644
 --- a/Documentation/devicetree/bindings/display/apple,s8000-display-pipe.yaml
 +++ b/Documentation/devicetree/bindings/display/apple,s8000-display-pipe.yaml
-@@ -32,16 +32,30 @@ properties:
+@@ -34,16 +34,31 @@ properties:
  
    reg:
      minItems: 3
@@ -41,9 +43,10 @@ index 4df755c..2ce5b7d 100644
 +    maxItems: 1
 +    description:
 +      The panel supply enable (the Apple device tree's function-lcd_ldo on
-+      the displayport node). On the A9 the driver then switches the panel
-+      off in system sleep and trains the eDP link again on wake, leaving the
-+      pipe and the DisplayPort transmitter as the bootloader set them.
++      the displayport node). With it, the panel is switched off in system
++      sleep and the eDP link is trained again on wake over the DisplayPort
++      transmitter's AUX channel (the "dp" register window), leaving the pipe
++      and the transmitter as the bootloader set them.
 +
 +  backlight:
 +    $ref: /schemas/types.yaml#/definitions/phandle
@@ -54,15 +57,29 @@ index 4df755c..2ce5b7d 100644
    power-domains:
      minItems: 2
      maxItems: 3
-@@ -54,6 +68,7 @@ allOf:
-             const: apple,t8010-display-pipe
+@@ -80,17 +95,21 @@ allOf:
      then:
        properties:
-+        apple,lcd-ldo-gpios: false
          reg:
++          minItems: 3
            items:
              - description:
-@@ -96,6 +111,7 @@ allOf:
+                 ADP window, with the control and interrupt registers, the
+                 parameter FIFO port and the pipe layer registers
+             - description: Display DART (dart-disp0), first window
+             - description: Display DART (dart-disp0), second window
++            - description: DisplayPort transmitter (displayport)
+         reg-names:
++          minItems: 3
+           items:
+             - const: adp
+             - const: dart0
+             - const: dart1
++            - const: dp
+         interrupts:
+           items:
+             - description:
+@@ -121,6 +140,7 @@ allOf:
              - description: Seven-register side block
              - description: Display DART (dart-disp0), first window
              - description: Display DART (dart-disp0), second window
@@ -70,7 +87,7 @@ index 4df755c..2ce5b7d 100644
  
          reg-names:
            minItems: 6
-@@ -108,6 +124,7 @@ allOf:
+@@ -133,6 +153,7 @@ allOf:
              - const: side
              - const: dart0
              - const: dart1
@@ -78,6 +95,3 @@ index 4df755c..2ce5b7d 100644
  
          interrupts:
            items:
--- 
-2.49.0
-

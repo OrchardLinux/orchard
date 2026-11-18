@@ -14,47 +14,69 @@ link again. Its event log on J71t shows a no-handshake (fast) training at
 the link the boot loader set up: 4 lanes, 1.62 Gb/s, enhanced framing,
 swing 0, pre-emphasis 0, ASSR on.
 
-Do the same around system sleep, leaving the pipe and the transmitter as
-the boot loader set them up; only the sink loses power:
+Do the same around system sleep wherever the device tree gives the panel
+supply, leaving the pipe and the transmitter as the boot loader set them
+up; only the sink loses power:
 
 - Before the first sleep, look up the supply and the backlight, and order
   sleep so that the pipe suspends before the PMU GPIO (behind I2C) and
   the backlight resumes after the pipe. Neither holds up probe.
 - At suspend, after the CRTC is off and the pipe shows the black boot
   framebuffer, the supply goes off only if the live link passes every
-  check the wake needs: AUX reads of the receiver capabilities and of the
-  sink's link configuration, a lane status that reads trained, a sink
+  check the wake needs: the receiver capabilities and the sink's link
+  configuration read over AUX, a lane status that reads trained, a sink
   that allows no-handshake training, a sink whose scrambler seed mode
   (ASSR) matches the transmitter's (0x614 bit 0), and a supply that reads
-  on and then off. Otherwise the panel stays on for that sleep, with the
-  reason logged. 50 ms after the supply goes off, the hot-plug detect
-  level and one AUX read are logged as a witness that the sink went away.
+  on and then off. Otherwise the panel stays on for that sleep.
 - On resume, before the CRTC is restored: supply on after the 125 ms
   minimum (counted in boot time: s2idle stops the monotonic clock), wait
-  for hot-plug detect, read the capabilities back over AUX, write the
-  saved link configuration (D0, ASSR as the transmitter has it,
-  downspread, rate, lane count), send TPS1 then TPS2 with the transmitter
-  and the DPCD, then check the lane status. A failed wake retries the
-  whole sequence twice. If the panel still does not come back, the
-  backlight is held off, the supply is left on and panel-off sleeps stop.
+  for hot-plug detect, read the capabilities back over AUX, power the sink
+  up (DP_SET_POWER), write the saved link configuration (ASSR as the
+  transmitter has it, downspread, rate, lane count), send TPS1 then TPS2
+  with the transmitter and the DPCD, then check the lane status. A failed
+  wake retries the whole sequence twice. If the panel still does not come
+  back, the backlight is held off and the supply is left on.
 
-AUX follows iOS's readDPCDGated/writeDPCDGated. Unlike the Analogix
-layout, the request nibble sits next to address bits 19:16 at 0x7a0, the
-length at 0x794, the data at 0xc00, and the buffer clears with 0x790 bit
-9. Completion is DP_INT_STA bit 1, an error bit 0 with the cause in
-AUX_CH_STA.
-
-sleep_panel_off=0 keeps the panel on in sleep, as before. The debugfs
-file adbe_panel runs the pre-sleep checks on demand, with AUX reads only,
-so their result can be seen before any sleep.
+The transmitter's AUX channel is a struct drm_dp_aux whose transfer hook
+follows iOS's readDPCDGated/writeDPCDGated: unlike the Analogix layout,
+the request nibble sits next to address bits 19:16 at 0x7a0, the length
+at 0x794, the data at 0xc00, and the buffer clears with 0x790 bit 9.
+Completion is DP_INT_STA bit 1, an error bit 0 with the cause in
+AUX_CH_STA. DPCD access, retries, the capability and link status reads,
+the lane checks and DP_SET_POWER come from the shared DP helpers. The
+no-handshake training sequence, which needs the transmitter's own
+training pattern register, stays in the driver: the helpers have none.
 
 Assisted-by: LLM
 ---
- drivers/gpu/drm/adbe/adbe_drv.c | 701 +++++++++++++++++++++++++++++++-
- 1 file changed, 694 insertions(+), 7 deletions(-)
+ drivers/gpu/drm/adbe/Kconfig    |   5 +-
+ drivers/gpu/drm/adbe/adbe_drv.c | 597 +++++++++++++++++++++++++++++++-
+ 2 files changed, 594 insertions(+), 8 deletions(-)
 
+diff --git a/drivers/gpu/drm/adbe/Kconfig b/drivers/gpu/drm/adbe/Kconfig
+index 20dd572..d53edf2 100644
+--- a/drivers/gpu/drm/adbe/Kconfig
++++ b/drivers/gpu/drm/adbe/Kconfig
+@@ -5,6 +5,8 @@ config DRM_APPLE_ADBE
+ 	depends on ARCH_APPLE || COMPILE_TEST
+ 	select APERTURE_HELPERS
+ 	select DRM_CLIENT_SELECTION
++	select DRM_DISPLAY_DP_HELPER
++	select DRM_DISPLAY_HELPER
+ 	select DRM_GEM_DMA_HELPER
+ 	select DRM_KMS_HELPER
+ 	help
+@@ -12,6 +14,7 @@ config DRM_APPLE_ADBE
+ 	  (S8000/S8003), as used in the iPad 5. It adopts the mode the
+ 	  bootloader leaves running, takes the framebuffer over from
+ 	  simpledrm, and adds page flips and vblank interrupts. It never
+-	  programs timings, clocks or the eDP link.
++	  programs timings or clocks, and trains the eDP link only to bring
++	  the panel back after a sleep with its supply off.
+ 
+ 	  If M is selected, the module is called apple_adbe_drm.
 diff --git a/drivers/gpu/drm/adbe/adbe_drv.c b/drivers/gpu/drm/adbe/adbe_drv.c
-index c1af6ca06..aa9a2838b 100644
+index 2eb8b54..b01313d 100644
 --- a/drivers/gpu/drm/adbe/adbe_drv.c
 +++ b/drivers/gpu/drm/adbe/adbe_drv.c
 @@ -3,12 +3,14 @@
@@ -78,15 +100,16 @@ index c1af6ca06..aa9a2838b 100644
   *
   * The block is the ADBE back end of iOS's AppleH8ADBE0 kext
   * (AppleMobileADBE0, AppleH7DisplayPipe). Its FIFO port and layer registers
-@@ -35,19 +37,33 @@
+@@ -35,19 +37,34 @@
   * every buffer it handed to the pipe mapped until the pipe is seen reading a
   * newer one, and returns the DART to bypass, on the boot framebuffer, at
   * shutdown.
 + *
-+ * In system sleep the panel supply goes off, as on iOS, where
-+ * AppleDPDisplayPowerController switches the panel's lcd_ldo and the
-+ * DisplayPort transmitter (an Analogix DP core) trains the link again on
-+ * every wake. The pipe and the transmitter keep running as iBoot set them
++ * Where the device tree gives the panel supply, it goes off in system sleep,
++ * as on iOS, where AppleDPDisplayPowerController switches the panel's
++ * lcd_ldo and the DisplayPort transmitter (an Analogix DP core) trains the
++ * link again on every wake. The transmitter's AUX channel is a drm_dp_aux,
++ * so DPCD access goes through the shared DP helpers. The pipe and the transmitter keep running as iBoot set them
 + * up: only the sink loses power. Before the supply is cut, the link must
 + * read back as trained over AUX and the supply must read on; otherwise the
 + * panel stays on for that sleep. On wake the link gets the boot loader's
@@ -112,25 +135,20 @@ index c1af6ca06..aa9a2838b 100644
  #include <linux/module.h>
  #include <linux/of.h>
  #include <linux/of_address.h>
-@@ -59,13 +75,17 @@
- #include <linux/pm_runtime.h>
+@@ -60,10 +77,12 @@
  #include <linux/sizes.h>
  #include <linux/scatterlist.h>
-+#include <linux/seq_file.h>
  #include <linux/slab.h>
 +#include <linux/suspend.h>
  #include <linux/timer.h>
  #include <linux/workqueue.h>
  
  #include <drm/clients/drm_client_setup.h>
-+#include <drm/display/drm_dp.h>
++#include <drm/display/drm_dp_helper.h>
  #include <drm/drm_atomic.h>
  #include <drm/drm_atomic_helper.h>
-+#include <drm/drm_debugfs.h>
  #include <drm/drm_drv.h>
- #include <drm/drm_dumb_buffers.h>
- #include <drm/drm_fb_dma_helper.h>
-@@ -149,6 +169,65 @@
+@@ -149,6 +168,60 @@
  #define DART_PTE_VALID		BIT_ULL(0)
  #define DART_PTE_ADDR		GENMASK_ULL(35, 12)
  
@@ -165,15 +183,12 @@ index c1af6ca06..aa9a2838b 100644
 +#define DPTX_AUX_ADDR_7_0	0x798
 +#define DPTX_AUX_ADDR_15_8	0x79c
 +#define DPTX_AUX_ADDR_19_16	0x7a0	/* [7:4] request, [3:0] address 19:16 */
++#define DPTX_AUX_REQUEST	GENMASK(7, 4)
 +#define DPTX_AUX_CTL_2		0x7a4
 +#define DPTX_AUX_EN		BIT(0)
 +#define DPTX_AUX_ADDR_ONLY	BIT(1)
 +#define DPTX_AUX_DATA(i)	(0xc00 + 4 * (i))
-+#define DPTX_AUX_NATIVE_WRITE	0x80
-+#define DPTX_AUX_NATIVE_READ	0x90
-+#define DPTX_AUX_MAX		16
 +#define DPTX_AUX_WAIT_US	20000
-+#define DPTX_AUX_TRIES		5
 +
 +/*
 + * Panel power timing, AppleDPDisplayPowerController's defaults (no ADT
@@ -184,31 +199,17 @@ index c1af6ca06..aa9a2838b 100644
 +#define ADBE_PANEL_HPD_MS	67
 +#define ADBE_PANEL_BL_MS	193
 +#define ADBE_PANEL_HPD_WAIT_US	(500 * USEC_PER_MSEC)
-+#define ADBE_PANEL_AUX_WAIT_MS	500
++#define ADBE_PANEL_AUX_WAIT_US	(500 * USEC_PER_MSEC)
 +#define ADBE_PANEL_TRIES	3
-+/* After the supply goes off: when to look whether the sink went away. */
-+#define ADBE_PANEL_DROP_MS	50
 +/* Fast training: each pattern for at least 500 us. */
 +#define ADBE_TPS_US		1000
 +/* DPCD 0x100..0x10a: the link the boot loader trained, replayed on wake. */
 +#define ADBE_LINK_CFG_LEN	(DP_EDP_CONFIGURATION_SET - DP_LINK_BW_SET + 1)
 +
  #define ADBE_ALIGN		64	/* plane base and stride */
- #define ADBE_ADDR_TAG		(ADBE_ALIGN - 1)	/* low bits of base/stride */
- #define ADBE_BUS_LIMIT		BIT_ULL(32)
-@@ -172,6 +251,11 @@ static bool dart_scanout = true;
- module_param(dart_scanout, bool, 0444);
- MODULE_PARM_DESC(dart_scanout,
- 		 "Scan out through the display DART, so any dma-buf can be shown (reads back the active mode)");
-+
-+static bool sleep_panel_off = true;
-+module_param(sleep_panel_off, bool, 0644);
-+MODULE_PARM_DESC(sleep_panel_off,
-+		 "Turn the panel supply off in system sleep and train the eDP link again on wake, as iOS (default 1)");
- #define ADBE_FLIP_VBLANKS	3	/* complete on VBI if bit 10 never comes */
- #define ADBE_FLIP_TIMEOUT_MS	100	/* complete anyway without an interrupt */
- #define ADBE_INTEN_VBLANK	(ADP_ST_VBI | ADP_ST_APPLIED)
-@@ -228,6 +312,24 @@ struct adbe {
+ #define ADBE_MIN_SIZE		32	/* panel width and height */
+ #define ADBE_MAX_SIZE		4096
+@@ -230,6 +303,25 @@ struct adbe {
  	} hold[ADBE_HOLD_MAX];
  	unsigned int nhold;
  	struct delayed_work hold_work;
@@ -219,6 +220,7 @@ index c1af6ca06..aa9a2838b 100644
 +	 * not wait for the PMU or the backlight.
 +	 */
 +	void __iomem *dp;
++	struct drm_dp_aux aux;
 +	struct notifier_block pm_nb;
 +	struct gpio_desc *lcd_ldo;
 +	struct backlight_device *backlight;
@@ -228,35 +230,49 @@ index c1af6ca06..aa9a2838b 100644
 +	bool panel_lost;	/* a wake did not bring the panel back */
 +	bool bl_held;		/* backlight held off after a failed wake */
 +	ktime_t panel_off_at;
-+	u8 dpcd_caps[DP_RECEIVER_CAP_SIZE + 1];
++	u8 dpcd_caps[DP_RECEIVER_CAP_SIZE];
 +	u8 link_cfg[ADBE_LINK_CFG_LEN];
  };
  
  static struct adbe *to_adbe(struct drm_device *drm)
-@@ -1792,6 +1894,552 @@ static int adbe_modeset_init(struct adbe *adbe)
+@@ -1838,6 +1930,453 @@ static int adbe_modeset_init(struct adbe *adbe)
  	return 0;
  }
  
-+/* One native AUX transaction of 1..16 bytes, as AppleANXDPTXController. */
-+static int adbe_aux_xfer(struct adbe *adbe, u32 request, u32 addr, u8 *buf,
-+			 size_t len)
++static struct adbe *aux_to_adbe(struct drm_dp_aux *aux)
 +{
++	return container_of(aux, struct adbe, aux);
++}
++
++/*
++ * One native AUX transaction, the transfer hook of the shared DP helpers,
++ * which do the retries. The request nibble is the DisplayPort request code.
++ */
++static ssize_t adbe_aux_transfer(struct drm_dp_aux *aux,
++				 struct drm_dp_aux_msg *msg)
++{
++	struct adbe *adbe = aux_to_adbe(aux);
 +	void __iomem *dp = adbe->dp;
-+	u32 ctl, mask, st, aux;
-+	size_t i;
++	size_t i, len = msg->size;
++	u8 *buf = msg->buffer;
++	u32 ctl, mask, st, status;
 +	int ret;
 +
-+	if (!len || len > DPTX_AUX_MAX)
++	if (msg->request != DP_AUX_NATIVE_READ &&
++	    msg->request != DP_AUX_NATIVE_WRITE)
++		return -EOPNOTSUPP;
++	if (!len || len > DP_AUX_MAX_PAYLOAD_BYTES)
 +		return -EINVAL;
 +
 +	writel(len - 1, dp + DPTX_AUX_LEN);
-+	writel(addr & 0xff, dp + DPTX_AUX_ADDR_7_0);
-+	writel((addr >> 8) & 0xff, dp + DPTX_AUX_ADDR_15_8);
-+	writel(request | ((addr >> 16) & 0xf), dp + DPTX_AUX_ADDR_19_16);
++	writel(msg->address & 0xff, dp + DPTX_AUX_ADDR_7_0);
++	writel((msg->address >> 8) & 0xff, dp + DPTX_AUX_ADDR_15_8);
++	writel(FIELD_PREP(DPTX_AUX_REQUEST, msg->request) |
++	       ((msg->address >> 16) & 0xf), dp + DPTX_AUX_ADDR_19_16);
 +	ctl = readl(dp + DPTX_AUX_CTL_2) & ~(DPTX_AUX_ADDR_ONLY | DPTX_AUX_EN);
 +	writel(ctl, dp + DPTX_AUX_CTL_2);
 +	writel(DPTX_AUX_BUF_CLR, dp + DPTX_AUX_BUF_CTL);
-+	if (request == DPTX_AUX_NATIVE_WRITE)
++	if (msg->request == DP_AUX_NATIVE_WRITE)
 +		for (i = 0; i < len; i++)
 +			writel(buf[i], dp + DPTX_AUX_DATA(i));
 +
@@ -274,61 +290,30 @@ index c1af6ca06..aa9a2838b 100644
 +		/* iOS drops AUX_EN itself after a failed transaction. */
 +		writel(readl(dp + DPTX_AUX_CTL_2) & ~DPTX_AUX_EN,
 +		       dp + DPTX_AUX_CTL_2);
-+		aux = readl(dp + DPTX_AUX_CH_STA) & DPTX_AUX_STATUS;
++		status = readl(dp + DPTX_AUX_CH_STA) & DPTX_AUX_STATUS;
 +		dev_dbg(adbe->drm.dev,
-+			"AUX %s %#x: %s, AUX_CH_STA %#x AUX_RX_COMM %#x\n",
-+			request == DPTX_AUX_NATIVE_READ ? "read" : "write", addr,
-+			ret ? "no reply" : "error", aux,
-+			readl(dp + DPTX_AUX_RX_COMM));
-+		if (ret || aux == DPTX_AUX_STATUS_TIMEOUT)
++			"AUX %#x at %#x: %s, AUX_CH_STA %#x AUX_RX_COMM %#x\n",
++			msg->request, msg->address, ret ? "no reply" : "error",
++			status, readl(dp + DPTX_AUX_RX_COMM));
++		if (ret || status == DPTX_AUX_STATUS_TIMEOUT)
 +			return -ETIMEDOUT;
-+		if (aux == DPTX_AUX_STATUS_NACK || aux == DPTX_AUX_STATUS_NACK_M)
-+			return -ENXIO;
++		if (status == DPTX_AUX_STATUS_NACK ||
++		    status == DPTX_AUX_STATUS_NACK_M) {
++			msg->reply = DP_AUX_NATIVE_REPLY_NACK;
++			return 0;
++		}
 +		return -EIO;
 +	}
 +
-+	if (request == DPTX_AUX_NATIVE_READ) {
-+		if (FIELD_GET(DPTX_AUX_BUF_COUNT,
-+			      readl(dp + DPTX_AUX_BUF_CTL)) < len)
-+			return -EPROTO;
++	if (msg->request == DP_AUX_NATIVE_READ) {
++		len = min_t(size_t, len, FIELD_GET(DPTX_AUX_BUF_COUNT,
++						   readl(dp + DPTX_AUX_BUF_CTL)));
 +		for (i = 0; i < len; i++)
 +			buf[i] = readl(dp + DPTX_AUX_DATA(i));
 +	}
++	msg->reply = DP_AUX_NATIVE_REPLY_ACK;
 +
-+	return 0;
-+}
-+
-+/* Retried like commitAuxTransactionWithRetries; a NACK is final. */
-+static int adbe_dpcd_xfer(struct adbe *adbe, u32 request, u32 addr, u8 *buf,
-+			  size_t len)
-+{
-+	int ret = -EIO, tries;
-+
-+	for (tries = 0; tries < DPTX_AUX_TRIES; tries++) {
-+		ret = adbe_aux_xfer(adbe, request, addr, buf, len);
-+		if (!ret || ret == -ENXIO || ret == -EINVAL)
-+			break;
-+		usleep_range(1000, 2000);
-+	}
-+
-+	return ret;
-+}
-+
-+static int adbe_dpcd_read(struct adbe *adbe, u32 addr, u8 *buf, size_t len)
-+{
-+	return adbe_dpcd_xfer(adbe, DPTX_AUX_NATIVE_READ, addr, buf, len);
-+}
-+
-+static int adbe_dpcd_write(struct adbe *adbe, u32 addr, const u8 *buf,
-+			   size_t len)
-+{
-+	return adbe_dpcd_xfer(adbe, DPTX_AUX_NATIVE_WRITE, addr, (u8 *)buf,
-+			      len);
-+}
-+
-+static int adbe_dpcd_writeb(struct adbe *adbe, u32 addr, u8 value)
-+{
-+	return adbe_dpcd_write(adbe, addr, &value, 1);
++	return len;
 +}
 +
 +/*
@@ -347,28 +332,22 @@ index c1af6ca06..aa9a2838b 100644
 +	       DP_LANE_COUNT_MASK;
 +}
 +
-+/*
-+ * The sink's view of the link: every lane has clock recovery, equalisation
-+ * and symbol lock, and the lanes are aligned. Returns 0 or -EIO, and the
-+ * status bytes 0x202..0x204 in @st.
-+ */
-+static int adbe_link_status(struct adbe *adbe, u8 st[3])
++/* The sink reports clock recovery, equalisation, symbol lock and alignment. */
++static int adbe_link_trained(struct adbe *adbe)
 +{
-+	unsigned int lane, lanes = adbe_link_lanes(adbe);
-+	u8 want = DP_LANE_CR_DONE | DP_LANE_CHANNEL_EQ_DONE |
-+		  DP_LANE_SYMBOL_LOCKED;
++	unsigned int lanes = adbe_link_lanes(adbe);
++	u8 status[DP_LINK_STATUS_SIZE];
 +	int ret;
 +
-+	ret = adbe_dpcd_read(adbe, DP_LANE0_1_STATUS, st, 3);
++	ret = drm_dp_dpcd_read_link_status(&adbe->aux, status);
 +	if (ret)
 +		return ret;
-+	if (!lanes || lanes > 4)
++	if (!drm_dp_clock_recovery_ok(status, lanes) ||
++	    !drm_dp_channel_eq_ok(status, lanes)) {
++		dev_dbg(adbe->drm.dev, "eDP lane status %*ph\n",
++			DP_LINK_STATUS_SIZE, status);
 +		return -EIO;
-+	for (lane = 0; lane < lanes; lane++)
-+		if (((st[lane / 2] >> (4 * (lane & 1))) & want) != want)
-+			return -EIO;
-+	if (!(st[2] & DP_INTERLANE_ALIGN_DONE))
-+		return -EIO;
++	}
 +
 +	return 0;
 +}
@@ -378,71 +357,69 @@ index c1af6ca06..aa9a2838b 100644
 + * does on every wake (its event log: TrainLink, 4 lanes, RBR, enhanced
 + * framing, Fast, no downspread, swing 0 / pre-emphasis 0; ASSR on). The
 + * sink advertises NO_AUX_HANDSHAKE_LINK_TRAINING, so the source sends TPS1
-+ * then TPS2 for a fixed time and the sink locks without AUX handshakes.
-+ * The transmitter's own link rate, lane count and drive levels are as the
-+ * boot loader set them and are not touched.
++ * then TPS2 for a fixed time and the sink locks without AUX handshakes; the
++ * shared DP helpers have no sequence for that, so it is done here. The
++ * transmitter's own link rate, lane count and drive levels are as the boot
++ * loader set them and are not touched.
 + */
 +static int adbe_link_train(struct adbe *adbe)
 +{
-+	struct device *dev = adbe->drm.dev;
++	struct drm_dp_aux *aux = &adbe->aux;
 +	unsigned int lanes = adbe_link_lanes(adbe);
 +	const u8 *cfg = adbe->link_cfg;
-+	u8 tps[5] = { 0 }, st[3];
++	u8 tps[1 + 4] = { 0 };
 +	u32 ptn;
 +	int ret;
 +
 +	ptn = readl(adbe->dp + DPTX_TRAINING_PTN);
 +	if (ptn & DPTX_TRAINING_PTN_MASK) {
-+		dev_warn(dev, "transmitter left in training pattern %#x\n", ptn);
++		dev_warn(adbe->drm.dev,
++			 "eDP transmitter left in training pattern %#x\n", ptn);
 +		ptn &= ~(DPTX_TRAINING_PTN_MASK | DPTX_TRAINING_NO_SCRAMBLE);
 +	}
 +
-+	ret = adbe_dpcd_writeb(adbe, DP_SET_POWER, DP_SET_POWER_D0);
++	ret = drm_dp_link_power_up(aux, adbe->dpcd_caps[DP_DPCD_REV]);
 +	if (!ret)
-+		ret = adbe_dpcd_writeb(adbe, DP_EDP_CONFIGURATION_SET,
-+				       (cfg[DP_EDP_CONFIGURATION_SET - DP_LINK_BW_SET] &
-+					~DP_ALTERNATE_SCRAMBLER_RESET_ENABLE) |
-+				       adbe_source_assr(adbe));
++		ret = drm_dp_dpcd_write_byte(aux, DP_EDP_CONFIGURATION_SET,
++				(cfg[DP_EDP_CONFIGURATION_SET - DP_LINK_BW_SET] &
++				 ~DP_ALTERNATE_SCRAMBLER_RESET_ENABLE) |
++				adbe_source_assr(adbe));
 +	if (!ret)
-+		ret = adbe_dpcd_writeb(adbe, DP_DOWNSPREAD_CTRL,
-+				       cfg[DP_DOWNSPREAD_CTRL - DP_LINK_BW_SET]);
++		ret = drm_dp_dpcd_write_byte(aux, DP_DOWNSPREAD_CTRL,
++				cfg[DP_DOWNSPREAD_CTRL - DP_LINK_BW_SET]);
 +	if (!ret)
-+		ret = adbe_dpcd_writeb(adbe, DP_LINK_BW_SET, cfg[0]);
++		ret = drm_dp_dpcd_write_byte(aux, DP_LINK_BW_SET, cfg[0]);
 +	if (!ret)
-+		ret = adbe_dpcd_writeb(adbe, DP_LANE_COUNT_SET,
-+				       cfg[DP_LANE_COUNT_SET - DP_LINK_BW_SET]);
++		ret = drm_dp_dpcd_write_byte(aux, DP_LANE_COUNT_SET,
++				cfg[DP_LANE_COUNT_SET - DP_LINK_BW_SET]);
 +	if (ret) {
-+		dev_err(dev, "eDP: link configuration write failed: %d\n", ret);
++		dev_err(adbe->drm.dev, "eDP link configuration failed: %d\n", ret);
 +		return ret;
 +	}
 +
 +	writel(ptn | DPTX_TRAINING_NO_SCRAMBLE | DP_TRAINING_PATTERN_1,
 +	       adbe->dp + DPTX_TRAINING_PTN);
 +	tps[0] = DP_TRAINING_PATTERN_1 | DP_LINK_SCRAMBLING_DISABLE;
-+	ret = adbe_dpcd_write(adbe, DP_TRAINING_PATTERN_SET, tps, 1 + lanes);
++	ret = drm_dp_dpcd_write_data(aux, DP_TRAINING_PATTERN_SET, tps,
++				     1 + lanes);
 +	usleep_range(ADBE_TPS_US, 2 * ADBE_TPS_US);
 +	if (!ret) {
 +		writel(ptn | DPTX_TRAINING_NO_SCRAMBLE | DP_TRAINING_PATTERN_2,
 +		       adbe->dp + DPTX_TRAINING_PTN);
 +		tps[0] = DP_TRAINING_PATTERN_2 | DP_LINK_SCRAMBLING_DISABLE;
-+		ret = adbe_dpcd_write(adbe, DP_TRAINING_PATTERN_SET, tps,
-+				      1 + lanes);
++		ret = drm_dp_dpcd_write_data(aux, DP_TRAINING_PATTERN_SET, tps,
++					     1 + lanes);
 +		usleep_range(ADBE_TPS_US, 2 * ADBE_TPS_US);
 +	}
 +	/* Back to the normal (scrambled) stream whatever happened. */
 +	writel(ptn, adbe->dp + DPTX_TRAINING_PTN);
 +	if (!ret)
-+		ret = adbe_dpcd_writeb(adbe, DP_TRAINING_PATTERN_SET,
-+				       DP_TRAINING_PATTERN_DISABLE);
-+	if (ret) {
-+		dev_err(dev, "eDP: training pattern write failed: %d\n", ret);
-+		return ret;
-+	}
-+
-+	ret = adbe_link_status(adbe, st);
++		ret = drm_dp_dpcd_write_byte(aux, DP_TRAINING_PATTERN_SET,
++					     DP_TRAINING_PATTERN_DISABLE);
++	if (!ret)
++		ret = adbe_link_trained(adbe);
 +	if (ret)
-+		dev_err(dev, "eDP: link not trained: lane status %3ph (%d)\n",
-+			st, ret);
++		dev_err(adbe->drm.dev, "eDP link training failed: %d\n", ret);
 +
 +	return ret;
 +}
@@ -463,11 +440,11 @@ index c1af6ca06..aa9a2838b 100644
 +		return;
 +
 +	if (!adbe->lcd_ldo) {
-+		ldo = devm_gpiod_get_optional(dev, "apple,lcd-ldo", GPIOD_ASIS);
-+		if (IS_ERR_OR_NULL(ldo)) {
++		ldo = devm_gpiod_get(dev, "apple,lcd-ldo", GPIOD_ASIS);
++		if (IS_ERR(ldo)) {
 +			if (PTR_ERR(ldo) == -EPROBE_DEFER)
 +				return;	/* the PMU is not there yet: next sleep */
-+			dev_info(dev, "sleep: no panel supply (%pe), panel stays on\n",
++			dev_warn(dev, "no panel supply (%pe): panel stays on in sleep\n",
 +				 ldo);
 +			adbe->dp = NULL;
 +			return;
@@ -479,7 +456,7 @@ index c1af6ca06..aa9a2838b 100644
 +			gpio_device_to_device(gpiod_to_gpio_device(adbe->lcd_ldo)),
 +			DL_FLAG_STATELESS);
 +		if (!adbe->ldo_link) {
-+			dev_warn(dev, "sleep: cannot order against the panel supply\n");
++			dev_warn(dev, "cannot order sleep against the panel supply\n");
 +			return;
 +		}
 +	}
@@ -494,7 +471,7 @@ index c1af6ca06..aa9a2838b 100644
 +		adbe->bl_link = device_link_add(&adbe->backlight->dev, dev,
 +						DL_FLAG_STATELESS);
 +		if (!adbe->bl_link) {
-+			dev_warn(dev, "sleep: cannot order the backlight after the panel\n");
++			dev_warn(dev, "cannot order the backlight after the panel\n");
 +			put_device(&adbe->backlight->dev);
 +			adbe->backlight = NULL;
 +			of_node_put(np);
@@ -522,7 +499,7 @@ index c1af6ca06..aa9a2838b 100644
 +{
 +	struct adbe *adbe = container_of(nb, struct adbe, pm_nb);
 +
-+	if (action == PM_SUSPEND_PREPARE && sleep_panel_off)
++	if (action == PM_SUSPEND_PREPARE)
 +		adbe_panel_attach(adbe);
 +
 +	return NOTIFY_DONE;
@@ -539,12 +516,12 @@ index c1af6ca06..aa9a2838b 100644
 + * Before the supply goes off, everything the wake needs must already work
 + * on the live link: AUX, the sink's capabilities and its trained link
 + * configuration, the lane status check, and a supply that reads on. Any
-+ * miss keeps the panel on for this sleep, as before.
++ * miss keeps the panel on for this sleep.
 + */
 +static const char *adbe_panel_gate(struct adbe *adbe)
 +{
-+	u8 caps[sizeof(adbe->dpcd_caps)], cfg[ADBE_LINK_CFG_LEN], st[3];
-+	int ret;
++	u8 caps[DP_RECEIVER_CAP_SIZE], cfg[ADBE_LINK_CFG_LEN];
++	unsigned int lanes;
 +
 +	if (adbe->panel_lost)
 +		return "a wake did not bring it back earlier";
@@ -554,19 +531,19 @@ index c1af6ca06..aa9a2838b 100644
 +		return "lcd_ldo does not read on";
 +	if (readl(adbe->dp + DPTX_TRAINING_PTN) & DPTX_TRAINING_PTN_MASK)
 +		return "the transmitter is sending a training pattern";
-+	if (adbe_dpcd_read(adbe, DP_DPCD_REV, caps, sizeof(caps)))
++	if (drm_dp_read_dpcd_caps(&adbe->aux, caps))
 +		return "AUX read of the receiver capabilities failed";
-+	if (!caps[DP_DPCD_REV] || !(caps[DP_MAX_LANE_COUNT] & DP_MAX_LANE_COUNT_MASK))
++	if (!(caps[DP_MAX_LANE_COUNT] & DP_MAX_LANE_COUNT_MASK))
 +		return "the receiver capabilities read back empty";
 +	if (!(caps[DP_MAX_DOWNSPREAD] & DP_NO_AUX_HANDSHAKE_LINK_TRAINING))
 +		return "the sink needs handshake link training";
 +	if (adbe->dpcd_caps[DP_DPCD_REV] &&
 +	    memcmp(caps, adbe->dpcd_caps, sizeof(caps)))
 +		return "the receiver capabilities changed";
-+	if (adbe_dpcd_read(adbe, DP_LINK_BW_SET, cfg, sizeof(cfg)))
++	if (drm_dp_dpcd_read_data(&adbe->aux, DP_LINK_BW_SET, cfg, sizeof(cfg)))
 +		return "AUX read of the link configuration failed";
-+	if (!cfg[0] || !(cfg[DP_LANE_COUNT_SET - DP_LINK_BW_SET] & DP_LANE_COUNT_MASK) ||
-+	    (cfg[DP_LANE_COUNT_SET - DP_LINK_BW_SET] & DP_LANE_COUNT_MASK) > 4)
++	lanes = cfg[DP_LANE_COUNT_SET - DP_LINK_BW_SET] & DP_LANE_COUNT_MASK;
++	if (!cfg[0] || !lanes || lanes > 4)
 +		return "the sink reports no trained link";
 +	if ((cfg[DP_EDP_CONFIGURATION_SET - DP_LINK_BW_SET] &
 +	     DP_ALTERNATE_SCRAMBLER_RESET_ENABLE) != adbe_source_assr(adbe))
@@ -574,113 +551,46 @@ index c1af6ca06..aa9a2838b 100644
 +
 +	memcpy(adbe->dpcd_caps, caps, sizeof(caps));
 +	memcpy(adbe->link_cfg, cfg, sizeof(cfg));
-+	ret = adbe_link_status(adbe, st);
-+	if (ret) {
-+		dev_info(adbe->drm.dev, "sleep: live lane status %3ph (%d)\n",
-+			 st, ret);
++	if (adbe_link_trained(adbe))
 +		return "the live link does not read back as trained";
-+	}
 +
 +	return NULL;
-+}
-+
-+/*
-+ * The pre-sleep checks on demand, without a sleep: AUX reads only, nothing
-+ * is written to the sink, the supply or the transmitter.
-+ */
-+static int adbe_panel_show(struct seq_file *m, void *data)
-+{
-+	struct drm_debugfs_entry *entry = m->private;
-+	struct adbe *adbe = to_adbe(entry->dev);
-+	const char *why;
-+	u32 hpd;
-+
-+	seq_printf(m, "sleep_panel_off %d\n", sleep_panel_off);
-+	if (adbe->dp)
-+		adbe_panel_attach(adbe);
-+	if (!adbe->dp) {
-+		seq_puts(m, "no DisplayPort transmitter or panel supply: panel stays on in sleep\n");
-+		return 0;
-+	}
-+	hpd = readl(adbe->dp + DPTX_SYS_CTL_3);
-+	seq_printf(m, "ready %d lost %d backlight %s held %d\n", adbe->panel_ready,
-+		   adbe->panel_lost, adbe->backlight ? dev_name(&adbe->backlight->dev) : "none",
-+		   adbe->bl_held);
-+	seq_printf(m, "SYS_CTL_3 %#x (hpd %d) TRAINING_PTN %#x ASSR %#x\n", hpd,
-+		   !!(hpd & DPTX_SYS_CTL_3_HPD),
-+		   readl(adbe->dp + DPTX_TRAINING_PTN),
-+		   readl(adbe->dp + DPTX_ASSR));
-+	if (!adbe->lcd_ldo) {
-+		seq_puts(m, "lcd_ldo not found yet\n");
-+		return 0;
-+	}
-+	seq_printf(m, "lcd_ldo direction %d value %d\n",
-+		   gpiod_get_direction(adbe->lcd_ldo),
-+		   gpiod_get_value_cansleep(adbe->lcd_ldo));
-+	why = adbe_panel_gate(adbe);
-+	seq_printf(m, "gate %s\n", why ? why : "pass: the supply would go off in sleep");
-+	seq_printf(m, "dpcd 0x000 %*ph\n", (int)sizeof(adbe->dpcd_caps),
-+		   adbe->dpcd_caps);
-+	seq_printf(m, "dpcd 0x100 %*ph\n", (int)sizeof(adbe->link_cfg),
-+		   adbe->link_cfg);
-+	seq_printf(m, "ASSR transmitter %u sink %u\n", adbe_source_assr(adbe),
-+		   adbe->link_cfg[DP_EDP_CONFIGURATION_SET - DP_LINK_BW_SET] &
-+		   DP_ALTERNATE_SCRAMBLER_RESET_ENABLE);
-+
-+	return 0;
 +}
 +
 +static void adbe_panel_off(struct adbe *adbe)
 +{
 +	struct device *dev = adbe->drm.dev;
 +	const char *why;
-+	u8 dpcd_rev;
-+	int rev;
 +
-+	if (!sleep_panel_off || !adbe->dp ||
-+	    pm_suspend_target_state == PM_SUSPEND_ON)
++	if (!adbe->dp || pm_suspend_target_state == PM_SUSPEND_ON)
 +		return;
-+	if (!adbe->panel_ready) {
-+		dev_info(dev, "sleep: panel stays on: supply or backlight not found yet\n");
-+		return;
-+	}
 +
-+	why = adbe_panel_gate(adbe);
++	why = adbe->panel_ready ? adbe_panel_gate(adbe) :
++				  "supply or backlight not found yet";
 +	if (why) {
-+		dev_info(dev, "sleep: panel stays on: %s\n", why);
++		dev_dbg(dev, "panel stays on in sleep: %s\n", why);
 +		return;
 +	}
 +
 +	gpiod_set_value_cansleep(adbe->lcd_ldo, 0);
 +	if (gpiod_get_value_cansleep(adbe->lcd_ldo) != 0) {
 +		gpiod_set_value_cansleep(adbe->lcd_ldo, 1);
-+		dev_info(dev, "sleep: panel stays on: lcd_ldo did not switch off\n");
++		dev_warn(dev, "lcd_ldo did not switch off: panel stays on in sleep\n");
 +		return;
 +	}
++	drm_dp_dpcd_set_powered(&adbe->aux, false);
 +	adbe->panel_off = true;
 +	adbe->panel_off_at = ktime_get_boottime();
-+
-+	/*
-+	 * Witness that the sink lost power: its hot-plug detect drops and AUX
-+	 * gets no reply. Logged, not gated: the rail may decay slowly.
-+	 */
-+	msleep(ADBE_PANEL_DROP_MS);
-+	rev = adbe_aux_xfer(adbe, DPTX_AUX_NATIVE_READ, DP_DPCD_REV, &dpcd_rev, 1);
-+	dev_info(dev, "sleep: panel supply off (link %u lanes, bw %#x, ASSR %u); after %d ms: hpd %d, aux %d\n",
-+		 adbe_link_lanes(adbe), adbe->link_cfg[0], adbe_source_assr(adbe),
-+		 ADBE_PANEL_DROP_MS,
-+		 !!(readl(adbe->dp + DPTX_SYS_CTL_3) & DPTX_SYS_CTL_3_HPD), rev);
 +}
 +
 +/* Supply on, wait for the sink, train. Returns 0 once the link reads trained. */
 +static int adbe_panel_power_up(struct adbe *adbe, ktime_t *on_at)
 +{
 +	struct device *dev = adbe->drm.dev;
-+	u8 caps[sizeof(adbe->dpcd_caps)];
++	u8 caps[DP_RECEIVER_CAP_SIZE];
 +	s64 off_ms;
-+	ktime_t deadline;
 +	u32 v;
-+	int ret;
++	int ret, err;
 +
 +	off_ms = ktime_ms_delta(ktime_get_boottime(), adbe->panel_off_at);
 +	if (off_ms < ADBE_PANEL_OFF_MIN_MS)
@@ -689,32 +599,29 @@ index c1af6ca06..aa9a2838b 100644
 +	gpiod_set_value_cansleep(adbe->lcd_ldo, 1);
 +	*on_at = ktime_get();
 +	if (gpiod_get_value_cansleep(adbe->lcd_ldo) != 1) {
-+		dev_err(dev, "eDP: lcd_ldo does not read on\n");
++		dev_err(dev, "lcd_ldo does not read on\n");
 +		return -EIO;
 +	}
++	drm_dp_dpcd_set_powered(&adbe->aux, true);
 +
 +	msleep(ADBE_PANEL_HPD_MS);
 +	ret = readl_poll_timeout(adbe->dp + DPTX_SYS_CTL_3, v,
 +				 v & DPTX_SYS_CTL_3_HPD, 1000,
 +				 ADBE_PANEL_HPD_WAIT_US);
 +	if (ret)
-+		dev_warn(dev, "eDP: no hot-plug detect (SYS_CTL_3 %#x), trying AUX\n",
-+			 v);
++		dev_dbg(dev, "no eDP hot-plug detect (SYS_CTL_3 %#x), trying AUX\n",
++			v);
 +
 +	/* The TCON answers AUX once it is up; iOS reads the caps first too. */
-+	deadline = ktime_add_ms(ktime_get(), ADBE_PANEL_AUX_WAIT_MS);
-+	do {
-+		ret = adbe_dpcd_read(adbe, DP_DPCD_REV, caps, sizeof(caps));
-+		if (!ret)
-+			break;
-+		msleep(10);
-+	} while (ktime_before(ktime_get(), deadline));
++	ret = read_poll_timeout(drm_dp_read_dpcd_caps, err, !err,
++				10 * USEC_PER_MSEC, ADBE_PANEL_AUX_WAIT_US,
++				false, &adbe->aux, caps);
 +	if (ret) {
-+		dev_err(dev, "eDP: sink does not answer AUX: %d\n", ret);
-+		return ret;
++		dev_err(dev, "eDP sink does not answer AUX: %d\n", err);
++		return err;
 +	}
 +	if (memcmp(caps, adbe->dpcd_caps, sizeof(caps))) {
-+		dev_err(dev, "eDP: receiver capabilities %*ph differ from before sleep\n",
++		dev_err(dev, "eDP receiver capabilities %*ph differ from before sleep\n",
 +			(int)sizeof(caps), caps);
 +		return -EIO;
 +	}
@@ -735,7 +642,7 @@ index c1af6ca06..aa9a2838b 100644
 +static void adbe_panel_on(struct adbe *adbe)
 +{
 +	struct device *dev = adbe->drm.dev;
-+	ktime_t start = ktime_get(), on_at = start;
++	ktime_t on_at = ktime_get();
 +	s64 lit_ms;
 +	int tries, ret = -EIO;
 +
@@ -745,25 +652,25 @@ index c1af6ca06..aa9a2838b 100644
 +	for (tries = 0; tries < ADBE_PANEL_TRIES; tries++) {
 +		if (tries || (!adbe->panel_off && adbe->panel_lost)) {
 +			gpiod_set_value_cansleep(adbe->lcd_ldo, 0);
++			drm_dp_dpcd_set_powered(&adbe->aux, false);
 +			adbe->panel_off_at = ktime_get_boottime();
 +		}
 +		ret = adbe_panel_power_up(adbe, &on_at);
 +		if (!ret)
 +			break;
-+		dev_warn(dev, "eDP: panel wake attempt %d failed: %d\n",
-+			 tries + 1, ret);
 +	}
 +	adbe->panel_off = false;
 +
 +	if (ret) {
 +		/* Leave the supply on: a later wake or a reboot may still recover. */
 +		gpiod_set_value_cansleep(adbe->lcd_ldo, 1);
++		drm_dp_dpcd_set_powered(&adbe->aux, true);
 +		adbe->panel_lost = true;
 +		if (adbe->backlight && !adbe->bl_held) {
 +			backlight_disable(adbe->backlight);
 +			adbe->bl_held = true;
 +		}
-+		dev_err(dev, "eDP: panel did not come back after %d attempts: backlight held off, panel-off sleeps stopped\n",
++		dev_err(dev, "eDP panel did not come back after %d attempts: backlight held off\n",
 +			ADBE_PANEL_TRIES);
 +		return;
 +	}
@@ -776,44 +683,39 @@ index c1af6ca06..aa9a2838b 100644
 +		backlight_enable(adbe->backlight);
 +		adbe->bl_held = false;
 +	}
-+	if (adbe->panel_lost)
-+		dev_info(dev, "eDP: panel recovered\n");
 +	adbe->panel_lost = false;
-+	dev_info(dev, "wake: panel back, link %u lanes trained in %lld ms\n",
-+		 adbe_link_lanes(adbe), ktime_ms_delta(ktime_get(), start));
 +}
 +
  /*
   * Powering disp0 or dp off resets the pipe and the eDP link, which this
   * driver cannot bring back. Hold every listed domain while bound.
-@@ -1838,6 +2486,16 @@ static int adbe_probe(struct platform_device *pdev)
+@@ -1884,6 +2423,25 @@ static int adbe_probe(struct platform_device *pdev)
  	if (IS_ERR(adbe->regs))
  		return PTR_ERR(adbe->regs);
  
-+	/* The DisplayPort transmitter: only system sleep uses it (panel power). */
-+	if (platform_get_resource_byname(pdev, IORESOURCE_MEM, "dp")) {
++	/*
++	 * With a panel supply, the panel goes off in system sleep and the
++	 * DisplayPort transmitter's AUX channel brings it back on wake.
++	 */
++	if (of_property_present(dev->of_node, "apple,lcd-ldo-gpios")) {
 +		adbe->dp = devm_platform_ioremap_resource_byname(pdev, "dp");
 +		if (IS_ERR(adbe->dp)) {
 +			dev_warn(dev, "no DisplayPort transmitter window (%pe): panel stays on in sleep\n",
 +				 adbe->dp);
 +			adbe->dp = NULL;
++		} else {
++			adbe->aux.name = "adbe eDP";
++			adbe->aux.dev = dev;
++			adbe->aux.drm_dev = &adbe->drm;
++			adbe->aux.transfer = adbe_aux_transfer;
++			drm_dp_aux_init(&adbe->aux);
 +		}
 +	}
 +
  	ret = adbe_power_init(dev);
  	if (ret)
  		return dev_err_probe(dev, ret, "cannot hold the power domains\n");
-@@ -1908,12 +2566,32 @@ static int adbe_probe(struct platform_device *pdev)
- 				     "cannot take over the boot framebuffer\n");
- 	}
- 
-+	if (adbe->dp)
-+		drm_debugfs_add_file(&adbe->drm, "adbe_panel", adbe_panel_show,
-+				     NULL);
-+
- 	ret = drm_dev_register(&adbe->drm, 0);
- 	if (ret) {
- 		adbe_dart_exit(adbe);
+@@ -1959,6 +2517,22 @@ static int adbe_probe(struct platform_device *pdev)
  		return ret;
  	}
  
@@ -828,7 +730,7 @@ index c1af6ca06..aa9a2838b 100644
 +							       adbe);
 +		}
 +		if (ret) {
-+			dev_warn(dev, "sleep: panel power unavailable (%d)\n", ret);
++			dev_warn(dev, "panel stays on in sleep: %d\n", ret);
 +			adbe->dp = NULL;
 +		}
 +	}
@@ -836,19 +738,19 @@ index c1af6ca06..aa9a2838b 100644
  	drm_client_setup(&adbe->drm, NULL);
  
  	return 0;
-@@ -1955,14 +2633,23 @@ static void adbe_shutdown(struct platform_device *pdev)
+@@ -2000,14 +2574,23 @@ static void adbe_shutdown(struct platform_device *pdev)
  static int adbe_suspend(struct device *dev)
  {
  	struct adbe *adbe = dev_get_drvdata(dev);
 +	int ret;
-+
+ 
+-	return drm_mode_config_helper_suspend(&adbe->drm);
 +	ret = drm_mode_config_helper_suspend(&adbe->drm);
 +	if (ret)
 +		return ret;
 +	/* The pipe now shows the black boot framebuffer. */
 +	adbe_panel_off(adbe);
- 
--	return drm_mode_config_helper_suspend(&adbe->drm);
++
 +	return 0;
  }
  
@@ -861,6 +763,3 @@ index c1af6ca06..aa9a2838b 100644
  	return drm_mode_config_helper_resume(&adbe->drm);
  }
  
--- 
-2.49.0
-
