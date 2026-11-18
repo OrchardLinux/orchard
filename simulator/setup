@@ -1,0 +1,56 @@
+#!/bin/sh
+# Builds the simulator's VM disk from a published Omarchy A release:
+#     simulator/setup              the newest nightly
+#     simulator/setup v0.3.1       a given release
+#     simulator/setup --replace    rebuild over an existing disk (it is thrown away)
+# Needs QEMU (glu install qemu) and a running Podman machine, which builds the disk.
+set -eu
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -- "$HERE/.." && pwd)
+OUT="$ROOT/out/simulator"
+VM="$OUT/vm"
+REPO=OrchardLinux/omarchy-a
+release=nightly replace=
+for arg; do
+    case "$arg" in
+        --replace) replace=1 ;;
+        -*) echo "usage: simulator/setup [--replace] [RELEASE]" >&2; exit 2 ;;
+        *) release=$arg ;;
+    esac
+done
+
+[ -x /opt/glustore/bin/qemu-system-aarch64 ] || command -v qemu-system-aarch64 >/dev/null ||
+    { echo 'QEMU is missing: glu install qemu' >&2; exit 1; }
+podman machine ssh true 2>/dev/null || { echo 'Start the Podman machine first: podman machine start' >&2; exit 1; }
+if [ -e "$VM/root.raw" ] && [ -z "$replace" ]; then
+    echo "A VM disk exists ($(cat "$VM/release" 2>/dev/null || echo 'unknown release')); --replace rebuilds it." >&2
+    exit 1
+fi
+if "$HERE/vm" status >/dev/null 2>&1; then echo 'Stop the VM first: simulator/vm stop' >&2; exit 1; fi
+FREE=$(df -k "$ROOT" | awk 'NR==2 {print int($4 / 1048576)}')
+[ "$FREE" -ge 10 ] || { echo "Only $FREE GB free; the disk needs about 4 GB and the download 1 GB." >&2; exit 1; }
+
+# The release's root image, checked against the release's own checksums.
+DOWNLOAD="$OUT/download"
+rm -rf "$DOWNLOAD"
+mkdir -p "$DOWNLOAD"
+trap 'rm -rf "$DOWNLOAD"' EXIT INT TERM
+# `nightly` is a pointer release: its latest.json names the newest nightly.
+if [ "$release" = nightly ]; then
+    release=$(curl -fsSL "https://github.com/$REPO/releases/download/nightly/latest.json" |
+        python3 -c 'import json, sys; print(json.load(sys.stdin)["name"])')
+fi
+BASE="https://github.com/$REPO/releases/download/$release"
+for file in release.toml SHA256SUMS root.map.json root.blocks.zst; do
+    echo "Downloading $file"
+    curl -fL --retry 3 --progress-bar -o "$DOWNLOAD/$file" "$BASE/$file"
+done
+version=$(sed -n 's/^"version" = "\(.*\)"/\1/p' "$DOWNLOAD/release.toml")
+( cd "$DOWNLOAD" && grep -E ' \./(root\.blocks\.zst|root\.map\.json)$' SHA256SUMS | shasum -a 256 -c - )
+
+if [ -n "$replace" ]; then rm -f "$VM/root.raw"; fi
+mkdir -p "$VM"
+[ -f "$VM/ssh-keys" ] || cat "$HOME"/.ssh/id_*.pub > "$VM/ssh-keys" 2>/dev/null || true
+podman machine ssh "sudo $HERE/prepare-vm-linux.sh $DOWNLOAD"
+printf '%s\n' "$version" > "$VM/release"
+echo "Simulator disk ready: Omarchy A $version. Start it with simulator/run."

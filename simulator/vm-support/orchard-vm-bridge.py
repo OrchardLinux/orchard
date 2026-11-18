@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""VM-only hardware bridge: report backlight state and accept shutdown only."""
+"""VM-only hardware bridge: report backlight state; accept shutdown and the desktop switch only."""
 import errno
 import os
 import select
@@ -56,6 +56,16 @@ def commands():
             line, pending = pending.split(b'\n', 1)
             if line == b'shutdown':
                 subprocess.run(['/usr/bin/systemctl', 'poweroff'], check=False)
+            elif line in (b'desktop gpu', b'desktop software'):
+                # The GPU desktop on software OpenGL, or the software desktop;
+                # the session starts again with it (back to the PIN screen).
+                flag = '/etc/omarchy-a/simulator-gpu'
+                if line == b'desktop gpu':
+                    os.makedirs(os.path.dirname(flag), exist_ok=True)
+                    open(flag, 'a').close()
+                elif os.path.exists(flag):
+                    os.unlink(flag)
+                subprocess.run(['/usr/bin/systemctl', 'restart', 'greetd'], check=False)
 
 
 threading.Thread(target=report_brightness, daemon=True).start()

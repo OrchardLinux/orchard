@@ -31,39 +31,51 @@ final class SimulatorView: NSView {
     private var resizeCorner: (right: Bool, top: Bool)?
     private var resizeFrame: NSRect?
     private var hoverCorner: Int?
-    private let vnc = VNCClient()
+    private var display: GuestDisplay?
+    private let screen = GuestScreenView()
     private var hardware: VMHardware?
-    private var brightness: CGFloat = 1
-    private var guestFrame: CGImage?
+    private var brightness: CGFloat = 1 { didSet { screen.brightness = brightness } }
     private var guestConnected = false
     private var guestPointerDown = false
     private var touchPosition = NSPoint.zero
     private(set) var touchMode = true
     private var guestFocused = false
-    private var guestKeysDown = Set<UInt32>()
+    private var guestKeysDown = Set<String>()
     private var resignObserver: NSObjectProtocol?
     private var appResignObserver: NSObjectProtocol?
     private let displayRect = NSRect(x: 10.835, y: 21.45, width: 147.83, height: 197.10)
+    // The inner half of the bezel is the screen's edge: a drag that starts
+    // there is a finger sliding onto the screen (the keyboard from the
+    // bottom, panels from the sides and the top). The outer half moves the
+    // frame; the hardware buttons keep their places.
+    private var edgeRect: NSRect {
+        let side = displayRect.minX / 2, end = displayRect.minY / 2
+        return displayRect.insetBy(dx: -side, dy: -end)
+    }
+    private var edgeTouch = false
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         appResignObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in self?.releaseGuestInput() }
-        vnc.onFrame = { [weak self] image in self?.guestFrame = image; self?.needsDisplay = true }
-        vnc.onConnection = { [weak self] connected in
-            self?.guestConnected = connected
-            if !connected {
-                self?.releaseGuestInput()
-                self?.hardware?.resetTouchConnection()
-                self?.guestFrame = nil
-                self?.guestFocused = false
+        addSubview(screen)
+        if let directory = ProcessInfo.processInfo.environment["ORCHARD_VM_DIR"] {
+            let display = GuestDisplay(qmpPath: directory + "/viewer.sock")
+            display.onFrame = { [weak self, weak display] in self?.screen.show(display?.image()) }
+            display.onConnection = { [weak self] connected in
+                guard let self else { return }
+                self.guestConnected = connected
+                if !connected {
+                    self.releaseGuestInput()
+                    self.hardware?.resetTouchConnection()
+                    self.screen.show(nil)
+                    self.guestFocused = false
+                }
             }
-            self?.needsDisplay = true
-        }
-        if ProcessInfo.processInfo.environment["ORCHARD_VM_VNC"] == "1" {
-            vnc.start()
-            if let directory = ProcessInfo.processInfo.environment["ORCHARD_VM_DIR"] {
+            self.display = display
+            display.start()
+            do {
                 let bridge = VMHardware(directory: directory)
                 bridge.onBrightness = { [weak self] value in
                     guard let self, self.brightness != value else { return }
@@ -93,13 +105,17 @@ final class SimulatorView: NSView {
         if let observer = appResignObserver { NotificationCenter.default.removeObserver(observer) }
     }
 
-    private func sendGuestKey(_ key: UInt32, down: Bool) {
+    private func sendGuestKey(_ key: String, down: Bool) {
         if down { guestKeysDown.insert(key) } else { guestKeysDown.remove(key) }
-        vnc.key(key, down: down)
+        hardware?.key(key, down: down)
     }
 
     private func releaseGuestKeys() {
-        for key in guestKeysDown { vnc.key(key, down: false) }
+        pendingCommandTap?.cancel()
+        pendingCommandTap = nil
+        heldCommand = nil
+        commandSent = false
+        for key in guestKeysDown { hardware?.key(key, down: false) }
         guestKeysDown.removeAll()
     }
 
@@ -111,9 +127,10 @@ final class SimulatorView: NSView {
             needsDisplay = true
         }
         if guestPointerDown {
-            if touchMode { hardware?.touch("end", x: touchPosition.x, y: touchPosition.y) }
-            else { vnc.pointer(x: touchPosition.x, y: touchPosition.y, buttons: 0) }
+            if touchMode || edgeTouch { hardware?.touch("end", x: touchPosition.x, y: touchPosition.y) }
+            else { hardware?.pointer(x: touchPosition.x, y: touchPosition.y, buttons: 0) }
             guestPointerDown = false
+            edgeTouch = false
         }
     }
 
@@ -124,8 +141,9 @@ final class SimulatorView: NSView {
 
     private func sendTouch(_ event: NSEvent, phase: String) {
         let point = devicePoint(event)
-        touchPosition = NSPoint(x: (point.x - displayRect.minX) / displayRect.width,
-                                y: (point.y - displayRect.minY) / displayRect.height)
+        // Clamped: a touch from the bezel lands on the screen's edge pixel.
+        touchPosition = NSPoint(x: min(1, max(0, (point.x - displayRect.minX) / displayRect.width)),
+                                y: min(1, max(0, (point.y - displayRect.minY) / displayRect.height)))
         hardware?.touch(phase, x: touchPosition.x, y: touchPosition.y)
     }
 
@@ -133,7 +151,7 @@ final class SimulatorView: NSView {
         let point = devicePoint(event)
         touchPosition = NSPoint(x: (point.x - displayRect.minX) / displayRect.width,
                                 y: (point.y - displayRect.minY) / displayRect.height)
-        vnc.pointer(x: touchPosition.x, y: touchPosition.y, buttons: buttons)
+        hardware?.pointer(x: touchPosition.x, y: touchPosition.y, buttons: buttons)
     }
 
     private var viewScale: CGFloat { bounds.width / Device.canvas.width }
@@ -209,6 +227,15 @@ final class SimulatorView: NSView {
             if touchMode { sendTouch(event, phase: "begin") } else { sendPointer(event, buttons: 1) }
             return
         }
+        if guestConnected && edgeRect.contains(devicePoint(event)) && button(at: devicePoint(event)) == nil {
+            // Always a touch, also in mouse mode: edge swipes are touch gestures.
+            guestFocused = true
+            guestPointerDown = true
+            edgeTouch = true
+            window?.makeFirstResponder(self)
+            sendTouch(event, phase: "begin")
+            return
+        }
         releaseGuestKeys()
         guestFocused = false
         resizeCorner = corner(at: convert(event.locationInWindow, from: nil))
@@ -223,7 +250,7 @@ final class SimulatorView: NSView {
     }
     override func mouseDragged(with event: NSEvent) {
         if guestPointerDown {
-            if touchMode { sendTouch(event, phase: "update") } else { sendPointer(event, buttons: 1) }
+            if touchMode || edgeTouch { sendTouch(event, phase: "update") } else { sendPointer(event, buttons: 1) }
             return
         }
         if let start = mouseDownScreen, let origin = windowOrigin {
@@ -245,8 +272,9 @@ final class SimulatorView: NSView {
     }
     override func mouseUp(with event: NSEvent) {
         if guestPointerDown {
-            if touchMode { sendTouch(event, phase: "end") } else { sendPointer(event, buttons: 0) }
+            if touchMode || edgeTouch { sendTouch(event, phase: "end") } else { sendPointer(event, buttons: 0) }
             guestPointerDown = false
+            edgeTouch = false
             return
         }
         if let pressed { hardware?.key(hardwareKey(pressed), down: false) }
@@ -338,21 +366,60 @@ final class SimulatorView: NSView {
         sendPointer(event, buttons: event.scrollingDeltaY > 0 ? 8 : 16)
         sendPointer(event, buttons: 0)
     }
-    private func keysym(_ event: NSEvent) -> UInt32? {
-        let special: [UInt16: UInt32] = [36: 0xff0d, 48: 0xff09, 51: 0xff08, 53: 0xff1b, 117: 0xffff,
-                                          123: 0xff51, 124: 0xff53, 125: 0xff54, 126: 0xff52,
-                                          115: 0xff50, 119: 0xff57, 116: 0xff55, 121: 0xff56]
-        if let key = special[event.keyCode] { return key }
-        guard let scalar = event.charactersIgnoringModifiers?.unicodeScalars.first else { return nil }
-        let value = scalar.value
-        return value <= 0xff ? value : 0x01000000 | value
+    // macOS virtual key codes (US layout positions) to QEMU qcodes.
+    private static let qcodes: [UInt16: String] = [
+        0: "a", 1: "s", 2: "d", 3: "f", 4: "h", 5: "g", 6: "z", 7: "x", 8: "c", 9: "v", 11: "b", 12: "q",
+        13: "w", 14: "e", 15: "r", 16: "y", 17: "t", 18: "1", 19: "2", 20: "3", 21: "4", 22: "6", 23: "5",
+        24: "equal", 25: "9", 26: "7", 27: "minus", 28: "8", 29: "0", 30: "bracket_right", 31: "o", 32: "u",
+        33: "bracket_left", 34: "i", 35: "p", 36: "ret", 37: "l", 38: "j", 39: "apostrophe", 40: "k",
+        41: "semicolon", 42: "backslash", 43: "comma", 44: "slash", 45: "n", 46: "m", 47: "dot", 48: "tab",
+        49: "spc", 50: "grave_accent", 51: "backspace", 53: "esc", 117: "delete", 115: "home", 119: "end",
+        116: "pgup", 121: "pgdn", 123: "left", 124: "right", 125: "down", 126: "up",
+        122: "f1", 120: "f2", 99: "f3", 118: "f4", 96: "f5", 97: "f6", 98: "f7", 100: "f8", 101: "f9",
+        109: "f10", 103: "f11", 111: "f12",
+        56: "shift", 60: "shift_r", 59: "ctrl", 62: "ctrl_r", 58: "alt", 61: "alt_r", 55: "meta_l", 54: "meta_r",
+    ]
+    // Command is the guest's Super, but macOS keeps Cmd+Tab and the like:
+    // the window loses focus before Cmd comes up, which would reach the
+    // guest as a lone Super tap. So Cmd goes to the guest only with the key
+    // it modifies, or as a tap of its own while this window stays active.
+    private var heldCommand: String?
+    private var commandSent = false
+    // macOS switches apps only after Cmd comes up from Cmd+Tab: a lone Cmd
+    // tap waits a moment and is dropped when the window loses focus meanwhile.
+    private var pendingCommandTap: DispatchWorkItem?
+
+    override func keyDown(with event: NSEvent) {
+        if guestFocused, let key = Self.qcodes[event.keyCode] {
+            if let command = heldCommand, !commandSent { sendGuestKey(command, down: true); commandSent = true }
+            if !event.isARepeat { sendGuestKey(key, down: true) }
+        }
+        else { super.keyDown(with: event) }
     }
-    override func keyDown(with event: NSEvent) { if guestFocused, let key = keysym(event) { sendGuestKey(key, down: true) } else { super.keyDown(with: event) } }
-    override func keyUp(with event: NSEvent) { if guestFocused, let key = keysym(event) { sendGuestKey(key, down: false) } else { super.keyUp(with: event) } }
+    override func keyUp(with event: NSEvent) { if guestFocused, let key = Self.qcodes[event.keyCode] { sendGuestKey(key, down: false) } else { super.keyUp(with: event) } }
     override func flagsChanged(with event: NSEvent) {
-        guard guestFocused else { return }
-        let map: [UInt16: (UInt32, NSEvent.ModifierFlags)] = [56: (0xffe1, .shift), 60: (0xffe2, .shift), 59: (0xffe3, .control), 62: (0xffe4, .control), 58: (0xffe9, .option), 61: (0xffea, .option), 55: (0xffeb, .command), 54: (0xffec, .command)]
-        if let (key, flag) = map[event.keyCode] { sendGuestKey(key, down: event.modifierFlags.contains(flag)) }
+        guard guestFocused, let key = Self.qcodes[event.keyCode] else { return }
+        let flags: [UInt16: NSEvent.ModifierFlags] = [56: .shift, 60: .shift, 59: .control, 62: .control, 58: .option, 61: .option, 55: .command, 54: .command]
+        guard let flag = flags[event.keyCode] else { return }
+        let down = event.modifierFlags.contains(flag)
+        guard flag == .command else { sendGuestKey(key, down: down); return }
+        if down {
+            heldCommand = key
+            commandSent = false
+        } else if heldCommand == key {
+            if commandSent { sendGuestKey(key, down: false) }
+            else {
+                let tap = DispatchWorkItem { [weak self] in
+                    guard let self, NSApp.isActive, self.window?.isKeyWindow == true else { return }
+                    self.sendGuestKey(key, down: true)
+                    self.sendGuestKey(key, down: false)
+                }
+                pendingCommandTap = tap
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: tap)
+            }
+            heldCommand = nil
+            commandSent = false
+        }
     }
 
     private func rounded(_ rect: NSRect, _ radius: CGFloat, fill: NSColor, stroke: NSColor? = nil, lineWidth: CGFloat = 0.3) {
@@ -374,6 +441,17 @@ final class SimulatorView: NSView {
         path.lineWidth = 0.7; path.stroke()
         NSGraphicsContext.restoreGraphicsState()
     }
+
+    // The guest screen is its own layer above the drawn frame, so a guest
+    // frame never redraws the device around it.
+    override func layout() {
+        super.layout()
+        let s = viewScale * Device.scale
+        screen.frame = NSRect(x: (Device.margin + displayRect.minX * Device.scale) * viewScale,
+                              y: (Device.margin + displayRect.minY * Device.scale) * viewScale,
+                              width: displayRect.width * s, height: displayRect.height * s)
+    }
+    override func setFrameSize(_ newSize: NSSize) { super.setFrameSize(newSize); needsLayout = true }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
@@ -412,10 +490,6 @@ final class SimulatorView: NSView {
         let display = displayRect
         rounded(display.insetBy(dx: -0.35, dy: -0.35), 0.45, fill: c(0.14))
         rounded(display, 0.12, fill: NSColor(calibratedRed: 0.025, green: 0.029, blue: 0.035, alpha: 1))
-        if let frame = guestFrame {
-            NSImage(cgImage: frame, size: NSSize(width: frame.width, height: frame.height)).draw(in: display, from: .zero, operation: .copy, fraction: 1, respectFlipped: true, hints: nil)
-            if brightness < 1 { NSColor.black.withAlphaComponent(1 - brightness).setFill(); display.fill() }
-        }
         // A restrained glass reflection; no fake desktop or fabricated device state.
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: display).addClip()
@@ -442,6 +516,30 @@ final class SimulatorView: NSView {
     }
 }
 
+final class GuestScreenView: NSView {
+    private let dim = CALayer()
+    var brightness: CGFloat = 1 { didSet { dim.opacity = Float(1 - max(0, min(1, brightness))) } }
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.contentsGravity = .resize
+        layer?.magnificationFilter = .linear
+        dim.backgroundColor = NSColor.black.cgColor
+        dim.opacity = 0
+        layer?.addSublayer(dim)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func layout() { super.layout(); dim.frame = bounds }
+    func show(_ image: CGImage?) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer?.contents = image
+        CATransaction.commit()
+    }
+}
+
 private extension NSPoint {
     var length: CGFloat { sqrt(x * x + y * y) }
 }
@@ -464,6 +562,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let stop = NSMenuItem(title: "Shut Down Development VM", action: #selector(stopVM), keyEquivalent: "")
             stop.target = self
             appMenu.addItem(stop)
+            appMenu.addItem(.separator())
+        }
+        if let directory = ProcessInfo.processInfo.environment["ORCHARD_VM_DIR"] {
+            // The tablets' GPU desktop (on software OpenGL here) or the
+            // desktop of a board without a GPU. Switching restarts the session.
+            let current = (try? String(contentsOfFile: directory + "/desktop", encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? "gpu"
+            for (title, name) in [("GPU Desktop", "gpu"), ("Software Desktop", "software")] {
+                let item = NSMenuItem(title: title, action: #selector(selectDesktop(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = name
+                item.state = current == name ? .on : .off
+                appMenu.addItem(item)
+            }
             appMenu.addItem(.separator())
         }
         let touch = NSMenuItem(title: "Touch Input", action: #selector(selectTouchInput(_:)), keyEquivalent: "")
@@ -534,6 +646,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
+    @objc private func selectDesktop(_ item: NSMenuItem) {
+        guard let name = item.representedObject as? String else { return }
+        runVM(["desktop", name]) { ok, message in
+            if ok {
+                for entry in item.menu?.items ?? [] where entry.action == #selector(self.selectDesktop(_:)) {
+                    entry.state = entry === item ? .on : .off
+                }
+                return
+            }
+            let alert = NSAlert()
+            alert.messageText = "Could not switch the desktop"
+            alert.informativeText = message
+            alert.runModal()
+        }
+    }
     @objc private func selectTouchInput(_ item: NSMenuItem) {
         guard let view = window.contentView as? SimulatorView else { return }
         view.setTouchMode(item.tag == 1)
@@ -553,10 +680,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     // Runs the VM script with COMMAND; calls DONE on the main queue with success and output.
     private func runVM(_ command: String, done: @escaping (Bool, String) -> Void) {
+        runVM([command], done: done)
+    }
+    private func runVM(_ arguments: [String], done: @escaping (Bool, String) -> Void) {
         guard let script = ProcessInfo.processInfo.environment["ORCHARD_VM_SCRIPT"] else { done(true, ""); return }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: script)
-        process.arguments = [command]
+        process.arguments = arguments
         let output = Pipe()
         process.standardOutput = output
         process.standardError = output
