@@ -30,12 +30,32 @@ Record measured job/step durations from the run API, including cache hits, rathe
 
 Manual dispatch uploads two-day workflow artifacts only. A version tag must match `pyproject.toml`; after successful builds it creates a **draft** release without overwriting existing assets. Review and publish dependencies deliberately. Builds do not access devices or qualify storage/boot behavior.
 
-Publish in this order:
+Release in this order (orchard, the Orchard package repository, then the
+distributions). Each step waits until the one before is published:
 
-1. Hardware wheel, component bundle, checksums and corresponding source.
-2. A compatible CLI release, selecting that hardware tag.
-3. Minimal Linux and/or Omarchy A images, selecting the explicit hardware/CLI tags.
-4. Qualify the complete installation/cold-restart flow before announcing the app.
+1. **Sources the packages follow.** The package repository publishes a package
+   only when its source tags a release (OrchardLinux/packages README, "Releases
+   only"). For every changed source that should ship (Mesa, Omactivity, Folio,
+   ...), tag a version release (`v1.2.3`, digits only) and let *Follow sources*
+   move the pin; send `source-updated` to skip its wait. Wait until the
+   package repository's build has published them.
+2. **orchard.** One pull request sets `pyproject.toml`'s version and renames
+   CHANGELOG.md's Unreleased section to it. Merge it, push the tag `vX.Y.Z`,
+   wait for the draft release, check it and publish it.
+3. **orchard's kernels as packages.** In OrchardLinux/packages,
+   `tools/pkgrepo orchard-release vX.Y.Z` moves the `linux-orchard-*` recipes to
+   that release; merge and let it publish. Installed systems take the new
+   kernel with their next update.
+4. **Distributions.** Each releases with its own pull request (changelog
+   section, version) and tag. A tag build uses orchard's latest published
+   release (step 2), never a nightly: orchard removes nightlies after 14 days,
+   and a release links its files. Check the draft (the orchard release it
+   links, the package versions in its root) and publish it.
+5. **The distribution's own package.** For Omarchy A, move its recipe in the
+   package repository to the new tag (`tools/pkgrepo release omarchy-a
+   VERSION`, plus any pin that must land with that release), so installed
+   tablets update to it.
+6. Qualify a fresh install and a cold restart on hardware before announcing.
 
 Cross-repository inputs must be published public releases, not drafts. The default repository token cannot read another repository's drafts. No broad personal access token is required for public dependencies.
 
