@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Thu, 19 Nov 2026 03:33:38 +0800
+Subject: [PATCH] power: supply: apple_tristar_charger: Keep USB data off on a
+ dedicated charging port
+
+On a BC1.2 dedicated charging port (DCP), USB data was turned on like on
+any identified source. A DCP shorts D+ to D-: there is no host behind
+it, and the device controller's pull-up on that pair reads as a bus reset
+("new device is full-speed") followed within milliseconds by a PMU
+source event, which ended the attachment and started the identification
+over. On an iPad 7 with a 5 V 1.8 A DCP this looped every 5.6 s, the
+input limit alternating between 1.5 A and 100 mA and the battery between
+charging and discharging.
+
+Keep USB data off on a DCP. A port that changes its mode later (a
+computer waking up) is a new source event and is identified again.
+
+Reported-by: Duke Eagleman <301139544+jerricky26@users.noreply.github.com>
+Assisted-by: LLM
+---
+ drivers/power/supply/apple_tristar_charger.c | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/power/supply/apple_tristar_charger.c b/drivers/power/supply/apple_tristar_charger.c
+index ca81e07..66d1698 100644
+--- a/drivers/power/supply/apple_tristar_charger.c
++++ b/drivers/power/supply/apple_tristar_charger.c
+@@ -790,8 +790,12 @@ static void tristar_grant(struct tristar_charger *chg)
+ 
+ /*
+  * Take an identification and turn USB data on. Even a charger signature does
+- * not rule out a host: some ports show one until a device draws current.
+- * Caller holds lock.
++ * not rule out a host: some ports show one until a device draws current. A
++ * BC1.2 dedicated charging port does: it shorts D+ to D-, so no host is behind
++ * it, and the controller's pull-up on that pair reads as a bus reset and a
++ * source event, which would start the identification over every few seconds.
++ * USB data stays off on a DCP; a port that changes its mode later is a new
++ * source event and is identified again. Caller holds lock.
+  */
+ static void tristar_accept(struct tristar_charger *chg, const struct tristar_ident *id)
+ {
+@@ -801,7 +805,7 @@ static void tristar_accept(struct tristar_charger *chg, const struct tristar_ide
+ 	chg->cable_known = id->sampled;
+ 	chg->usbc = id->usbc;
+ 	chg->orientation = id->orientation;
+-	tristar_set_usb(chg, true);
++	tristar_set_usb(chg, id->type != POWER_SUPPLY_USB_TYPE_DCP);
+ 	tristar_grant(chg);
+ }
+ 
