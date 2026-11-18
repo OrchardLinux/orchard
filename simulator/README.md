@@ -64,7 +64,8 @@ Replacing throws the old disk away, with anything you changed in it.
 - `ssh -p 2228 tablet@127.0.0.1`: a shell in the guest.
 - `simulator/qmp shot FILE.png`: the guest screen as the guest draws it.
 - `simulator/qmp key 1`, `simulator/qmp type TEXT`, `simulator/qmp tap X Y`:
-  input, in guest pixels (768 × 1024).
+  input, in the screen's points (768 × 1024; the screen is the iPad 6's
+  1536 × 2048 at 2×, as on the tablet).
 - `simulator/vm status|start|stop|kill`: the VM without the window.
 
 A change to a package can be tried by copying the built files in over SSH and

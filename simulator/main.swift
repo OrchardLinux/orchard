@@ -447,9 +447,11 @@ final class SimulatorView: NSView {
     override func layout() {
         super.layout()
         let s = viewScale * Device.scale
-        screen.frame = NSRect(x: (Device.margin + displayRect.minX * Device.scale) * viewScale,
-                              y: (Device.margin + displayRect.minY * Device.scale) * viewScale,
-                              width: displayRect.width * s, height: displayRect.height * s)
+        // On whole device pixels, so drawing the frame adds no half-pixel blur.
+        screen.frame = backingAlignedRect(NSRect(x: (Device.margin + displayRect.minX * Device.scale) * viewScale,
+                                                 y: (Device.margin + displayRect.minY * Device.scale) * viewScale,
+                                                 width: displayRect.width * s, height: displayRect.height * s),
+                                          options: .alignAllEdgesNearest)
     }
     override func setFrameSize(_ newSize: NSSize) { super.setFrameSize(newSize); needsLayout = true }
 
@@ -524,6 +526,10 @@ final class GuestScreenView: NSView {
         wantsLayer = true
         layer?.contentsGravity = .resize
         layer?.magnificationFilter = .linear
+        // The guest draws at the iPad's own 1536 x 2048, more pixels than the
+        // window usually has room for. Plain linear: trilinear blends in the
+        // half-size mipmap and softens a frame shrunk only to about 3/4.
+        layer?.minificationFilter = .linear
         dim.backgroundColor = NSColor.black.cgColor
         dim.opacity = 0
         layer?.addSublayer(dim)
