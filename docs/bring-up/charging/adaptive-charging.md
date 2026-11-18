@@ -74,7 +74,7 @@ not known. A battery that charges proves nothing about the source contract
 
 ```
 source ─ Lightning ─ CBTL1610 (Tristar, i2c0 0x1a) ─ mux ─▶ D2365 ADC ch 1 (0x4000)
-VBUS ─────────────────────────────────────────────▶ D2365 charger: status 0x18a, limit 0xa03
+VBUS ─────────────────────────────────────────────▶ D2365 charger: connected 0x189, limit 0xa03
 D2365 event block 0x140 ─ PMU line (AP GPIO 38) ─▶ pmu_gpio irq_chip ─▶ charger IRQs
 USB host ─ dwc2 gadget ─ composite (vendor req 0x40) ─ vbus_draw ─▶ "lightning" psy
 BQ27540 gauge ("battery" psy) ─▶ pack guards
@@ -91,8 +91,8 @@ exceeds what is allowed.
 
 | Phase | Entry | What happens |
 |---|---|---|
-| EMPTY | `0x18a` = 0 | Writes the handoff `0x02` and forgets the source, `usb_ma` included |
-| SETTLING | `0x18a` ≠ 0 with no source present → `tristar_new_attachment()` | Writes the 100 mA handoff (iOS draws nothing more before the grant ramps). Early look at 300 ms, before USB enumerates (0009). Identifies at 1000 ms (`tristar_run_identification()`) |
+| EMPTY | `0x189` bit 0 clear | Writes the handoff `0x02` and forgets the source, `usb_ma` included |
+| SETTLING | `0x189` bits 0 and 1 set with no source present → `tristar_new_attachment()` | Writes the 100 mA handoff (iOS draws nothing more before the grant ramps). Early look at 300 ms, before USB enumerates (0009). Identifies at 1000 ms (`tristar_run_identification()`) |
 | RAMPING | target above the current limit | `tristar_ramp_step()`, as iOS 16: from the handoff, 100 mA held for 100 ms, then +100 mA steps, each waiting 1 ms per 10 mA of the previous step (10 ms). Steps pause for 50 ms after a PMU source event. Before each step it reads the pack and falls back if the pack is outside the window |
 | CHARGING | target reached | `tristar_guard()` once a second: `tristar_check_limit()` (0013), then the pack window |
 | FAULT | mux restore failed, limit write failed, event storm | Holds the fallback until reboot |
@@ -151,7 +151,9 @@ only 100 mA in the J71b RAM test (`experiments.md` CH-16). PR #51 drove the
 grant from a Fedora host with a private tool. A 1000 mA allowance held, and
 1500 mA held at dim brightness. At the requested 2400 mA, and at 1500 mA
 with a bright screen, the PMIC status read `0x62` and the driver fell back.
-The meaning of `0x62` is not established.
+The meaning of `0x62` is not established, but it no longer matters for the
+grant: `0x18a` is the battery charger's state, and the charger keeps the
+grant whatever it reads while `0x189` reports the input (`pmic-d2365.md`).
 
 ### 2.5 Withdrawal and PMU events (0005, `devices/t8010/0004`)
 
@@ -266,7 +268,7 @@ exports `online`, `status`, `charge_type` and `input_current_limit`.
 | Ramp | iOS 16: 100 mA held 100 ms, then 100 mA every 10 ms; pack check before each step | None |
 | Pack guards | 5–40 °C, 3.2–4.35 V, \|I\| ≤ 3 A; before each step and every 1 s | 10–40 °C, 3.0–4.35 V; no current check; every 5 s |
 | Limit read-back | Every 1 s; restore or lower (0013) | Every 5 s; `0x02` within 15 s is rewritten (0010), anything else stops the policy |
-| Withdrawal trigger | Input lost (`0x18a` = 0, poll ≤ 100 ms) or allowance lowered; PMU events are debounced 50 ms, as in iOS | Bellatrix poll (≤ 1 s) → `power_supply_changed` → workqueue |
+| Withdrawal trigger | Input lost (`0x189` bit 0 clear, poll ≤ 100 ms) or allowance lowered; PMU events are debounced 50 ms, as in iOS | Bellatrix poll (≤ 1 s) → `power_supply_changed` → workqueue |
 | Swap without a VBUS gap | Not seen by PMU events, as in iOS; a USB host change still ends its allowance through the USB session (reset, disconnect) | Not seen (Bellatrix stays online) |
 | Host grant | `usb-psy-name` → `set_property` | Not wired (`usb-psy-name` deleted on iPad 7) |
 | Unexplained limit at start | Lowered to the fallback | Policy refuses; limit left as found |
@@ -358,7 +360,7 @@ current is net of system load.
 | 5 | Does the D2365 reset `0xa03` after attach on J171? (0010 was ported from the iPad 5) | To check |
 | 6 | What does 1425 mA actually draw on a computer port? What is the ThinkPad port in PR #46? | Unmeasured (CH-14) |
 | 7 | Does the J171 gadget receive the Apple host request? Does macOS send it to this gadget? | Unknown (CH-16: macOS sent 100 mA to the J71b gadget) |
-| 8 | J71b status `0x62` (bit 5): what it means, and whether J171 shows it | Unresolved (PR #51) |
+| 8 | J71b status `0x62` (bit 5): what it means, and whether J171 shows it | Undecoded; no longer withdraws the grant (presence is `0x189`) |
 | 9 | Real input current per code; iPadOS uses a per-unit `usb-input-limit-calibration` | Unmeasured; never publish calibration bytes |
 | 10 | Suspend and wake with charging | CH-06 |
 
