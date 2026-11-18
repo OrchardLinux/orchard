@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
 Date: Wed, 18 Nov 2026 17:09:02 +0100
-Subject: [PATCH 2/2] usb: dwc2: Keep an addressed peripheral session over
+Subject: [PATCH] usb: dwc2: Keep an addressed peripheral session over
  suspend-to-idle
 
 dwc2_suspend() disconnects the gadget (soft disconnect in L0) and powers
@@ -11,10 +11,10 @@ iPad 5 the Mac enumerates the device again after each wake, USB
 networking and serial reconnect, and the charger falls back to the
 100 mA a new session may draw until the host grants more.
 
-iOS never does this for sleep: IOUSBDeviceController's system power
-handler takes the bus down only for power-off and restart (messages
-0xe0000250 and 0xe0000310), and AppleSynopsysOTGDevice holds its PHY
-power assertion from bus on to bus off.
+In iOS, IOUSBDeviceController's system power handler takes the bus down
+for power-off and restart (messages 0xe0000250 and 0xe0000310), not for
+sleep, and AppleSynopsysOTGDevice holds its PHY power assertion from bus
+on to bus off.
 
 Add params.s2idle_keep_session, set for Apple SoCs. In suspend-to-idle,
 a session the host has addressed, in L0 or bus-suspended in L2, is left
@@ -34,7 +34,7 @@ Assisted-by: LLM
  4 files changed, 94 insertions(+)
 
 diff --git a/drivers/usb/dwc2/core.h b/drivers/usb/dwc2/core.h
-index b4bca5e..d36c772 100644
+index b4bca5e7a..d36c772d7 100644
 --- a/drivers/usb/dwc2/core.h
 +++ b/drivers/usb/dwc2/core.h
 @@ -368,6 +368,15 @@ enum dwc2_ep0_state {
@@ -79,7 +79,7 @@ index b4bca5e..d36c772 100644
  
  	struct phy *phy;
 diff --git a/drivers/usb/dwc2/debugfs.c b/drivers/usb/dwc2/debugfs.c
-index cf9367d..befe590 100644
+index cf9367d7b..befe590b4 100644
 --- a/drivers/usb/dwc2/debugfs.c
 +++ b/drivers/usb/dwc2/debugfs.c
 @@ -707,6 +707,7 @@ static int params_show(struct seq_file *seq, void *v)
@@ -91,7 +91,7 @@ index cf9367d..befe590 100644
  	print_param(seq, p, lpm_clock_gating);
  	print_param(seq, p, besl);
 diff --git a/drivers/usb/dwc2/params.c b/drivers/usb/dwc2/params.c
-index de10ca0..02778f0 100644
+index de10ca04c..02778f032 100644
 --- a/drivers/usb/dwc2/params.c
 +++ b/drivers/usb/dwc2/params.c
 @@ -310,6 +310,11 @@ static void dwc2_set_apple_silicon_params(struct dwc2_hsotg *hsotg)
@@ -107,7 +107,7 @@ index de10ca0..02778f0 100644
  	p->host_nperio_tx_fifo_size = 16;
  	p->g_np_tx_fifo_size = 16;
 diff --git a/drivers/usb/dwc2/platform.c b/drivers/usb/dwc2/platform.c
-index ef0d730..f3bc1a9 100644
+index ef0d73077..f3bc1a977 100644
 --- a/drivers/usb/dwc2/platform.c
 +++ b/drivers/usb/dwc2/platform.c
 @@ -17,6 +17,7 @@
