@@ -11,16 +11,17 @@ for a brightness of 0 set from user space or a blanked framebuffer.
 iOS 16 (AppleARMBacklight, "bklE" on the lp8559 node) turns the
 backlight off by clearing bits 0 and 3 of the LP8559 command register and
 on by setting them, then waits 600 us before the first level. When the
-device tree names the LED driver, do the same: on before a nonzero level,
-off after level 0. A device link orders sleep so that the I2C client is
-suspended after the backlight and resumed before it. An LED driver that
-does not answer at probe is left alone, as before.
+device tree names an LP8559 as the LED driver, do the same: on before a
+nonzero level, off after level 0. Any other LED driver is left alone. A
+device link orders sleep so that the I2C client is suspended after the
+backlight and resumed before it. An LED driver that does not answer at
+probe is left alone, as before.
 
 Assisted-by: LLM
 ---
  drivers/video/backlight/Kconfig        |   1 +
- drivers/video/backlight/apple_dwi_bl.c | 110 +++++++++++++++++++++++++
- 2 files changed, 111 insertions(+)
+ drivers/video/backlight/apple_dwi_bl.c | 116 +++++++++++++++++++++++++
+ 2 files changed, 117 insertions(+)
 
 diff --git a/drivers/video/backlight/Kconfig b/drivers/video/backlight/Kconfig
 index 47ee7d0..de724c1 100644
@@ -35,7 +36,7 @@ index 47ee7d0..de724c1 100644
  	  Say Y to enable the backlight driver for backlight controllers
  	  attached via the Apple DWI 2-wire interface which is found in some
 diff --git a/drivers/video/backlight/apple_dwi_bl.c b/drivers/video/backlight/apple_dwi_bl.c
-index 9900b59..8af13fe 100644
+index 9900b59..a919f31 100644
 --- a/drivers/video/backlight/apple_dwi_bl.c
 +++ b/drivers/video/backlight/apple_dwi_bl.c
 @@ -7,10 +7,13 @@
@@ -124,7 +125,7 @@ index 9900b59..8af13fe 100644
  	return 0;
  }
  
-@@ -84,12 +134,65 @@ static const struct backlight_ops dwi_bl_ops = {
+@@ -84,12 +134,71 @@ static const struct backlight_ops dwi_bl_ops = {
  	.update_status	= dwi_bl_update_status
  };
  
@@ -142,7 +143,8 @@ index 9900b59..8af13fe 100644
 +
 +/*
 + * The LED driver the DWI commands reach can have an enable of its own on
-+ * I2C. Sleep must suspend this device before that bus, and resume it after.
++ * I2C. Only a TI LP8559 is driven here. Sleep must suspend this device
++ * before that bus, and resume it after.
 + */
 +static int dwi_bl_get_led(struct platform_device *pdev, struct apple_dwi_bl *dwi_bl)
 +{
@@ -154,6 +156,11 @@ index 9900b59..8af13fe 100644
 +	np = of_parse_phandle(dev->of_node, "apple,led-driver", 0);
 +	if (!np)
 +		return 0;
++	/* Only the LP8559's command register is known; leave others alone. */
++	if (!of_device_is_compatible(np, "ti,lp8559")) {
++		of_node_put(np);
++		return 0;
++	}
 +	dwi_bl->led = of_find_i2c_device_by_node(np);
 +	of_node_put(np);
 +	if (!dwi_bl->led)
@@ -190,7 +197,7 @@ index 9900b59..8af13fe 100644
  
  	dwi_bl = devm_kzalloc(&dev->dev, sizeof(*dwi_bl), GFP_KERNEL);
  	if (!dwi_bl)
-@@ -99,6 +202,10 @@ static int dwi_bl_probe(struct platform_device *dev)
+@@ -99,6 +208,10 @@ static int dwi_bl_probe(struct platform_device *dev)
  	if (IS_ERR(dwi_bl->base))
  		return PTR_ERR(dwi_bl->base);
  
@@ -201,7 +208,7 @@ index 9900b59..8af13fe 100644
  	memset(&props, 0, sizeof(struct backlight_properties));
  	props.type = BACKLIGHT_PLATFORM;
  	props.max_brightness = DWI_BL_MAX_BRIGHTNESS;
-@@ -112,6 +219,9 @@ static int dwi_bl_probe(struct platform_device *dev)
+@@ -112,6 +225,9 @@ static int dwi_bl_probe(struct platform_device *dev)
  	platform_set_drvdata(dev, dwi_bl);
  
  	bl->props.brightness = dwi_bl_get_brightness(bl);

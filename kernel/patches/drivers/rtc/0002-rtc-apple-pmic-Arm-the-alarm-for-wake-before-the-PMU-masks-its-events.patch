@@ -1,4 +1,4 @@
-From d47db0bf07bbaa632bf11ccfe6bc2216ccc19b1f Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 18:19:21 +0100
 Subject: [PATCH] rtc: apple-pmic: Arm the alarm for wake before the PMU masks

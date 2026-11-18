@@ -4,12 +4,16 @@ Date: Tue, 17 Nov 2026 20:36:28 +0100
 Subject: [PATCH] arm64: dts: apple: ipad5: Arm cover line 10 only; name the
  backlight LED driver
 
-Every sleep logged "wake-only event(s) 48 latched in sleep", also pm_test
-runs that never leave the device phase: hall line 0 (event 0x30) latches
-whether a cover moves or not, so it named every wake whatever caused it.
-iOS arms only the hall lines whose configuration passes cfg & 0xc1 == 1,
-which is line 10 (0x3a) on J71t; a cover move latches both lines. Arm 0x3a
-alone. The polled cover switches read both lines as before.
+Only event 0x30 (PMIC GPIO line 0) was listed as a wake event, but that
+is not the line iOS wakes on, and it latches at every sleep whether a
+cover moves or not, also in pm_test runs that never leave the device
+phase. At sleep entry AppleD2365PMU unmasks the GPIO events of the lines
+whose configuration byte passes cfg & 0xc1 == 1 (sleep entry at
+0xfffffff006bbb380). On a cold-booted J71t the boot firmware leaves line
+0 at 0x24 and line 10 at 0x25 (logged by the PMIC GPIO driver,
+2026-11-11), so iOS arms line 10 (event 0x3a) and not line 0; a cover
+move latches both lines. Arm 0x3a alone. The polled cover switches read
+both lines as before.
 
 The backlight's enable is the LP8559 at I2C0 0x26 (ADT i2c0/lp8559, the
 target of /backlight function-backlight_enable). Describe it and point the
@@ -17,11 +21,11 @@ DWI backlight at it, so that a dark panel is off.
 
 Assisted-by: LLM
 ---
- arch/arm64/boot/dts/apple/s800x-ipad5.dtsi | 22 +++++++++++++++++-----
- 1 file changed, 17 insertions(+), 5 deletions(-)
+ arch/arm64/boot/dts/apple/s800x-ipad5.dtsi | 21 +++++++++++++++++++--
+ 1 file changed, 19 insertions(+), 2 deletions(-)
 
 diff --git a/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi b/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
-index f7977c1..de0a7b5 100644
+index 6c252bb..de0a7b5 100644
 --- a/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
 +++ b/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
 @@ -147,6 +147,11 @@
@@ -49,21 +53,19 @@ index f7977c1..de0a7b5 100644
  	tristar: port-controller@1a {
  		compatible = "nxp,cbtl1610";
  		reg = <0x1a>;
-@@ -191,12 +202,13 @@
+@@ -190,8 +201,14 @@
+ 			interrupt-controller;
  			#interrupt-cells = <2>;
  			interrupts-extended = <&pinctrl_ap 76 IRQ_TYPE_LEVEL_LOW>;
- 			/*
--			 * Smart Cover hall sensors (lines 0 and 10): wake only.
--			 * iOS arms line 10 for sleep (its boot configuration
--			 * 0x25 passes the sleep rule cfg & 0xc1 == 1; line 0's
--			 * 0x24 does not), so list both.
+-			/* Smart Cover front hall sensor (line 0): wake only. */
+-			apple,wake-events = <0x30>;
++			/*
 +			 * Smart Cover hall sensors (lines 0 and 10): wake only,
 +			 * as iOS arms them: line 10 alone (its boot
 +			 * configuration 0x25 passes the sleep rule
 +			 * cfg & 0xc1 == 1; line 0's 0x24 does not). Line 0
 +			 * latches at every sleep, with or without a cover.
- 			 */
--			apple,wake-events = <0x30 0x3a>;
++			 */
 +			apple,wake-events = <0x3a>;
  		};
  

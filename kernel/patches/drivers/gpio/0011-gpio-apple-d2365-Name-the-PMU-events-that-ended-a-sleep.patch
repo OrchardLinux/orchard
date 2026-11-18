@@ -4,25 +4,32 @@ Date: Tue, 17 Nov 2026 20:36:28 +0100
 Subject: [PATCH] gpio: apple-d2365: Name the PMU events that ended a sleep
 
 Every PMU event shares one interrupt line, so the PM core can only name
-that line ("Triggering wakeup from IRQ 56") and the event that woke the
-system was not logged unless it was a wake-only event. On an iPad 5, every
-RTC-alarm wake was logged as "wake-only event(s) 48 latched in sleep": the
-Smart Cover hall line 0 latches at every sleep, also in pm_test runs that
-never leave the device phase, while the alarm itself (event 74) was
-dispatched later by the event thread without a word.
+that line ("Triggering wakeup from IRQ 56"), and nothing said which event
+woke the system. On an iPad 5 the Smart Cover hall line 0 latches at
+every sleep, also in pm_test runs that never leave the device phase, so
+a log of the latched wake-only events named it for every wake, while the
+RTC alarm itself (event 74) was dispatched later by the event thread
+without a word.
 
 Remember which events were unmasked for the sleep. On resume, read the
-event block whenever any was, still gated, and log the armed events that
-latched as the wake; others latched in sleep could not have woken it and
-are logged at debug level. Consumer events are dispatched as before.
+event block whenever any was, still gated, and log at debug level the
+armed events that latched as the wake; others latched in sleep could not
+have woken it and are logged apart. Consumer events are dispatched as
+before.
+
+A wake request that arrives after the sleep mask was written (a dedicated
+wake IRQ, which the PM core arms at the start of the noirq phase) leaves
+its event masked, and the system then does not wake on it; the RTC alarm
+did this on the iPad 5. Log such a request at debug level, naming the
+event, so that a consumer doing so can be found.
 
 Assisted-by: LLM
 ---
- drivers/gpio/gpio-apple-d2365.c | 43 ++++++++++++++++++++++++---------
- 1 file changed, 32 insertions(+), 11 deletions(-)
+ drivers/gpio/gpio-apple-d2365.c | 41 ++++++++++++++++++++++++++++++++-
+ 1 file changed, 40 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/gpio/gpio-apple-d2365.c b/drivers/gpio/gpio-apple-d2365.c
-index c6886f4..912867f 100644
+index 8d40292..8ff38fc 100644
 --- a/drivers/gpio/gpio-apple-d2365.c
 +++ b/drivers/gpio/gpio-apple-d2365.c
 @@ -138,6 +138,7 @@ struct apple_pmic_gpio {
@@ -33,7 +40,24 @@ index c6886f4..912867f 100644
  	u8 mask[APPLE_PMIC_EVENT_BYTES_MAX];		/* as last written */
  	u8 boot_mask[APPLE_PMIC_EVENT_BYTES_MAX];
  	int wake_delta;			/* parent wake references to apply */
-@@ -738,6 +739,7 @@ static int apple_pmic_gpio_suspend(struct device *dev)
+@@ -282,6 +283,16 @@ static int apple_pmic_irq_set_wake(struct irq_data *data, unsigned int on)
+ 	/* The line interrupt only runs while the system is awake. */
+ 	if (hwirq >= gpio->nevents)
+ 		return -EINVAL;
++	/*
++	 * The sleep mask was written in our suspend callback and the bus is
++	 * not used again before resume: a wake request arriving now (a
++	 * dedicated wake IRQ, armed at the start of the noirq phase) leaves
++	 * its event masked. Its consumer must arm it in its own suspend.
++	 */
++	if (on && gpio->suspended && !test_bit(hwirq, gpio->wake))
++		dev_dbg(gpio->chip.parent,
++			"event 0x%lx armed for wake after the sleep mask was written: it cannot wake this sleep\n",
++			hwirq);
+ 	if (on && !test_bit(hwirq, gpio->wake)) {
+ 		__set_bit(hwirq, gpio->wake);
+ 		gpio->wake_delta++;
+@@ -728,6 +739,7 @@ static int apple_pmic_gpio_suspend(struct device *dev)
  	ret = apple_pmic_event_sync(gpio, armed);
  	if (ret)
  		goto unwind;
@@ -41,7 +65,7 @@ index c6886f4..912867f 100644
  	gpio->suspended = true;
  	gpio->wake_only_armed = wake_only;
  	mutex_unlock(&gpio->irq_lock);
-@@ -755,6 +757,7 @@ static int apple_pmic_gpio_suspend(struct device *dev)
+@@ -745,6 +757,7 @@ static int apple_pmic_gpio_suspend(struct device *dev)
  			mutex_lock(&gpio->irq_lock);
  			gpio->suspended = false;
  			gpio->wake_only_armed = false;
@@ -49,7 +73,7 @@ index c6886f4..912867f 100644
  			goto unwind_enabled;
  		}
  		gpio->parent_wake_armed = true;
-@@ -777,6 +780,29 @@ unwind_enabled:
+@@ -767,6 +780,29 @@ unwind_enabled:
  	return ret;
  }
  
@@ -70,7 +94,7 @@ index c6886f4..912867f 100644
 +	bitmap_and(woke, latched, gpio->sleep_armed, gpio->nevents);
 +	bitmap_andnot(other, latched, gpio->sleep_armed, gpio->nevents);
 +	if (!bitmap_empty(woke, gpio->nevents))
-+		dev_info(dev, "wake: PMU event(s) %*pbl\n", gpio->nevents, woke);
++		dev_dbg(dev, "wake: PMU event(s) %*pbl\n", gpio->nevents, woke);
 +	if (!bitmap_empty(other, gpio->nevents))
 +		dev_dbg(dev, "PMU event(s) %*pbl latched in sleep, not armed\n",
 +			gpio->nevents, other);
@@ -79,7 +103,7 @@ index c6886f4..912867f 100644
  static int apple_pmic_gpio_resume(struct device *dev)
  {
  	struct apple_pmic_gpio *gpio = dev_get_drvdata(dev);
-@@ -793,13 +819,16 @@ static int apple_pmic_gpio_resume(struct device *dev)
+@@ -783,13 +819,16 @@ static int apple_pmic_gpio_resume(struct device *dev)
  	ret = apple_pmic_event_sync(gpio, gpio->enabled);
  	if (ret)
  		dev_warn(dev, "event mask write failed: %d\n", ret);
@@ -97,23 +121,3 @@ index c6886f4..912867f 100644
  	gpio->suspended = false;
  	gpio->retries = 0;
  	/* An event that arrived while gated is still latched, unless read here. */
-@@ -810,17 +839,9 @@ static int apple_pmic_gpio_resume(struct device *dev)
- 	mutex_unlock(&gpio->irq_lock);
- 
- 	if (armed) {
--		if (!read) {
--			/* Unknown: every consumer may have an event. */
-+		/* Unknown: every consumer may have an event. */
-+		if (!read)
- 			bitmap_copy(pending, gpio->enabled, gpio->nevents);
--		} else if (bitmap_intersects(latched, gpio->wake_only, gpio->nevents)) {
--			DECLARE_BITMAP(woke, APPLE_PMIC_EVENTS_MAX);
--
--			/* Nothing else reports these: say which ones ended the sleep. */
--			bitmap_and(woke, latched, gpio->wake_only, gpio->nevents);
--			dev_info(dev, "wake-only event(s) %*pbl latched in sleep\n",
--				 gpio->nevents, woke);
--		}
- 		if (gpio->parent_wake_armed) {
- 			irq_set_irq_wake(gpio->parent_irq, 0);
- 			gpio->parent_wake_armed = false;
