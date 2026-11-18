@@ -11,18 +11,22 @@ is missing or empty.
 
 ## Unreleased
 
-### Install & launch
-
-- Kernel updates come as a package: the installer installs the kernel as
-  `linux-orchard-<platform>` from the Orchard package repository with the
-  system's own package manager (pacman or apk), so the system's ordinary
-  update takes each orchard release's kernel, and its boot entry follows. The kernel
-  before stays as a second entry to fall back to.
-- `/usr/lib/orchard/boot-entries default` makes this system the one that boots
-  when nobody picks.
+## [0.3.2] - 2026-11-19
 
 ### Devices
 
+- Sleep on the iPad 5, 6 and 7: the Smart Cover and the alarm wake the iPad,
+  the screen powers off fully in sleep, and video, display and USB come back
+  cleanly after waking.
+- Charging: full current under heavy load, from a Mac or a charger. Plain USB
+  wall chargers no longer loop between charging and discharging.
+- USB to a computer: the connection survives sleep and comes back after a
+  replug.
+- iPad 7: the GPU-accelerated desktop now works end to end, along with sleep,
+  hardware video and Bluetooth audio.
+- Bluetooth: A10 iPads load the firmware that matches their Bluetooth module.
+- Security keys (FIDO) work.
+- Apps built with Bun, such as Claude Code, run on A7, A8 and A9 devices.
 - iPad mini 4: display, backlight, buttons, Wi-Fi, battery and the USB console
   and network are marked working, as seen during its bring-up.
 - A10 iPads: if the video decoder firmware is missing, sound keeps working and
@@ -32,12 +36,19 @@ is missing or empty.
 
 ### Install & launch
 
+- Kernel updates come as a package: the installer installs the kernel as
+  `linux-orchard-<platform>` from the Orchard package repository with the
+  system's own package manager (pacman or apk), so the system's ordinary
+  update takes each orchard release's kernel, and its boot entry follows. The
+  kernel before stays as a second entry to fall back to.
 - Several systems on one device boot like a multi-boot PC: `orchard launch`
   no longer asks, m1n1 starts the default system by itself. Installing a
   system makes it the default (systemd-boot's `loader.conf`, which a system
   can also set). `orchard launch --list` picks an entry with the arrow keys,
   `--entry ID` starts one entry once. If the default can't start, the iPad
   shows why and waits for `--list` or `--entry`.
+- `/usr/lib/orchard/boot-entries default` makes this system the one that boots
+  when nobody picks.
 
 ## [0.3.1] - 2026-11-15
 
