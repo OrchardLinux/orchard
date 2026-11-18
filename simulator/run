@@ -1,14 +1,32 @@
 #!/bin/sh
 set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-APP="$HERE/../out/simulator/Orchard Simulator.app"
+OUT="$HERE/../out/simulator"
+APP="$OUT/Orchard Simulator.app"
 mkdir -p "$APP/Contents/MacOS"
-if [ -f "$HERE/../out/simulator/vm/root.raw" ]; then "$HERE/vm" start; fi
-swiftc -O "$HERE/main.swift" "$HERE/VNCClient.swift" "$HERE/VMHardware.swift" -o "$APP/Contents/MacOS/OrchardSimulator"
-printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0"><dict><key>CFBundleExecutable</key><string>OrchardSimulator</string><key>CFBundleIdentifier</key><string>org.orchardlinux.simulator</string><key>CFBundleName</key><string>Orchard Simulator</string><key>CFBundlePackageType</key><string>APPL</string><key>NSHighResolutionCapable</key><true/></dict></plist>' > "$APP/Contents/Info.plist"
-if [ -f "$HERE/../out/simulator/vm/root.raw" ]; then
-  VM_DIR=$(CDPATH= cd -- "$HERE/../out/simulator/vm" && pwd)
-  open -n --env ORCHARD_VM_VNC=1 --env "ORCHARD_VM_DIR=$VM_DIR" --env "ORCHARD_VM_SCRIPT=$HERE/vm" "$APP"
-else
-  open -n "$APP"
+if [ ! -f "$OUT/vm/root.raw" ]; then
+  echo 'No VM disk yet: run simulator/setup first.' >&2
+  exit 1
 fi
+# Which system it runs, and whether a newer one is published (nothing is downloaded).
+current=$(cat "$OUT/vm/release" 2>/dev/null || echo unknown)
+newest=$(curl -fsSL --max-time 3 https://github.com/OrchardLinux/omarchy-a/releases/download/nightly/latest.json 2>/dev/null |
+  python3 -c 'import json, sys; print(json.load(sys.stdin)["name"])' 2>/dev/null || true)
+echo "Omarchy A $current"
+case "$current" in nightly-*)
+  if [ -n "$newest" ] && [ "$newest" != "$current" ]; then
+    echo "A newer nightly is out ($newest): simulator/vm stop && simulator/setup --replace"
+  fi ;;
+esac
+"$HERE/vm" start
+# GLib, for QEMU's D-Bus display; QEMU itself depends on it.
+GLIB=${GLIB_PREFIX:-/opt/glustore}
+cc -O2 -c "$HERE/display/qemu-display.c" -o "$OUT/qemu-display.o" \
+  -I"$GLIB/include/glib-2.0" -I"$GLIB/lib/glib-2.0/include" -I"$GLIB/include/gio-unix-2.0"
+swiftc -O -import-objc-header "$HERE/display/bridge.h" -I"$GLIB/include/glib-2.0" -I"$GLIB/lib/glib-2.0/include" \
+  "$HERE/main.swift" "$HERE/GuestDisplay.swift" "$HERE/VMHardware.swift" "$OUT/qemu-display.o" \
+  -L"$GLIB/lib" -lgio-2.0 -lgobject-2.0 -lglib-2.0 -Xlinker -rpath -Xlinker "$GLIB/lib" \
+  -o "$APP/Contents/MacOS/OrchardSimulator"
+printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0"><dict><key>CFBundleExecutable</key><string>OrchardSimulator</string><key>CFBundleIdentifier</key><string>org.orchardlinux.simulator</string><key>CFBundleName</key><string>Orchard Simulator</string><key>CFBundlePackageType</key><string>APPL</string><key>NSHighResolutionCapable</key><true/></dict></plist>' > "$APP/Contents/Info.plist"
+VM_DIR=$(CDPATH= cd -- "$OUT/vm" && pwd)
+pgrep -qf "$APP/Contents/MacOS" || open -n --env "ORCHARD_VM_DIR=$VM_DIR" --env "ORCHARD_VM_SCRIPT=$HERE/vm" "$APP"

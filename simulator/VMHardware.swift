@@ -141,6 +141,25 @@ final class VMHardware {
             }
         }
     }
+    // Mouse mode, on the USB tablet: BUTTONS as in RFB (1 left, 4 right, 8/16 wheel up/down).
+    private var pointerButtons: UInt8 = 0 // accessed only on touchQueue
+    func pointer(x: CGFloat, y: CGFloat, buttons: UInt8) {
+        let px = Int(max(0, min(1, x)) * 32767)
+        let py = Int(max(0, min(1, y)) * 32767)
+        touchQueue.async { [weak self] in
+            guard let self, self.ensureInputConnection() else { return }
+            var events: [[String: Any]] = [["type": "abs", "data": ["axis": "x", "value": px]],
+                                           ["type": "abs", "data": ["axis": "y", "value": py]]]
+            for (bit, name) in [(UInt8(1), "left"), (4, "right"), (8, "wheel-up"), (16, "wheel-down")]
+            where (buttons ^ self.pointerButtons) & bit != 0 {
+                events.append(["type": "btn", "data": ["button": name, "down": buttons & bit != 0]])
+            }
+            self.pointerButtons = buttons
+            if !self.inputCommand(["execute": "input-send-event", "arguments": ["events": events]]) {
+                close(self.touchFD); self.touchFD = -1
+            }
+        }
+    }
     func key(_ name: String, down: Bool) {
         touchQueue.async { [weak self] in
             guard let self, self.ensureInputConnection() else { return }

@@ -15,19 +15,18 @@ case "${1:-status}" in
     if running; then echo "VM already running (PID $pid)"; exit 0; fi
     [ -x "$QEMU" ] || { echo 'Install qemu using glu first.' >&2; exit 1; }
     [ -f "$D/root.raw" ] && [ -f "$D/vmlinuz" ] || { echo 'VM disk/kernel not prepared.' >&2; exit 1; }
-    if lsof -nP -iTCP:5908 -sTCP:LISTEN >/dev/null 2>&1; then echo 'Port 5908 is already in use; refusing to attach to an unknown server.' >&2; exit 1; fi
     umask 077
-    rm -f "$D/qmp.sock" "$D/display.sock" "$D/control.sock"
-    nohup "$QEMU" -machine virt,accel=hvf -cpu host -m 2048 -smp 1 \
-      -kernel "$D/vmlinuz" -append 'root=/dev/vda rootwait rw console=ttyAMA0 console=tty0 systemd.show_status=1' \
+    rm -f "$D/qmp.sock" "$D/agent.sock" "$D/viewer.sock" "$D/display.sock" "$D/control.sock"
+    nohup "$QEMU" -machine virt,accel=hvf -cpu host -m 4096 -smp 4 \
+      -kernel "$D/vmlinuz" -append 'root=/dev/vda rootwait rw console=ttyAMA0 quiet fbcon=map:9 vt.global_cursor_default=0' \
       -drive "file=$D/root.raw,format=raw,if=virtio" \
       -device virtio-gpu-pci,xres=768,yres=1024 -device qemu-xhci -device usb-tablet -device virtio-multitouch-pci -device virtio-keyboard-pci \
       -device virtio-serial-pci -chardev "socket,id=screen,path=$D/display.sock,server=on,wait=off" \
       -device virtserialport,chardev=screen,name=org.orchard.display \
       -chardev "socket,id=control,path=$D/control.sock,server=on,wait=off" \
       -device virtserialport,chardev=control,name=org.orchard.control \
-      -netdev user,id=guestnet -device virtio-net-pci,netdev=guestnet,mac=52:54:00:71:00:01 \
-      -display none -vnc 127.0.0.1:8 -qmp "unix:$D/qmp.sock,server=on,wait=off" \
+      -netdev user,id=guestnet,hostfwd=tcp:127.0.0.1:2228-:22 -device virtio-net-pci,netdev=guestnet,mac=52:54:00:71:00:01 \
+      -display dbus,p2p=yes -qmp "unix:$D/viewer.sock,server=on,wait=off" -qmp "unix:$D/qmp.sock,server=on,wait=off" -qmp "unix:$D/agent.sock,server=on,wait=off" \
       -serial "file:$D/serial.log" -no-reboot > "$D/qemu.log" 2>&1 &
     echo $! > "$D/qemu.pid"
     sleep 1
@@ -69,5 +68,20 @@ PY
     echo 'VM is still running' >&2
     exit 1
     ;;
-  *) echo "Usage: $0 {start|stop|kill|status}" >&2; exit 2;;
+  desktop)
+    # gpu: the tablets' GPU desktop on software OpenGL (the default); software: the desktop of a board without one.
+    case "${2:-}" in gpu|software) ;; *) echo "Usage: $0 desktop {gpu|software}" >&2; exit 2;; esac
+    running || { echo 'VM is not running' >&2; exit 1; }
+    python3 - "$D/control.sock" "$2" <<'PY'
+import socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.settimeout(4)
+s.connect(sys.argv[1])
+s.sendall(b'desktop ' + sys.argv[2].encode() + b'\n')
+s.close()
+PY
+    printf '%s\n' "$2" > "$D/desktop"
+    echo "Desktop: $2 (the session restarts)"
+    ;;
+  *) echo "Usage: $0 {start|stop|kill|status|desktop gpu|software}" >&2; exit 2;;
 esac

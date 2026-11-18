@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""Drive the simulator VM over QMP: qmp shot FILE.png | qmp type TEXT | qmp key KEY... | qmp tap X Y | qmp drag X1 Y1 X2 Y2 | qmp touch X Y [SECONDS] | qmp touch-drag X1 Y1 X2 Y2 [HOLD_SECONDS]"""
+import json, os, socket, sys, time
+from pathlib import Path
+SOCK = Path(__file__).resolve().parent.parent / 'out/simulator/vm/agent.sock'
+W, H = 768, 1024
+
+def session():
+    s = socket.socket(socket.AF_UNIX); s.settimeout(10); s.connect(str(SOCK))
+    f = s.makefile('rw'); f.readline()
+    def call(name, **args):
+        f.write(json.dumps({'execute': name, 'arguments': args}) + '\n'); f.flush()
+        while True:
+            r = json.loads(f.readline())
+            if 'event' not in r:
+                if 'error' in r: raise SystemExit(r['error']['desc'])
+                return r['return']
+    call('qmp_capabilities')
+    return call
+
+def keys(call, names):
+    call('send-key', keys=[{'type': 'qcode', 'data': n} for n in names])
+    time.sleep(0.05)
+
+NAMES = {' ': 'spc', '.': 'dot', '-': 'minus', '/': 'slash', '_': ['shift', 'minus'], '\n': 'ret'}
+cmd, args = sys.argv[1], sys.argv[2:]
+call = session()
+if cmd == 'shot':
+    call('screendump', filename=str(Path(args[0]).resolve()), format='png')
+elif cmd == 'type':
+    for ch in ' '.join(args):
+        n = NAMES.get(ch, ch.lower())
+        keys(call, n if isinstance(n, list) else (['shift', n] if ch.isupper() else [n]))
+elif cmd == 'key':
+    keys(call, args)
+elif cmd == 'tap':
+    # Absolute pointer on the virtual touchscreen/tablet: QEMU scales 0..32767.
+    x, y = int(args[0]) * 32767 // W, int(args[1]) * 32767 // H
+    ev = lambda *e: call('input-send-event', events=list(e))
+    ev({'type': 'abs', 'data': {'axis': 'x', 'value': x}}, {'type': 'abs', 'data': {'axis': 'y', 'value': y}})
+    ev({'type': 'btn', 'data': {'down': True, 'button': 'left'}}); time.sleep(0.08)
+    ev({'type': 'btn', 'data': {'down': False, 'button': 'left'}})
+elif cmd == 'drag':
+    # A press, a slow move and a release: a text selection, not a tap.
+    x1, y1, x2, y2 = (int(a) for a in args)
+    ev = lambda *e: call('input-send-event', events=list(e))
+    def to(x, y):
+        ev({'type': 'abs', 'data': {'axis': 'x', 'value': x * 32767 // W}},
+           {'type': 'abs', 'data': {'axis': 'y', 'value': y * 32767 // H}})
+    to(x1, y1)
+    ev({'type': 'btn', 'data': {'down': True, 'button': 'left'}})
+    for i in range(1, 21):
+        time.sleep(0.03)
+        to(x1 + (x2 - x1) * i // 20, y1 + (y2 - y1) * i // 20)
+    ev({'type': 'btn', 'data': {'down': False, 'button': 'left'}})
+elif cmd in ('touch', 'touch-drag'):
+    # The window's touch input: one finger on QEMU's virtual multitouch screen.
+    if cmd == 'touch':
+        points = [(int(args[0]), int(args[1]))] * 2
+        hold = float(args[2]) if len(args) > 2 else 0.08
+    else:
+        x1, y1, x2, y2 = (int(a) for a in args[:4])
+        # An optional first hold in place: a long press before the drag.
+        points = [(x1, y1)] * int(float(args[4]) / 0.03 if len(args) > 4 else 0)
+        points += [(x1 + (x2 - x1) * i // 20, y1 + (y2 - y1) * i // 20) for i in range(21)]
+        hold = float(os.environ.get("QMP_STEP", "0.03"))
+    def mt(kind, axis='x', value=0, tracking=0):
+        return {'type': 'mtt', 'data': {'type': kind, 'slot': 0, 'tracking-id': tracking, 'axis': axis, 'value': value}}
+    def at(kind, x, y):
+        call('input-send-event', events=[mt(kind), {'type': 'btn', 'data': {'button': 'touch', 'down': True}},
+                                         mt('data', 'x', x * 32767 // W), mt('data', 'y', y * 32767 // H)])
+    at('begin', *points[0])
+    for point in points[1:]:
+        time.sleep(hold)
+        at('update', *point)
+    call('input-send-event', events=[mt('end', tracking=-1), {'type': 'btn', 'data': {'button': 'touch', 'down': False}}])
+else:
+    raise SystemExit(__doc__)

@@ -1,67 +1,90 @@
-# Orchard Simulator — VM prototype
+# Orchard Simulator
 
-Run on an Apple Silicon Mac:
+An iPad 6 frame on your desktop, running the published Omarchy A system in a
+virtual machine. Use it to work on the desktop: the greeter, the shell, the
+on-screen keyboard, apps and touch gestures, without a tablet in DFU mode.
 
-```sh
-./simulator/run
-```
+## Start
 
-This builds and opens the native AppKit viewer. If a VM disk is prepared, it starts the VM (or reconnects to it). Drag the frame or its corners to move or resize it; click the display to focus guest input. By default, a mouse press, drag and release on the display become single-finger events on a virtual touchscreen; keyboard input still works. Choose **Orchard Simulator → Mouse Input** for ordinary mouse movement, right-click and wheel scrolling, or **Touch Input** to return to touch. Touch mode has no hover, wheel or multi-finger gestures. Quitting (Cmd-Q, or closing the window) **shuts the VM down** and waits for it; if the guest has not powered off after 30 seconds, the viewer offers to force it off or leave it running. Option-Cmd-Q quits and keeps the VM running. The touchscreen device requires a VM restart after upgrading an already-running VM.
-
-The silver/white Wi-Fi frame uses the [iPad 6 dimensions](https://www.dimensions.com/element/apple-ipad-6th-gen-2018): 169.5 × 240 mm, with a 9.7-inch 4:3 display. Smaller details are visual approximations, not measured CAD geometry; it is not physical-size calibrated.
-
-Orchard Simulator is not made or endorsed by Apple. iPad is a trademark of Apple Inc.; the frame only shows which device the display size and buttons model.
-
-## Controls and shutdown
-
-The frame buttons send QEMU virtual keyboard events to the running Linux guest:
-
-- **Power** sends `KEY_POWER`. In the desktop session it blanks the display immediately while requesting the session lock; another press wakes the display without unlocking once the lock is confirmed. If locking fails, the display is restored and the error is reported. A black screen alone is not proof that the lock is secure. At the greeter Power blanks/restores the display.
-- **Home** sends `KEY_HOMEPAGE`. It wakes a blank display without unlocking; while the desktop is unlocked and lit it opens or closes the app launcher.
-- **Volume + / −** follow the existing bindings for display brightness.
-
-Drag downward on the on-screen keyboard to dismiss it; a short drag returns it to its original position. Use the keyboard button in the shell to show it again. The virtual touchscreen is not the physical iPad touchscreen; physical behavior still requires device testing.
-
-After five minutes of inactivity the session locks and the display blanks; the lock screen blanks again after 15 seconds without activity. The idle timeout is configurable in the tablet user's `~/.config/omarchy-ipad/shell.json` (`idle.lock`, in seconds; 0 disables it), and the existing Stay Awake toggle inhibits idle locking. There is not yet a settings screen for this policy. The simulator does **not** suspend; actual sleep and hardware wake sources remain future work.
-
-The VM has no J71b panel. A **VM-only kernel module** registers a virtual backlight with the same sysfs interface used by the actual screen-toggle helper. A guest bridge reads the resulting brightness and sends it over virtio-serial; the host viewer dims or blanks the live VM display accordingly. This tests the actual key binding and helper, but **not the iPad backlight driver or physical power hardware**. The VM starts its virtual backlight at a fixed brightness on boot instead of restoring a saved zero.
-
-For the *development VM*, not the product device:
+On an Apple Silicon Mac:
 
 ```sh
-./simulator/vm status
-./simulator/vm stop
-./simulator/vm kill
-./simulator/vm start
+glu install qemu
+podman machine start          # builds the VM disk
+simulator/setup               # newest Omarchy A nightly → out/simulator/vm
+simulator/run                 # opens the simulator
 ```
 
-The app menu also offers **Shut Down Development VM**. `stop` sends a narrowly scoped shutdown request over a separate VM-only virtio channel, invoking the guest's `systemctl poweroff`; it waits 30 seconds and does not force shutdown if that fails. `kill` powers the VM off at once through QEMU, like pulling the plug. This management path does not imply the tethered iPad system has a working shutdown feature. The guest bridge accepts only the shutdown command, and host control sockets are owner-only.
+Sign in with PIN **123456**. `simulator/setup` downloads about 700 MB once and
+builds a 12 GB sparse disk (about 4 GB used). The account is the installer's:
+user `tablet`, PIN 123456, a random password in `out/simulator/vm/credentials`
+(sudo needs none), and your `~/.ssh/id_*.pub` keys for SSH.
 
-## VM preparation
+## What it runs, and what it does not
 
-This is an experimental, disposable development installation, **not the iPad's installed system**. It boots the public `out/rootfs/0.1.0-next.1/rootfs.tar.zst` under QEMU ARM64/HVF with **1 vCPU and 2 GiB RAM**, using a separate VM kernel and modules copied from the local Podman Linux VM. It does not copy private iPad firmware. The guest runs systemd and the image's existing tty1 autologin and desktop session. Its J71b hardware-readiness gate and charge/diagnostics units are disabled in the VM copy, and `/etc/fstab` is bound to the VM disk. The product archive is untouched.
+- **Real:** everything above the kernel, as an install puts it on a tablet: the
+  release's root image, the installer's account and PIN setup, and the boot
+  options of an installed system (`quiet fbcon=map:9 vt.global_cursor_default=0`).
+- **Two desktops, as on the tablets:** **Orchard Simulator → GPU Desktop**
+  (the default) is the iPad 6's: Labwc on GLES2 and the shell and apps on
+  OpenGL, with their animations, here on Mesa's software OpenGL instead of the
+  GPU. **Software Desktop** is that of a board without a GPU driver: Labwc on
+  pixman, Qt's software renderer, no animations. Switching restarts the session
+  (`simulator/vm desktop gpu|software` does the same).
+- **Not real:** the kernel is the Podman machine's Fedora kernel, not orchard's;
+  the Apple drivers cannot run in a VM. So there is no GPU (the GPU desktop
+  draws in software, slower than on the tablet), no Apple touch controller
+  (QEMU's virtual multitouch stands in), no sleep (suspend is masked: a VM has
+  no wake source), and no panel backlight. Hardware behaviour still needs the
+  tablet.
 
-Install QEMU using `glu install qemu`, and start the local Podman machine. From the repository root, run (substitute the absolute project path if different):
+`simulator/run` prints which release the disk holds and says when a newer
+nightly is out. Nothing updates on its own; to move to it:
 
 ```sh
-podman machine ssh 'sudo $PWD/simulator/prepare-vm-linux.sh'
-./simulator/build-vm-backlight
-# Only install while the VM is stopped; never mount a running VM disk.
-podman machine ssh 'sudo $PWD/simulator/vm-support/install-linux.sh'
-./simulator/run
+simulator/vm stop && simulator/setup --replace     # or: simulator/setup --replace v0.3.1
 ```
 
-Preparation refuses to overwrite an existing disk and uses a file-backed ext4 filesystem only. The sparse disk has a 6 GiB logical size and initially consumes around 3.2 GiB. Check free space first; it can grow. A failed preparation may leave a partial disk; inspect it before removing and retrying. The matching kernel-devel RPM is fetched and verified against the Podman VM's Fedora RPM keyring; the module build uses the existing Debian toolchain image with a GCC compatibility wrapper, so compiler-version warnings are expected. The VM is tied to the copied kernel snapshot; rebuilding the module currently requires the Podman machine still to be running that same kernel. Intermediate kernel build files are removed after the build.
+Replacing throws the old disk away, with anything you changed in it.
 
-Logs, the kernel and disk are under `out/simulator/vm/`. No physical iPad is accessed.
+## Using it
 
-The login screen, lock screen and PIN are the distribution's (Omarchy A's greeter) and the installer's, not the simulator's.
+- Click and drag on the screen are touches (one finger). A drag that starts
+  on the inner half of the bezel slides onto the screen from its edge (the
+  keyboard from the bottom, panels from the sides and the top), also in mouse
+  mode; the outer half moves the frame. **Orchard Simulator →
+  Mouse Input** switches to an ordinary mouse with right-click and wheel.
+- The Mac keyboard types into the guest after you click the screen.
+- The frame's buttons are the tablet's: Power, Home, Volume up and down.
+- Drag the frame to move it, its corners to resize.
+- Quitting shuts the VM down; Option-Cmd-Q quits and leaves it running.
 
-## Current limitations
+## For agents and scripts
 
-- The guest has a VM-only virtual Ethernet adapter using QEMU user-mode NAT and the Mac's existing network connection. Outbound network access works without a separate guest Wi-Fi connection; inbound connections and LAN discovery are not provided by default. This does not test iPad networking hardware.
-- There is no live source sync or QEMU guest agent.
-- QEMU's software display is sent over an unauthenticated **loopback-only** VNC socket at `127.0.0.1:5908`; the app uses a raw-RFB client, not a screenshot polling viewer. This is local development infrastructure, not a security boundary. `vm start` refuses to start if the port is already occupied.
-- Resolution is 768×1024. Virtual backlight intensity is approximated by dimming the viewer; display color/brightness and iPad physical hardware are not validated. Performance and input mappings need more testing.
+- `ssh -p 2228 tablet@127.0.0.1`: a shell in the guest.
+- `simulator/qmp shot FILE.png`: the guest screen as the guest draws it.
+- `simulator/qmp key 1`, `simulator/qmp type TEXT`, `simulator/qmp tap X Y`:
+  input, in guest pixels (768 × 1024).
+- `simulator/vm status|start|stop|kill`: the VM without the window.
 
-For a rendering check, set `ORCHARD_SIMULATOR_RENDER_CHECK` to a writable PNG path when launching the compiled executable; it renders its view after three seconds and exits. Set `ORCHARD_VM_VNC=1` and `ORCHARD_VM_DIR` to include a running VM display and backlight bridge. `ORCHARD_SIMULATOR_SELF_TEST` can instead name a result file for a power-button click/restore test; only one viewer can use the backlight bridge at a time.
+A change to a package can be tried by copying the built files in over SSH and
+restarting the session; the disk is disposable, `setup --replace` restores it.
+
+## How it works
+
+QEMU runs the VM (HVF on macOS; KVM on Linux). The window gets the screen
+from QEMU's D-Bus display, peer to peer over a private socket (no D-Bus daemon):
+each frame is in memory shared with QEMU, drawn as soon as the guest draws it
+(`display/qemu-display.c`, plain GLib, so a Linux viewer can use the same
+code). Touch, keys and the hardware buttons go in through QMP. A small guest
+service (`vm-support/orchard-vm-bridge.py`) takes shutdown requests and
+reports the backlight. QMP sockets: `qmp.sock` (the window's input),
+`viewer.sock` (the window's display), `agent.sock` (scripts).
+
+Optional: `simulator/build-vm-backlight` and `vm-support/install-linux.sh`
+(in the Podman machine, VM stopped) add a VM-only backlight driver, so the
+Power button's screen blanking dims the window as it would the panel.
+
+Orchard Simulator is not made or endorsed by Apple. iPad is a trademark of
+Apple Inc.; the frame only shows which device the display size and buttons
+model.
