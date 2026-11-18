@@ -75,15 +75,15 @@ def local_settings(directory):
     """The nearest orchard.local.toml from DIRECTORY up to its repository's root.
 
     This checkout's own choices, never committed: sticky defaults for
-    --device ("BOARD"), --platform ("PLATFORM" or "all") and --kernel-tree
-    ("PATH", relative to the file), and orchard = "PATH" (the orchard checkout
-    to use; read by the launcher).
+    --device ("BOARD"), --platform ("PLATFORM" or "all"), --kernel-tree and
+    --packages ("PATH", relative to the file), and orchard = "PATH" (the
+    orchard checkout to use; read by the launcher).
     """
     directory = Path(directory).expanduser().resolve()
     for parent in (directory, *directory.parents):
         path = parent / LOCAL
         if path.exists():
-            return _toml(path, ('device', 'platform', 'orchard', 'kernel-tree')), path
+            return _toml(path, ('device', 'platform', 'orchard', 'kernel-tree', 'packages')), path
         if (parent / '.git').exists():
             break
     return {}, None
@@ -125,6 +125,27 @@ def resolve_kernel_tree(directory, tree=None):
     if not isinstance(settings['kernel-tree'], str) or not settings['kernel-tree']:
         raise ValueError(f'{path}: kernel-tree must be a path')
     return (path.parent / Path(settings['kernel-tree']).expanduser()).resolve()
+
+
+def resolve_packages(directory, packages=None):
+    """--packages, else this checkout's packages (orchard.local.toml, relative to it); or None.
+
+    A checkout of the Orchard package repository (OrchardLinux/packages): a
+    distribution's build compiles from it what its image installs from [orchard].
+    """
+    if packages is not None:
+        found, where = Path(packages).expanduser().resolve(), '--packages'
+    else:
+        settings, path = local_settings(directory)
+        if 'packages' not in settings:
+            return None
+        if not isinstance(settings['packages'], str) or not settings['packages']:
+            raise ValueError(f'{path}: packages must be a path')
+        found, where = (path.parent / Path(settings['packages']).expanduser()).resolve(), f'{path}: packages'
+    if not (found / 'tools/pkgrepo').is_file() or not (found / 'packages').is_dir():
+        raise ValueError(f'{where}: {found} is not a checkout of the Orchard package repository '
+                         '(OrchardLinux/packages: tools/pkgrepo, packages/)')
+    return found
 
 
 def configured_device(directory):

@@ -20,7 +20,8 @@ class ProjectFile(unittest.TestCase):
         (self.root / '.git').mkdir()
         (self.root / 'tools').mkdir()
         (self.root / 'tools/build.py').write_text(ENTRY + "\nimport os\n"
-                                                  "(args.output / 'tree').write_text(os.environ.get('ORCHARD_KERNEL_TREE', ''))\n")
+                                                  "(args.output / 'tree').write_text(os.environ.get('ORCHARD_KERNEL_TREE', ''))\n"
+                                                  "(args.output / 'packages').write_text(os.environ.get('ORCHARD_PACKAGES', ''))\n")
 
     def release(self, extra=''):
         (self.root / 'orchard.toml').write_text(f'name = "fixture-linux"\n[release]\nbuild = "tools/build.py"\n{extra}')
@@ -63,6 +64,31 @@ class ProjectFile(unittest.TestCase):
         self.assertIn(f'ORCHARD_KERNEL_TREE={tree}', commands)
         self.assertIn('ORCHARD_CHECKOUT=', commands)
         self.assertIn('tools/build.py --version dev-1 --output', commands)
+
+    def test_a_build_passes_a_packages_checkout(self):
+        self.release()
+        packages = self.root / 'packages-checkout'
+        with contextlib.redirect_stdout(io.StringIO()):
+            index = distro.build(self.root, version='dev-1', packages=packages)
+        self.assertEqual((index.parent / 'packages').read_text(), str(packages))
+        self.assertIn(f'ORCHARD_PACKAGES={packages}', (self.root / 'out/releases/dev-1.commands.sh').read_text())
+        with contextlib.redirect_stdout(io.StringIO()):
+            index = distro.build(self.root, version='dev-2')
+        self.assertEqual((index.parent / 'packages').read_text(), '')
+
+    def test_the_packages_argument_wins_over_the_local_file_and_must_be_a_packages_checkout(self):
+        checkout = self.root.parent / f'{self.root.name}-packages'
+        self.addCleanup(shutil.rmtree, checkout, True)
+        self.assertIsNone(build.resolve_packages(self.root))
+        (self.root / 'orchard.local.toml').write_text(f'packages = "../{checkout.name}"\n')
+        with self.assertRaisesRegex(ValueError, 'not a checkout of the Orchard package repository'):
+            build.resolve_packages(self.root)
+        (checkout / 'tools').mkdir(parents=True)
+        (checkout / 'packages').mkdir()
+        (checkout / 'tools/pkgrepo').write_text('')
+        self.assertEqual(build.resolve_packages(self.root), checkout)
+        with self.assertRaisesRegex(ValueError, '--packages'):
+            build.resolve_packages(self.root, self.root / 'elsewhere')
 
 
 if __name__ == '__main__':

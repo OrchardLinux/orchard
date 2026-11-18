@@ -84,7 +84,7 @@ and Cascadia's NAND driver is read-only by construction.
 2. `orchard build` passes the same arguments through: `--platform NAME|all`
    (repeatable), `--device BOARD`.
 3. `orchard.local.toml` only holds sticky defaults for those arguments
-   (`platform`, `device`, `kernel-tree`).
+   (`platform`, `device`, `kernel-tree`, `packages`).
 4. Precedence: argument, then `--device`, then `orchard.local.toml`, then the
    attached board, else an error. A local build never means all platforms
    implicitly; CI passes `--platform all`.
@@ -184,7 +184,7 @@ NFS.
 replacing `payload.toml` and `distro.toml`, which are still read with a
 notice to rename them. It declares what the project builds and never which
 board it is for; the kernel is the platform's, and a developer's choices
-(`platform`, `device`, `kernel-tree`) stay in arguments and
+(`platform`, `device`, `kernel-tree`, `packages`) stay in arguments and
 `orchard.local.toml`.
 
 ```toml
@@ -196,8 +196,10 @@ transport = false                build = "tools/build.py"   # its own script com
 ```
 
 In a distribution `orchard build` runs the script with `ORCHARD_CHECKOUT` (the
-snapshot whose producers it calls) and, with `--kernel-tree`,
-`ORCHARD_KERNEL_TREE`, which `orchard.inputs` builds the kernels from; it
+snapshot whose producers it calls), with `--kernel-tree`,
+`ORCHARD_KERNEL_TREE`, which `orchard.inputs` builds the kernels from, and
+with `--packages`, `ORCHARD_PACKAGES`, a checkout of OrchardLinux/packages the
+distribution builds its image's changed `[orchard]` packages from; it
 records that call as `out/releases/VERSION.commands.sh`, which `--explain`
 prints. The script's own steps are the distribution's
 ([distribution-contract.md](distribution-contract.md)).

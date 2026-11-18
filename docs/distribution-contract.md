@@ -17,6 +17,17 @@ recovery runtime, recipes) are files under `$ORCHARD`. A build that runs
 under `orchard build` gets `ORCHARD_CHECKOUT` set to the snapshot; a build
 without orchard takes it as an argument.
 
+`orchard build` passes a developer's checkouts the same way, as paths, and
+does nothing with them itself: `ORCHARD_KERNEL_TREE` (`--kernel-tree`, or
+`kernel-tree` in `orchard.local.toml`), which `orchard.inputs` builds the
+kernels from, and `ORCHARD_PACKAGES` (`--packages`, or `packages`), a
+checkout of the Orchard package repository (OrchardLinux/packages). With
+`ORCHARD_PACKAGES` set, the distribution builds the `[orchard]` packages its
+image installs whose recipe there is not the published one, with that
+repository's own commands (`tools/pkgrepo local --arch ARCH NAME…` says which
+and in what order; `ci/build-package` with `OUT` and `LOCAL_REPO` builds one),
+and installs them in place of `[orchard]`'s. Unset, both change nothing.
+
 ## Commands
 
 | Command | Does | Files |

@@ -42,6 +42,9 @@ def main():
         command.add_argument('--kernel-dir', type=Path, help='reuse a staged kernel/DTB/module tree')
         command.add_argument('--kernel-tree', type=Path, help='build this kernel tree as it is, with its own '
                              'defconfig (default: kernel-tree in orchard.local.toml, else orchard\'s own kernel)')
+        command.add_argument('--packages', type=Path, help='distribution checkouts: build the image\'s [orchard] '
+                             'packages from this checkout of OrchardLinux/packages where it differs from the '
+                             'published repository (default: packages in orchard.local.toml, else the published ones)')
         for component in ('pongo', 'busybox', 'loader'):
             command.add_argument('--' + component, type=Path, help='reuse this local component')
     build.add_argument('--explain', action='store_true',
@@ -133,6 +136,8 @@ def main():
             root = distro.find(args.directory)
             payload_only = [name for name in ('hardware', 'cache', 'kernel_dir',
                                               'pongo', 'busybox', 'loader') if getattr(args, name) is not None]
+            if root is None and args.packages is not None:
+                raise ValueError('--packages is for distribution checkouts (orchard.toml [release])')
             if root is not None:
                 if payload_only:
                     raise ValueError(f'--{payload_only[0].replace("_", "-")} is for RAM payloads; '
@@ -150,9 +155,10 @@ def main():
                         raise ValueError(f'{root.name}\'s build entry builds every platform and takes no '
                                          '--platform or --device; update the distribution '
                                          '(orchard.toml [release] selects-platform = true)')
-                    from orchard.build import resolve_kernel_tree
+                    from orchard.build import resolve_kernel_tree, resolve_packages
                     index = distro.build(root, version=args.version, platforms=platforms,
-                                         kernel_tree=resolve_kernel_tree(root, args.kernel_tree))
+                                         kernel_tree=resolve_kernel_tree(root, args.kernel_tree),
+                                         packages=resolve_packages(root, args.packages))
                     commands = index.parent.parent / f'{index.parent.name}.commands.sh'
                     if args.explain:
                         print(commands.read_text(), end='')
@@ -161,12 +167,13 @@ def main():
                 else:
                     if args.no_build and args.version:
                         raise ValueError('--no-build boots the last build; leave out --version')
-                    if args.no_build and args.kernel_tree:
-                        raise ValueError('--no-build boots the last build; leave out --kernel-tree')
-                    from orchard.build import resolve_kernel_tree
+                    if args.no_build and (args.kernel_tree or args.packages):
+                        raise ValueError('--no-build boots the last build; leave out --kernel-tree and --packages')
+                    from orchard.build import resolve_kernel_tree, resolve_packages
                     result = distro.run(root, build_first=not args.no_build, version=args.version,
                                         yes=args.yes, progress=progress,
-                                        kernel_tree=resolve_kernel_tree(root, args.kernel_tree))
+                                        kernel_tree=resolve_kernel_tree(root, args.kernel_tree),
+                                        packages=None if args.no_build else resolve_packages(root, args.packages))
                     print(json.dumps(result, indent=2))
                 return
             if args.version is not None:
