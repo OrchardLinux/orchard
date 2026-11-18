@@ -150,13 +150,14 @@ def build(output, *, loaders, boards=None, release=None, hardware=None):
         members[f'loaders/{name}.bin'] = path
     data = {}
     if release is not None:
-        from .manifests import load, resolve_local
+        from .manifests import load, release_receipts, resolve_local
         release = Path(release)
         index = load(release / 'index.toml')
         data['release/index.toml'] = (release / 'index.toml').read_bytes()
-        if 'file' in index['release']:  # a local release; a published one fetches it by URL
-            path, _ = resolve_local(index, release)
-            data['release/' + index['release']['file']] = path.read_bytes()
+        for receipt in release_receipts(index):
+            if 'file' in receipt:  # a local release; a published one fetches it by URL
+                path, _ = resolve_local(index, release, receipt)
+                data['release/' + receipt['file']] = path.read_bytes()
     info = {'schema': 1, 'version': version('orchard'), 'orchard': _revision(), 'boards': boards}
     data['core.json'] = (json.dumps(info, indent=2) + '\n').encode()
     data['__main__.py'] = BOOTSTRAP.encode()
@@ -250,17 +251,22 @@ fi
 '''
 
 
-def release_manifest(directory, index):
-    """The installation manifest DIRECTORY's INDEX pins: a local file, or the published one staged beside it."""
-    from .manifests import ManifestError, load, resolve_local, verify_file
-    if 'file' in index['release']:
-        return resolve_local(index, directory)[1]
-    name = index['release']['url'].rsplit('/', 1)[-1]
-    path = verify_file({**{k: v for k, v in index['release'].items() if k != 'url'}, 'file': name}, directory)
-    manifest = load(path)
-    if manifest['kind'] != 'orchard.install' or manifest['distro'] != index['distro']:
-        raise ManifestError('The staged manifest does not match its index')
-    return manifest
+def release_manifests(directory, index):
+    """The installation manifests DIRECTORY's INDEX pins (one per root architecture): local files, or the
+    published ones staged beside it."""
+    from .manifests import ManifestError, load, release_receipts, resolve_local, verify_file
+    manifests = []
+    for receipt in release_receipts(index):
+        if 'file' in receipt:
+            manifests.append(resolve_local(index, directory, receipt)[1])
+            continue
+        name = receipt['url'].rsplit('/', 1)[-1]
+        path = verify_file({**{k: v for k, v in receipt.items() if k != 'url'}, 'file': name}, directory)
+        manifest = load(path)
+        if manifest['kind'] != 'orchard.install' or manifest['distro'] != index['distro']:
+            raise ManifestError('The staged manifest does not match its index')
+        manifests.append(manifest)
+    return manifests
 
 
 def loaders_from(archive, directory):
@@ -277,13 +283,16 @@ def release(directory, *, loaders, installer_url=None, hardware=None):
     """Add orchard-install.pyz and install.sh to the release DIRECTORY; returns the zipapp's receipt.
 
     A published DIRECTORY (its index pins release.toml by URL) carries that
-    release.toml beside it, as orchard.image.publish stages it.
+    release.toml beside it, as orchard.image.publish stages it; the installer
+    covers the boards of every root the index names.
     """
     from .manifests import load
     directory = Path(directory)
     index = load(directory / 'index.toml')
-    manifest = release_manifest(directory, index)
-    boards = sorted({board for row in manifest['platforms'].values() for board in row['boards']})
+    manifests = release_manifests(directory, index)
+    manifest = manifests[0]
+    boards = sorted({board for document in manifests for row in document['platforms'].values()
+                     for board in row['boards']})
     receipt = build(directory / 'orchard-install.pyz', loaders=loaders, boards=boards, release=directory,
                     hardware=hardware)
     text = script(distro=manifest['distro'], name=manifest.get('name', manifest['distro']),

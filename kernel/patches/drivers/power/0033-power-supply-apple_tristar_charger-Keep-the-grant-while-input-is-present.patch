@@ -1,4 +1,4 @@
-From 55446931afab3a74211e2edc1df3cabf5139d431 Mon Sep 17 00:00:00 2001
+From 6a0229ed8c1362ed1aa55598492fc55a620a5bc6 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 01:08:51 +0100
 Subject: [PATCH] power: supply: apple_tristar_charger: Keep the grant while
@@ -7,9 +7,11 @@ Subject: [PATCH] power: supply: apple_tristar_charger: Keep the grant while
 An iPad 5 on a Mac logs a 2400 mA Apple host grant and reports a
 2400 mA current_max, yet holds the input limit at the 500 mA fallback
 and discharges near full charge. tristar_poll() withdraws to the
-fallback for every D2365 status 0x18a other than 0x42 and 0x62, so a
-charger that reaches charge end or stops charging takes the adapter
-budget away from the running system.
+fallback for every D2365 status 0x18a other than 0x42, so a charger
+that reaches charge end or stops charging takes the adapter budget away
+from the running system. A two-minute capture on a Mac attributed all
+23 drops from 2400 mA to 500 mA to status 0x62 alone, without a source
+epoch change.
 
 iOS keeps it. Its AppleD2365PMUPowerSource status method decodes 0x18a
 bits 1:0 as charging, bit 2 as charge end and bit 4 as charge timeout,
@@ -27,11 +29,11 @@ waiting for 0x42. Update the D2365 and charging notes to match.
 Affects: Apple iPad 5 and iPad 6 (TriStar with D2365); battery charging unchanged
 Assisted-by: LLM
 ---
- drivers/power/supply/apple_tristar_charger.c | 36 +++++++-------------
- 1 file changed, 12 insertions(+), 24 deletions(-)
+ drivers/power/supply/apple_tristar_charger.c | 33 ++++++++++----------
+ 1 file changed, 17 insertions(+), 16 deletions(-)
 
 diff --git a/drivers/power/supply/apple_tristar_charger.c b/drivers/power/supply/apple_tristar_charger.c
-index f5b9ae0..f6ac2a7 100644
+index f12cee3..3afbe9b 100644
 --- a/drivers/power/supply/apple_tristar_charger.c
 +++ b/drivers/power/supply/apple_tristar_charger.c
 @@ -58,7 +58,6 @@
@@ -42,7 +44,7 @@ index f5b9ae0..f6ac2a7 100644
  #define TRISTAR_CHG_INPUT_LIMIT		0x03	/* control bank */
  #define TRISTAR_CHG_ADC_SELECT		0x00	/* ADC bank */
  #define TRISTAR_CHG_ADC_RESULT		0x01
-@@ -948,12 +947,6 @@ static void tristar_guard(struct tristar_charger *chg, u64 now)
+@@ -947,12 +946,6 @@ static void tristar_guard(struct tristar_charger *chg, u64 now)
   * up on the source: USB serial and SSH must not depend on charging. An attachment
   * later holds USB data off again and identifies as usual. Caller holds lock.
   */
@@ -55,15 +57,11 @@ index f5b9ae0..f6ac2a7 100644
  static void tristar_no_source(struct tristar_charger *chg, unsigned int status, u64 now)
  {
  	if (chg->usb_on ||
-@@ -996,16 +989,18 @@ static void tristar_follow_accessory(struct tristar_charger *chg, u64 now)
+@@ -994,6 +987,21 @@ static void tristar_follow_accessory(struct tristar_charger *chg, u64 now)
+ 	dev_dbg(chg->dev, "%s: %u mA\n", holder, ma);
  }
  
- /*
-- * D2365 status 0x18a may set bit 5 while charging at the granted limit.
-- * iOS tests bits 1:0 for charging, bit 2 for charge end and bit 4 for
-- * timeout; its D2365 input-limited callback is false. Bit 5 alone must
-- * not turn a running grant into a fallback/ramp cycle. Accept only the
-- * two observed online bytes, retaining the other status checks.
++/*
 + * D2365 status 0x18a reads 0 without input. Its other bits describe the
 + * battery charger, not the input: iOS 16's AppleD2365PMUPowerSource status
 + * method takes bits 1:0 as charging, bit 2 as charge end and bit 4 as charge
@@ -72,17 +70,16 @@ index f5b9ae0..f6ac2a7 100644
 + * backs off only when the PMIC reports input limiting, which the D2365 never
 + * does. A charger that finished, timed out or does not charge still runs the
 + * system from the source, so any nonzero value keeps the grant.
-  */
--static bool tristar_status_online(unsigned int status)
++ */
 +static bool tristar_input_present(unsigned int status)
- {
--	return status == TRISTAR_CHG_STATUS_ONLINE ||
--	       status == (TRISTAR_CHG_STATUS_ONLINE | BIT(5));
++{
 +	return status != 0;
- }
- 
++}
++
  static void tristar_poll(struct work_struct *work)
-@@ -1026,8 +1021,8 @@ static void tristar_poll(struct work_struct *work)
+ {
+ 	struct tristar_charger *chg = container_of(to_delayed_work(work),
+@@ -1014,8 +1022,8 @@ static void tristar_poll(struct work_struct *work)
  		dev_err_ratelimited(chg->dev, "PMIC status unreadable; holding the fallback\n");
  		goto again;
  	}
@@ -93,11 +90,11 @@ index f5b9ae0..f6ac2a7 100644
  		/* The hold of the next attachment starts when input returns. */
  		chg->hold_ns = now;
  		if (chg->present) {
-@@ -1045,13 +1040,6 @@ static void tristar_poll(struct work_struct *work)
+@@ -1033,13 +1041,6 @@ static void tristar_poll(struct work_struct *work)
  		tristar_no_source(chg, status, now);
  		goto again;
  	}
--	if (!tristar_status_online(status)) {
+-	if (status != TRISTAR_CHG_STATUS_ONLINE) {
 -		/* Transitional input state (e.g. 0x40 while attaching): no grant. */
 -		if (chg->code > TRISTAR_CHG_FALLBACK_CODE)
 -			tristar_withdraw(chg, TRISTAR_CHG_FALLBACK_CODE);

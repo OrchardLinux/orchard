@@ -1,4 +1,4 @@
-From 545cefaccb90e6377fd587cee66b42c96fd899c1 Mon Sep 17 00:00:00 2001
+From fc956a6643f014aa00e345efac449a7101a9017e Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 13:04:17 +0100
 Subject: [PATCH] power: supply: apple_tristar_charger: Read the digital ID
@@ -137,10 +137,10 @@ index 8df74ed..3890919 100644
  
  #endif /* _APPLE_TRISTAR_ACCESSORY_H */
 diff --git a/drivers/power/supply/apple_tristar_charger.c b/drivers/power/supply/apple_tristar_charger.c
-index 504eff9..bcf22e7 100644
+index 37c805a..dc0cd9b 100644
 --- a/drivers/power/supply/apple_tristar_charger.c
 +++ b/drivers/power/supply/apple_tristar_charger.c
-@@ -885,6 +885,13 @@ static void tristar_run_identification(struct tristar_charger *chg, u64 now)
+@@ -835,6 +835,13 @@ static void tristar_run_identification(struct tristar_charger *chg, u64 now)
  		tristar_reconfirm(chg, now, expired);
  		return;
  	}

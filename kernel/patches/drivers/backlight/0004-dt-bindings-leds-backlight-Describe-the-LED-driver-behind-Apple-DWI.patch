@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 20:36:28 +0100
+Subject: [PATCH] dt-bindings: leds: backlight: Describe the LED driver behind
+ Apple DWI
+
+On the iPad 5 the DWI brightness commands reach a TI LP8559, which has an
+enable of its own on I2C: a DWI brightness of 0 leaves its LEDs lit at the
+lowest current, and only its command register turns them off (iOS does so
+through the ADT /backlight function-backlight_enable). Let the DWI node
+name that LED driver, and add the LP8559 to the LP855x family binding.
+
+Assisted-by: LLM
+---
+ .../devicetree/bindings/leds/backlight/apple,dwi-bl.yaml  | 8 ++++++++
+ .../bindings/leds/backlight/lp855x-backlight.yaml         | 1 +
+ 2 files changed, 9 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/leds/backlight/apple,dwi-bl.yaml b/Documentation/devicetree/bindings/leds/backlight/apple,dwi-bl.yaml
+index 29caeb3..af1be17 100644
+--- a/Documentation/devicetree/bindings/leds/backlight/apple,dwi-bl.yaml
++++ b/Documentation/devicetree/bindings/leds/backlight/apple,dwi-bl.yaml
+@@ -37,6 +37,14 @@ properties:
+   power-domains:
+     maxItems: 1
+ 
++  apple,led-driver:
++    $ref: /schemas/types.yaml#/definitions/phandle
++    description:
++      The LED driver that receives the DWI brightness commands, when it has
++      an enable of its own on another bus. A DWI brightness of 0 leaves its
++      LEDs lit at their lowest current; they are only off while it is
++      disabled (iPad 5: TI LP8559 on I2C).
++
+ required:
+   - compatible
+   - reg
+diff --git a/Documentation/devicetree/bindings/leds/backlight/lp855x-backlight.yaml b/Documentation/devicetree/bindings/leds/backlight/lp855x-backlight.yaml
+index 9416e1b..bf294d5 100644
+--- a/Documentation/devicetree/bindings/leds/backlight/lp855x-backlight.yaml
++++ b/Documentation/devicetree/bindings/leds/backlight/lp855x-backlight.yaml
+@@ -19,6 +19,7 @@ properties:
+       - ti,lp8555
+       - ti,lp8556
+       - ti,lp8557
++      - ti,lp8559
+ 
+   reg:
+     maxItems: 1

@@ -38,6 +38,8 @@ class ManifestError(ValueError):
 def sources(document):
     if document['kind'] == 'orchard.index':
         yield 'release', document['release']
+        for architecture, receipt in document.get('releases', {}).items():
+            yield f'releases.{architecture}', receipt
     elif document['kind'] in ('orchard.install', 'orchard.boot'):
         for name in ('root', 'boot', 'pongo', 'logo', 'm1n1', 'install_tools'):
             if name in document:
@@ -135,12 +137,26 @@ def verify_file(receipt, bundle):
     return path
 
 
-def resolve_local(index, bundle):
-    """The index's pinned installation manifest, checked to belong to its distro."""
+def release_for(index, architecture):
+    """The receipt of the installation manifest INDEX pins for a root of ARCHITECTURE (aarch64, armv7).
+
+    [releases] names a release per further root architecture; [release] is the 64-bit one, or
+    in an index without [releases] the one release, whatever its architecture.
+    """
+    return index.get('releases', {}).get(architecture, index['release'])
+
+
+def release_receipts(index):
+    """Every installation manifest INDEX pins: [release], then [releases] in order."""
+    return [index['release'], *index.get('releases', {}).values()]
+
+
+def resolve_local(index, bundle, receipt=None):
+    """The index's pinned installation manifest (RECEIPT, default [release]), checked to belong to its distro."""
     validate(index)
     if index['kind'] != 'orchard.index':
         raise ManifestError('Expected distro index')
-    path = verify_file(index['release'], bundle)
+    path = verify_file(receipt or index['release'], bundle)
     manifest = load(path)
     if manifest['kind'] != 'orchard.install' or manifest['distro'] != index['distro']:
         raise ManifestError('Resolved manifest does not match the index distro')
@@ -160,8 +176,9 @@ def platform_for(manifest, board):
 def verify_local_receipts(document, bundle):
     validate(document)
     if document['kind'] == 'orchard.index':
-        path, manifest = resolve_local(document, bundle)
-        verify_local_receipts(manifest, path.parent)
+        for receipt in release_receipts(document):
+            path, manifest = resolve_local(document, bundle, receipt)
+            verify_local_receipts(manifest, path.parent)
     elif document['kind'] == 'hardware.device':
         path = local_file(document['firmware']['recipe'], bundle)
         recipe = json.loads(path.read_text())
