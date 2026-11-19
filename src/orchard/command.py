@@ -131,6 +131,8 @@ def main():
         check_state(build_cache())
         if args.action == 'build' or (args.action == 'run' and not args.no_build):
             from orchard.cache import check_free
+            from orchard.components import fit
+            fit(cache=args.cache)
             check_free(build_cache(), args.directory)
         if args.action in ('build', 'run'):
             from orchard import distro

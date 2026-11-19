@@ -27,7 +27,7 @@ DTB directory, the toolchain image and `KERNEL_PRODUCER` in
 a change alters what they produce. Compiled objects also go
 into a compiler cache (ccache) next to the trees, `.../orchard/ccache/kernel/`,
 so a tree that returns to a patch set built before, in any worktree, compiles it
-from the cache. ccache stands in for `clang-19` on the recipe's PATH, so the
+from the cache; it keeps itself under 2 GB. ccache stands in for `clang-19` on the recipe's PATH, so the
 recorded compiler commands are the same with and without it; `ORCHARD_CCACHE=0`
 builds without it and rebuilds nothing by itself. `make` runs one job per CPU of
 the build environment (the Podman machine's CPUs); `ORCHARD_KERNEL_JOBS=N`
