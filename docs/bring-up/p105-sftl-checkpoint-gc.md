@@ -149,15 +149,16 @@ Use this checkout's `bin/orchard` with the `p105` device profile. The
 kernel source and exported patches belong in the `apple-armv7` series.
 The board-specific measurement module lives in `kernel/modules/p105/capture/`
 and is staged by the device kernel producer. Loading it is an explicit lab
-operation. The PR's ARMv7 build also packages the matching kernel, P105
-device tree, module, kernel release, tested Git revision and checksums.
+operation. The PR's ARMv7 build publishes `p105-read-only-measurement` in
+Orchard's kernel-directory layout, with the P105 device tree, matching
+module tree, kernel release, tested Git revision and file checksums.
 
-An earlier installed desktop used a different storage implementation. A
-successful launch of that desktop or USB discovery in normal iOS does not
-exercise this kernel. Use a RAM-root test environment running the measured
-kernel. Confirm the board, kernel build and USB serial or SSH session first.
-Keep the internal volumes unmounted during the footprint comparison. The
-generic `hardware-check` storage test is for NVMe.
+Use the existing [hardware-check RAM project](../../examples/hardware-check/)
+for the P105 session. Its `hardware-check storage` command checks the live
+read-only flag and mount state of the SFTL disk and its registered partitions
+before and after reading one 4 KiB block. Confirm the running kernel's notes
+digest against the artifact and keep the internal volumes unmounted. The [capture procedure](../../tools/p105/)
+includes host commands for verification and streaming both flash views.
 
 The H2FMI driver drains raw MTD programs before SFTL reads its first map.
 New raw writes return `EBUSY` for the lifetime of that disk, including

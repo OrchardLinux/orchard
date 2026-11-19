@@ -8,21 +8,39 @@ and block as read-only parameters at load. It samples that block index
 across all 16 lanes and the adjacent blocks on the selected lane, in both
 normal and SLC views. Each open of `/dev/p105-capture` starts a new scan.
 
-For an authorized observation, use a quiescent system and record its target,
-device, trial, driver revision and issued operation separately. On the device,
-load the matching module with the actual target values:
+Use the PR's `p105-read-only-measurement` artifact as the kernel directory for
+the current [hardware-check RAM project](../../examples/hardware-check/).
+Set `KERNEL_DIR` to the directory containing `zImage`, `dtbs/`, `lib/` and
+`orchard.commit`. From the Orchard checkout, verify the files and the live
+kernel before taking a baseline. `bin/orchard exec` uses the running session's
+SSH transport. The kernel notes digest distinguishes builds with the same
+`uname -r`.
 
 ```sh
-timeout -k 5 30 modprobe p105_capture bus="$BUS" cau="$CAU" block="$BLOCK"
+(cd "$KERNEL_DIR" && shasum -a 256 -c SHA256SUMS) || exit 1
+notes=$(bin/orchard exec -- timeout -k 5 10 sha256sum /sys/kernel/notes) || exit 1
+test "${notes%% *}" = "$(cat "$KERNEL_DIR/kernel.notes.sha256")" || exit 1
+bin/orchard exec -- timeout -k 5 10 cat /proc/self/mountinfo || exit 1
+bin/orchard exec -- timeout -k 5 90 hardware-check storage || exit 1
 ```
 
-Stream directly into a private host file from the already accessible device.
-This example uses an existing SSH connection with permission to read the
-capture node. The stream contains full flash data and out-of-band metadata.
+Confirm that `/` is the RAM root. The storage check uses mountinfo device
+numbers to reject a mounted internal disk or partition, including read-only
+mounts through aliases. Record the check's 4 KiB read before the baseline as
+part of the trial. Record the board, `orchard.commit`, target
+coordinates and the issued operation. With the system quiescent, load the
+module using the measured bus, CAU and block for this trial.
+
+```sh
+bin/orchard exec -- timeout -k 5 30 modprobe p105_capture bus="$BUS" cau="$CAU" block="$BLOCK"
+```
+
+Stream the flash data and out-of-band metadata directly into a private host
+file. Use a fresh directory for each trial. A failed read leaves a partial file.
 
 ```sh
 umask 077
-ssh "$DEVICE" 'timeout -k 5 600 cat /dev/p105-capture' > before.ppns.partial &&
+bin/orchard exec -- timeout -k 5 600 cat /dev/p105-capture > before.ppns.partial &&
     mv before.ppns.partial before.ppns
 ```
 

@@ -3,8 +3,8 @@
 A RAM-only system that checks what a device offers and writes a report you can
 send back. It works on every Orchard device: each check looks at what is
 present first, and what the device doesn't have is reported as SKIP, not FAIL.
-Nothing is written to the device's storage; NVMe is set read-only as soon as it
-appears.
+The RAM session keeps internal volumes unmounted and sets NVMe and P105 SFTL
+block devices read-only as they appear.
 
 ## Run it
 
@@ -16,12 +16,19 @@ orchard shell                            # or: screen /dev/cu.usbmodem* 115200
 
 At the shell, run `hardware-check`. It takes about three minutes and checks:
 
-- storage (read-only, a 1 GiB read);
+- storage (a 1 GiB NVMe read, or a 4 KiB read on P105);
 - PCIe devices and their drivers;
 - Wi-Fi: firmware load, scan, association, DHCP, the gateway, a timed download;
 - the battery gauge and other power supplies;
 - display and backlight;
 - the kernel log (IOMMU faults, NVMe timeouts, warnings, oopses).
+
+For storage alone, run `hardware-check storage`. On P105 it waits up to
+60 seconds for the SFTL disk. Before and after the read it checks that the disk
+and each registered partition are read-only and absent from this session's mount
+table, using kernel device numbers to recognize mount aliases. An inaccessible
+node, a mount (including a read-only mount), a changed device set or a short
+read fails the check.
 
 Then, if you want: `hardware-check touch`, `hardware-check keys` and
 `hardware-check charge` (plug chargers in and out). `hardware-check wifi` runs

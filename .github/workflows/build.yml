@@ -184,19 +184,52 @@ jobs:
           { echo "Compiler cache, $PLATFORM:"; echo '```'; ccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       # Local P105 builds stage the board's optional capture module separately
       # from the platform kernel. Use that same producer for device-test builds.
-      - name: Build the P105 read-only measurement module
+      - name: Stage the P105 read-only measurement kernel and modules
         id: p105_capture
         if: github.event_name == 'pull_request' && matrix.platform == 'apple-armv7' && steps.reuse.outputs.reused == ''
         run: |
           bash kernel/build-modules --source "$PWD/out/kernel-work/source" \
             --build "$PWD/out/kernel-work/output" --modules "$PWD/kernel/modules/p105" \
             --arch arm --localversion "-orchard-apple-armv7" --output "$PWD/out/p105-modules"
-          mkdir out/p105-measurement
-          cp out/components/kernel/{kernel.release,zImage} out/p105-measurement/
-          cp out/components/kernel/dtbs/s5l8942x-p105.dtb out/p105-measurement/
-          cp out/p105-modules/capture/p105_capture.ko out/p105-measurement/
-          printf '%s\n' "$GITHUB_SHA" > out/p105-measurement/orchard.commit
-          (cd out/p105-measurement && sha256sum kernel.release orchard.commit zImage *.dtb *.ko > SHA256SUMS)
+          stage="$PWD/out/p105-measurement"
+          python3 kernel/stage-modules.py --build "$PWD/out/kernel-work/output" \
+            --external "$PWD/out/p105-modules" --output "$stage"
+          read -r platform dtb < <(python3 kernel/series.py --resolve p105)
+          test "$platform" = "$PLATFORM"
+          mkdir "$stage/dtbs"
+          cp out/components/kernel/{kernel.release,zImage} "$stage/"
+          cp "out/components/kernel/dtbs/$dtb.dtb" "$stage/dtbs/"
+          cp "$stage/dtbs/$dtb.dtb" "$stage/p105.dtb"
+          printf '%s\n' "$GITHUB_SHA" > "$stage/orchard.commit"
+          # ARM exports the linked .notes section byte-for-byte at /sys/kernel/notes.
+          llvm-readelf-19 --notes out/kernel-work/output/vmlinux | grep 'Build ID:'
+          llvm-objcopy-19 --only-section=.notes -O binary out/kernel-work/output/vmlinux out/p105-kernel.notes
+          test -s out/p105-kernel.notes
+          sha256sum out/p105-kernel.notes | cut -d ' ' -f1 > "$stage/kernel.notes.sha256"
+          (cd "$stage" && find . -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > SHA256SUMS)
+      - name: Check the P105 RAM project's kernel inputs
+        if: steps.p105_capture.outcome == 'success'
+        run: |
+          stage="$PWD/out/p105-measurement"
+          (cd "$stage" && sha256sum --check --status SHA256SUMS)
+          PYTHONPATH=src python3 - "$stage" <<'PY'
+          from pathlib import Path
+          import sys
+          from orchard.hardware import device
+          from orchard.image.cascadia import check_compatible
+          from orchard.kernel import descriptor, layout
+
+          root, stage = Path.cwd(), Path(sys.argv[1])
+          platform, dtb = layout(root, 'p105')
+          if not (stage / descriptor(root, platform)['image']).stat().st_size:
+              sys.exit('Empty P105 kernel image')
+          check_compatible((stage / 'dtbs' / (dtb + '.dtb')).read_bytes(),
+                           device('p105', root)['device']['dt_compatible'])
+          PY
+          release=$(cat "$stage/kernel.release")
+          test -s "$stage/lib/modules/$release/modules.dep"
+          test -s "$stage/lib/modules/$release/extra/p105_capture.ko"
+          modprobe -d "$stage" -S "$release" --show-depends p105_capture
       - uses: actions/upload-artifact@v4
         if: steps.p105_capture.outcome == 'success'
         with:
