@@ -1,7 +1,8 @@
 # P105 NAND: two drivers, one proposal
 
-State: proposal. Nothing here changes what the kernel builds. Henrik decides
-which way the P105's NAND support goes; the combined driver is not written yet.
+State: ports 1, 5, 3, 4 and 6 written on branch `p105-nand-fusion` as
+`kernel/patches/armv7/mtd` 0017-0023 on top of #93 (now at 59bdee56); port 2
+compared offline only (below). None of it has run on a P105.
 
 The iPad mini 1 (P105) stores iOS's disk on PPN NAND behind two H2FMI buses,
 through Apple's VFL and SwissPPNFTL, with LwVM partitions on top. Two
@@ -129,16 +130,88 @@ in the write path, VFL rotation, native context pages, interrupted-save
 recovery, provider accounting, native allocation order, verified erase and
 raw-program exclusion.
 
+## What the ports became
+
+All patches leave #93's 0001-0016 untouched. Port patches are authored by
+rzxvx and cite the Cascadia commits they come from; the two follow-ups that
+change behaviour of Shayne's code are ours and say why.
+
+| patch | port | author | what it does |
+|---|---|---|---|
+| 0017 | (for 1) | ours | geometry descriptor instead of #93's fixed 64 GB constants; no functional change |
+| 0018 | 1 | rzxvx | 16 GB layout (4 lanes, 1064 × 256, 1055 superblocks, VFL in 1062/1063, 3,906,250 pages); 12H321 tree batch 16, "+nb" summary spans, PAD records; H2FMI registers the provider for both profiles; the 16 GB disk is read-only |
+| 0019 | 5 | rzxvx | SDR bring-up and SDR transfers in H2FMI when iBoot left no DDR state: NAND reset, power state 0x180 = 2 after it, timing 0x23210, firmware and bad-block table reads, one start per 4112-byte unit; the armv7 config gets `STRICT_DEVMEM` + `IO_STRICT_DEVMEM` (H2FMI already claims its windows) |
+| 0020 | (for 3) | ours | H2FMI resets the packages after a failed transaction instead of refusing all later I/O (at most 8 resets) |
+| 0021 | 3 | rzxvx | a failed data or summary program gives the block up: live pages move, the request follows, blank failed pages reuse their sequences; 8 failures per session stop the writer |
+| 0022 | 4 | rzxvx | one torn last page per open block is skipped at load and its four sequences accounted; the first write moves the block's live pages out |
+| 0023 | 6 | rzxvx | `CONFIG_MTD_APPLE_H2FMI_FAULT_INJECT` (default n): debugfs `apple-h2fmi/fail_program`, `fail_program_landed`, `fail_erase` |
+
+Not ported: Cascadia's "try the next spare" after a failed spare erase (#93's
+verified erase stops on failure, and erase is off on the P105), and marking a
+given-up or torn block as awaiting erase in the next context (the append
+writer writes no checkpoint on the P105; the block stays an open block whose
+records are all superseded).
+
+Where the ports change what #93's tests asserted: a failed program no longer
+stops the writer (four cases rewritten to assert the give-up), a torn data page
+no longer makes the medium unreadable, and the relocation case that corrupted
+the landing block's last page now corrupts the page before it. Unknown read
+statuses and refresh still stop recovery, as #93 decided; Cascadia's walk
+would skip them.
+
+## Port 2: 12H321 against #93's native encoder (offline)
+
+Cascadia's `w0c` dump is private, so the reader did not run against it. The
+comparison is between #93's native context encoder (`apple-sftl-reclaim.c`
+`sftl_checkpoint_build`, `apple-sftl-account.c`) and Cascadia's
+`sftl_ctx_build` / `sftl_context_write` / `frontier_close`, which iOS 8.4.1
+boots from. Same in both: context metadata (`0x1f`, section, sequence,
+entry offset and count, `0xffffffff`), section order 1, 2, 3, 5, 6, 4, each
+section padded to whole pages, 511 range pairs per record, the unmapped
+sentinel, summary entry layout and the "+0" span a Linux close writes.
+
+| field | #93 (13G36 model) | Cascadia (12H321, iOS-accepted) |
+|---|---|---|
+| base record names | 2 (new context group and the reserved next site) | 1 (its own superblock) |
+| range records | multiple of 64 (`cxtNextBatch`) | `max(32, roundup(used, 16))` |
+| unused range record bytes | all `0xff` | two words `0xffffffff`, rest zero |
+| statistics section | refreshed: ids 9-13, 37, 38 and live records 254 and 255 from the provider | copied unchanged from the replaced context |
+| block roles 1 and 9 | 1 clean free, 9 dirty free | read as 1 awaiting erase, 9 erased; its own recovery found type-9 blocks with old data, which fits #93's reading |
+| summary size | 32 chunks (flags `0x40`) | 4 or 8 chunks (flags 8 or 16), the only sizes on 12H321 media |
+| summary padding | repeats the last page | PAD records (`0xffff0000`, type 1) up to the summary, no hole |
+| user sequence tuple | per footer run, `U32_MAX` users skipped, count = samples | over all entries, count = entries |
+| read counts | zeroed for a retired block | carried unchanged |
+| context site | two-block group, any lanes | one superblock with all four banks |
+| previous context | erased after the new one reloads | kept as the fallback, at most two |
+| VFL table reference (reader) | u16, bit 15 = bank, low bits = page | u32 log position |
+
+Each row is a candidate for the 16 GB writer. Only the dump (or a 16 GB P105)
+can say which 13G36 behaviours 12H321 tolerates; until then the 16 GB profile
+stays read-only.
+
 ## Order and evidence before anything is enabled
 
 1. Land #93 as it stands (its own review); P105 erase stays off.
-2. Ports 1 and 5, then read-only device runs on both a 16 GB and a 64 GB
-   P105: the whole disk read and compared with a raw dump.
-3. Ports 3, 4 and 6; fault-injection runs on a 16 GB P105 against a
-   disposable Linux volume, as Cascadia did.
+2. Ports 1 and 5 (0017-0019), then read-only device runs on both a 16 GB and
+   a 64 GB P105: the whole disk read and compared with a raw dump.
+   **Needs hardware:** a 16 GB P105 for the 16 GB reader at all (VFL in
+   either bank, the u16 table reference reading Cascadia's log positions,
+   statistics record tags, "+nb" spans and PAD replay are untested on real
+   12H321 media); the SDR path of 0019 on either package (today's boot chain
+   leaves DDR, so it only runs after a failure, 0020).
+3. Ports 3, 4 and 6 (0020-0023); fault-injection runs on a 16 GB P105
+   against a disposable Linux volume, as Cascadia did. KUnit covers the
+   give-up and torn paths on synthetic 64 GB media only.
+   **Needs hardware:** the reset after a failed transaction (0020) and the
+   SDR transfers it switches to; what a cut-short PPN program reads back as
+   (0022 only recognises malformed metadata); the debugfs injection (0023)
+   on a tablet; iOS meeting a given-up or torn open block (never observed,
+   Cascadia's spec section 9).
 4. Port 2, then writes with reclamation on the 16 GB P105 (8.4.1), a cold
    iOS boot and `fsck_hfs` after each step, as in Cascadia's 2026-11-16
    cycle; then the 64 GB P105 (9.3.5) once #93's erase qualification is done.
+   **Needs the `w0c` dump or hardware:** every row of the port 2 table; the
+   16 GB writer is not enabled until they are settled.
 
 Cascadia's import stays in the series meanwhile, so its files remain
 available; `APPLE_PPN` stays off. Drop 0018 from the platform only when the

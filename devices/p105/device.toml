@@ -51,7 +51,8 @@ gyroscope = "missing"
 light_sensor = "missing"
 touch_id = "missing"
 # The 64 GB P105 read current logical pages matching the physical captures.
-# The PR #93 device trial used read-only internal volumes.
+# The PR #93 device trial used read-only internal volumes. The 16 GB
+# package's read-only layout (Cascadia's, mtd 0018) has not run on a tablet.
 storage_read = "working"
 storage_write = "untested"
 wifi = "untested"
