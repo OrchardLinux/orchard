@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 13:15:02 +0100
+Subject: [PATCH] arm64: dts: apple: t7001-air2: Enable internal storage
+
+Enable ANS with the firmware region m1n1 fills in.
+
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/apple/t7001-air2.dtsi | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t7001-air2.dtsi b/arch/arm64/boot/dts/apple/t7001-air2.dtsi
+index d4b114f73..246790a7f 100644
+--- a/arch/arm64/boot/dts/apple/t7001-air2.dtsi
++++ b/arch/arm64/boot/dts/apple/t7001-air2.dtsi
+@@ -95,7 +95,11 @@ reserved-memory {
+ 		#size-cells = <2>;
+ 		ranges;
+ 
+-		/* To be filled by loader */
++		ans_firmware: ans-firmware {
++			/* Filled in by the loader. */
++			reg = <0 0 0 0>;
++			no-map;
++		};
+ 	};
+ 
+ 	battery_info: battery {
+@@ -113,6 +117,12 @@ wlan_vdd: regulator-wlan-vdd {
+ 	};
+ };
+ 
++&ans {
++	memory-region = <&ans_firmware>;
++	memory-region-names = "firmware";
++	status = "okay";
++};
++
+ &serial0 {
+ 	status = "okay";
+ };
