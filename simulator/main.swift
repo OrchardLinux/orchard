@@ -120,11 +120,10 @@ final class SimulatorView: NSView {
     // The window zoom (window points per canvas point) at which one guest
     // pixel takes SHARE of a pixel of this Mac's screen: 1 is 100 %, the
     // guest's picture pixel for pixel. The panel's width in pixels is the
-    // guest's own, or the profile's until it has drawn.
+    // profile's: the VM runs with the profile's panel (a device switch
+    // restarts it), and the guest's last picture may still be the old one's.
     func zoom(pixelShare share: CGFloat, backingScale: CGFloat) -> CGFloat {
-        let live = display.map { CGFloat(min($0.width, $0.height)) } ?? 0
-        let pixels = live > 0 ? live : profile.panelPixelsWide
-        return pixels * share / backingScale / (profile.display.width * profile.scale)
+        profile.panelPixelsWide * share / backingScale / (profile.display.width * profile.scale)
     }
 
     // Device millimetres (upright) to the held device's millimetres, and back.
@@ -727,7 +726,7 @@ final class SimulatorWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var window: NSWindow!
     func applicationDidFinishLaunching(_ notification: Notification) {
         let app = NSApplication.shared
@@ -832,6 +831,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let fit = NSMenuItem(title: "Fit to Screen", action: #selector(selectScale(_:)), keyEquivalent: "")
         fit.target = self
         scaleMenu.addItem(fit)
+        scaleMenu.delegate = self
         scaleItem.submenu = scaleMenu
         app.mainMenu = menu
         window = SimulatorWindow(contentRect: NSRect(origin: .zero, size: view.canvas), styleMask: [.borderless], backing: .buffered, defer: false)
@@ -904,18 +904,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.runModal()
         }
     }
-    // The window at a share of the Mac's pixels, or fitted to the screen,
-    // about its own centre and kept on the screen.
+    // The Scale menu's choice: a share of the Mac's pixels, or nil for Fit
+    // to Screen; none until one is picked.
+    private var scaleChoice: Double??
+
+    // The window zoom a Scale choice means for the device as it is now.
+    private func zoom(for choice: Double?, _ view: SimulatorView) -> CGFloat {
+        if let share = choice { return view.zoom(pixelShare: CGFloat(share), backingScale: window.backingScaleFactor) }
+        let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? window.frame
+        return min(visible.width / view.canvas.width, visible.height / view.canvas.height)
+    }
+    // Whether the window is at that choice now (not resized off it since).
+    private func isAt(_ choice: Double?, _ view: SimulatorView) -> Bool {
+        let target = zoom(for: choice, view)
+        return abs(window.frame.width / view.canvas.width - target) <= target * 0.01
+    }
+
+    // The tick goes on whichever scale the window is at as the menu opens:
+    // none after the window was resized to something else.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard let view = window.contentView as? SimulatorView else { return }
+        for entry in menu.items where entry.action == #selector(selectScale(_:)) {
+            entry.state = isAt(entry.representedObject as? Double, view) ? .on : .off
+        }
+    }
+
     @objc private func selectScale(_ item: NSMenuItem) {
         guard let view = window.contentView as? SimulatorView else { return }
+        scaleChoice = .some(item.representedObject as? Double)
+        applyScale(view)
+    }
+
+    // The window at a share of the Mac's pixels, or fitted to the screen,
+    // about its own centre and kept on the screen.
+    private func applyScale(_ view: SimulatorView) {
+        guard let choice = scaleChoice else { return }
         let screen = window.screen ?? NSScreen.main
         let visible = screen?.visibleFrame ?? window.frame
-        let zoom: CGFloat
-        if let share = item.representedObject as? Double {
-            zoom = view.zoom(pixelShare: CGFloat(share), backingScale: window.backingScaleFactor)
-        } else {
-            zoom = min(visible.width / view.canvas.width, visible.height / view.canvas.height)
-        }
+        let zoom = zoom(for: choice, view)
         let size = NSSize(width: view.canvas.width * zoom, height: view.canvas.height * zoom)
         var frame = NSRect(x: window.frame.midX - size.width / 2, y: window.frame.midY - size.height / 2,
                            width: size.width, height: size.height)
@@ -924,7 +950,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         frame.origin.y = min(frame.origin.y, visible.maxY - frame.height)
         frame.origin.x = max(visible.minX, min(frame.origin.x, visible.maxX - frame.width))
         window.setFrame(frame, display: true)
-        for entry in item.menu?.items ?? [] { entry.state = entry === item ? .on : .off }
     }
 
     // Turns the device in the window, frame and screen together, and tells the
@@ -975,11 +1000,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // Resizes the window to the view's new canvas at the same zoom, about the
-    // same centre.
+    // same centre; at a Scale choice still, the choice is applied to the new
+    // device or orientation instead (100 % stays pixel for pixel).
     private func refit(_ view: SimulatorView, _ change: () -> Void) {
         let zoom = window.frame.width / view.canvas.width
         let center = NSPoint(x: window.frame.midX, y: window.frame.midY)
+        let keepChoice = scaleChoice.map { isAt($0, view) } ?? false
         change()
+        if keepChoice { applyScale(view); return }
         let size = NSSize(width: view.canvas.width * zoom, height: view.canvas.height * zoom)
         window.setFrame(NSRect(x: center.x - size.width / 2, y: center.y - size.height / 2, width: size.width, height: size.height), display: true)
     }
