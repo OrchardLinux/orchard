@@ -32,7 +32,7 @@ status = "experimental"
 [features]
 # The display pipe driver adopts the boot framebuffer mode; translated scanout is untested.
 display = "working"
-screen_off = "untested"
+screen_off = "working" # panel fully black on idle blank and Smart Cover, normal picture back; J171 2026-11-19 (#175)
 backlight = "working"
 touch = "working"
 buttons = "working"
@@ -51,7 +51,7 @@ charging = "working" # DCP wall charger gets the 1500 mA grant (#179); other sou
 charging_control = "missing"
 suspend = "working" # s2idle from Power button and idle, cable in and out; J171 2026-11-18 (#175, main 1b20c3e)
 resume = "working" # Home wakes it, USB/NCM comes back; J171 2026-11-18
-usb_serial = "untested"
+usb_serial = "working" # /dev/ttyACM0 on the host, login prompt and shell; J171 2026-11-19 (#175)
 usb_network = "working" # NCM gadget, DHCP and SSH from a Linux host in daily use
 usb_host = "untested"
 audio_output = "working"
