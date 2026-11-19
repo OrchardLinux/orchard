@@ -92,3 +92,52 @@ The comparator checks every byte of each ending response. A match means
 the same 64-bit counter increments explain both intervals, including any
 wraparound. On the measured iPad two pairs of opposite read orders matched.
 [64 GB P105 measurements](../../docs/bring-up/p105-sftl-device-qualification.md)
+
+## Capture Linux flash commands from startup
+
+Use a P105 diagnostic kernel built with the
+[H2FMI launch recorder](https://github.com/shaynelegault/linux/commit/a82a79427c0de5ec4dde0a9cdf8200fbc03a97ab).
+The recorder tracks the register write that starts each operation on both
+flash buses and the status each poll returns. A timeout has its own event
+in the exported timeline. This kernel still needs a physical P105 run.
+
+Enable the event before the controller probes. One example Linux command
+line reserves 16 MiB per CPU for the trace.
+
+```text
+trace_event=apple_h2fmi:apple_h2fmi_transaction trace_buf_size=16M
+```
+
+On a verified RAM session with Python 3 and tracefs at `/sys/kernel/tracing`,
+put `check_flash_trace.py` in `/run`. On the host, set `KERNEL_DIR` to the
+verified diagnostic package. With the internal volumes idle, use a fresh
+private directory to save the capture. The device streams the trace over
+the session's SSH connection.
+
+```sh
+umask 077
+expected=$(cat "$KERNEL_DIR/kernel.notes.sha256") || exit 1
+bin/orchard exec -- timeout -k 5 120 python3 /run/check_flash_trace.py capture \
+    --kernel-notes "$expected" > linux.trace.partial &&
+    python3 tools/p105/check_flash_trace.py verify --require-launches \
+        --kernel-notes "$expected" linux.trace.partial &&
+    mv linux.trace.partial linux.trace
+```
+
+The host checks the boot identity and requires every event from the first
+geometry request through a point where both buses had finished their work.
+A gap, a controller rebind or a partial transfer invalidates the capture.
+For a timeline of requests and results in sequence order, run the following
+on the host. The final JSON line holds the counts for the verified interval.
+
+```sh
+python3 tools/p105/check_flash_trace.py verify --timeline \
+    --kernel-notes "$expected" linux.trace > linux-timeline.jsonl
+```
+
+A host replay of 11,193 reads from an archived P105 scan produced 134,340
+events including geometry discovery. Their numeric fields alone occupied
+3,761,520 bytes, exceeding the two CPUs' combined default trace capacity
+of 2,883,584 bytes. One more read lacked an archived response and was
+excluded. Check the sequence on each real boot even with the larger buffer.
+Firmware activity before the first Linux request needs a separate witness.

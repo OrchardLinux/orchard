@@ -83,6 +83,14 @@ controlled read. Between the last iOS sample and Linux's first request, an
 ordered firmware trace or a verified interval of flash inactivity is still
 needed.
 
+A host test ran the Linux driver against two simulated flash controllers.
+Bus 0 prepared a read first and bus 1 started its read first. The earlier
+recorder reported preparation order. The revised recorder agreed with an
+independent observer for all 20 starts and four status replies. The host
+checker also rejected each of 84 single-event deletions from a sample that
+included a timeout. Physical testing of the recorder is pending.
+[Linux capture procedure](../../tools/p105/#capture-linux-flash-commands-from-startup)
+
 After returning to iOS, both copies of the LwVM partition header passed
 their CRC and matched the Linux measurements. All 29 sampled Data pages
 from block 896 also matched. Two native reads gave identical SHA-256
