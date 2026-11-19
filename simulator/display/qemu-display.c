@@ -148,10 +148,13 @@ static GVariant *get_property(GDBusConnection *connection, const char *sender, c
 
 static const GDBusInterfaceVTable LISTENER_VTABLE = {method_call, get_property, NULL};
 
+// The listener connection went away with QEMU: the viewer hears it first
+// (so it lets go of the surface), then this connection's loop ends.
 static void closed(GDBusConnection *connection, gboolean vanished, GError *error, gpointer user)
 {
     display *d = user;
-    d->cb.disable(d->cb.context);
+    d->cb.closed(d->cb.context);
+    g_main_loop_quit(d->loop);
 }
 
 static GDBusConnection *connection_on(int fd, const char *guid, GDBusConnectionFlags flags, GError **error)
@@ -199,7 +202,17 @@ static gpointer run_loop(gpointer user)
     job->done = TRUE;
     g_cond_signal(&job->ready);
     g_mutex_unlock(&job->lock);
-    if (connection) g_main_loop_run(d->loop);
+    if (!connection) return NULL;
+    g_main_loop_run(d->loop);
+    // Closed: nothing of this connection stays behind.
+    drop_surface(d);
+    g_object_unref(d->listener);
+    g_object_unref(d->qemu);
+    g_dbus_node_info_unref(d->info);
+    g_main_loop_unref(d->loop);
+    g_main_context_pop_thread_default(d->context);
+    g_main_context_unref(d->context);
+    g_free(d);
     return NULL;
 }
 
@@ -298,12 +311,13 @@ int qd_start(const char *qmp_path, qd_callbacks callbacks, char *error, int erro
     g_mutex_lock(&job->lock);
     while (!job->done) g_cond_wait(&job->ready, &job->lock);
     g_mutex_unlock(&job->lock);
+    if (!d->listener) err = job->error;
+    g_mutex_clear(&job->lock);
+    g_cond_clear(&job->ready);
+    g_free(job);
     if (!reply) goto fail;
     g_variant_unref(reply);
-    if (!d->listener) {
-        err = job->error;
-        goto fail;
-    }
+    if (!d->listener) goto fail;
     return 0;
 fail:
     snprintf(error, error_size, "%s", err ? err->message : "D-Bus display failed");

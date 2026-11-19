@@ -13,8 +13,11 @@ typedef struct {
     void (*scanout)(void *context, const void *pixels, uint32_t width, uint32_t height, uint32_t stride);
     // A rectangle of the current surface changed.
     void (*update)(void *context, int32_t x, int32_t y, int32_t width, int32_t height);
-    // The display went away (guest off, connection lost).
+    // The guest stopped showing a surface; the connection stays.
     void (*disable)(void *context);
+    // The connection is gone (QEMU quit or restarted). Its thread has ended;
+    // a viewer that wants the next VM calls qd_start again.
+    void (*closed)(void *context);
 } qd_callbacks;
 
 // Connects through the QMP socket at QMP_PATH (one QEMU started with

@@ -89,6 +89,9 @@ final class SimulatorView: NSView {
     private var hardware: VMHardware?
     private var brightness: CGFloat = 1 { didSet { screen.brightness = brightness } }
     private var guestConnected = false
+    // The guest's screen appeared (again): the VM may have restarted as
+    // another device.
+    var onConnect: (() -> Void)?
     private var guestPointerDown = false
     private var touchPosition = NSPoint.zero
     private(set) var touchMode = true
@@ -172,6 +175,7 @@ final class SimulatorView: NSView {
             display.onFrame = { [weak self, weak display] in self?.screen.show(display?.image()) }
             display.onConnection = { [weak self] connected in
                 guard let self else { return }
+                if connected && !self.guestConnected { self.onConnect?() }
                 self.guestConnected = connected
                 if !connected {
                     self.releaseGuestInput()
@@ -756,6 +760,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 appMenu.addItem(.separator())
             }
+            // A VM restarted as another device from a terminal
+            // (`simulator/vm device iphone7`): the window takes its frame.
+            view.onConnect = { [weak self, weak view] in
+                guard let self, let view else { return }
+                let name = (try? String(contentsOfFile: directory + "/device", encoding: .utf8))?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? "ipad6"
+                guard name != view.profile.name else { return }
+                self.refit(view) { view.setDevice(DeviceProfile.named(name)) }
+                self.markDevice(name)
+            }
             // Upright to begin with, whatever the VM last felt.
             sendControl("orientation normal")
         }
@@ -894,10 +908,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             self.refit(view) { view.setDevice(device) }
-            for entry in item.menu?.items ?? [] where entry.action == #selector(self.selectDevice(_:)) {
-                entry.state = entry === item ? .on : .off
+            self.markDevice(name)
+        }
+    }
+
+    // The Device menu's tick on NAME.
+    private func markDevice(_ name: String) {
+        func walk(_ menu: NSMenu?) {
+            for entry in menu?.items ?? [] {
+                if entry.action == #selector(selectDevice(_:)) { entry.state = (entry.representedObject as? String) == name ? .on : .off }
+                walk(entry.submenu)
             }
         }
+        walk(NSApp.mainMenu)
     }
 
     // Resizes the window to the view's new canvas at the same zoom, about the

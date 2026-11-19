@@ -39,12 +39,10 @@ final class GuestDisplay {
                         Unmanaged<GuestDisplay>.fromOpaque(context!).takeUnretainedValue().changed()
                     },
                     disable: { context in
-                        let display = Unmanaged<GuestDisplay>.fromOpaque(context!).takeUnretainedValue()
-                        display.lock.lock()
-                        display.pixels = nil
-                        display.lock.unlock()
-                        DispatchQueue.main.async { display.onConnection?(false) }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { display.start() }
+                        Unmanaged<GuestDisplay>.fromOpaque(context!).takeUnretainedValue().lost(reconnect: false)
+                    },
+                    closed: { context in
+                        Unmanaged<GuestDisplay>.fromOpaque(context!).takeUnretainedValue().lost(reconnect: true)
                     })
                 if qd_start(self.qmpPath, callbacks, &error, Int32(error.count)) == 0 {
                     DispatchQueue.main.async { self.connecting = false }
@@ -53,6 +51,17 @@ final class GuestDisplay {
                 Thread.sleep(forTimeInterval: 1)
             }
         }
+    }
+
+    // No surface any more. A closed connection (the VM went away, a restart
+    // for another device, say) is followed by connecting to the next VM; a
+    // guest that only stopped showing one keeps its connection.
+    private func lost(reconnect: Bool) {
+        lock.lock()
+        pixels = nil
+        lock.unlock()
+        DispatchQueue.main.async { self.onConnection?(false) }
+        if reconnect { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.start() } }
     }
 
     // One redraw per main-loop turn, however many rectangles arrived.
