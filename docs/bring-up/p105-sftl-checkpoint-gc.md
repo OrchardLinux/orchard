@@ -143,6 +143,50 @@ build 13G36 and the [pinned Cascadia NAND research](https://github.com/rzxvx/Pro
 The original [planner and rotation notes](https://github.com/shaynelegault/linux/commit/c504eae2a214915dcf5d2c4856c52e7a6ac79d2d)
 document the starting evidence.
 
+## Testing the PR kernel on P105
+
+Use this checkout's `bin/orchard` with the `p105` device profile. The
+kernel source and exported patches belong in the `apple-armv7` series.
+The board-specific measurement module lives in `kernel/modules/p105/capture/`
+and is staged by the device kernel producer. Loading it is an explicit lab
+operation. The PR's ARMv7 build also packages the matching kernel, P105
+device tree, module, kernel release, tested Git revision and checksums.
+
+An earlier installed desktop used a different storage implementation. A
+successful launch of that desktop or USB discovery in normal iOS does not
+exercise this kernel. Use a RAM-root test environment running the measured
+kernel. Confirm the board, kernel build and USB serial or SSH session first.
+Keep the internal volumes unmounted during the footprint comparison. The
+generic `hardware-check` storage test is for NVMe.
+
+The H2FMI driver drains raw MTD programs before SFTL reads its first map.
+New raw writes return `EBUSY` for the lifetime of that disk, including
+requests through an already-open MTD. Probe failure or disk removal
+releases the claim. Diagnostic reads stay available and count toward the
+physical controller activity a future accounting provider must observe.
+
+For a read-only baseline, select one physical bus, CAU and block on the
+measured 64 GB profile. The optional `p105_capture` module accepts those
+three coordinates as parameters (`bus`, `cau`, `block`). A sequential
+read of `/dev/p105-capture` returns PPNS records, including the controller
+status and all data/OOB bytes. Stream the output to the host. For an
+interior block the stream covers 3,456 pages across both views, all 16
+lanes at that block index and the adjacent blocks on the selected lane.
+No erase is available through this interface.
+
+Keep the raw captures private. With two captures around one independently
+recorded operation, run `python3 tools/p105/compare_erase.py before.json after.json`
+on the host. The tool's `--help` describes the companion files and manifest
+fields. It reports observed transitions, unexpected changes and ranges
+that were already blank. A blank page cannot show whether an erase also
+reached it. Record collateral coverage and limitations with the result.
+
+For the eventual cold-boot check, compare the CRC-validated primary and
+backup LwVM headers, stable filesystem geometry and file contents on iOS
+with their pre-test values. The earlier device captures showed that HFSX
+mount bookkeeping can change on a normal iOS reboot. Verify the relocated
+Linux data and actual donor reuse after a cold start as well.
+
 ## Remaining before hardware enablement
 
 The physical provider needs a trustworthy starting state and a continuous
@@ -154,8 +198,8 @@ issued different maintenance erases. Losing that history invalidates the
 counter model. Scrub and bad-member replacement also need qualification.
 
 Physical qualification must establish the exact erase footprint in both
-normal and SLC views, exclusive ownership across raw MTD and SFTL operations,
-and recovery after a partial erase or block retirement. Before a physical
+normal and SLC views, verify the raw write exclusion on the tablet,
+and establish recovery after a partial erase or block retirement. Before a physical
 donor can be returned for writing, the driver must also reconcile the
 reported erase outcome with native wear and free-block state. End-to-end testing
 on the measured P105 must verify cold-boot recovery and preservation of

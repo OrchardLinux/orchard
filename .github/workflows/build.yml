@@ -182,7 +182,29 @@ jobs:
           # Keep only what this build used, so the saved cache stays one build large.
           ccache --evict-older-than "$(( $(date +%s) - started + 60 ))s" >/dev/null
           { echo "Compiler cache, $PLATFORM:"; echo '```'; ccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-      # A pull request's kernel only has to compile; nothing assembles it.
+      # Local P105 builds stage the board's optional capture module separately
+      # from the platform kernel. Use that same producer for device-test builds.
+      - name: Build the P105 read-only measurement module
+        id: p105_capture
+        if: github.event_name == 'pull_request' && matrix.platform == 'apple-armv7' && steps.reuse.outputs.reused == ''
+        run: |
+          bash kernel/build-modules --source "$PWD/out/kernel-work/source" \
+            --build "$PWD/out/kernel-work/output" --modules "$PWD/kernel/modules/p105" \
+            --arch arm --localversion "-orchard-apple-armv7" --output "$PWD/out/p105-modules"
+          mkdir out/p105-measurement
+          cp out/components/kernel/{kernel.release,zImage} out/p105-measurement/
+          cp out/components/kernel/dtbs/s5l8942x-p105.dtb out/p105-measurement/
+          cp out/p105-modules/capture/p105_capture.ko out/p105-measurement/
+          git rev-parse HEAD > out/p105-measurement/orchard.commit
+          (cd out/p105-measurement && sha256sum kernel.release orchard.commit zImage *.dtb *.ko > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        if: steps.p105_capture.outcome == 'success'
+        with:
+          name: p105-read-only-measurement
+          path: out/p105-measurement/
+          if-no-files-found: error
+          retention-days: 7
+      # Release builds also archive the full platform components and source.
       - name: Archive components and corresponding kernel source
         if: steps.reuse.outputs.reused == '' && github.event_name != 'pull_request'
         run: |
