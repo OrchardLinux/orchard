@@ -190,6 +190,10 @@ Linux data and actual donor reuse after a cold start as well.
 
 ## Remaining before hardware enablement
 
+The 64 GB P105 ran the PR kernel and verified raw write exclusion on all
+16 devices. The device report records block ownership and the counter
+measurements. [P105 qualification results](p105-sftl-device-qualification.md)
+
 The physical provider needs a trustworthy starting state and a continuous
 record of native-equivalent reads, programs, erases, synchronizations and
 their completion flags. One saved counter sample plus the logical journal
@@ -199,8 +203,8 @@ issued different maintenance erases. Losing that history invalidates the
 counter model. Scrub and bad-member replacement also need qualification.
 
 Physical qualification must establish the exact erase footprint in both
-normal and SLC views, verify the raw write exclusion on the tablet,
-and establish recovery after a partial erase or block retirement. Before a physical
+normal and SLC views and verify recovery after a partial erase or block
+retirement. Before a physical
 donor can be returned for writing, the driver must also reconcile the
 reported erase outcome with native wear and free-block state. End-to-end testing
 on the measured P105 must verify cold-boot recovery and preservation of

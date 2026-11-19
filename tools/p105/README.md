@@ -63,3 +63,23 @@ python3 tools/p105/compare_erase.py before.json after.json
 The capture calls the provider's page reader and leaves SFTL ownership in
 place. A scan spans many transactions. Other activity may change the medium
 or its read counters during the scan.
+
+## Read live counters in iOS
+
+On a paired Mac or Linux host with `ideviceinfo` installed, select the
+64 GB iPad mini running build 13G36. Use its identifier from `idevice_id -l`.
+The paired USB service can answer while the iPad runs iOS.
+
+```sh
+python3 tools/p105/capture_ios_counters.py --udid "$P105_UDID" --samples 4 ./p105-ios-counters
+```
+
+The collector checks the board, build and flash geometry. For each sample
+it compares the two provider records against their copies in the native
+statistics table. It creates a private directory for the responses and
+records the time window for each query. A disconnect ends the run. Keep
+the raw responses on the measurement host.
+
+The USB service returns cumulative counts. Two opposite read orders on
+this iPad produced the same changes in every counter.
+[64 GB P105 measurements](../../docs/bring-up/p105-sftl-device-qualification.md)
