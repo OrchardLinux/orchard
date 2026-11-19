@@ -79,6 +79,17 @@ record starts like J71t's.
 5. MAX98721 driver; low-gain `speaker-test`, one amp at a time.
 6. Headphones and microphones through CS42L81.
 
+## Status
+
+| Piece | State |
+| --- | --- |
+| SmartIO firmware (`smartio-from-kernelcache@2`, `AppleT7000SmartIO`) | done |
+| SmartIO V1 register backend (`apple,t7000-sio`) | written, builds |
+| MCA v1 (`apple,t7001-mca`, MCA3 speaker link) | written, builds |
+| MAX98721 driver | written, builds; DT nodes kept back until the read-only probe |
+| NCO clock for MCA3 (T7001 layout differs from T8010) | open |
+| DT: SIO, I2S switch, MCA3, amplifiers, sound card (`audio-graph-card2`, two codecs on one link) | open |
+
 ## Speaker safety
 
 iOS protects the speakers in software (amp current/voltage feedback plus the
@@ -93,3 +104,5 @@ static).
 | Date | Step | Result |
 | --- | --- | --- |
 | 2026-11-19 | ADT and kernelcache analysis (offline) | hardware above identified; no device access |
+| 2026-11-19 | SmartIO firmware recipe | `t7000-smartio.bin` extracted, sha256 matches |
+| 2026-11-19 | SmartIO V1 backend, MCA v1, MAX98721 driver (offline) | build as modules for apple-4k; patch audit passes for apple-4k and apple-16k; not run on hardware |
