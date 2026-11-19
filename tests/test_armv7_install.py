@@ -124,6 +124,11 @@ class DiskDiscovery(unittest.TestCase):
         with FakeDevice(disks=[f'nvme0n{n}' for n in range(1, 8)]):
             self.assertEqual(direct.find_disk(None), '/dev/nvme0n1')
 
+    def test_the_disk_is_the_first_ans1_namespace(self):
+        # An iPad Air 2 lists ten ANS1 namespaces; only the first is the storage.
+        with FakeDevice(disks=[f'asp0n{n}' for n in range(1, 11)]):
+            self.assertEqual(direct.find_disk(None), '/dev/asp0n1')
+
     def test_two_internal_disks_stop_the_install(self):
         with FakeDevice(disks=['nvme0n1', 'applesftl0']), self.assertRaisesRegex(D.InstallError, 'More than one'):
             direct.find_disk(None)

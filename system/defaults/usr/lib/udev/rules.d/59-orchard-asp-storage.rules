@@ -1,0 +1,7 @@
+# The asp driver's disks (ANS1 storage, e.g. J81) are named asp*, which
+# systemd's 60-persistent-storage.rules does not cover: without these rules
+# there is no /dev/disk/by-partuuid or by-uuid for them, so an fstab entry by
+# PARTUUID (the installer's /boot) times out and the boot ends in emergency mode.
+SUBSYSTEM=="block", KERNEL=="asp*", IMPORT{builtin}="blkid"
+SUBSYSTEM=="block", KERNEL=="asp*", ENV{DEVTYPE}=="partition", ENV{PARTUUID}=="?*", SYMLINK+="disk/by-partuuid/$env{PARTUUID}"
+SUBSYSTEM=="block", KERNEL=="asp*", ENV{ID_FS_UUID_ENC}=="?*", SYMLINK+="disk/by-uuid/$env{ID_FS_UUID_ENC}"
