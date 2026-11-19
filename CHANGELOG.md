@@ -27,6 +27,10 @@ is missing or empty.
   and the desktop follows through the same rotation-sensor path as a real
   tablet. The frame's buttons no longer take the keyboard away from the
   guest, and the screen comes back by itself after the VM restarts.
+- Orchard Simulator: a Scale menu shows the guest at 50 %, 75 % or 100 %
+  of the Mac's pixels (100 % is pixel for pixel) or fitted to the screen,
+  and keeps the scale across device switches and rotation. Cmd+H and
+  Cmd+Option+H hide the simulator and other apps, as on any Mac app.
 
 ## [0.3.2] - 2026-11-19
 
