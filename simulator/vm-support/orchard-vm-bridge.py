@@ -74,14 +74,46 @@ def commands():
                         pass
             elif line in (b'desktop gpu', b'desktop software'):
                 # The GPU desktop on software OpenGL, or the software desktop;
-                # the session starts again with it (back to the PIN screen).
+                # the session starts again with it (back to the lock screen).
                 flag = '/etc/omarchy-a/simulator-gpu'
                 if line == b'desktop gpu':
                     os.makedirs(os.path.dirname(flag), exist_ok=True)
                     open(flag, 'a').close()
                 elif os.path.exists(flag):
                     os.unlink(flag)
-                subprocess.run(['/usr/bin/systemctl', 'restart', 'greetd'], check=False)
+                restart_desktop()
+
+
+def restart_desktop():
+    """A new desktop session, as at boot.
+
+    greetd starts the desktop (initial_session) once per boot and notes that
+    in its runfile; restarted alone it would show its fallback instead. So
+    the old session ends, the note goes, and greetd starts the desktop
+    again, locked as at boot.
+    """
+    subprocess.run(['/usr/bin/systemctl', 'stop', 'greetd'], check=False)
+    sessions = subprocess.run(['/usr/bin/loginctl', 'list-sessions', '--no-legend'],
+                              capture_output=True, text=True, check=False).stdout
+    seat = [row.split()[0] for row in sessions.splitlines() if row.split()[3:4] == ['seat0']]
+    # With greetd stopped its sessions are abandoned: terminate-session only
+    # marks them closing (user processes outlive a session here), so their
+    # processes are signalled, and killed if they are not gone in 5 s.
+    for signal in ('SIGTERM', 'SIGKILL'):
+        for session in seat:
+            subprocess.run(['/usr/bin/loginctl', 'kill-session', session, f'--signal={signal}'],
+                           capture_output=True, check=False)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and subprocess.run(['/usr/bin/pgrep', '-x', 'labwc'],
+                                                                capture_output=True).returncode == 0:
+            time.sleep(0.1)
+    for session in seat:
+        subprocess.run(['/usr/bin/loginctl', 'terminate-session', session], capture_output=True, check=False)
+    try:
+        os.unlink('/run/greetd.run')
+    except FileNotFoundError:
+        pass
+    subprocess.run(['/usr/bin/systemctl', 'start', 'greetd'], check=False)
 
 
 threading.Thread(target=report_brightness, daemon=True).start()
