@@ -35,7 +35,7 @@ status = "experimental"
 [features]
 display = "untested" # simplefb on iBoot's scanout; a userspace dashboard drew to fb0 on the LCD.
 screen_off = "missing"
-backlight = "missing"
+backlight = "untested" # PMU WLED, from Cascadia PR #35; not run on orchard's build.
 gpu_desktop = "missing"
 touch = "untested" # Z2 bootload from userspace, then multitouch contacts on event0.
 buttons = "missing"
@@ -46,19 +46,19 @@ touch_id = "none"
 storage_read = "missing"
 storage_write = "missing"
 wifi = "untested" # Joined WPA2 on 5 GHz and held a DHCP lease past 5 min; second USB complex brought up from userspace.
-bluetooth_input = "missing"
+bluetooth_input = "untested" # BCM4330 on UART3, from Cascadia PR #35.
 bluetooth_audio = "missing"
 cellular = "none"
-battery = "missing"
+battery = "untested" # bq27xxx over HDQ (UART5 powered), from Cascadia PR #35.
 charging = "missing"
 charging_control = "missing"
 suspend = "missing"
 resume = "missing"
-# The P105 USB topic preserves legacy tuning; its shared gate helper needs a J1 regression boot.
+# The legacy PHY path now enables UPERF/USBREG too (not fatal if they do not answer); needs a J1 regression boot.
 usb_serial = "untested" # Root shell on ttyGS0.
 usb_network = "untested" # CDC Ethernet, pinged both ways.
 usb_host = "missing"
-audio_output = "missing"
-audio_input = "missing"
+audio_output = "untested" # I2S0 + CS42L63 speaker, from Cascadia PR #36.
+audio_input = "untested" # built-in and headset microphones on the CS42L63, from Cascadia PR #47.
 camera = "missing"
 video_decode_hevc = "missing"

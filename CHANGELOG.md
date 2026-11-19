@@ -13,6 +13,13 @@ is missing or empty.
 
 ### Devices
 
+- Older 32-bit devices (apple-armv7): the kernel is now Project Cascadia at
+  d92da7d (it was 091d441). The kernel now builds for the iPad 2 (Wi-Fi) too,
+  with drivers for its display, touch, Wi-Fi, Bluetooth, sensors, battery,
+  audio and camera; it becomes a board Orchard builds for once its firmware
+  recipe exists. The iPad 3 gains drivers for
+  its backlight, battery, Bluetooth, speaker and microphones, also untested
+  here. (rzxvx, Simone99, Stephen Cox, Alberto Giancarlo Ferrario)
 - iPhone 8 Plus: Wi-Fi works (BCM4357). Tested by ryzensnyper.
 - A11 devices: PCIe DMA through the DART works. The T8015 DART is driven
   with its own (T8020-like) register layout instead of the S5L8960X one,
