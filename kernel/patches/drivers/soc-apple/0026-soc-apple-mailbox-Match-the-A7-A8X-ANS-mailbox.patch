@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 13:15:00 +0100
+Subject: [PATCH] soc: apple: mailbox: Match the A7-A8X ANS mailbox
+
+The A7-A8X ANS mailbox has the same FIFO, mask and message packing as
+the A7 IOP mailbox that is already supported, so match its generic
+compatible to that variant instead of carrying a separate 64-bit AKF
+implementation.
+
+[Orchard: replaces Hoolock's AKF mailbox series (HoolockLinux/linux ans1 ed8528f a9683d122ab2,
+b055d938b01a, 26f606f7aa9f, 4cfff10fc213) by Nick Chan on this stack.]
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/soc/apple/mailbox.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/soc/apple/mailbox.c b/drivers/soc/apple/mailbox.c
+index cd27fb666..75aa1b2d0 100644
+--- a/drivers/soc/apple/mailbox.c
++++ b/drivers/soc/apple/mailbox.c
+@@ -553,6 +553,8 @@ static const struct of_device_id apple_mbox_of_match[] = {
+ 	{ .compatible = "apple,asc-mailbox-v4", .data = &apple_mbox_asc_hw },
+ 	{ .compatible = "apple,t8015-asc-mailbox", .data = &apple_mbox_t8015_hw },
+ 	{ .compatible = "apple,t8010-a7iop-mailbox", .data = &apple_mbox_a7iop_hw },
++	/* A7-A8X ANS/AKF coprocessors: same FIFO, mask and packing layout as A7IOP */
++	{ .compatible = "apple,akf-mailbox-v1", .data = &apple_mbox_a7iop_hw },
+ 	{ .compatible = "apple,m3-mailbox-v2", .data = &apple_mbox_m3_hw },
+ 	{}
+ };
