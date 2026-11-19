@@ -28,7 +28,7 @@ if [ -e "$VM/root.raw" ] && [ -z "$replace" ]; then
 fi
 if "$HERE/vm" status >/dev/null 2>&1; then echo 'Stop the VM first: simulator/vm stop' >&2; exit 1; fi
 FREE=$(df -k "$ROOT" | awk 'NR==2 {print int($4 / 1048576)}')
-[ "$FREE" -ge 10 ] || { echo "Only $FREE GB free; the disk needs about 4 GB and the download 1 GB." >&2; exit 1; }
+[ "$FREE" -ge 6 ] || { echo "Only $FREE GB free; the disk needs about 4 GB and the download 1 GB." >&2; exit 1; }
 
 # The release's root image, checked against the release's own checksums.
 DOWNLOAD="$OUT/download"
