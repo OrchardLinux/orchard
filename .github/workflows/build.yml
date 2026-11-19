@@ -195,7 +195,7 @@ jobs:
           cp out/components/kernel/{kernel.release,zImage} out/p105-measurement/
           cp out/components/kernel/dtbs/s5l8942x-p105.dtb out/p105-measurement/
           cp out/p105-modules/capture/p105_capture.ko out/p105-measurement/
-          git rev-parse HEAD > out/p105-measurement/orchard.commit
+          printf '%s\n' "$GITHUB_SHA" > out/p105-measurement/orchard.commit
           (cd out/p105-measurement && sha256sum kernel.release orchard.commit zImage *.dtb *.ko > SHA256SUMS)
       - uses: actions/upload-artifact@v4
         if: steps.p105_capture.outcome == 'success'
