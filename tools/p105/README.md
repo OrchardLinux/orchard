@@ -80,6 +80,15 @@ statistics table. It creates a private directory for the responses and
 records the time window for each query. A disconnect ends the run. Keep
 the raw responses on the measurement host.
 
-The USB service returns cumulative counts. Two opposite read orders on
-this iPad produced the same changes in every counter.
+To compare two controlled intervals, bracket each with a pair of saved
+samples from the same iPad. Record which reads completed in each interval
+and their order. Pass the four binary responses to the host comparator.
+
+```sh
+python3 tools/p105/compare_ios_intervals.py a-before.bin a-after.bin b-before.bin b-after.bin
+```
+
+The comparator checks every byte of each ending response. A match means
+the same 64-bit counter increments explain both intervals, including any
+wraparound. On the measured iPad two pairs of opposite read orders matched.
 [64 GB P105 measurements](../../docs/bring-up/p105-sftl-device-qualification.md)

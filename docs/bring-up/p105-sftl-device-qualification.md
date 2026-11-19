@@ -58,9 +58,9 @@ media scan. Reclamation remains disabled pending that handoff and the
 physical erase and cold-boot tests.
 
 On iOS 9.3.5, the paired USB service returned both live records in
-`com.apple.disk_usage` under `NANDInfo`. The collector verified 40 saved
-responses and four fresh ones. Each contained matching copies of the 11 VFL
-and 58 lower-provider counters. The geometry record
+`com.apple.disk_usage` under `NANDInfo`. The collector verified 48 responses
+across the controlled reads and their checks. Each contained matching copies
+of the 11 VFL and 58 lower-provider counters. The geometry record
 `0x03000f00` contained the measured 64 GB signature at byte offset 48.
 Starting there, five little-endian words read `2, 2088, 8, 64, 128`.
 
@@ -72,15 +72,23 @@ Starting there, five little-endian words read `2, 2088, 8, 64, 128`.
 The first System interval also recorded a program covering 32
 pages. A repeat showed the same read counts with no program delta. In two
 comparisons, reversing the read order produced identical changes in all 69
-counters. The paired system log yielded no per-command flash records during
-the controlled read. Between the last iOS sample and Linux's first request,
-an ordered firmware trace or a verified interval of flash inactivity is still
+provider counters. Each full USB reply was 8,766 bytes long. Applying the
+counter changes from one read order to the starting reply for the opposite
+order reproduced its ending reply byte for byte. This held in both directions
+for each pair and included the other 43 values in the statistics table.
+One interval with background programs produced a different result.
+
+The paired system log yielded no per-command flash records during the
+controlled read. Between the last iOS sample and Linux's first request, an
+ordered firmware trace or a verified interval of flash inactivity is still
 needed.
 
 After returning to iOS, both copies of the LwVM partition header passed
 their CRC and matched the Linux measurements. All 29 sampled Data pages
-from block 896 also matched. These are measurements taken before any
-erase trial.
+from block 896 also matched. Two native reads gave identical SHA-256
+hashes for 241 font files on System and 13 package manifests on Data.
+The file hashes stay on the measurement host for comparison after the
+erase trial and cold boot.
 
 ## Repeating the checks
 

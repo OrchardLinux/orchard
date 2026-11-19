@@ -24,8 +24,8 @@ TABLE_LAYOUT = [(i, 2) for i in range(1, 44)] + [(255, 22), (254, 116)]
 MAX_PLIST = 1024 * 1024
 
 
-def decode_nandinfo(blob):
-    """Require one complete envelope, the measured table, and matching direct records."""
+def inspect_nandinfo(blob):
+    """Return the verified provider records and the spans of all statistics values."""
     wanted = {TABLE, GEOMETRY, *(selector for selector, _ in DIRECT.values())}
     chunks = {}
     offset = 0
@@ -47,33 +47,45 @@ def decode_nandinfo(blob):
         if selector in wanted:
             if flags or selector in chunks:
                 raise ValueError("flagged or repeated counter record")
-            chunks[selector] = blob[start:end]
+            chunks[selector] = (start, end)
         offset = end
     if not closed or set(chunks) != wanted:
         raise ValueError("incomplete NANDInfo counter envelope")
-    geometry = chunks[GEOMETRY]
+    geometry_start, geometry_end = chunks[GEOMETRY]
+    geometry = blob[geometry_start:geometry_end]
     if len(geometry) != 116 or struct.unpack_from("<5I", geometry, 48) != P105_GEOMETRY:
         raise ValueError("unexpected flash geometry for the 64 GB P105")
-    table = chunks[TABLE]
+    table_start, table_end = chunks[TABLE]
+    table = blob[table_start:table_end]
     if len(table) < 4 or struct.unpack_from("<I", table)[0] != len(TABLE_LAYOUT):
         raise ValueError("unexpected SwissPPNFTL table count")
     offset = 4
     result = {}
+    spans = []
     for tag, words in TABLE_LAYOUT:
         start = offset + 8
         end = start + words * 4
         if end > len(table) or struct.unpack_from("<II", table, offset) != (tag, words):
             raise ValueError("unexpected SwissPPNFTL table layout")
+        spans.append((table_start + start, table_start + end))
         if tag in DIRECT:
             selector, size = DIRECT[tag]
-            raw = chunks[selector]
+            direct_start, direct_end = chunks[selector]
+            raw = blob[direct_start:direct_end]
             if len(raw) != size or raw != table[start:end]:
                 raise ValueError(f"direct and table copies of record {tag} disagree")
             result[tag] = raw
+            spans.append((direct_start, direct_end))
         offset = end
     if offset != len(table):
         raise ValueError("trailing SwissPPNFTL table bytes")
-    return result
+    return result, spans
+
+
+def decode_nandinfo(blob):
+    """Require one complete envelope, the measured table, and matching direct records."""
+    providers, _ = inspect_nandinfo(blob)
+    return providers
 
 
 def usb_query(tool, udid, *args):

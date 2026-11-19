@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import plistlib
 import struct
+import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -20,26 +21,55 @@ def load(name):
 
 
 ios = load("capture_ios_counters")
+with patch.dict(sys.modules, {"capture_ios_counters": ios}):
+    compare = load("compare_ios_intervals")
 
 
 def envelope(selector, raw=b"", flags=0):
     return struct.pack("<4I", selector, flags, len(raw), 0) + raw
 
 
-def nandinfo():
+def nandinfo(vfl_value=None, table_value=0, extra=b"odd"):
     raw = {tag: bytes([tag]) * width for tag, (_, width) in ios.DIRECT.items()}
+    if vfl_value is not None:
+        raw[255] = struct.pack("<Q", vfl_value) + raw[255][8:]
     table = struct.pack("<I", 45)
     for tag, words in ios.TABLE_LAYOUT:
-        table += struct.pack("<II", tag, words) + raw.get(tag, bytes(words * 4))
+        value = struct.pack("<Q", table_value) if tag == 1 else raw.get(tag, bytes(words * 4))
+        table += struct.pack("<II", tag, words) + value
     geometry = bytearray(116)
     struct.pack_into("<5I", geometry, 48, 2, 2088, 8, 64, 128)
-    return (envelope(ios.OPEN, flags=0x20001) + envelope(0x123, b"odd") +
+    return (envelope(ios.OPEN, flags=0x20001) + envelope(0x123, extra) +
             envelope(ios.GEOMETRY, geometry) + envelope(ios.TABLE, table) +
             b"".join(envelope(selector, raw[tag]) for tag, (selector, _) in ios.DIRECT.items()) +
             envelope(ios.CLOSE, flags=0x20001))
 
 
 class IOSCounters(unittest.TestCase):
+    def test_same_increments_across_wrap_and_different_starting_values(self):
+        self.assertTrue(compare.same_changes(
+            nandinfo(2**64 - 2, 10), nandinfo(1, 11),
+            nandinfo(253, 100), nandinfo(256, 101),
+        ))
+
+    def test_full_reply_accounts_for_table_and_opaque_payload(self):
+        first = nandinfo(0, 5), nandinfo(1, 6)
+        for change, changed in (("table counter", nandinfo(21, 8)),
+                                ("provider counter", nandinfo(22, 7)),
+                                ("opaque payload", nandinfo(21, 7, extra=b"new"))):
+            with self.subTest(change=change):
+                self.assertFalse(compare.same_changes(*first, nandinfo(20, 6), changed))
+
+    def test_interval_requires_consistent_valid_layout(self):
+        good = nandinfo()
+        longer = nandinfo(extra=b"longer")
+        with self.assertRaisesRegex(ValueError, "different diagnostic layouts"):
+            compare.same_changes(good, longer, good, good)
+        with self.assertRaisesRegex(ValueError, "different diagnostic layouts"):
+            compare.same_changes(good, good, longer, longer)
+        with self.assertRaises(ValueError):
+            compare.same_changes(good, good, good, good[:-1])
+
     def test_complete_odd_aligned_envelope(self):
         pair = ios.decode_nandinfo(nandinfo())
         self.assertEqual(pair, {255: b"\xff" * 88, 254: b"\xfe" * 464})
