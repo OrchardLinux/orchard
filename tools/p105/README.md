@@ -80,6 +80,22 @@ statistics table. It creates a private directory for the responses and
 records the time window for each query. A disconnect ends the run. Keep
 the raw responses on the measurement host.
 
+To count requests at the iOS block layer during the same experiment, install
+`idevicediagnostics` alongside `ideviceinfo`. With the option below, each
+flash sample has a disk counter reading on either side and a checked iOS boot
+ID. Each of the two disk readings has its own time window in the sample JSON.
+
+```sh
+python3 tools/p105/capture_ios_counters.py --udid "$P105_UDID" \
+    --block-stats idevicediagnostics --samples 4 ./p105-ios-block-counts
+```
+
+Bracket a controlled read with two samples. Compare the first sample's
+`block_after` with the second sample's `block_before` to get the disk
+request count for that interval. Compare native samples from the same boot.
+The block layer reports totals for reads and writes. The paired service
+closes when iOS shuts down.
+
 To compare two controlled intervals, bracket each with a pair of saved
 samples from the same iPad. Record which reads completed in each interval
 and their order. Pass the four binary responses to the host comparator.

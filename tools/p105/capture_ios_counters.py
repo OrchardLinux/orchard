@@ -12,6 +12,7 @@ import struct
 import subprocess
 import sys
 import time
+import uuid
 
 
 # Record numbers, flags and sizes as returned by 13G36, little endian.
@@ -22,6 +23,8 @@ P105_GEOMETRY = (2, 2088, 8, 64, 128)  # buses, blocks/CAU, CAUs/bus, SLC and no
 DIRECT = {255: (0x02000200, 88), 254: (0x03000200, 464)}
 TABLE_LAYOUT = [(i, 2) for i in range(1, 44)] + [(255, 22), (254, 116)]
 MAX_PLIST = 1024 * 1024
+BLOCK_COUNTERS = {f"{field} ({direction})" for direction in ("Read", "Write")
+                  for field in ("Bytes", "Errors", "Latency Time", "Operations", "Retries", "Total Time")}
 
 
 def inspect_nandinfo(blob):
@@ -97,6 +100,36 @@ def usb_query(tool, udid, *args):
     return request.stdout
 
 
+def registry_entry(tool, udid, name):
+    reply = plistlib.loads(usb_query(tool, udid, "ioregentry", name))
+    entry = reply.get("IORegistry") if isinstance(reply, dict) else None
+    if not isinstance(entry, dict):
+        raise ValueError(f"missing iOS registry entry for {name}")
+    return entry
+
+
+def boot_session(tool, udid):
+    value = registry_entry(tool, udid, "IOPMrootDomain").get("BootSessionUUID")
+    if not isinstance(value, str):
+        raise ValueError("missing iOS boot identity")
+    session = uuid.UUID(value)
+    if not session.int:
+        raise ValueError("empty iOS boot identity")
+    return str(session)
+
+
+def block_stats(tool, udid):
+    start = time.monotonic_ns()
+    entry = registry_entry(tool, udid, "IOBlockStorageDriver")
+    end = time.monotonic_ns()
+    values = entry.get("Statistics")
+    if (entry.get("IOClass") != "IOBlockStorageDriver" or not isinstance(values, dict)
+            or values.keys() != BLOCK_COUNTERS
+            or any(type(value) is not int or not 0 <= value < 2**64 for value in values.values())):
+        raise ValueError("unexpected iOS block statistics")
+    return {"start_monotonic_ns": start, "end_monotonic_ns": end, "counters": values}
+
+
 def timestamp():
     return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
@@ -120,10 +153,13 @@ def capture(args):
     args.output.mkdir(mode=0o700)
     count = 0
     error = None
+    diagnostics = getattr(args, "block_stats", None)
     try:
+        boot = boot_session(diagnostics, args.udid) if diagnostics else None
         for n in range(args.samples):
             if n:
                 time.sleep(args.interval)
+            before = block_stats(diagnostics, args.udid) if diagnostics else None
             wall = timestamp()
             start = time.monotonic_ns()
             data = usb_query(args.ideviceinfo, args.udid, "-q", "com.apple.disk_usage", "-k", "NANDInfo", "-x")
@@ -133,6 +169,12 @@ def capture(args):
             if not isinstance(raw, bytes):
                 raise ValueError("NANDInfo is not a data property")
             pair = decode_nandinfo(raw)
+            block_fields = {}
+            if diagnostics:
+                after = block_stats(diagnostics, args.udid)
+                if boot_session(diagnostics, args.udid) != boot:
+                    raise ValueError("iOS boot changed during the capture")
+                block_fields = {"ios_boot_id": boot, "block_before": before, "block_after": after}
             stem = f"sample-{n:05d}"
             save_private(args.output / (stem + ".bin"), raw)
             save_json(args.output / (stem + ".json"), {
@@ -140,6 +182,7 @@ def capture(args):
                 "end_monotonic_ns": end, "product": "iPad2,5", "build": "13G36",
                 "nandinfo_sha256": sha256(raw).hexdigest(),
                 "provider_sha256": {tag: sha256(buf).hexdigest() for tag, buf in pair.items()},
+                **block_fields,
             })
             count += 1
     except (ValueError, OSError, KeyboardInterrupt, subprocess.TimeoutExpired, plistlib.InvalidFileException) as exc:
@@ -158,6 +201,8 @@ def capture(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ideviceinfo", default="ideviceinfo")
+    parser.add_argument("--block-stats", metavar="IDEVICEDIAGNOSTICS",
+                        help="bracket each flash sample with iOS disk counters using this executable")
     parser.add_argument("--udid", required=True, help="paired P105 identifier from idevice_id -l")
     parser.add_argument("--samples", type=int, default=1)
     parser.add_argument("--interval", type=float, default=0, help="seconds between completed queries")

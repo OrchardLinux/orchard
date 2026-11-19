@@ -78,6 +78,26 @@ order reproduced its ending reply byte for byte. This held in both directions
 for each pair and included the other 43 values in the statistics table.
 One interval with background programs produced a different result.
 
+The paired diagnostics service also returned 12 totals from
+`IOBlockStorageDriver`. A direct registry lookup found the native flash
+driver `AppleSwissPPNFTL` and controller `AppleIOPFMI`. Their published
+properties described configuration and power state. The following reads
+started at the same 64 MiB offset on the native System volume. A sample
+from each flash provider and independent disk counters bracketed every read
+or batch of reads.
+
+| iOS System read | Disk read requests | Additional VFL pages | Change in lower-provider word 1 |
+| --- | ---: | ---: | ---: |
+| One 4 KiB read | 1 | 1 | 1 |
+| One 64 KiB read | 1 | 16 | 4 |
+| 1 MiB in 4 KiB reads | 256 | 256 | 256 |
+| 1 MiB in 64 KiB reads | 16 | 256 | 64 |
+
+Both repetitions of each row gave the same counts. All four control
+intervals read from `/dev/zero` and added zero disk I/O. The disk driver
+recorded zero bytes written during all 12 intervals. These counts identify
+how iOS grouped the controlled reads while its paired service was running.
+
 The paired system log yielded no per-command flash records during the
 controlled read. Between the last iOS sample and Linux's first request, an
 ordered firmware trace or a verified interval of flash inactivity is still

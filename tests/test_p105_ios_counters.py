@@ -7,6 +7,7 @@ import struct
 import sys
 import tempfile
 import unittest
+import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -46,6 +47,45 @@ def nandinfo(vfl_value=None, table_value=0, extra=b"odd"):
 
 
 class IOSCounters(unittest.TestCase):
+    def test_block_counts_bracket_the_flash_sample_and_pin_one_ios_boot(self):
+        session = str(uuid.uuid4())
+        root = plistlib.dumps({"IORegistry": {"BootSessionUUID": session.upper()}})
+        before = {key: 0 for key in ios.BLOCK_COUNTERS}
+        after = {**before, "Bytes (Read)": 65536, "Operations (Read)": 1}
+
+        def block(values):
+            return plistlib.dumps({"IORegistry": {"IOClass": "IOBlockStorageDriver", "Statistics": values}})
+
+        for label, last_root in (("same", root), ("restarted", plistlib.dumps({
+                "IORegistry": {"BootSessionUUID": str(uuid.uuid4())}}))):
+            with self.subTest(boot=label), tempfile.TemporaryDirectory() as tmp:
+                dest = Path(tmp) / "counts"
+                args = SimpleNamespace(samples=1, interval=0, output=dest, udid="test",
+                                       ideviceinfo="info", block_stats="diagnostics")
+                responses = [b"iPad2,5", b"P105AP", b"13G36", root, block(before),
+                             plistlib.dumps(nandinfo()), block(after), last_root]
+                with patch.object(ios, "usb_query", side_effect=responses):
+                    if label == "restarted":
+                        with self.assertRaisesRegex(ValueError, "boot changed"):
+                            ios.capture(args)
+                        self.assertEqual(json.loads((dest / "run.json").read_text())["samples"], 0)
+                        self.assertFalse((dest / "sample-00000.bin").exists())
+                        continue
+                    ios.capture(args)
+                row = json.loads((dest / "sample-00000.json").read_text())
+                self.assertEqual(row["block_before"]["counters"], before)
+                self.assertEqual(row["block_after"]["counters"], after)
+                self.assertEqual(row["ios_boot_id"], session)
+                self.assertLessEqual(row["block_before"]["end_monotonic_ns"], row["start_monotonic_ns"])
+                self.assertLessEqual(row["end_monotonic_ns"], row["block_after"]["start_monotonic_ns"])
+
+    def test_rejects_unexpected_native_block_counters(self):
+        good = {key: 0 for key in ios.BLOCK_COUNTERS}
+        for counters in ({}, {**good, "Errors (Write)": -1}, {**good, "Operations (Read)": True}):
+            reply = {"IORegistry": {"IOClass": "IOBlockStorageDriver", "Statistics": counters}}
+            with patch.object(ios, "usb_query", return_value=plistlib.dumps(reply)), self.assertRaises(ValueError):
+                ios.block_stats("diagnostics", "test")
+
     def test_same_increments_across_wrap_and_different_starting_values(self):
         self.assertTrue(compare.same_changes(
             nandinfo(2**64 - 2, 10), nandinfo(1, 11),
