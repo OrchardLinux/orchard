@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""VM-only hardware bridge: report backlight state; accept shutdown and the desktop switch only."""
+"""VM-only hardware bridge: report backlight state; accept shutdown, the desktop switch and the device's orientation only."""
 import errno
 import os
 import select
@@ -9,6 +9,15 @@ import time
 
 BASE = '/dev/virtio-ports/'
 BRIGHTNESS = '/sys/class/backlight/20e200080.backlight/brightness'
+ACCEL = '/sys/module/orchard_vm_accel/parameters/'
+# The gravity the VM accelerometer reports (mg) when the window holds the
+# device this way up; iio-sensor-proxy names its orientations the same way.
+GRAVITY = {
+    b'normal': (0, -1000, 0),
+    b'bottom-up': (0, 1000, 0),
+    b'left-up': (1000, 0, 0),
+    b'right-up': (-1000, 0, 0),
+}
 MAXIMUM = '/sys/class/backlight/20e200080.backlight/max_brightness'
 
 def open_port(name):
@@ -56,6 +65,13 @@ def commands():
             line, pending = pending.split(b'\n', 1)
             if line == b'shutdown':
                 subprocess.run(['/usr/bin/systemctl', 'poweroff'], check=False)
+            elif line.startswith(b'orientation ') and line[12:] in GRAVITY:
+                for axis, value in zip('xyz', GRAVITY[line[12:]]):
+                    try:
+                        with open(ACCEL + axis, 'w') as f:
+                            f.write(str(value))
+                    except OSError:
+                        pass
             elif line in (b'desktop gpu', b'desktop software'):
                 # The GPU desktop on software OpenGL, or the software desktop;
                 # the session starts again with it (back to the PIN screen).

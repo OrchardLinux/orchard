@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-D=$(CDPATH= cd -- "$HERE/../out/simulator/vm" 2>/dev/null && pwd) || { echo 'VM is not prepared.' >&2; exit 1; }
+# The window passes its VM's directory; otherwise the one beside this script.
+D=$(CDPATH= cd -- "${ORCHARD_VM_DIR:-$HERE/../out/simulator/vm}" 2>/dev/null && pwd) || { echo 'VM is not prepared.' >&2; exit 1; }
 QEMU=/opt/glustore/bin/qemu-system-aarch64
 running() {
     [ -f "$D/qemu.pid" ] || return 1
@@ -15,12 +16,17 @@ case "${1:-status}" in
     if running; then echo "VM already running (PID $pid)"; exit 0; fi
     [ -x "$QEMU" ] || { echo 'Install qemu using glu first.' >&2; exit 1; }
     [ -f "$D/root.raw" ] && [ -f "$D/vmlinuz" ] || { echo 'VM disk/kernel not prepared.' >&2; exit 1; }
+    # The simulated device fixes the virtual panel, as a real one does.
+    case "$(cat "$D/device" 2>/dev/null || echo ipad6)" in
+      iphone7) panel='xres=750,yres=1334' ;;
+      *) panel='xres=1536,yres=2048' ;;
+    esac
     umask 077
     rm -f "$D/qmp.sock" "$D/agent.sock" "$D/viewer.sock" "$D/display.sock" "$D/control.sock"
     nohup "$QEMU" -machine virt,accel=hvf -cpu host -m 4096 -smp 4 \
       -kernel "$D/vmlinuz" -append 'root=/dev/vda rootwait rw console=ttyAMA0 quiet fbcon=map:9 vt.global_cursor_default=0' \
       -drive "file=$D/root.raw,format=raw,if=virtio" \
-      -device virtio-gpu-pci,xres=1536,yres=2048 -device qemu-xhci -device usb-tablet -device virtio-multitouch-pci -device virtio-keyboard-pci \
+      -device virtio-gpu-pci,$panel -device qemu-xhci -device usb-tablet -device virtio-multitouch-pci -device virtio-keyboard-pci \
       -device virtio-serial-pci -chardev "socket,id=screen,path=$D/display.sock,server=on,wait=off" \
       -device virtserialport,chardev=screen,name=org.orchard.display \
       -chardev "socket,id=control,path=$D/control.sock,server=on,wait=off" \
@@ -83,5 +89,27 @@ PY
     printf '%s\n' "$2" > "$D/desktop"
     echo "Desktop: $2 (the session restarts)"
     ;;
-  *) echo "Usage: $0 {start|stop|kill|status|desktop gpu|software}" >&2; exit 2;;
+  orientation)
+    # Which edge is up as the window holds the device; the VM accelerometer
+    # reports the matching gravity.
+    case "${2:-}" in normal|left-up|right-up|bottom-up) ;; *) echo "Usage: $0 orientation {normal|left-up|right-up|bottom-up}" >&2; exit 2;; esac
+    running || { echo 'VM is not running' >&2; exit 1; }
+    python3 - "$D/control.sock" "$2" <<'PY'
+import socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.settimeout(4)
+s.connect(sys.argv[1])
+s.sendall(b'orientation ' + sys.argv[2].encode() + b'\n')
+s.close()
+PY
+    ;;
+  device)
+    # The simulated device: its panel is fixed when the VM starts, so a
+    # running VM restarts with the new one (same disk, same install).
+    case "${2:-}" in ipad6|iphone7) ;; *) echo "Usage: $0 device {ipad6|iphone7}" >&2; exit 2;; esac
+    printf '%s\n' "$2" > "$D/device"
+    if running; then "$0" stop && "$0" start; fi
+    echo "Device: $2"
+    ;;
+  *) echo "Usage: $0 {start|stop|kill|status|desktop gpu|software|orientation EDGE|device ipad6|iphone7}" >&2; exit 2;;
 esac

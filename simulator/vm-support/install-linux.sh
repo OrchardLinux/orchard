@@ -7,15 +7,17 @@ SUPPORT="$BASE/simulator/vm-support"
 MOUNT="$D/mount"
 KVER=$(cat "$D/kernel-version")
 [ "$(id -u)" = 0 ] || { echo 'Run as root in the Podman Linux VM' >&2; exit 1; }
-[ -f "$D/root.raw" ] && [ -f "$D/orchard-vm-backlight.ko" ] || { echo 'VM disk or matching module missing' >&2; exit 1; }
+[ -f "$D/root.raw" ] && [ -f "$D/orchard-vm-backlight.ko" ] && [ -f "$D/orchard-vm-accel.ko" ] || { echo 'VM disk or matching modules missing' >&2; exit 1; }
 mkdir -p "$MOUNT"
 cleanup() { if mountpoint -q "$MOUNT"; then umount "$MOUNT"; fi; }
 trap cleanup EXIT INT TERM
 mount -o loop "$D/root.raw" "$MOUNT"
 install -D -m 0644 "$D/orchard-vm-backlight.ko" "$MOUNT/usr/lib/modules/$KVER/extra/orchard-vm-backlight.ko"
+install -D -m 0644 "$D/orchard-vm-accel.ko" "$MOUNT/usr/lib/modules/$KVER/extra/orchard-vm-accel.ko"
 depmod -b "$MOUNT" "$KVER"
 install -D -m 0755 "$SUPPORT/orchard-vm-bridge.py" "$MOUNT/usr/local/libexec/orchard-vm-bridge"
 printf '%s\n' orchard-vm-backlight > "$MOUNT/etc/modules-load.d/orchard-vm-backlight.conf"
+printf '%s\n' industrialio orchard-vm-accel > "$MOUNT/etc/modules-load.d/orchard-vm-accel.conf"
 cat > "$MOUNT/etc/systemd/system/orchard-vm-bridge.service" <<'UNIT'
 [Unit]
 Description=Orchard simulator virtual hardware bridge
@@ -34,4 +36,4 @@ sync
 umount "$MOUNT"
 rmdir "$MOUNT"
 trap - EXIT INT TERM
-printf 'Installed VM-only backlight and bridge for %s\n' "$KVER"
+printf 'Installed VM-only backlight, accelerometer and bridge for %s\n' "$KVER"
