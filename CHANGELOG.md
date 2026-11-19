@@ -13,6 +13,9 @@ is missing or empty.
 
 ### Install & launch
 
+- On Linux, `orchard run` and `orchard launch` use the released Pongo again
+  instead of asking for a Mac with Xcode: the release lookup picked the
+  moving `nightly` tag, which publishes no checksums.
 - A7 and A8 devices (ANS1 storage) no longer reset back to iOS when
   `orchard launch` starts a system from internal storage: m1n1 freed its
   storage command queue twice while shutting storage down.
