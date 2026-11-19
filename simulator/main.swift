@@ -807,6 +807,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         mouse.tag = 0
         appMenu.addItem(mouse)
         appMenu.addItem(.separator())
+        // The Mac's own: a menu key equivalent is the Mac's before the guest
+        // sees Command as Super.
+        appMenu.addItem(withTitle: "Hide Orchard Simulator", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthers = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(hideOthers)
+        appMenu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Orchard Simulator", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         if ProcessInfo.processInfo.environment["ORCHARD_VM_SCRIPT"] != nil {
             let detach = NSMenuItem(title: "Quit and Keep VM Running", action: #selector(quitKeepingVM), keyEquivalent: "q")
