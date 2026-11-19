@@ -174,6 +174,10 @@ final class SimulatorView: NSView {
         return displayRect.insetBy(dx: -side, dy: -end)
     }
     private var edgeTouch = false
+    // A press on the bezel's edge zone is a touch only once it moves: an edge
+    // swipe slides onto the screen, a tap on the frame is no touch at all.
+    // Until then the press waits here, and begins where it was pressed.
+    private var edgePress: NSEvent?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -262,8 +266,12 @@ final class SimulatorView: NSView {
             needsDisplay = true
         }
         if guestPointerDown {
-            if touchMode || edgeTouch { hardware?.touch("end", x: touchPosition.x, y: touchPosition.y) }
-            else { hardware?.pointer(x: touchPosition.x, y: touchPosition.y, buttons: 0) }
+            // A bezel press that never moved never began.
+            if edgePress == nil {
+                if touchMode || edgeTouch { hardware?.touch("end", x: touchPosition.x, y: touchPosition.y) }
+                else { hardware?.pointer(x: touchPosition.x, y: touchPosition.y, buttons: 0) }
+            }
+            edgePress = nil
             guestPointerDown = false
             edgeTouch = false
         }
@@ -365,8 +373,8 @@ final class SimulatorView: NSView {
             guestFocused = true
             guestPointerDown = true
             edgeTouch = true
+            edgePress = event
             window?.makeFirstResponder(self)
-            sendTouch(event, phase: "begin")
             return
         }
         resizeCorner = corner(at: convert(event.locationInWindow, from: nil))
@@ -391,6 +399,12 @@ final class SimulatorView: NSView {
     }
     override func mouseDragged(with event: NSEvent) {
         if guestPointerDown {
+            if let press = edgePress {
+                let from = convert(press.locationInWindow, from: nil), to = convert(event.locationInWindow, from: nil)
+                guard hypot(to.x - from.x, to.y - from.y) >= 3 else { return }
+                edgePress = nil
+                sendTouch(press, phase: "begin")
+            }
             if touchMode || edgeTouch { sendTouch(event, phase: "update") } else { sendPointer(event, buttons: 1) }
             return
         }
@@ -413,7 +427,11 @@ final class SimulatorView: NSView {
     }
     override func mouseUp(with event: NSEvent) {
         if guestPointerDown {
-            if touchMode || edgeTouch { sendTouch(event, phase: "end") } else { sendPointer(event, buttons: 0) }
+            // A bezel press that never moved never began.
+            if edgePress == nil {
+                if touchMode || edgeTouch { sendTouch(event, phase: "end") } else { sendPointer(event, buttons: 0) }
+            }
+            edgePress = nil
             guestPointerDown = false
             edgeTouch = false
             return
