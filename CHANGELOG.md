@@ -11,6 +11,12 @@ is missing or empty.
 
 ## Unreleased
 
+### Install & launch
+
+- A7 and A8 devices (ANS1 storage) no longer reset back to iOS when
+  `orchard launch` starts a system from internal storage: m1n1 freed its
+  storage command queue twice while shutting storage down.
+
 ## [0.3.2] - 2026-11-19
 
 ### Devices
