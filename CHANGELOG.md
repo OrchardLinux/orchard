@@ -11,6 +11,12 @@ is missing or empty.
 
 ## Unreleased
 
+### Install & launch
+
+- On Linux, `orchard run` and `orchard launch` use the released Pongo again
+  instead of asking for a Mac with Xcode: the release lookup picked the
+  moving `nightly` tag, which publishes no checksums.
+
 ## [0.3.2] - 2026-11-19
 
 ### Devices

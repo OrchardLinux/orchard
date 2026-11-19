@@ -609,7 +609,7 @@ def released_pongo(hardware):
     """
     def git(*arguments):
         return subprocess.run(['git', '-C', str(hardware), *arguments], capture_output=True, text=True)
-    described = git('describe', '--tags', '--abbrev=0')
+    described = git('describe', '--tags', '--abbrev=0', '--match', 'v*')
     if described.returncode:
         return None
     tag = described.stdout.strip()
