@@ -37,6 +37,6 @@ podman run --rm -v "$ROOT:/work" localhost/orchard-hardware-kernel-toolchain:boo
   set -e
   cp -r /work/simulator/vm-support /tmp/module
   make -C "/work/out/simulator/kernel-build/usr/src/kernels/'"$KVER"'" M=/tmp/module CC=/work/out/simulator/kernel-build/gcc-compat modules
-  cp /tmp/module/orchard-vm-backlight.ko /work/out/simulator/vm/orchard-vm-backlight.ko
+  cp /tmp/module/orchard-vm-backlight.ko /tmp/module/orchard-vm-accel.ko /work/out/simulator/vm/
 '
-echo "VM backlight module built for $KVER"
+echo "VM backlight and accelerometer modules built for $KVER"

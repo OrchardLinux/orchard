@@ -56,14 +56,14 @@ podman machine ssh "sudo $HERE/prepare-vm-linux.sh $DOWNLOAD"
 # button's blanking then dims the window as it darkens a tablet's panel.
 # Without it everything else still works; the window just stays lit.
 kver=$(cat "$VM/kernel-version")
-if [ ! -f "$VM/orchard-vm-backlight.ko" ] || [ "$(cat "$VM/backlight-kernel" 2>/dev/null)" != "$kver" ]; then
-    rm -f "$VM/orchard-vm-backlight.ko"
+if [ ! -f "$VM/orchard-vm-backlight.ko" ] || [ ! -f "$VM/orchard-vm-accel.ko" ] || [ "$(cat "$VM/backlight-kernel" 2>/dev/null)" != "$kver" ]; then
+    rm -f "$VM/orchard-vm-backlight.ko" "$VM/orchard-vm-accel.ko"
     if "$HERE/build-vm-backlight"; then printf '%s\n' "$kver" > "$VM/backlight-kernel"; fi
 fi
-if [ -f "$VM/orchard-vm-backlight.ko" ]; then
+if [ -f "$VM/orchard-vm-backlight.ko" ] && [ -f "$VM/orchard-vm-accel.ko" ]; then
     podman machine ssh "sudo $HERE/vm-support/install-linux.sh"
 else
-    echo 'No VM backlight (building it failed): Power will not dim the window.' >&2
+    echo 'No VM modules (building them failed): Power will not dim the window and turning it will not rotate the desktop.' >&2
 fi
 printf '%s\n' "$version" > "$VM/release"
 echo "Simulator disk ready: Omarchy A $version. Start it with simulator/run."

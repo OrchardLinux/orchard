@@ -20,6 +20,14 @@ is missing or empty.
   `orchard launch` starts a system from internal storage: m1n1 freed its
   storage command queue twice while shutting storage down.
 
+### Development
+
+- Orchard Simulator: an iPhone 7 alongside the iPad 6 (Device menu), each in
+  a realistic frame. Rotate Left and Right (⌃⌘← and ⌃⌘→) turn the device,
+  and the desktop follows through the same rotation-sensor path as a real
+  tablet. The frame's buttons no longer take the keyboard away from the
+  guest, and the screen comes back by itself after the VM restarts.
+
 ## [0.3.2] - 2026-11-19
 
 ### Devices
