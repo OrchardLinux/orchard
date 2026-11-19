@@ -20,6 +20,8 @@ struct DeviceProfile {
     let darkFront: Bool
     // Window pixels per millimetre: both devices open about as tall.
     var scale: CGFloat { 720 / height }
+    // The panel's short side in pixels, until the guest's own picture says.
+    var panelPixelsWide: CGFloat { name == "iphone7" ? 750 : 1536 }
     static let margin: CGFloat = 24
 
     // iPad (6th generation), Wi-Fi: 169.5 × 240 mm, 9.7-inch 4:3 display.
@@ -113,6 +115,16 @@ final class SimulatorView: NSView {
     }
     var canvas: NSSize {
         NSSize(width: heldSize.width * profile.scale + margin * 2, height: heldSize.height * profile.scale + margin * 2)
+    }
+
+    // The window zoom (window points per canvas point) at which one guest
+    // pixel takes SHARE of a pixel of this Mac's screen: 1 is 100 %, the
+    // guest's picture pixel for pixel. The panel's width in pixels is the
+    // guest's own, or the profile's until it has drawn.
+    func zoom(pixelShare share: CGFloat, backingScale: CGFloat) -> CGFloat {
+        let live = display.map { CGFloat(min($0.width, $0.height)) } ?? 0
+        let pixels = live > 0 ? live : profile.panelPixelsWide
+        return pixels * share / backingScale / (profile.display.width * profile.scale)
     }
 
     // Device millimetres (upright) to the held device's millimetres, and back.
@@ -805,6 +817,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appMenu.addItem(detach)
         }
         appItem.submenu = appMenu
+        // Scale: the guest's picture at a share of the Mac's own pixels
+        // (100 % is pixel for pixel), or as large as the screen allows.
+        let scaleItem = NSMenuItem()
+        menu.addItem(scaleItem)
+        let scaleMenu = NSMenu(title: "Scale")
+        for (title, share) in [("50%", 0.5), ("75%", 0.75), ("100%", 1.0)] {
+            let item = NSMenuItem(title: title, action: #selector(selectScale(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = share
+            scaleMenu.addItem(item)
+        }
+        scaleMenu.addItem(.separator())
+        let fit = NSMenuItem(title: "Fit to Screen", action: #selector(selectScale(_:)), keyEquivalent: "")
+        fit.target = self
+        scaleMenu.addItem(fit)
+        scaleItem.submenu = scaleMenu
         app.mainMenu = menu
         window = SimulatorWindow(contentRect: NSRect(origin: .zero, size: view.canvas), styleMask: [.borderless], backing: .buffered, defer: false)
         window.title = "Orchard Simulator"
@@ -876,6 +904,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.runModal()
         }
     }
+    // The window at a share of the Mac's pixels, or fitted to the screen,
+    // about its own centre and kept on the screen.
+    @objc private func selectScale(_ item: NSMenuItem) {
+        guard let view = window.contentView as? SimulatorView else { return }
+        let screen = window.screen ?? NSScreen.main
+        let visible = screen?.visibleFrame ?? window.frame
+        let zoom: CGFloat
+        if let share = item.representedObject as? Double {
+            zoom = view.zoom(pixelShare: CGFloat(share), backingScale: window.backingScaleFactor)
+        } else {
+            zoom = min(visible.width / view.canvas.width, visible.height / view.canvas.height)
+        }
+        let size = NSSize(width: view.canvas.width * zoom, height: view.canvas.height * zoom)
+        var frame = NSRect(x: window.frame.midX - size.width / 2, y: window.frame.midY - size.height / 2,
+                           width: size.width, height: size.height)
+        // Keep the top on the screen (where the menu bar is); larger than the
+        // screen, it runs off the bottom.
+        frame.origin.y = min(frame.origin.y, visible.maxY - frame.height)
+        frame.origin.x = max(visible.minX, min(frame.origin.x, visible.maxX - frame.width))
+        window.setFrame(frame, display: true)
+        for entry in item.menu?.items ?? [] { entry.state = entry === item ? .on : .off }
+    }
+
     // Turns the device in the window, frame and screen together, and tells the
     // VM's accelerometer; the guest turns its picture as a tablet does.
     @objc private func rotate(_ item: NSMenuItem) {
