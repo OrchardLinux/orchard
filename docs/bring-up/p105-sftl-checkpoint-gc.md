@@ -44,35 +44,54 @@ indeterminate erase or failed verification stops the writer instance.
 
 ## Checkpoint publication and recovery
 
-The two-block SwissPPNFTL save and VFL bank rotation operate on different
-parts of the medium.
+SwissPPNFTL saves allocate a fresh normal-view context group. The separate
+VFL rotation uses two replicated SLC banks.
 
 | Operation | Write order | Recovery evidence |
 | --- | --- | --- |
-| SwissPPNFTL checkpoint | Write the named blank alternate in normal view, verify each page, reload with both generations visible, retire the old context, reload again, then erase the data donor. | The native base and accounting prefix contains 32 records. The map is padded in batches of 64 records. Coverage of the last logical key can occur many pages before the save finishes. |
+| SwissPPNFTL checkpoint | Reserve fresh sites, copy live data, write the base page, sample the two providers, then write the statistics and remaining context pages. Reload with the old generation present, retire its occupied site, release unused new capacity, reload and verify the donor erase. | The base names the new generation's capacity. Old occupied sites are discovered independently. The native accounting prefix has 32 records and map batches have 64. |
 | Healthy VFL rotation | Erase the four target SLC members, save a checkpoint referencing the source tables, copy all 16 lane tables, then save the final checkpoint with the target references. | Each page has four replicas. The source bank can contain a table update after its last complete checkpoint. The executor checks that tail before changing the target. |
 
 Recovery from an incomplete native batch preserves confirmed journal writes
 and exposes the disk read-only when the next safe sequence is uncertain.
-If retirement stops between lanes, the new generation must name the old
-context site and every surviving record there must predate the selected
-generation. Conflicting references, missing live records or unsupported
-geometry can still prevent a mount.
+For a saved context-role site outside the selected group, recovery checks
+the physical pages, lane order, record tags, sequence and map ownership.
+Incomplete evidence can yield a read-only mount. Conflicting metadata or
+references into a reserved site can prevent recovery.
 
-The encoder derives per-superblock valid logical-page counts and the global
-valid-page statistic from the whole map. These values matched every one of
-the 2,086 superblocks in the archived native checkpoint. The writer also
+The writer derives the valid-page count of each of the 2,086 superblocks
+from the whole map. A native save preserves the cached global counts until
+the observed firmware statistics refresh. The writer also
 rebuilds the per-block user sequence statistics from closed footers. A live
 page copy receives a new physical write sequence and keeps the high 32 bits
 of the original user sequence in its tag. The tests supply the remaining
 allocation policy for synthetic media. The P105 driver keeps native
 checkpoint writes disabled.
 
+## Native allocation, wear and counters
+
+The healthy 13G36 allocator compares wear across clean and dirty free
+blocks. When the clean pool is below six, an allocation can also erase
+other low-wear dirty blocks to replenish it. After the last valid page
+moves, the closed donor changes from class 3 to dirty-free class 9 and its
+read count clears. A successful later erase changes it to clean-free
+class 1 and increments its 16-bit wear value. Native firmware also
+increments wear when it releases an unused new context reservation,
+without issuing an erase for that site. The driver declines an ambiguous
+or overflowing transition before reuse.
+
+The native base program completes before the two getters run. ID 255
+contains 88 bytes of VFL statistics. ID 254 contains 464 bytes from
+lower-provider requests and completions. Both are sampled before the
+statistics page is programmed. The number of physical rows, command
+batching and completion flags all matter. A post-save statistics refresh
+updates cached global counts separately.
+
 ## Source and verification
 
 The patches in `kernel/patches/armv7/mtd/` apply to the merged
 [ARMv7 append writer](https://github.com/OrchardLinux/linux/commit/0c6503279c702b44a340c37f072cd9170d6bf4a4).
-The [kernel source](https://github.com/shaynelegault/linux/commit/64e248acc722bbf6a1171caf07d3858853de6ad3)
+The [kernel source](https://github.com/shaynelegault/linux/commit/e3684d2ab4c71fbef0907f3e584e07af09b59744)
 contains the synthetic KUnit fixtures.
 
 - A normal write moved five live records, programmed a 24-page native-format
@@ -81,11 +100,14 @@ contains the synthetic KUnit fixtures.
   save boundaries, readback faults, and power cuts between the old context's
   lane erases.
 - The C reader replayed captured device pages through journal sequence
-  187831212. All 15,625,016 keys agreed with the archived map. All 95
-  incomplete prefixes of a 96-record second generation preserved the map,
-  including interruptions inside pages and during map padding.
-  Erasing 1–15 of the 16 old lanes preserved the new map read-only. A fully
-  retired old context permitted healthy recovery.
+  187831212. All 15,625,016 keys agreed with the archived map. Of the 2,048
+  pages at unnamed context-role block 601, only two are in the archive.
+  The reader exposes that unmodified capture read-only.
+- A separate RAM overlay supplied erased values for the 2,046 uncaptured
+  pages on each of blocks 594, 601 and 636. With that assumption, all 95
+  incomplete prefixes of a new 96-record save and all 15 partial
+  retirements preserved the full map. The overlay started with all
+  captured pages intact.
 - Replaying the recorded healthy VFL rotation reproduced all 72 target
   replica pages, including their out-of-band metadata. All 256 source pages
   remained intact. Synthetic tests also interrupted the operation after
@@ -93,9 +115,28 @@ contains the synthetic KUnit fixtures.
 - The reader rejects a historical 283-FTL-superblock checkpoint for this
   2,086-superblock volume. The native loader and setter treat this field as
   the size of the FTL address space.
-- All 59 host sanitizer cases passed, along with 209 range-map round trips,
-  66 relocation cases and 24 native metadata vectors. The ARMv7 object
-  checks covered 17 configurations.
+- Independent execution of the storage firmware matched the C allocation
+  planner on 600 generated block tables. On 341 captured closed donors the
+  two implementations agreed on donor state, wear and the separate cached
+  statistics refresh.
+- The firmware and C implementation agreed on all 552 provider bytes at
+  426 comparison points, covering the archived initial counters, a
+  synthetic initial state and integer rollover.
+- In a separate end-to-end replay, the original 13G36 foreground GC chose
+  donor 3 from two eligible blocks, read its footer, and moved keys
+  101–104 to block 32. The verifier compared all 16 KiB of data and 64
+  out-of-band bytes at the lower-provider write boundary. Native firmware
+  updated the map, finalized the donor, allocated context sites 33 and 34,
+  and serialized the statistics after writing the base page. It erased old
+  context 17, released unused site 34, and subsequently erased the donor.
+  The Linux event accounting matched the native getters byte-for-byte.
+  The initial state and successful NAND responses were supplied in RAM.
+- The replay used the original ARM storage code from build 13G36, SHA-256
+  `fcc7fa01fa80c03ca4de026ce01e8fb2b131abd60fffa1f498e5b901d34e78be`.
+  It entered foreground GC at `0x81090320`; the checkpoint getters at
+  `0x810a048c` and `0x8108ac18` supplied the independent reference bytes.
+- All 72 host sanitizer cases, 209 map round trips and 66 relocation
+  differentials passed. Twenty ARMv7 object configurations compiled.
 
 The checkpoint metadata and footer evidence comes from IOFlashStorage-730 on
 build 13G36 and the [pinned Cascadia NAND research](https://github.com/rzxvx/Project-Cascadia/blob/c20b85ebb951c704d7e3a664c378dde8276e3928/docs/research/p105-nand.md).
@@ -104,21 +145,13 @@ document the starting evidence.
 
 ## Remaining before hardware enablement
 
-The remaining software work is to account for allocation of the landing
-block, open write streams, wear and the timing of native counter updates.
-On all 341 qualifying captured closed donors, native finalization changes
-class 3 to class 9 and clears the read count. After a statistics refresh,
-the free count increases and the data count decreases. The native writer
-can save the previously cached counters before that refresh. Applying the
-donor delta directly to the old checkpoint could therefore publish the
-wrong counts. Each save also requests two statistics payloads from the
-native provider. ID 255 reads 88 bytes of VFL state (13G36 handler
-`0x810a048c`), and ID 254 reads 464 bytes of lower-provider state
-(`0x8108ac18`). The archive contains one version of this pair. A pair of
-checkpoints bracketing a known native relocation, or an independently
-validated replay of those provider events, would allow a byte-for-byte
-comparison of the resulting state. Scrub and bad-member replacement also
-need qualification.
+The physical provider needs a trustworthy starting state and a continuous
+record of native-equivalent reads, programs, erases, synchronizations and
+their completion flags. One saved counter sample plus the logical journal
+cannot reconstruct that history. Replaying two plausible clean-pool
+histories selected the same observed landing blocks, 654 and 661, and
+issued different maintenance erases. Losing that history invalidates the
+counter model. Scrub and bad-member replacement also need qualification.
 
 Physical qualification must establish the exact erase footprint in both
 normal and SLC views, exclusive ownership across raw MTD and SFTL operations,
