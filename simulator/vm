@@ -107,8 +107,9 @@ PY
     # The simulated device: its panel is fixed when the VM starts, so a
     # running VM restarts with the new one (same disk, same install).
     case "${2:-}" in ipad6|iphone7) ;; *) echo "Usage: $0 device {ipad6|iphone7}" >&2; exit 2;; esac
-    printf '%s\n' "$2" > "$D/device"
-    if running; then "$0" stop && "$0" start; fi
+    # Recorded only once the old VM is down, so a failed stop changes nothing.
+    if running; then "$0" stop; printf '%s\n' "$2" > "$D/device"; "$0" start
+    else printf '%s\n' "$2" > "$D/device"; fi
     echo "Device: $2"
     ;;
   *) echo "Usage: $0 {start|stop|kill|status|desktop gpu|software|orientation EDGE|device ipad6|iphone7}" >&2; exit 2;;
