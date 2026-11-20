@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: dugs <dugahol@protonmail.com>
+Date: Fri, 20 Nov 2026 07:44:06 +0800
+Subject: [PATCH] arm64: dts: apple: t8015: Add the SMC function switch
+ regulators
+
+The SMC switches some supplies through function keys on A11 phones.
+Add the node that holds them, disabled until a board describes one.
+
+Originally from iPhOmarchy patches/0040 (b2533c59a2a0), iPhOmarchy
+5921728.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8015.dtsi | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t8015.dtsi b/arch/arm64/boot/dts/apple/t8015.dtsi
+index 58850628a..887750877 100644
+--- a/arch/arm64/boot/dts/apple/t8015.dtsi
++++ b/arch/arm64/boot/dts/apple/t8015.dtsi
+@@ -645,6 +645,11 @@ smc_hwmon: hwmon {
+ 				compatible = "apple,smc-hwmon";
+ 			};
+ 
++			smc_regulators: regulators {
++				compatible = "apple,smc-regulators";
++				status = "disabled";
++			};
++
+ 			smc_reboot: reboot {
+ 				compatible = "apple,t8015-smc-reboot";
+ 				nvmem-cells = <&shutdown_flag>, <&boot_stage>,

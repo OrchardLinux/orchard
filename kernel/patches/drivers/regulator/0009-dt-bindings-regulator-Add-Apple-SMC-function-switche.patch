@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: dugs <dugahol@protonmail.com>
+Date: Fri, 20 Nov 2026 07:43:09 +0800
+Subject: [PATCH] dt-bindings: regulator: Add Apple SMC function switches
+
+Apple A-series phones switch some supplies through an SMC function key
+rather than a PMIC register. The ADT names them as SMC functions with a
+key and a function value, e.g. the iPhone 8 Plus touch controller core
+rail, pKW4('rBK3', 0x5020000). Describe such supplies by key and
+function value.
+
+Originally from iPhOmarchy patches/0040 ("input: apple_z2: D21 SMC function
+rail control + iOS-order power cycle", b2533c59a2a0) and patches/0041
+("input: apple_z2: D21 SMC rail-state probe (RW) + smc_on_retries",
+b570c134309f), iPhOmarchy 5921728.
+
+Assisted-by: LLM
+---
+ .../regulator/apple,smc-regulators.yaml       | 61 +++++++++++++++++++
+ 1 file changed, 61 insertions(+)
+ create mode 100644 Documentation/devicetree/bindings/regulator/apple,smc-regulators.yaml
+
+diff --git a/Documentation/devicetree/bindings/regulator/apple,smc-regulators.yaml b/Documentation/devicetree/bindings/regulator/apple,smc-regulators.yaml
+new file mode 100644
+index 000000000..51b277ef0
+--- /dev/null
++++ b/Documentation/devicetree/bindings/regulator/apple,smc-regulators.yaml
+@@ -0,0 +1,61 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/regulator/apple,smc-regulators.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Apple SMC function switch regulators
++
++maintainers:
++  - dugs <dugahol@protonmail.com>
++
++description:
++  Supplies that Apple A-series phones switch through a System Management
++  Controller function key instead of a PMIC register. The Apple device tree
++  names them as SMC functions with a key and a function value, for example
++  pKW4('rBK3', 0x5020000) for the iPhone 8 Plus touch controller core rail.
++  Writing the function value with its low half set to 1 switches the supply
++  on, with its low half 0 off.
++
++properties:
++  compatible:
++    const: apple,smc-regulators
++
++patternProperties:
++  "^regulator-[a-z0-9-]+$":
++    type: object
++    $ref: regulator.yaml#
++    unevaluatedProperties: false
++
++    properties:
++      apple,key-id:
++        $ref: /schemas/types.yaml#/definitions/string
++        pattern: "^[A-Za-z0-9]{4}$"
++        description: The SMC key of the function
++
++      apple,function:
++        $ref: /schemas/types.yaml#/definitions/uint32
++        description:
++          The function value from the Apple device tree. Its low 16 bits
++          are zero; the driver sets them to the enable state.
++
++    required:
++      - apple,key-id
++      - apple,function
++
++required:
++  - compatible
++
++additionalProperties: false
++
++examples:
++  - |
++    regulators {
++        compatible = "apple,smc-regulators";
++
++        regulator-touch-core {
++            apple,key-id = "rBK3";
++            apple,function = <0x05020000>;
++            regulator-name = "touch-core";
++        };
++    };

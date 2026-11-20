@@ -1,0 +1,234 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: dugs <dugahol@protonmail.com>
+Date: Fri, 20 Nov 2026 07:43:09 +0800
+Subject: [PATCH] regulator: Add Apple SMC function switch regulators
+
+On the iPhone 8 Plus (D21) the touch controller's core rail is an SMC
+function, pKW4('rBK3', 0x5020000) in the ADT. iOS calls it by writing a
+32-bit code to the key: the function value with its low half replaced by
+the enable state, 0x05020001 on and 0x05020000 off (decoded from
+AppleSMCEmbeddedFunctions in the iOS 16.7.16 kernelcache, and what iOS
+writes on every screen lock). A plain zero is not a valid code: the SMC
+resets the system on it, so function values with an empty upper half
+are refused.
+
+A plain read of a function key fails, so the state is the last one
+written. A rail the bootloader left on gets the on code again on its
+first enable, as on every iOS power-up.
+
+Modelled as a regulator so that the touch driver can cut the rail on
+power-off and so make a reload or resume a real power cycle, which the
+D21 controller needs to leave a half-booted state.
+
+Originally from iPhOmarchy patches/0040 ("input: apple_z2: D21 SMC function
+rail control + iOS-order power cycle", b2533c59a2a0) and patches/0041
+("input: apple_z2: D21 SMC rail-state probe (RW) + smc_on_retries",
+b570c134309f), iPhOmarchy 5921728.
+
+Assisted-by: LLM
+---
+ drivers/regulator/Kconfig            |   9 ++
+ drivers/regulator/Makefile           |   1 +
+ drivers/regulator/macsmc-regulator.c | 161 +++++++++++++++++++++++++++
+ 3 files changed, 171 insertions(+)
+ create mode 100644 drivers/regulator/macsmc-regulator.c
+
+diff --git a/drivers/regulator/Kconfig b/drivers/regulator/Kconfig
+index cb63712f7..574ca0038 100644
+--- a/drivers/regulator/Kconfig
++++ b/drivers/regulator/Kconfig
+@@ -144,6 +144,15 @@ config REGULATOR_APPLE_PMIC_TOUCH
+ 	  inside the driver instead of describing register programming in the
+ 	  device tree.
+ 
++config REGULATOR_MACSMC
++	tristate "Apple SMC function switch regulators"
++	depends on MFD_MACSMC
++	default MFD_MACSMC
++	help
++	  Support supplies that Apple A-series phones switch through an SMC
++	  function key rather than a PMIC register, such as the iPhone 8
++	  Plus touch controller core rail.
++
+ config REGULATOR_ANATOP
+ 	tristate "Freescale i.MX on-chip ANATOP LDO regulators"
+ 	depends on ARCH_MXC || COMPILE_TEST
+diff --git a/drivers/regulator/Makefile b/drivers/regulator/Makefile
+index 731ea00ec..53908818d 100644
+--- a/drivers/regulator/Makefile
++++ b/drivers/regulator/Makefile
+@@ -24,6 +24,7 @@ obj-$(CONFIG_REGULATOR_ACT8945A) += act8945a-regulator.o
+ obj-$(CONFIG_REGULATOR_AD5398) += ad5398.o
+ obj-$(CONFIG_REGULATOR_ADP5055) += adp5055-regulator.o
+ obj-$(CONFIG_REGULATOR_APPLE_PMIC_TOUCH) += apple-pmic-touch-regulator.o
++obj-$(CONFIG_REGULATOR_MACSMC) += macsmc-regulator.o
+ obj-$(CONFIG_REGULATOR_ANATOP) += anatop-regulator.o
+ obj-$(CONFIG_REGULATOR_ARIZONA_LDO1) += arizona-ldo1.o
+ obj-$(CONFIG_REGULATOR_ARIZONA_MICSUPP) += arizona-micsupp.o
+diff --git a/drivers/regulator/macsmc-regulator.c b/drivers/regulator/macsmc-regulator.c
+new file mode 100644
+index 000000000..b3033014f
+--- /dev/null
++++ b/drivers/regulator/macsmc-regulator.c
+@@ -0,0 +1,161 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Apple SMC function switches as regulators
++ *
++ * On Apple A-series phones some supplies are switched by the SMC rather than
++ * by a PMIC register. The ADT names them as SMC functions, e.g. the iPhone 8
++ * Plus touch controller core rail:
++ *
++ *   function-power_ldo = <smc-pmu> pKW4('rBK3', 0x5020000)
++ *
++ * iOS calls such a function by writing a 32-bit code to its key: the
++ * function value with its low half replaced by the enable state, so
++ * 0x05020001 switches the rail on and 0x05020000 off. A plain zero is not a
++ * valid code; the SMC answers it by resetting the system, so a function
++ * value whose upper half is zero is refused.
++ *
++ * The SMC reports no state for a function key on a plain read, so the state
++ * is the last one written. The bootloader may leave a rail on; the first
++ * enable then repeats the on code, as iOS does on every power-up.
++ */
++
++#include <linux/bitfield.h>
++#include <linux/mfd/core.h>
++#include <linux/mfd/macsmc.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/regulator/driver.h>
++#include <linux/regulator/of_regulator.h>
++
++#define SMC_FUNCTION_CODE	GENMASK(31, 16)
++#define SMC_FUNCTION_ENABLE	BIT(0)
++
++struct macsmc_regulator {
++	struct apple_smc *smc;
++	struct regulator_desc desc;
++	smc_key key;
++	u32 code;
++	bool enabled;
++};
++
++static int macsmc_regulator_set(struct regulator_dev *rdev, bool enable)
++{
++	struct macsmc_regulator *reg = rdev_get_drvdata(rdev);
++	u32 value = reg->code | (enable ? SMC_FUNCTION_ENABLE : 0);
++	int ret;
++
++	ret = apple_smc_write_u32(reg->smc, reg->key, value);
++	if (ret)
++		return ret;
++
++	reg->enabled = enable;
++	return 0;
++}
++
++static int macsmc_regulator_enable(struct regulator_dev *rdev)
++{
++	return macsmc_regulator_set(rdev, true);
++}
++
++static int macsmc_regulator_disable(struct regulator_dev *rdev)
++{
++	return macsmc_regulator_set(rdev, false);
++}
++
++static int macsmc_regulator_is_enabled(struct regulator_dev *rdev)
++{
++	struct macsmc_regulator *reg = rdev_get_drvdata(rdev);
++
++	return reg->enabled;
++}
++
++static const struct regulator_ops macsmc_regulator_ops = {
++	.enable = macsmc_regulator_enable,
++	.disable = macsmc_regulator_disable,
++	.is_enabled = macsmc_regulator_is_enabled,
++};
++
++static int macsmc_regulator_add(struct device *dev, struct apple_smc *smc,
++				struct device_node *np)
++{
++	struct regulator_config config = { };
++	struct macsmc_regulator *reg;
++	struct regulator_dev *rdev;
++	const char *key;
++	u32 function;
++	int ret;
++
++	ret = of_property_read_string(np, "apple,key-id", &key);
++	if (ret || strlen(key) != 4)
++		return dev_err_probe(dev, -EINVAL, "%pOF: invalid apple,key-id\n", np);
++
++	ret = of_property_read_u32(np, "apple,function", &function);
++	if (ret)
++		return dev_err_probe(dev, ret, "%pOF: missing apple,function\n", np);
++	if (function & ~SMC_FUNCTION_CODE || !FIELD_GET(SMC_FUNCTION_CODE, function))
++		return dev_err_probe(dev, -EINVAL,
++				     "%pOF: invalid function value %#x\n", np, function);
++
++	reg = devm_kzalloc(dev, sizeof(*reg), GFP_KERNEL);
++	if (!reg)
++		return -ENOMEM;
++
++	reg->smc = smc;
++	reg->key = _SMC_KEY(key);
++	reg->code = function;
++	reg->desc.name = devm_kasprintf(dev, GFP_KERNEL, "smc-%s", key);
++	if (!reg->desc.name)
++		return -ENOMEM;
++	reg->desc.type = REGULATOR_VOLTAGE;
++	reg->desc.owner = THIS_MODULE;
++	reg->desc.ops = &macsmc_regulator_ops;
++
++	config.dev = dev;
++	config.of_node = np;
++	config.driver_data = reg;
++	config.init_data = of_get_regulator_init_data(dev, np, &reg->desc);
++
++	rdev = devm_regulator_register(dev, &reg->desc, &config);
++	if (IS_ERR(rdev))
++		return dev_err_probe(dev, PTR_ERR(rdev), "%pOF: registration failed\n", np);
++
++	return 0;
++}
++
++static int macsmc_regulator_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct apple_smc *smc = dev_get_drvdata(dev->parent);
++	int ret;
++
++	if (!dev->of_node)
++		return -ENODEV;
++
++	for_each_available_child_of_node_scoped(dev->of_node, np) {
++		ret = macsmc_regulator_add(dev, smc, np);
++		if (ret)
++			return ret;
++	}
++
++	return 0;
++}
++
++static const struct of_device_id macsmc_regulator_of_match[] = {
++	{ .compatible = "apple,smc-regulators" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, macsmc_regulator_of_match);
++
++static struct platform_driver macsmc_regulator_driver = {
++	.driver = {
++		.name = "macsmc-regulator",
++		.of_match_table = macsmc_regulator_of_match,
++	},
++	.probe = macsmc_regulator_probe,
++};
++module_platform_driver(macsmc_regulator_driver);
++
++MODULE_DESCRIPTION("Apple SMC function switch regulators");
++MODULE_LICENSE("GPL");
++MODULE_ALIAS("platform:macsmc-regulator");

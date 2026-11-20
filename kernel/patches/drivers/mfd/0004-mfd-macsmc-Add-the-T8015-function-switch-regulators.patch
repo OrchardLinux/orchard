@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: dugs <dugahol@protonmail.com>
+Date: Fri, 20 Nov 2026 07:43:09 +0800
+Subject: [PATCH] mfd: macsmc: Add the T8015 function switch regulators
+
+Register the SMC function switch regulators on T8015, where the
+iPhone 8 Plus switches its touch controller core rail through the SMC.
+Boards that do not describe them leave the node disabled.
+
+Originally from iPhOmarchy patches/0040 ("input: apple_z2: D21 SMC function
+rail control + iOS-order power cycle", b2533c59a2a0) and patches/0041
+("input: apple_z2: D21 SMC rail-state probe (RW) + smc_on_retries",
+b570c134309f), iPhOmarchy 5921728.
+
+Assisted-by: LLM
+---
+ drivers/mfd/macsmc.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/mfd/macsmc.c b/drivers/mfd/macsmc.c
+index 08f7b6c8e..e9aee92f6 100644
+--- a/drivers/mfd/macsmc.c
++++ b/drivers/mfd/macsmc.c
+@@ -54,6 +54,7 @@ static const struct mfd_cell apple_smc_t8015_devs[] = {
+ 	MFD_CELL_OF("macsmc-gpio", NULL, NULL, 0, 0, "apple,smc-gpio"),
+ 	MFD_CELL_OF("macsmc-hwmon", NULL, NULL, 0, 0, "apple,smc-hwmon"),
+ 	MFD_CELL_OF("macsmc-reboot", NULL, NULL, 0, 0, "apple,t8015-smc-reboot"),
++	MFD_CELL_OF("macsmc-regulator", NULL, NULL, 0, 0, "apple,smc-regulators"),
+ };
+ 
+ static const struct mfd_cell apple_smc_t8103_devs[] = {

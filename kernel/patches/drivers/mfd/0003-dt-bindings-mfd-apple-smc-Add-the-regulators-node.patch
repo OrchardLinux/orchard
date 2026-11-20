@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: dugs <dugahol@protonmail.com>
+Date: Fri, 20 Nov 2026 07:43:09 +0800
+Subject: [PATCH] dt-bindings: mfd: apple,smc: Add the regulators node
+
+The SMC switches supplies through function keys on A-series phones.
+Allow the node that describes them.
+
+Originally from iPhOmarchy patches/0040 ("input: apple_z2: D21 SMC function
+rail control + iOS-order power cycle", b2533c59a2a0) and patches/0041
+("input: apple_z2: D21 SMC rail-state probe (RW) + smc_on_retries",
+b570c134309f), iPhOmarchy 5921728.
+
+Assisted-by: LLM
+---
+ Documentation/devicetree/bindings/mfd/apple,smc.yaml | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/mfd/apple,smc.yaml b/Documentation/devicetree/bindings/mfd/apple,smc.yaml
+index 16702250a..43cba6d8c 100644
+--- a/Documentation/devicetree/bindings/mfd/apple,smc.yaml
++++ b/Documentation/devicetree/bindings/mfd/apple,smc.yaml
+@@ -59,6 +59,9 @@ properties:
+   hwmon:
+     $ref: /schemas/hwmon/apple,smc-hwmon.yaml
+ 
++  regulators:
++    $ref: /schemas/regulator/apple,smc-regulators.yaml
++
+ additionalProperties: false
+ 
+ required:
