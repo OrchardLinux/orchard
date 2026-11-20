@@ -64,6 +64,20 @@ that match the upstream MAX98925 map. Init, as iOS does it:
 Base: upstream `max98925.c` with a new compatible, the MAX98721 revision ID
 (unknown yet; upstream accepts 0x51/0x80), the ADT values and TDM slots.
 
+**NCO (new work, small).** The ADT's `/arm-io/nco` (`nco,t7001`,
+`nco,s5l8960x`) is the block the T8010 driver variant already handles (iOS:
+`AppleS5L8960XNCO`, same control bits). The only difference is the channel
+stride: iOS reads `pmgr-nco-page-size` and falls back to 0x1000, and the J81
+ADT has no such property. Its window is 0x5000 bytes, so five channels 0x1000
+apart; MCA0, 1, 3 and 4 use channels 0, 1, 3 and 4 (`function-mclk_frequency`).
+The reference rate is in `/arm-io` `clock-frequencies`, which the IPSW ADT
+leaves zero for iBoot to fill in; it has to be read from the live ADT (m1n1
+exposes it as MTD `adt`). iOS special-cases a 342857142 Hz reference
+(2.4 GHz / 7) for precision, a hint but not proof of the J81's rate.
+
+**I2S switch.** iOS binds `AppleAE2I2SSwitch3` to `i2s-switch,s5l8960x`, the
+layout `s8000-mca.c` programs. MCA3's route is `aud3` to `pin3`.
+
 **Headset codec.** CS42L81 has a driver on the A9/A10 path; the J81 MCA0
 record starts like J71t's.
 
@@ -87,8 +101,10 @@ record starts like J71t's.
 | SmartIO V1 register backend (`apple,t7000-sio`) | written, builds |
 | MCA v1 (`apple,t7001-mca`, MCA3 speaker link) | written, builds |
 | MAX98721 driver | written, builds; DT nodes kept back until the read-only probe |
-| NCO clock for MCA3 (T7001 layout differs from T8010) | open |
-| DT: SIO, I2S switch, MCA3, amplifiers, sound card (`audio-graph-card2`, two codecs on one link) | open |
+| NCO (`apple,t7001-nco`, 0x1000 channel stride) | written, builds |
+| DT: SIO, I2S switch, MCA3, NCO in `t7001.dtsi` (disabled); SmartIO enabled on the Air 2 | written |
+| NCO reference rate | open: read from the live ADT |
+| DT: amplifiers and sound card (`audio-graph-card2`, two codecs on one link) | kept back until the read-only probe |
 
 ## Speaker safety
 
@@ -106,3 +122,4 @@ static).
 | 2026-11-19 | ADT and kernelcache analysis (offline) | hardware above identified; no device access |
 | 2026-11-19 | SmartIO firmware recipe | `t7000-smartio.bin` extracted, sha256 matches |
 | 2026-11-19 | SmartIO V1 backend, MCA v1, MAX98721 driver (offline) | build as modules for apple-4k; patch audit passes for apple-4k and apple-16k; not run on hardware |
+| 2026-11-20 | NCO variant and DT nodes (offline) | NCO layout from iOS's `AppleS5L8960XNCO`; patch audit passes for apple-4k and apple-16k; not run on hardware |
