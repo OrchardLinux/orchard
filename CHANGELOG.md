@@ -16,6 +16,8 @@ is missing or empty.
 - iPad Air 2 (Wi-Fi): internal storage works, so Omarchy installs with
   `orchard install` and starts from the iPad with `orchard launch`, next to
   iPadOS. The A8X storage controller (ANS1) has a kernel driver now.
+- iPad Air 2 (Wi-Fi): the speakers play, in stereo, through PipeWire. The
+  headphone jack and the microphones do not work yet.
 
 ### Install & launch
 
