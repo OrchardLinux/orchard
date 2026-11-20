@@ -31,6 +31,8 @@ is missing or empty.
   of the Mac's pixels (100 % is pixel for pixel) or fitted to the screen,
   and keeps the scale across device switches and rotation. Cmd+H and
   Cmd+Option+H hide the simulator and other apps, as on any Mac app.
+- Orchard Simulator: a tap on the frame no longer touches the screen; a swipe
+  from the frame onto the screen still does.
 
 ## [0.3.2] - 2026-11-19
 
