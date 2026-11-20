@@ -1,9 +1,9 @@
 # J81 (iPad Air 2) audio bring-up
 
 Working notes for speaker and headphone audio on the iPad Air 2 (J81, A8X /
-T7001). Status: **both speakers play from a RAM boot**; the installed system
-and the headphone codec are not tested yet. `devices/j81/device.toml` keeps
-`audio_output` and `audio_input` at `missing` until the installed system plays.
+T7001). Status: **both speakers play**, from a RAM boot and from an installed
+Omarchy through PipeWire (`audio_output` is `working`). The headphone codec
+and the microphones are not supported yet (`audio_input` stays `missing`).
 
 Sources:
 - Apple's device tree `Firmware/all_flash/DeviceTree.j81ap.im4p`
@@ -133,4 +133,5 @@ static).
 | 2026-11-20 | RAM boots with the speaker DT, DFU entered from Recovery | 2 of 2 boot normally; PMGR at handoff: MCA0-4 `0x200` (off), SIO on. The earlier freezes all followed DFU entered straight from iPadOS, so they may be the same bootchain problem rather than MCA3; open until more boots confirm it |
 | 2026-11-20 | First playback (SmartIO firmware loaded by hand, modules loaded in order) | 440 Hz at -20 dBFS (-32 dBFS after the driver's attenuation) heard from amp0 at gain 8; 660 Hz in channel 1 heard from amp1. During playback: hw_ptr advances at 48000 frames/s, MCA3 TX_CFG 0x109 and FRAME 0x0f107007 (running), no underflow; i2s-switch aud3/pin3 routed with output enables; both amps global enable 0x80, blocks 0xb0, no status flags. A -30 dBFS tone at gain 4 was inaudible |
 | 2026-11-20 | Stereo test (portrait, Home button down) | channel 0 / amp0 (0x31, slot 0) is the bottom-left speaker, channel 1 / amp1 (0x34, slot 1) the bottom-right; both together play cleanly |
+| 2026-11-20 | Installed Omarchy (platform layer from this branch, SmartIO firmware copied in, `boot-entries sync`) | card and drivers come up on boot, no refcount warnings; without a UCM profile PipeWire plays silence (both gain controls start at 0); with `ucm2/conf.d/J81_Speakers` WirePlumber offers "Built-in Audio Speakers", sets both gains to 22, and `pw-play` is heard |
 | 2026-11-20 | Lesson | reading MCA3 offset 0x64 (not a v1 register) resets the SoC; read only the registers the driver names |
