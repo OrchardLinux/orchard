@@ -42,11 +42,11 @@ Compile-tested only; not run on hardware.
 Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- sound/soc/apple/s8000-mca.c | 363 +++++++++++++++++++++++++++++-------
- 1 file changed, 297 insertions(+), 66 deletions(-)
+ sound/soc/apple/s8000-mca.c | 366 +++++++++++++++++++++++++++++-------
+ 1 file changed, 300 insertions(+), 66 deletions(-)
 
 diff --git a/sound/soc/apple/s8000-mca.c b/sound/soc/apple/s8000-mca.c
-index 5499db8..edbfb4c 100644
+index 5499db8..dc8cbcc 100644
 --- a/sound/soc/apple/s8000-mca.c
 +++ b/sound/soc/apple/s8000-mca.c
 @@ -10,6 +10,13 @@
@@ -622,7 +622,17 @@ index 5499db8..edbfb4c 100644
  	spin_lock_init(&mca->hw_lock);
  	mca->irq_mask = MCA_IRQ_ALL;
  	platform_set_drvdata(pdev, mca);
-@@ -1106,6 +1291,7 @@ static int s8000_mca_probe(struct platform_device *pdev)
+@@ -1046,6 +1231,9 @@ static int s8000_mca_probe(struct platform_device *pdev)
+ 	fifo = mca_read(mca, MCA_FIFO_SIZE);
+ 	pm_runtime_put(dev);
+ 
++	/* Version 1 keeps the version in the upper half (0x00010002 on a J81) */
++	if (mca->hw->version == 1)
++		ver >>= 16;
+ 	mca->fifo_tx = FIELD_GET(MCA_FIFO_SIZE_TX, fifo);
+ 	if (ver != mca->hw->version || mca->fifo_tx < 8)
+ 		dev_warn(dev, "unexpected MCA version %u, TX FIFO %u\n", ver,
+@@ -1106,6 +1294,7 @@ static int s8000_mca_probe(struct platform_device *pdev)
  /* MCA0 on S8000/S8003, from iOS 16.7.10 AppleAE2MCA and the J71t ADT */
  static const struct s8000_mca_hw s8000_mca_hw = {
  	.version = 4,
@@ -630,7 +640,7 @@ index 5499db8..edbfb4c 100644
  	.dai_format = SND_SOC_DAIFMT_I2S,
  	.channels = 2,
  	.slots = 2,
-@@ -1135,6 +1321,7 @@ static const struct s8000_mca_hw s8000_mca_hw = {
+@@ -1135,6 +1324,7 @@ static const struct s8000_mca_hw s8000_mca_hw = {
   */
  static const struct s8000_mca_hw t8010_mca_hw = {
  	.version = 5,
@@ -638,7 +648,7 @@ index 5499db8..edbfb4c 100644
  	.clock_provider = true,
  	.dai_format = SND_SOC_DAIFMT_DSP_A,
  	.channels = 4,
-@@ -1153,8 +1340,52 @@ static const struct s8000_mca_hw t8010_mca_hw = {
+@@ -1153,8 +1343,52 @@ static const struct s8000_mca_hw t8010_mca_hw = {
  	.sio_trigger = 0xcc,
  };
  
@@ -691,3 +701,6 @@ index 5499db8..edbfb4c 100644
  	{ .compatible = "apple,t8010-mca", .data = &t8010_mca_hw },
  	{ .compatible = "apple,t8010-mca-i2s", .data = &t8010_i2s_mca_hw },
  	{ }
+-- 
+2.56.0
+

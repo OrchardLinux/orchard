@@ -99,8 +99,8 @@ record starts like J71t's.
 | Piece | State |
 | --- | --- |
 | SmartIO firmware (`smartio-from-kernelcache@2`, `AppleT7000SmartIO`) | done |
-| SmartIO V1 register backend (`apple,t7000-sio`) | written, builds |
-| MCA v1 (`apple,t7001-mca`, MCA3 speaker link) | written, builds |
+| SmartIO V1 register backend (`apple,t7000-sio`) | works on a J81: firmware boots, setup completes, 4 DMA channels |
+| MCA v1 (`apple,t7001-mca`, MCA3 speaker link) | probes on a J81, bit clock from NCO channel 3; no stream yet |
 | MAX98721 driver | written, builds; DT nodes kept back until the read-only probe |
 | NCO (`apple,t7001-nco`, 0x1000 channel stride) | written, builds |
 | DT: SIO, I2S switch, MCA3, NCO in `t7001.dtsi` (disabled); SmartIO enabled on the Air 2 | written |
@@ -124,4 +124,7 @@ static).
 | 2026-11-19 | SmartIO firmware recipe | `t7000-smartio.bin` extracted, sha256 matches |
 | 2026-11-19 | SmartIO V1 backend, MCA v1, MAX98721 driver (offline) | build as modules for apple-4k; patch audit passes for apple-4k and apple-16k; not run on hardware |
 | 2026-11-20 | Live ADT read from Omarchy (read-only) | NCO reference 342857142 Hz |
+| 2026-11-20 | RAM probe: amplifiers (read-only) | both answer at 0x31/0x34, revision 0x80; registers hold iOS's MAP values, global enable (0x38) and channel enables (0x36) off |
+| 2026-11-20 | RAM probe: SmartIO | firmware boots; first build failed setup with -EBUSY: the send FIFO stays disabled on V1 (TX status 0x00020000) until the AP enables it; fixed in the V1 backend |
+| 2026-11-20 | RAM probe: NCO and MCA3 | both bind; MCA version register reads 0x00010002 (version in the upper half on v1), check fixed |
 | 2026-11-20 | NCO variant and DT nodes (offline) | NCO layout from iOS's `AppleS5L8960XNCO`; patch audit passes for apple-4k and apple-16k; not run on hardware |
