@@ -16,6 +16,8 @@ is missing or empty.
 - iPad Air 2 (Wi-Fi): internal storage works, so Omarchy installs with
   `orchard install` and starts from the iPad with `orchard launch`, next to
   iPadOS. The A8X storage controller (ANS1) has a kernel driver now.
+- iPad Air 2 (Wi-Fi): sleep works. The iPad suspends when idle or on Power,
+  and Home or Power wakes it with Wi-Fi, Bluetooth and the USB network back.
 
 ### Install & launch
 
