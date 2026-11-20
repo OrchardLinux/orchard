@@ -100,12 +100,12 @@ record starts like J71t's.
 | --- | --- |
 | SmartIO firmware (`smartio-from-kernelcache@2`, `AppleT7000SmartIO`) | done |
 | SmartIO V1 register backend (`apple,t7000-sio`) | works on a J81: firmware boots, setup completes, 4 DMA channels |
-| MCA v1 (`apple,t7001-mca`, MCA3 speaker link) | probes on a J81, bit clock from NCO channel 3; no stream yet |
-| MAX98721 driver | written, builds; DT nodes kept back until the read-only probe |
+| MCA v1 (`apple,t7001-mca`, MCA3 speaker link) | plays on a J81: TDM 8×16 in a 256-bit frame, bit clock from NCO channel 3 (24.576 MHz at 48 kHz) |
+| MAX98721 driver | both amplifiers play on a J81 (0x31 slot 0, 0x34 slot 1) |
 | NCO (`apple,t7001-nco`, 0x1000 channel stride) | written, builds |
 | DT: SIO, I2S switch, MCA3, NCO in `t7001.dtsi` (disabled); SmartIO enabled on the Air 2 | written |
 | NCO reference rate | 342857142 Hz (live ADT `clock-frequencies[10]`); NCO, I2S switch and MCA3 enabled on the Air 2 |
-| DT: amplifiers and sound card (`audio-graph-card2`, two codecs on one link) | kept back until the read-only probe |
+| DT: amplifiers and sound card (`audio-graph-card2`, two codecs on one link) | card "J81 Speakers" registers and plays; parsing the `multi` node logs OF refcount warnings in audio-graph-card2, to be fixed |
 
 ## Speaker safety
 
@@ -129,3 +129,6 @@ static).
 | 2026-11-20 | RAM probe: NCO and MCA3 | both bind; MCA version register reads 0x00010002 (version in the upper half on v1), check fixed |
 | 2026-11-20 | RAM boots with the speaker DT | 4 of 5 freeze within ~1-12 s of /init (no console output, no USB), before any audio driver loads (they are blacklisted). Bisected by enabling one node at a time, one boot each: main kernel, +I2C1+SIO, +NCO, +I2S switch all boot; +MCA3 freezes. On a running system MCA3 can be powered (PMGR 0x20e020148) and its registers read (0x00010002) without a hang, so the suspect is how the boot treats the enabled MCA3 node: with a consumer that never probes, genpd keeps the domain in its boot state (sync_state pending) |
 | 2026-11-20 | NCO variant and DT nodes (offline) | NCO layout from iOS's `AppleS5L8960XNCO`; patch audit passes for apple-4k and apple-16k; not run on hardware |
+| 2026-11-20 | RAM boots with the speaker DT, DFU entered from Recovery | 2 of 2 boot normally; PMGR at handoff: MCA0-4 `0x200` (off), SIO on. The earlier freezes all followed DFU entered straight from iPadOS, so they may be the same bootchain problem rather than MCA3; open until more boots confirm it |
+| 2026-11-20 | First playback (SmartIO firmware loaded by hand, modules loaded in order) | 440 Hz at -20 dBFS (-32 dBFS after the driver's attenuation) heard from amp0 at gain 8; 660 Hz in channel 1 heard from amp1. During playback: hw_ptr advances at 48000 frames/s, MCA3 TX_CFG 0x109 and FRAME 0x0f107007 (running), no underflow; i2s-switch aud3/pin3 routed with output enables; both amps global enable 0x80, blocks 0xb0, no status flags. A -30 dBFS tone at gain 4 was inaudible |
+| 2026-11-20 | Lesson | reading MCA3 offset 0x64 (not a v1 register) resets the SoC; read only the registers the driver names |
