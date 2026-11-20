@@ -1,8 +1,9 @@
 # J81 (iPad Air 2) audio bring-up
 
 Working notes for speaker and headphone audio on the iPad Air 2 (J81, A8X /
-T7001). Status: **research; nothing enabled yet**. `devices/j81/device.toml`
-keeps `audio_output` and `audio_input` at `missing` until hardware tests pass.
+T7001). Status: **both speakers play from a RAM boot**; the installed system
+and the headphone codec are not tested yet. `devices/j81/device.toml` keeps
+`audio_output` and `audio_input` at `missing` until the installed system plays.
 
 Sources:
 - Apple's device tree `Firmware/all_flash/DeviceTree.j81ap.im4p`
