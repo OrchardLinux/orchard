@@ -9,14 +9,17 @@ a sound card for them: MCA3 drives both on one TDM link, 8 slots of 16
 bits, amplifier 0x31 in slot 0 and 0x34 in slot 1. One CPU to two
 codecs is audio-graph-card2's "semi-multi" link.
 
+The channels are named after the speakers they drive (portrait, Home
+button down): slot 0 is the left speaker, slot 1 the right.
+
 The amplifiers' interrupts (GPIO 8 and 9) and the 0x31 amplifier's
 "function-alive" GPIO 101 are not described yet.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
 ---
- arch/arm64/boot/dts/apple/t7001-air2.dtsi | 94 ++++++++++++++++++++++-
- 1 file changed, 91 insertions(+), 3 deletions(-)
+ arch/arm64/boot/dts/apple/t7001-air2.dtsi | 95 ++++++++++++++++++++++-
+ 1 file changed, 92 insertions(+), 3 deletions(-)
 
 diff --git a/arch/arm64/boot/dts/apple/t7001-air2.dtsi b/arch/arm64/boot/dts/apple/t7001-air2.dtsi
 index 29e355181..98320109c 100644
@@ -42,7 +45,7 @@ index 29e355181..98320109c 100644
 +		compatible = "maxim,max98721";
 +		reg = <0x31>;
 +		#sound-dai-cells = <0>;
-+		sound-name-prefix = "Amp0";
++		sound-name-prefix = "Left";
 +
 +		port {
 +			amp0_ep: endpoint {
@@ -58,7 +61,7 @@ index 29e355181..98320109c 100644
 +		compatible = "maxim,max98721";
 +		reg = <0x34>;
 +		#sound-dai-cells = <0>;
-+		sound-name-prefix = "Amp1";
++		sound-name-prefix = "Right";
 +
 +		port {
 +			amp1_ep: endpoint {
@@ -72,7 +75,7 @@ index 29e355181..98320109c 100644
  };
  
  /* SmartIO: the DMA engine of every MCA and of spi1 */
-@@ -219,6 +253,60 @@ &i2s_switch {
+@@ -219,6 +253,61 @@ &i2s_switch {
  &mca3 {
  	apple,i2s-switch = <&i2s_switch 3 3>;
  	status = "okay";
@@ -90,7 +93,8 @@ index 29e355181..98320109c 100644
 +/*
 + * The speakers: MCA3 playing to both amplifiers on one TDM link
 + * (audio-graph-card2 "semi-multi", one CPU to two codecs). Channel 0 is
-+ * slot 0 (amplifier 0x31), channel 1 slot 1 (0x34).
++ * slot 0 (amplifier 0x31, the left speaker in portrait), channel 1 slot 1
++ * (0x34, the right speaker).
 + */
 +/ {
 +	sound-speakers {
