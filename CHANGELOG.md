@@ -16,6 +16,9 @@ is missing or empty.
 - iPad Air 2 (Wi-Fi): internal storage works, so Omarchy installs with
   `orchard install` and starts from the iPad with `orchard launch`, next to
   iPadOS. The A8X storage controller (ANS1) has a kernel driver now.
+- iPad Air 2 (Wi-Fi): Bluetooth runs at 3 Mbit/s instead of 115,200 baud, so
+  Bluetooth headphones no longer crackle and calls with the CVSD codec have
+  sound.
 
 ### Install & launch
 
