@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 09:16:35 +0100
+Subject: [PATCH] dt-bindings: mfd: syscon: Add the T7001 i2s-switch
+
+The A8X i2s-switch (Apple's i2s-switch,t7001) is the S8000 routing
+block (AppleAE2I2SSwitch3) at its own address; the MCA driver programs
+it as a syscon.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+---
+ Documentation/devicetree/bindings/mfd/syscon.yaml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/mfd/syscon.yaml b/Documentation/devicetree/bindings/mfd/syscon.yaml
+index c74985051..6ce14ebaf 100644
+--- a/Documentation/devicetree/bindings/mfd/syscon.yaml
++++ b/Documentation/devicetree/bindings/mfd/syscon.yaml
+@@ -47,6 +47,7 @@ properties:
+               - apm,xgene-rb
+               - apm,xgene-scu
+               - apple,s8000-i2s-switch
++              - apple,t7001-i2s-switch
+               - apple,t8010-aop-i2s-oe
+               - apple,t8010-aop-i2s-switch
+               - apple,t8010-i2s-switch
+-- 
+2.56.0
+
