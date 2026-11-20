@@ -1,0 +1,153 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: thisiscamk <100883750+thisiscamk@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 12:00:00 +0800
+Subject: [PATCH] arm64: dts: apple: s5l8960x: Add ANS, SPI2, UART5 and the
+ touch clock
+
+Describe the A7 blocks the iPad Air uses, disabled until a board
+enables them:
+
+- the storage coprocessor (ANS) and its AppleA7IOP V1 mailbox; m1n1
+  fills the coprocessor's firmware region through the asp alias;
+- SPI2 with its pins and its 60 MHz clock;
+- UART5, which carries the battery gauge's HDQ line;
+- the touchscreen reference clock on PWM0 channel 2.
+
+[Orchard: from thisiscamk/ipad-air-j72-linux 2a257d6,
+ code/current/kernel/0001-j72-installed-kernel-snapshot.patch
+ (arch/arm64/boot/dts/apple/s5l8960x.dtsi and s5l8960x-j72.dts).
+ UART5 and the SPI2 pins move from his board file into the SoC file,
+ the mailbox uses the binding's existing apple,s5l8960x-akf-mailbox-v1
+ compatible, and the asp alias sits with the other loader aliases as on
+ the T7001.]
+Assisted-by: LLM
+---
+ .../arm64/boot/dts/apple/s5l8960x-common.dtsi |  1 +
+ arch/arm64/boot/dts/apple/s5l8960x.dtsi       | 74 +++++++++++++++++++
+ 2 files changed, 75 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/s5l8960x-common.dtsi b/arch/arm64/boot/dts/apple/s5l8960x-common.dtsi
+index a819f93cd..093e37081 100644
+--- a/arch/arm64/boot/dts/apple/s5l8960x-common.dtsi
++++ b/arch/arm64/boot/dts/apple/s5l8960x-common.dtsi
+@@ -11,6 +11,7 @@
+ 
+ / {
+ 	aliases {
++		asp = &ans; /* Used by loader */
+ 		ausbphy0 = &ausbphy0; /* Used by loader */
+ 		serial0 = &serial0;
+ 	};
+diff --git a/arch/arm64/boot/dts/apple/s5l8960x.dtsi b/arch/arm64/boot/dts/apple/s5l8960x.dtsi
+index 2a747bec0..d7b3807d4 100644
+--- a/arch/arm64/boot/dts/apple/s5l8960x.dtsi
++++ b/arch/arm64/boot/dts/apple/s5l8960x.dtsi
+@@ -26,6 +26,13 @@ clkref: clock-ref {
+ 		clock-output-names = "clkref";
+ 	};
+ 
++	spi2_clk: clock-spi2 {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		clock-frequency = <60000000>;
++		clock-output-names = "spi2";
++	};
++
+ 	cpus {
+ 		#address-cells = <2>;
+ 		#size-cells = <0>;
+@@ -77,6 +84,43 @@ cpufreq: performance-controller@202220000 {
+ 			#performance-domain-cells = <0>;
+ 		};
+ 
++		ans: block@208040000 {
++			compatible = "apple,s5l8960x-ans";
++			reg = <0x2 0x08040000 0x0 0x1000>;
++			mboxes = <&ans_mbox>;
++			power-domains = <&ps_ans>;
++			resets = <&ps_ans>;
++			status = "disabled";
++		};
++
++		ans_mbox: mbox@208041000 {
++			compatible = "apple,s5l8960x-akf-mailbox-v1", "apple,akf-mailbox-v1";
++			reg = <0x2 0x08041000 0x0 0x1000>;
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 52 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 53 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 54 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 55 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "send-empty", "send-not-empty",
++					  "recv-empty", "recv-not-empty";
++			#mbox-cells = <0>;
++			power-domains = <&ps_ans>;
++		};
++
++		spi2: spi@20a088000 {
++			compatible = "apple,s5l8960x-spi";
++			reg = <0x2 0x0a088000 0x0 0x4000>;
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 138 IRQ_TYPE_LEVEL_HIGH>;
++			clocks = <&spi2_clk>;
++			pinctrl-0 = <&spi2_pins>;
++			pinctrl-names = "default";
++			power-domains = <&ps_spi2>;
++			#address-cells = <1>;
++			#size-cells = <0>;
++			status = "disabled";
++		};
++
+ 		serial0: serial@20a0a0000 {
+ 			compatible = "apple,s5l-uart";
+ 			reg = <0x2 0x0a0a0000 0x0 0x4000>;
+@@ -90,6 +134,19 @@ serial0: serial@20a0a0000 {
+ 			status = "disabled";
+ 		};
+ 
++		serial5: serial@20a0b4000 {
++			compatible = "apple,s5l-uart";
++			reg = <0x2 0x0a0b4000 0x0 0x4000>;
++			reg-io-width = <4>;
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 145 IRQ_TYPE_LEVEL_HIGH>;
++			/* Use the bootloader-enabled clocks for now. */
++			clocks = <&clkref>, <&clkref>;
++			clock-names = "uart", "clk_uart_baud0";
++			power-domains = <&ps_uart5>;
++			status = "disabled";
++		};
++
+ 		i2c0: i2c@20a110000 {
+ 			compatible = "apple,s5l8960x-i2c", "apple,i2c";
+ 			reg = <0x2 0x0a110000 0x0 0x1000>;
+@@ -146,6 +203,16 @@ i2c3: i2c@20a113000 {
+ 			status = "disabled";
+ 		};
+ 
++		touchclk: clock-controller@20a118000 {
++			compatible = "apple,s5l8960x-touch-clock";
++			reg = <0x2 0x0a118000 0x0 0x4000>;
++			clocks = <&clkref>;
++			power-domains = <&ps_pwm0>;
++			#clock-cells = <0>;
++			clock-frequency = <32768>;
++			status = "disabled";
++		};
++
+ 		bus@20c000000 {
+ 			compatible = "apple,s5l8960x-usb-complex", "simple-pm-bus";
+ 			#address-cells = <2>;
+@@ -279,6 +346,13 @@ i2c3_pins: i2c3-pins {
+ 				pinmux = <APPLE_PINMUX(172, 1)>,
+ 					 <APPLE_PINMUX(171, 1)>;
+ 			};
++
++			spi2_pins: spi2-pins {
++				pinmux = <APPLE_PINMUX(76, 1)>,
++					 <APPLE_PINMUX(77, 1)>,
++					 <APPLE_PINMUX(78, 1)>,
++					 <APPLE_PINMUX(79, 1)>;
++			};
+ 		};
+ 	};
+ 

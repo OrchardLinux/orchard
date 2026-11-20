@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: thisiscamk <100883750+thisiscamk@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 12:00:00 +0800
+Subject: [PATCH] w1: masters: w1-uart: Require a contiguous HDQ command echo
+
+On the single HDQ wire every command symbol the UART sends comes back
+as an echo before the gauge answers. The receive callback skips any
+symbol that does not match the next expected echo symbol, so a stray
+symbol between them leaves an earlier partial match standing and the
+following bytes can complete the echo out of order, shifting the
+response by a bit.
+
+Require the eight echo symbols to arrive contiguously: after a
+mismatch, keep only the longest tail of the received symbols that is
+still a prefix of the command, across callback boundaries.
+
+[Orchard: from thisiscamk/ipad-air-j72-linux 2a257d6,
+ code/battery/bq27xxx_battery_hdq_uart.c (hdq_uart_receive_buf(): a
+ sliding window over the echo; also in
+ code/current/kernel/0001-j72-installed-kernel-snapshot.patch). His
+ serdev HDQ frontend duplicates this driver's HDQ mode, which Orchard
+ already uses for the iPad gauges, so the fix is carried over to
+ w1-uart instead of adding the second frontend.]
+Assisted-by: LLM
+---
+ drivers/w1/masters/w1-uart.c | 30 +++++++++++++++++++++++++++++-
+ 1 file changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/w1/masters/w1-uart.c b/drivers/w1/masters/w1-uart.c
+index f29fa08a2..c953c1b65 100644
+--- a/drivers/w1/masters/w1-uart.c
++++ b/drivers/w1/masters/w1-uart.c
+@@ -475,6 +475,29 @@ static int w1_uart_serdev_tx_rx(struct w1_uart_device *w1dev,
+ 	return ret;
+ }
+ 
++/*
++ * The command echo must arrive as eight contiguous symbols. After a
++ * mismatch, keep the longest tail of what was received (the echo matched
++ * so far, then @c) that is still a prefix of the command, so a stray
++ * symbol neither leaves an old partial match valid nor drops a real echo
++ * that started inside it.
++ */
++static u8 w1_uart_hdq_echo_restart(const struct w1_uart_device *w1dev,
++				   u8 matched, u8 c)
++{
++	const u8 *cmd = w1dev->hdq_command;
++	u8 len;
++
++	for (len = matched; len > 0; len--) {
++		/* received tail: cmd[matched - len + 1 .. matched - 1], c */
++		if (cmd[len - 1] == c &&
++		    !memcmp(cmd, cmd + matched - len + 1, len - 1))
++			return len;
++	}
++
++	return 0;
++}
++
+ static size_t w1_uart_serdev_receive_buf(struct serdev_device *serdev,
+ 					  const u8 *buf, size_t count)
+ {
+@@ -486,8 +509,13 @@ static size_t w1_uart_serdev_receive_buf(struct serdev_device *serdev,
+ 		spin_lock_irqsave(&w1dev->hdq_rx_lock, flags);
+ 		for (i = 0; i < count && w1dev->hdq_receiving; i++) {
+ 			if (w1dev->hdq_rx_bit < W1_UART_HDQ_BITS_PER_BYTE &&
+-			    buf[i] != w1dev->hdq_command[w1dev->hdq_rx_bit])
++			    buf[i] != w1dev->hdq_command[w1dev->hdq_rx_bit]) {
++				w1dev->hdq_rx_bit =
++					w1_uart_hdq_echo_restart(w1dev,
++								 w1dev->hdq_rx_bit,
++								 buf[i]);
+ 				continue;
++			}
+ 
+ 			if (w1dev->hdq_rx_bit >= W1_UART_HDQ_BITS_PER_BYTE &&
+ 			    buf[i] >= W1_UART_HDQ_RX_ONE_MIN)
