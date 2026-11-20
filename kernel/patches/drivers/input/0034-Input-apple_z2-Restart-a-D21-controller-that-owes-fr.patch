@@ -1,0 +1,207 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: dugs <dugahol@protonmail.com>
+Date: Fri, 20 Nov 2026 08:05:40 +0800
+Subject: [PATCH] Input: apple_z2: Restart a D21 controller that owes frames
+ but sends none
+
+A D21 boot can leave the controller half up: supplies on, every transfer
+answered, not one valid frame. It also stops that way at runtime. The
+control-only stall detector does not see it, and only a full restart,
+which cuts the core rail, brings it back.
+
+Watch for it every 5 s while booted. An idle controller is silent as
+well, with no frame and no interrupt (0 interrupts in 3 s with no
+finger), so silence alone is not a failure: restart only when frames are
+owed, that is when the controller interrupted within the last 15 s or a
+contact is still down, and no valid frame arrived for 15 s. The restart
+is the control-stall restart, so it is bounded the same way.
+
+Treating any 15 s without a frame as a failure restarted an idle
+controller about every 23 s, 45 times in one desktop session, and left
+quick taps landing only when they happened to fall after a restart. With
+the idle case left alone, every quick tap landed (25 of 25 in a 45 s
+capture, median contact 148 ms) and no restart ran at idle.
+
+Opt in through match data (no_frames_ms); other boards keep their
+recovery.
+
+Originally from iPhOmarchy patches/0042 ("input: apple_z2: D21 bounded
+runtime recovery (Orchard 79f5e69 port)", 170831592b6a) and the idle fix
+c2a38a5db829 ("Input: apple_z2: Do not treat an idle D21 controller as a
+dead one", GPU-WIP/jade/kernel/0009), as in GPU-WIP/jade/kernel/0021
+(apple_z2.c bce4e6c701a7), iPhOmarchy 7952dce.
+
+Assisted-by: LLM
+---
+ drivers/input/touchscreen/apple_z2.c | 60 ++++++++++++++++++++++++++++
+ 1 file changed, 60 insertions(+)
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index 083fecc19..905333e49 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -66,6 +66,7 @@
+ #define APPLE_Z2_CONTROL_RESTARTS        3
+ #define APPLE_Z2_CONTROL_RETRY_MS        1000
+ #define APPLE_Z2_CONTROL_RECOVERIES      5
++#define APPLE_Z2_FRAMES_WATCH_MS         5000
+ #define APPLE_Z2_CMD_SIZE                16
+ #define APPLE_Z2_RAW_XFER_MAX_SIZE       64
+ #define APPLE_Z2_GEN2_MIN_RESULT_SIZE    64
+@@ -290,6 +291,9 @@ struct apple_z2_gen2_boot {
+  *			bytes
+  * @contact_filter:	which contacts of an iPhone 7 Plus style report are
+  *			touches; without it, those in state 3 or 4
++ * @no_frames_ms:	restart the controller when it owes frames (a contact
++ *			is down, or it interrupted within this time) but sent
++ *			no valid one for this time; needs recover_control_stall
+  */
+ struct apple_z2_chip_info {
+ 	const char *name;
+@@ -310,6 +314,7 @@ struct apple_z2_chip_info {
+ 	u8 pull_filler;
+ 	bool data_checksum_end;
+ 	const struct apple_z2_contact_filter *contact_filter;
++	unsigned int no_frames_ms;
+ };
+ 
+ struct apple_z2 {
+@@ -330,6 +335,10 @@ struct apple_z2 {
+ 	struct pinctrl_state *sync_inactive;
+ 	struct gpio_desc *attn_gpio;
+ 	struct delayed_work rearm_work;
++	struct delayed_work frames_watch;
++	unsigned long last_frame;	/* last valid frame */
++	unsigned long last_irq;		/* last runtime interrupt */
++	bool contact_down;		/* the last report had a touch */
+ 	struct work_struct resume_work;
+ 	bool boot_due;		/* resumed: boot once every device is back */
+ 	unsigned int rearm_attempts;
+@@ -703,6 +712,7 @@ static void apple_z2_parse_touches(struct apple_z2 *z2,
+ 				   const u8 *msg, size_t msg_len)
+ {
+ 	DECLARE_BITMAP(seen, APPLE_Z2_D21_SLOTS) = { };
++	bool contact_down = false;
+ 	s16 abs_x;
+ 	s16 abs_y;
+ 	s16 orientation;
+@@ -760,6 +770,8 @@ static void apple_z2_parse_touches(struct apple_z2 *z2,
+ 			slot_valid = fingers[i].state == APPLE_Z2_TOUCH_STARTED ||
+ 				     fingers[i].state == APPLE_Z2_TOUCH_MOVED;
+ 		}
++		if (slot_valid)
++			contact_down = true;
+ 		input_mt_slot(z2->input_dev, slot);
+ 		if (!input_mt_report_slot_state(z2->input_dev, MT_TOOL_FINGER, slot_valid))
+ 			continue;
+@@ -812,6 +824,7 @@ static void apple_z2_parse_touches(struct apple_z2 *z2,
+ 			}
+ 		}
+ 	}
++	z2->contact_down = contact_down;
+ 	input_mt_sync_frame(z2->input_dev);
+ 	input_sync(z2->input_dev);
+ }
+@@ -1205,6 +1218,7 @@ static int apple_z2_read_packet(struct apple_z2 *z2)
+ 		 get_unaligned_le16(z2->rx_buf + 2) + 5 == pkt_len);
+ 	if (!z2->runtime_frame_valid)
+ 		return 0;
++	z2->last_frame = jiffies;
+ 
+ 	payload_len = get_unaligned_le16(z2->rx_buf + 2);
+ 	apple_z2_dispatch_frame(z2, z2->rx_buf + 5, payload_len - 2);
+@@ -2190,6 +2204,7 @@ static void apple_z2_release_contacts(struct apple_z2 *z2)
+ {
+ 	unsigned int i;
+ 
++	z2->contact_down = false;
+ 	for (i = 0; i < z2->input_dev->mt->num_slots; i++) {
+ 		input_mt_slot(z2->input_dev, i);
+ 		input_mt_report_slot_inactive(z2->input_dev);
+@@ -2411,6 +2426,36 @@ static void apple_z2_queue_control_recovery(struct apple_z2 *z2)
+ 	schedule_delayed_work(&z2->rearm_work, 0);
+ }
+ 
++/*
++ * A D21 controller can come up or end up silent: supplies on, transfers
++ * answered, no valid frame. An idle controller is silent too, without
++ * interrupts and with no contact down, so restart only when frames are
++ * owed: the controller interrupted within the window or a contact is down,
++ * and no valid frame came for that long.
++ */
++static void apple_z2_frames_watch_work(struct work_struct *work)
++{
++	struct apple_z2 *z2 = container_of(to_delayed_work(work),
++					   struct apple_z2, frames_watch);
++	unsigned long window = msecs_to_jiffies(z2->info->no_frames_ms);
++
++	mutex_lock(&z2->io_lock);
++	if (z2->stopping || !z2->booted || z2->recovering) {
++		mutex_unlock(&z2->io_lock);
++		return;
++	}
++	if ((z2->contact_down || time_before(jiffies, z2->last_irq + window)) &&
++	    time_after(jiffies, z2->last_frame + window)) {
++		dev_warn(&z2->spidev->dev, "no touch frames for %u ms\n",
++			 z2->info->no_frames_ms);
++		apple_z2_queue_control_recovery(z2);
++	} else {
++		schedule_delayed_work(&z2->frames_watch,
++				      msecs_to_jiffies(APPLE_Z2_FRAMES_WATCH_MS));
++	}
++	mutex_unlock(&z2->io_lock);
++}
++
+ static irqreturn_t apple_z2_irq(int irq, void *data)
+ {
+ 	struct apple_z2 *z2 = data;
+@@ -2429,6 +2474,7 @@ static irqreturn_t apple_z2_irq(int irq, void *data)
+ 			mutex_unlock(&z2->io_lock);
+ 			return IRQ_HANDLED;
+ 		}
++		z2->last_irq = jiffies;
+ 		/*
+ 		 * The iPhone 8 Plus gets one frame read per interrupt: its
+ 		 * level interrupt fires again while reports stay queued, and
+@@ -4529,6 +4575,17 @@ static int apple_z2_boot(struct apple_z2 *z2)
+ 	if (error)
+ 		goto err_stop;
+ 
++	if (z2->info->no_frames_ms) {
++		mutex_lock(&z2->io_lock);
++		z2->last_frame = jiffies;
++		z2->last_irq = jiffies;
++		z2->contact_down = false;
++		if (!z2->stopping)
++			schedule_delayed_work(&z2->frames_watch,
++					      msecs_to_jiffies(APPLE_Z2_FRAMES_WATCH_MS));
++		mutex_unlock(&z2->io_lock);
++	}
++
+ 	return 0;
+ 
+ err_stop:
+@@ -4773,6 +4830,7 @@ static const struct apple_z2_chip_info apple_z2_d21_info = {
+ 	.pull_filler = 0xaa,
+ 	.data_checksum_end = true,
+ 	.contact_filter = &apple_z2_d21_contacts,
++	.no_frames_ms = 15000,
+ };
+ 
+ static const struct apple_z2_chip_info apple_z2_n61_info = {
+@@ -4838,6 +4896,7 @@ static int apple_z2_probe(struct spi_device *spi)
+ 	mutex_init(&z2->io_lock);
+ 	INIT_DELAYED_WORK(&z2->rearm_work, info->recover_control_stall ?
+ 			  apple_z2_control_rearm_work : apple_z2_n1_rearm_work);
++	INIT_DELAYED_WORK(&z2->frames_watch, apple_z2_frames_watch_work);
+ 	INIT_WORK(&z2->resume_work, apple_z2_resume_work);
+ 	spi_set_drvdata(spi, z2);
+ 
+@@ -5036,6 +5095,7 @@ static void apple_z2_stop(struct apple_z2 *z2)
+ 		mutex_lock(&z2->io_lock);
+ 		z2->stopping = true;
+ 		mutex_unlock(&z2->io_lock);
++		cancel_delayed_work_sync(&z2->frames_watch);
+ 		cancel_delayed_work_sync(&z2->rearm_work);
+ 	}
+ 

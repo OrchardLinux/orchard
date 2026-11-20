@@ -1,0 +1,718 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: dugs <dugahol@protonmail.com>
+Date: Fri, 20 Nov 2026 08:04:03 +0800
+Subject: [PATCH] Input: apple_z2: Add iPhone 8 Plus (D21) touchscreen support
+
+The iPhone 8 Plus (D21, T8015) has a C1F5E controller of the iPhone 7
+Plus family: the same boot, surface descriptor and 0x44 contact report,
+but the generation-1 data phase of the iPad 6, and a boot that only
+yields contacts with a few additions. Add it as a variant of the iPhone
+7 Plus path, with its differences as match data:
+
+- Power: the high-voltage supply (the Chestnut display PMIC switch) has
+  to settle 500 ms before the core supply. Within 2 ms the controller
+  boots, sends a frame or two and falls silent; 50 ms still failed one
+  boot in three. The reset pulse is 25 ms; a short one leaves the
+  controller in its last run's mode. The first boot may take 5 s.
+- Data phase: the interrupt-data request carries 0xaa filler, and the
+  data phase repeats it with phase 1 and the checksum in its last two
+  bytes (AppleMultitouchZ2SPI in iOS 16.7.16). Transfers above 16 bytes
+  run in SPI mode 0 at 500 kHz, and a header answering the data phase is
+  taken as the next frame's, as on the iPad 6. The tag advances only
+  after a frame.
+- One frame per interrupt: the level interrupt fires again while reports
+  are queued, and a read that finds the queue empty, an extra transfer
+  iOS never makes, can stop the controller's interrupts for good. The
+  control-only stall recovery applies to these reads.
+- Calibration: the firmware file holds the calibration records in front
+  of the boot sequence that asks for them, and the controller keeps the
+  calibration only when it arrives after that request. Send the records
+  after the file, between the boot sequence's register writes repeated
+  after 50 ms (right after the file the first write can be refused) and
+  one write after them. The driver-built blobs count one word less than
+  their payload; with the full count, which HBPP 0x103 should take, the
+  controller refused every calibration blob.
+- Report setup in the iPad 6 order (device information, one read, the
+  0xd9/0xdb/0x73 reports, a drain, the level interrupt, 2.26 s, a wake),
+  then the 0x9d/0xbf mode reports this firmware has, and the arming that
+  backboardd does on iOS: report enable, high-level state Active (0x72),
+  detection options 0x09 (0xc8), touch mode 1 (0xbf), and 0x70. Then 40
+  interrupt-data reads 100 ms apart; without them the controller sends a
+  frame or two and goes silent with both supplies on.
+- The SPI timing is the match data's: the firmware configuration's 125 us
+  inter-packet delay and 16-byte DMA minimum wedged the controller.
+- Released contacts may be left out of the next report (DROP_UNUSED, as
+  on the D11).
+
+The register values are the boot sequence of the C1F5E,4 personality in
+D21.mtprops; 0x10003458 is the write of the tested configuration.
+
+Shared paths: the controller power-off now undoes the level interrupt
+type whenever it was set, not only on generation-1 boards (only J71b set
+it so far); everything else is behind the D21 variant or its match data.
+
+Originally from iPhOmarchy GPU-WIP/jade/kernel/0021 ("Input: apple_z2:
+Use the iPhOmarchy D21 touch driver", the known-good driver, apple_z2.c
+bce4e6c701a7, kernel c2a38a5db829) and its history, patches/0004
+(8d09368da7ec), 0007 (b1135f1f4ccf), 0020 (fb913fdd5f4f), 0022
+(1c357b4459d3), 0026 (52414f83235b), 0028 (bdae33f15b8f), 0033
+(afadcefa7a36), 0034 (99d364db003a) and 0040 (b2533c59a2a0), with the
+tested parameters of GPU-WIP/jade/README.md, iPhOmarchy 7952dce.
+
+Assisted-by: LLM
+---
+ drivers/input/touchscreen/apple_z2.c | 445 +++++++++++++++++++++++++--
+ 1 file changed, 424 insertions(+), 21 deletions(-)
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index a4201ca80..c80f958fa 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -43,6 +43,9 @@
+ #define APPLE_Z2_D11_STATUS_REPORT       0x50
+ #define APPLE_Z2_REPORT_ENABLE           0xaf
+ #define APPLE_Z2_D11_REPORT_ENABLE       0xe2
++#define APPLE_Z2_D21_SLOTS               10
++#define APPLE_Z2_D21_SETTLE_MS           2260
++#define APPLE_Z2_D21_REG_SETTLE_MS       50
+ #define APPLE_Z2_J172_HEADER_SIZE         32
+ #define APPLE_Z2_J172_CONTACT_SIZE        48
+ #define APPLE_Z2_J172_MAX_CONTACTS        32
+@@ -145,6 +148,7 @@ enum apple_z2_variant {
+ 	APPLE_Z2_VARIANT_D11,
+ 	APPLE_Z2_VARIANT_D111,
+ 	APPLE_Z2_VARIANT_N61,
++	APPLE_Z2_VARIANT_D21,
+ };
+ 
+ struct apple_z2_hbpp_reg {
+@@ -198,6 +202,47 @@ struct apple_z2_n1_info {
+ 	u32 surface_height;
+ };
+ 
++/**
++ * struct apple_z2_report_write - a short report write
++ * @report:		report ID
++ * @len:		payload length
++ * @data:		payload
++ */
++struct apple_z2_report_write {
++	u8 report;
++	u8 len;
++	u8 data[11];
++};
++
++/**
++ * struct apple_z2_gen2_boot - iPhone 8 Plus style boot completion
++ * @regs:		registers written again after the firmware file, before
++ *			its calibration
++ * @num_regs:		number of entries in @regs
++ * @post_cal_regs:	registers written after the calibration
++ * @num_post_cal_regs:	number of entries in @post_cal_regs
++ * @arm:		report writes after the report reads, in order
++ * @num_arm:		number of entries in @arm
++ * @kick_reads:		interrupt-data reads, 100 ms apart, that start the
++ *			controller's interrupts after the reports are armed
++ *
++ * The firmware file runs the controller's boot sequence, which ends in a
++ * calibration request, with the calibration records in front of it. These
++ * controllers keep the calibration only when it arrives after that request,
++ * so the records are sent once the file is done, between @regs and
++ * @post_cal_regs. The first register write right after the file can be
++ * refused; @regs repeat the boot sequence after a settle time.
++ */
++struct apple_z2_gen2_boot {
++	const struct apple_z2_hbpp_reg *regs;
++	unsigned int num_regs;
++	const struct apple_z2_hbpp_reg *post_cal_regs;
++	unsigned int num_post_cal_regs;
++	const struct apple_z2_report_write *arm;
++	unsigned int num_arm;
++	unsigned int kick_reads;
++};
++
+ /**
+  * struct apple_z2_chip_info - per-compatible data
+  * @name:		input device name
+@@ -209,6 +254,18 @@ struct apple_z2_n1_info {
+  * @recover_control_stall: restart after a sustained control-only runtime loop
+  * @shifted_reply_header: accept an interrupt reply whose header arrives one
+  *			byte late, leaving only the low checksum byte
++ * @gen2_boot:		boot completion of iPhone 8 Plus style controllers
++ * @boot_timeout_ms:	boot interrupt timeout, if not the variant's
++ * @reset_hold_ms:	reset pulse before the boot preamble, if over 1 ms
++ * @hv_settle_us:	time the high-voltage supply settles before the core
++ *			supply, if over the default 2 ms
++ * @fixed_timing:	the firmware's configuration sets only the SPI mode;
++ *			the SPI timing stays the match data's
++ * @blob_count_minus_one: HBPP blobs the driver builds count one word less
++ *			than their payload, whatever the HBPP version
++ * @pull_filler:	filler byte of the interrupt-data request
++ * @data_checksum_end:	the data phase carries its checksum in its last two
++ *			bytes
+  */
+ struct apple_z2_chip_info {
+ 	const char *name;
+@@ -220,6 +277,14 @@ struct apple_z2_chip_info {
+ 	bool recover_control_stall;
+ 	bool shifted_reply_header;
+ 	unsigned int upload_hz;	/* firmware upload clock, if above the device's */
++	const struct apple_z2_gen2_boot *gen2_boot;
++	unsigned int boot_timeout_ms;
++	unsigned int reset_hold_ms;
++	unsigned int hv_settle_us;
++	bool fixed_timing;
++	bool blob_count_minus_one;
++	u8 pull_filler;
++	bool data_checksum_end;
+ };
+ 
+ struct apple_z2 {
+@@ -319,7 +384,8 @@ static bool apple_z2_is_gen1(const struct apple_z2 *z2)
+ 
+ static bool apple_z2_uses_gen1_data(const struct apple_z2 *z2)
+ {
+-	return apple_z2_is_gen1(z2) || apple_z2_is_n61(z2);
++	return apple_z2_is_gen1(z2) || apple_z2_is_n61(z2) ||
++	       z2->variant == APPLE_Z2_VARIANT_D21;
+ }
+ 
+ static bool apple_z2_is_d11(const struct apple_z2 *z2)
+@@ -332,9 +398,16 @@ static bool apple_z2_is_d111(const struct apple_z2 *z2)
+ 	return z2->variant == APPLE_Z2_VARIANT_D111;
+ }
+ 
++/* The iPhone 8 Plus: an iPhone 7 Plus controller with the gen1 data phase. */
++static bool apple_z2_is_d21(const struct apple_z2 *z2)
++{
++	return z2->variant == APPLE_Z2_VARIANT_D21;
++}
++
+ static bool apple_z2_is_iphone7_plus(const struct apple_z2 *z2)
+ {
+-	return apple_z2_is_d11(z2) || apple_z2_is_d111(z2);
++	return apple_z2_is_d11(z2) || apple_z2_is_d111(z2) ||
++	       apple_z2_is_d21(z2);
+ }
+ 
+ struct apple_z2_finger {
+@@ -767,11 +840,11 @@ static void apple_z2_dispatch_frame(struct apple_z2 *z2, const u8 *payload,
+ 			return;
+ 
+ 		/*
+-		 * D111 hardware traces identify 0x44 as its touch report.  No D11
++		 * D111 and D21 hardware traces identify 0x44 as the touch report.  No D11
+ 		 * runtime capture currently establishes a report identifier, so
+ 		 * retain its length-based dispatch until that protocol is verified.
+ 		 */
+-		if (apple_z2_is_d111(z2) &&
++		if ((apple_z2_is_d111(z2) || apple_z2_is_d21(z2)) &&
+ 		    payload[0] != APPLE_Z2_D111_TOUCH_REPORT)
+ 			return;
+ 
+@@ -830,8 +903,8 @@ static bool apple_z2_gen2_packet_valid(const u8 *buf, size_t buf_len,
+ 
+ /*
+  * Generation-1 data phases: the controller expects the request bytes to
+- * keep streaming while it answers, so transmit from a copy. On J71b,
+- * transfers above 16 bytes run in SPI mode 0 at 500 kHz.
++ * keep streaming while it answers, so transmit from a copy. On J71b and
++ * D21, transfers above 16 bytes run in SPI mode 0 at 500 kHz.
+  */
+ static int apple_z2_gen1_exchange(struct apple_z2 *z2, u8 *buf, size_t len)
+ {
+@@ -841,7 +914,8 @@ static int apple_z2_gen1_exchange(struct apple_z2 *z2, u8 *buf, size_t len)
+ 		.bits_per_word = 8,
+ 	};
+ 	u32 saved_mode = z2->spidev->mode;
+-	bool mode_changed = apple_z2_is_j71b(z2) && len > 16;
++	bool mode_changed = (apple_z2_is_j71b(z2) || apple_z2_is_d21(z2)) &&
++			    len > 16;
+ 	u8 *tx;
+ 	int error, restore;
+ 
+@@ -892,6 +966,9 @@ static int apple_z2_read_packet(struct apple_z2 *z2)
+ 	z2->tx_buf[0] = APPLE_Z2_CMD_READ_INTERRUPT_DATA;
+ 	counter = z2->index_parity + 1;
+ 	z2->tx_buf[1] = counter;
++	if (z2->info->pull_filler)
++		memset(z2->tx_buf + 3, z2->info->pull_filler,
++		       APPLE_Z2_CMD_SIZE - 5);
+ 	apple_z2_z2_checksum(z2->tx_buf, APPLE_Z2_CMD_SIZE);
+ 	xfer.tx_buf = z2->tx_buf;
+ 	xfer.rx_buf = z2->rx_buf;
+@@ -972,10 +1049,11 @@ static int apple_z2_read_packet(struct apple_z2 *z2)
+ 			apple_z2_z2_checksum(z2->rx_buf, APPLE_Z2_CMD_SIZE);
+ 		}
+ 		/*
+-		 * The iPad 5 (iOS 0xfffffff005ea1f24) carries the same checksum
+-		 * in the last two bytes of the data phase, not at 14.
++		 * The iPad 5 (iOS 0xfffffff005ea1f24) and the iPhone 8 Plus
++		 * carry the same checksum in the last two bytes of the data
++		 * phase, not at 14.
+ 		 */
+-		if (apple_z2_is_j71t(z2)) {
++		if (apple_z2_is_j71t(z2) || z2->info->data_checksum_end) {
+ 			u16 checksum = get_unaligned_le16(z2->rx_buf + 14);
+ 
+ 			put_unaligned_le16(0, z2->rx_buf + 14);
+@@ -1012,7 +1090,7 @@ static int apple_z2_read_packet(struct apple_z2 *z2)
+ 		 * stayed dead until the controller was rebooted. Take it as the
+ 		 * next frame's header and read that frame.
+ 		 */
+-		if (apple_z2_is_j71b(z2) && !resynced &&
++		if ((apple_z2_is_j71b(z2) || apple_z2_is_d21(z2)) && !resynced &&
+ 		    z2->rx_buf[0] == APPLE_Z2_REPLY_INTERRUPT_DATA) {
+ 			resynced = true;
+ 			payload_len = get_unaligned_le16(z2->rx_buf + 1);
+@@ -2263,8 +2341,18 @@ static irqreturn_t apple_z2_irq(int irq, void *data)
+ 			mutex_unlock(&z2->io_lock);
+ 			return IRQ_HANDLED;
+ 		}
+-		error = apple_z2_is_gen1(z2) ? apple_z2_gen1_drain(z2) :
+-						 apple_z2_read_packet(z2);
++		/*
++		 * The iPhone 8 Plus gets one frame read per interrupt: its
++		 * level interrupt fires again while reports stay queued, and
++		 * a read that finds the queue empty can stop it for good.
++		 */
++		if (apple_z2_is_gen1(z2)) {
++			error = apple_z2_gen1_drain(z2);
++		} else {
++			error = apple_z2_read_packet(z2);
++			if (!error && apple_z2_control_stalled(z2))
++				error = -ETIMEDOUT;
++		}
+ 		if (error == -ETIMEDOUT && z2->info->recover_control_stall)
+ 			apple_z2_queue_control_recovery(z2);
+ 		mutex_unlock(&z2->io_lock);
+@@ -2407,8 +2495,8 @@ static void apple_z2_platform_power_off(struct apple_z2 *z2)
+ {
+ 	int error;
+ 
+-	if (apple_z2_is_gen1(z2))
+-		apple_z2_gen1_restore_irq_type(z2);
++	/* Every path that powers the controller off undoes the level type. */
++	apple_z2_gen1_restore_irq_type(z2);
+ 
+ 	if (apple_z2_is_j71t(z2)) {
+ 		gpiod_set_value_cansleep(z2->reset_gpio, 1);
+@@ -2652,7 +2740,15 @@ static int apple_z2_iphone7_plus_power_on(struct apple_z2 *z2)
+ 	if (error)
+ 		return error;
+ 	z2->hv_enabled = true;
+-	usleep_range(2000, 5000);
++	/*
++	 * The D21 controller boots, sends a frame or two and falls silent
++	 * when its core supply follows the high-voltage one within 2 ms;
++	 * 50 ms still failed one boot in three, 500 ms none.
++	 */
++	if (z2->info->hv_settle_us)
++		fsleep(z2->info->hv_settle_us);
++	else
++		usleep_range(2000, 5000);
+ 
+ 	error = regulator_enable(z2->core_supply);
+ 	if (error)
+@@ -2712,7 +2808,11 @@ static int apple_z2_platform_power_on(struct apple_z2 *z2)
+ static int apple_z2_pulse_reset(struct apple_z2 *z2)
+ {
+ 	gpiod_set_value_cansleep(z2->reset_gpio, 1);
+-	usleep_range(1000, 2000);
++	/* A short pulse leaves the D21 controller in its last run's mode. */
++	if (z2->info->reset_hold_ms)
++		msleep(z2->info->reset_hold_ms);
++	else
++		usleep_range(1000, 2000);
+ 	gpiod_set_value_cansleep(z2->reset_gpio, 0);
+ 	usleep_range(1000, 2000);
+ 	return 0;
+@@ -2833,9 +2933,12 @@ static u8 *apple_z2_build_hbpp_blob(struct apple_z2 *z2, u32 address,
+ 	put_unaligned_be16(APPLE_Z2_HBPP_CMD_BLOB, blob_data + 2);
+ 	/*
+ 	 * HBPP 0x103 encodes the full number of four-byte payload words,
+-	 * HBPP 0x104 and later one less.
++	 * HBPP 0x104 and later one less. The D21 (HBPP 0x103) refuses its
++	 * calibration with the full count, as if it read one word past it.
+ 	 */
+-	put_unaligned_be16(z2->hbpp_version >= 0x104 ? words - 1 : words, blob_data + 4);
++	put_unaligned_be16(z2->hbpp_version >= 0x104 ||
++			   z2->info->blob_count_minus_one ? words - 1 : words,
++			   blob_data + 4);
+ 	put_unaligned_be16(address, blob_data + 6);
+ 	put_unaligned_be16(address >> 16, blob_data + 8);
+ 	header_checksum = 0;
+@@ -3466,7 +3569,11 @@ static bool apple_z2_wait_firmware_irq(struct apple_z2 *z2, u32 timeout_ms)
+ 
+ static int apple_z2_wait_ready_irq(struct apple_z2 *z2, u32 timeout_ms)
+ {
+-	if (!apple_z2_wait_firmware_irq(z2, timeout_ms))
++	/*
++	 * The D21 asks for its calibration with this interrupt, and the
++	 * calibration follows the file anyway; a missed edge is not fatal.
++	 */
++	if (!apple_z2_wait_firmware_irq(z2, timeout_ms) && !apple_z2_is_d21(z2))
+ 		return -ETIMEDOUT;
+ 	if (!apple_z2_uses_ipad_protocol(z2) && !apple_z2_is_iphone7_plus(z2))
+ 		return 0;
+@@ -3506,6 +3613,11 @@ static int apple_z2_apply_fw_config(struct apple_z2 *z2, const u8 *data,
+ 	boot_timeout = apple_z2_fw_config_word(data, 9);
+ 	z2->hbpp_version = (valid & APPLE_Z2_FW_CONFIG_HBPP_VERSION) ?
+ 			   apple_z2_fw_config_word(data, 10) : 0;
++	/* The SPI timing of these boards is their match data's. */
++	if (z2->info->fixed_timing)
++		valid &= ~(APPLE_Z2_FW_CONFIG_MIN_DMA | APPLE_Z2_FW_CONFIG_Z2_DELAY |
++			   APPLE_Z2_FW_CONFIG_CS_DELAY |
++			   APPLE_Z2_FW_CONFIG_BOOT_TIMEOUT);
+ 	if ((valid & APPLE_Z2_FW_CONFIG_MIN_DMA) && min_dma) {
+ 		if (apple_z2_is_iphone7_plus(z2)) {
+ 			if (min_dma > APPLE_Z2_RX_BUF_SIZE)
+@@ -3562,6 +3674,226 @@ static int apple_z2_apply_fw_config(struct apple_z2 *z2, const u8 *data,
+ 	return 0;
+ }
+ 
++/* Register writes as one-word HBPP blobs, framed like the calibration. */
++static int apple_z2_gen2_write_regs(struct apple_z2 *z2,
++				    const struct apple_z2_hbpp_reg *regs,
++				    unsigned int num_regs)
++{
++	unsigned int i;
++	size_t size;
++	u8 value[4];
++	int error;
++
++	for (i = 0; i < num_regs; i++) {
++		put_unaligned_le32(regs[i].value, value);
++		u8 *blob __free(kfree) =
++			apple_z2_build_hbpp_blob(z2, regs[i].addr, value,
++						 sizeof(value), &size);
++		if (IS_ERR(blob))
++			return PTR_ERR(blob);
++		error = apple_z2_send_firmware_blob(z2, blob, size, false, false);
++		if (error)
++			return error;
++	}
++
++	return 0;
++}
++
++/* The calibration records the firmware walk skipped, in file order. */
++static int apple_z2_gen2_send_calibration(struct apple_z2 *z2,
++					  const struct firmware *fw)
++{
++	size_t fw_idx = sizeof(struct apple_z2_fw_hdr);
++	const char *property;
++	u32 load_cmd, size, address, max_size, provider;
++	size_t len;
++	int error;
++
++	while (fw->size - fw_idx >= 2 * sizeof(__le32)) {
++		load_cmd = get_unaligned_le32(fw->data + fw_idx);
++		size = get_unaligned_le32(fw->data + fw_idx + sizeof(__le32));
++		fw_idx += 2 * sizeof(__le32);
++		if (size > fw->size - fw_idx)
++			return -EINVAL;
++
++		if (load_cmd == LOAD_COMMAND_SEND_CALIBRATION_V2) {
++			if (size != sizeof(struct apple_z2_fw_calibration))
++				return -EINVAL;
++			address = get_unaligned_le32(fw->data + fw_idx);
++			max_size = get_unaligned_le32(fw->data + fw_idx + 4);
++			provider = get_unaligned_le32(fw->data + fw_idx + 8);
++			property = apple_z2_calibration_property(provider);
++			if (!property || !max_size)
++				return -EINVAL;
++
++			const u8 *data __free(kfree) =
++				apple_z2_build_iphone7_cal(z2, property, address,
++							   max_size, &len);
++			if (IS_ERR(data))
++				return PTR_ERR(data);
++			if (data) {
++				error = apple_z2_send_firmware_blob(z2, data, len,
++								    false, false);
++				if (error)
++					return error;
++			}
++		}
++		fw_idx = round_up(fw_idx + size, 4);
++	}
++
++	return 0;
++}
++
++/* Reads a report @times times if the controller has it; absent is fine. */
++static int apple_z2_gen2_read_optional(struct apple_z2 *z2, u8 report,
++				       unsigned int times, const char *tag)
++{
++	unsigned int i;
++	u8 status;
++	u16 len;
++	int error;
++
++	if (apple_z2_read_report_info_locked(z2, report, &status, &len, tag) ||
++	    !len)
++		return 0;
++	for (i = 0; i < times; i++) {
++		error = apple_z2_read_report_locked(z2, report, len, tag);
++		if (error)
++			return error;
++	}
++	return 0;
++}
++
++/*
++ * Report setup in the iPad 6 order (the same firmware generation): device
++ * information, one interrupt-data read, the surface, database and 0x73
++ * reports, a drain, the level interrupt, a settle and a wake; then the
++ * 0x9d/0xbf mode reports where the firmware has them, the arming writes and
++ * the reads that start the controller's interrupts.
++ */
++static int apple_z2_gen2_init_locked(struct apple_z2 *z2)
++{
++	static const u8 rep9d[] = { 0x01, 0, 0, 0, 0, 0, 0, 0 };
++	static const u8 repbf[] = { 0x9d, 0x81, 0x09, 0x00 };
++	const struct apple_z2_gen2_boot *boot = z2->info->gen2_boot;
++	const struct apple_z2_report_write *arm;
++	unsigned int i;
++	u16 len;
++	u8 status;
++	int error;
++
++	error = apple_z2_read_device_info_locked(z2);
++	if (error)
++		dev_warn(&z2->spidev->dev, "device information failed: %d\n",
++			 error);
++	error = apple_z2_read_packet(z2);
++	if (error)
++		return error;
++
++	error = apple_z2_read_report_info_locked(z2, APPLE_Z2_REPORT_SURFACE,
++						 &status, &len, "gen2-d9");
++	if (error)
++		return error;
++	error = apple_z2_read_report_locked(z2, APPLE_Z2_REPORT_SURFACE, len,
++					    "gen2-d9-read");
++	if (!error)
++		error = apple_z2_store_surface_descriptor(z2, len);
++	if (error)
++		return error;
++
++	error = apple_z2_gen2_read_optional(z2, 0xdb, 3, "gen2-db");
++	if (!error)
++		error = apple_z2_gen2_read_optional(z2, 0x73, 3, "gen2-73");
++	for (i = 0; !error && i < 4; i++) {
++		error = apple_z2_read_packet(z2);
++		if (z2->runtime_queue_empty ||
++		    (!z2->runtime_frame_valid && !z2->runtime_control_reply))
++			break;
++	}
++	if (error)
++		return error;
++
++	/* Masked until booted: the level line stays asserted meanwhile. */
++	apple_z2_irq_off(z2);
++	error = apple_z2_gen1_set_level_irq(z2);
++	if (error)
++		return error;
++	msleep(APPLE_Z2_D21_SETTLE_MS);
++
++	error = apple_z2_z2_cmd_locked(z2, APPLE_Z2_CMD_WAKE, 0, "gen2-wake");
++	if (error)
++		return error;
++	usleep_range(2200, 2300);
++
++	if (!apple_z2_read_report_info_locked(z2, 0x9d, &status, &len,
++					      "gen2-9d") &&
++	    !(status == 2 && !len)) {
++		error = apple_z2_write_report_locked(z2, 0x9d, rep9d,
++						     sizeof(rep9d), "gen2-9d-1");
++		if (error)
++			return error;
++		usleep_range(50500, 50700);
++		error = apple_z2_write_report_locked(z2, 0x9d, rep9d,
++						     sizeof(rep9d), "gen2-9d-2");
++		if (!error)
++			error = apple_z2_write_report_locked(z2, 0xbf, repbf,
++							     sizeof(repbf),
++							     "gen2-bf");
++		if (error)
++			return error;
++	}
++
++	for (i = 0; i < boot->num_arm; i++) {
++		arm = &boot->arm[i];
++		error = apple_z2_write_report_locked(z2, arm->report, arm->data,
++						     arm->len, "gen2-arm");
++		if (error)
++			return error;
++	}
++
++	/* Without these the controller sends a frame or two and stops. */
++	for (i = 0; i < boot->kick_reads; i++) {
++		error = apple_z2_read_packet(z2);
++		if (error)
++			return error;
++		msleep(100);
++	}
++
++	return 0;
++}
++
++static int apple_z2_gen2_finish_boot(struct apple_z2 *z2,
++				     const struct firmware *fw)
++{
++	const struct apple_z2_gen2_boot *boot = z2->info->gen2_boot;
++	int error;
++
++	mutex_lock(&z2->io_lock);
++	/* Right after the file the first register write can be refused. */
++	msleep(APPLE_Z2_D21_REG_SETTLE_MS);
++	error = apple_z2_gen2_write_regs(z2, boot->regs, boot->num_regs);
++	if (!error)
++		error = apple_z2_gen2_send_calibration(z2, fw);
++	if (!error)
++		error = apple_z2_gen2_write_regs(z2, boot->post_cal_regs,
++						 boot->num_post_cal_regs);
++	if (!error) {
++		msleep(50);
++		error = apple_z2_gen2_init_locked(z2);
++	}
++	if (!error) {
++		z2->protocol_state = APPLE_Z2_STATE_REPORTS_READY;
++		z2->booted = true;
++		error = apple_z2_read_packet(z2);
++	}
++	mutex_unlock(&z2->io_lock);
++	if (error)
++		return error;
++
++	apple_z2_irq_on(z2);
++	return 0;
++}
++
+ static int apple_z2_upload_firmware(struct apple_z2 *z2)
+ {
+ 	const struct apple_z2_fw_hdr *fw_hdr;
+@@ -3706,6 +4038,10 @@ static int apple_z2_upload_firmware(struct apple_z2 *z2)
+ 				break;
+ 			}
+ 
++			/* Sent once the boot sequence asked for it. */
++			if (z2->info->gen2_boot)
++				break;
++
+ 			if (apple_z2_is_n61(z2)) {
+ 				data = apple_z2_build_n61_cal(z2, property, address,
+ 							      max_size, provider, &size);
+@@ -3775,6 +4111,9 @@ static int apple_z2_upload_firmware(struct apple_z2 *z2)
+ 		return error;
+ 	}
+ 
++	if (z2->info->gen2_boot)
++		return apple_z2_gen2_finish_boot(z2, fw);
++
+ 	if (apple_z2_is_iphone7_plus(z2)) {
+ 		msleep(50);
+ 		mutex_lock(&z2->io_lock);
+@@ -4278,6 +4617,65 @@ static const struct apple_z2_chip_info apple_z2_d111_info = {
+ 	.variant = APPLE_Z2_VARIANT_D111,
+ };
+ 
++/*
++ * iPhone 8 Plus (D21), personality C1F5E,4 of D21.mtprops: the iPhone 7
++ * Plus boot and report layout with the generation-1 data phase. @regs are
++ * the personality's boot sequence; 0x10003458 after the calibration is the
++ * write of the tested configuration.
++ */
++static const struct apple_z2_hbpp_reg apple_z2_d21_regs[] = {
++	{ 0x10003060, 0x17d3 },	/* fll-mval */
++	{ 0x1000305c, 2 },	/* reference clock divider */
++	{ 0x10003058, 6 },
++	{ 0x10003000, 3 },
++	{ 0x10003518, 1 },	/* clk32-clock-enable */
++};
++
++static const struct apple_z2_hbpp_reg apple_z2_d21_post_cal_regs[] = {
++	{ 0x10003458, 1 },
++};
++
++/*
++ * After the reads: report enable, the iPhone report set, high-level state
++ * Active (0x72, offset 1), detection options with bit 0 set (0xc8), touch
++ * mode 1 in its 8-byte form (0xbf), then 0x70.
++ */
++static const struct apple_z2_report_write apple_z2_d21_arm[] = {
++	{ APPLE_Z2_REPORT_ENABLE, 1, { 0 } },
++	{ APPLE_Z2_D11_REPORT_ENABLE, 1, { 1 } },
++	{ 0x72, 8, { 0, 1 } },
++	{ 0xc8, 1, { 0x09 } },
++	{ 0xbf, 8, { 0x9f, 0x83, 0x0b, 0x02, 0x00, 0x10, 0x00, 0x00 } },
++	{ 0x70, 1, { 0x08 } },
++};
++
++static const struct apple_z2_gen2_boot apple_z2_d21_boot = {
++	.regs = apple_z2_d21_regs,
++	.num_regs = ARRAY_SIZE(apple_z2_d21_regs),
++	.post_cal_regs = apple_z2_d21_post_cal_regs,
++	.num_post_cal_regs = ARRAY_SIZE(apple_z2_d21_post_cal_regs),
++	.arm = apple_z2_d21_arm,
++	.num_arm = ARRAY_SIZE(apple_z2_d21_arm),
++	.kick_reads = 40,
++};
++
++static const struct apple_z2_chip_info apple_z2_d21_info = {
++	.name = "iPhone10,2 Touchscreen",
++	.variant = APPLE_Z2_VARIANT_D21,
++	.cs_setup_us = 1000,
++	.cs_hold_us = 1000,
++	.cs_inactive_us = 1000,
++	.recover_control_stall = true,
++	.gen2_boot = &apple_z2_d21_boot,
++	.boot_timeout_ms = 5000,	/* the personality's first boot */
++	.reset_hold_ms = 25,
++	.hv_settle_us = 500000,
++	.fixed_timing = true,
++	.blob_count_minus_one = true,
++	.pull_filler = 0xaa,
++	.data_checksum_end = true,
++};
++
+ static const struct apple_z2_chip_info apple_z2_n61_info = {
+ 	.name = "iPhone 6 Touchscreen",
+ 	.variant = APPLE_Z2_VARIANT_N61,
+@@ -4326,6 +4724,8 @@ static int apple_z2_probe(struct spi_device *spi)
+ 	}
+ 	if (apple_z2_is_j71b(z2))
+ 		z2->boot_timeout_ms = 500;
++	if (info->boot_timeout_ms)
++		z2->boot_timeout_ms = info->boot_timeout_ms;
+ 	if (info->n1)
+ 		z2->z2_inter_packet_delay_us = info->n1->control_delay_us;
+ 	z2->bpw16_min_len = 1;
+@@ -4510,7 +4910,8 @@ static int apple_z2_probe(struct spi_device *spi)
+ 		mt_flags |= INPUT_MT_DROP_UNUSED;
+ 	} else if (apple_z2_is_iphone7_plus(z2) || apple_z2_is_n61(z2)) {
+ 		slots = 10;
+-		if (apple_z2_is_d11(z2))
++		/* Released contacts may just be left out of the next report. */
++		if (apple_z2_is_d11(z2) || apple_z2_is_d21(z2))
+ 			mt_flags |= INPUT_MT_DROP_UNUSED;
+ 	} else {
+ 		slots = 256;
+@@ -4643,6 +5044,7 @@ static const struct of_device_id apple_z2_of_match[] = {
+ 	{ .compatible = "apple,j172-touchscreen", .data = &apple_z2_j172_info },
+ 	{ .compatible = "apple,d11-touchscreen", .data = &apple_z2_d11_info },
+ 	{ .compatible = "apple,d111-touchscreen", .data = &apple_z2_d111_info },
++	{ .compatible = "apple,d21-touchscreen", .data = &apple_z2_d21_info },
+ 	{ .compatible = "apple,n61-touchscreen", .data = &apple_z2_n61_info },
+ 	{}
+ };
+@@ -4658,6 +5060,7 @@ static struct spi_device_id apple_z2_of_id[] = {
+ 	{ .name = "j172-touchscreen", .driver_data = (kernel_ulong_t)&apple_z2_j172_info },
+ 	{ .name = "d11-touchscreen", .driver_data = (kernel_ulong_t)&apple_z2_d11_info },
+ 	{ .name = "d111-touchscreen", .driver_data = (kernel_ulong_t)&apple_z2_d111_info },
++	{ .name = "d21-touchscreen", .driver_data = (kernel_ulong_t)&apple_z2_d21_info },
+ 	{ .name = "n61-touchscreen", .driver_data = (kernel_ulong_t)&apple_z2_n61_info },
+ 	{}
+ };

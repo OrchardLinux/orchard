@@ -1,0 +1,219 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: dugs <dugahol@protonmail.com>
+Date: Fri, 20 Nov 2026 08:04:50 +0800
+Subject: [PATCH] Input: apple_z2: Tell D21 touches from hover and palms
+
+The D21 0x44 records do not mark touches the way the iPhone 7 Plus state
+byte does: a sustained press reads state 4 with pressure, a resting
+finger state 4 with pressure 0, new contacts 3 for one frame, light ones
+1 or 2, and lifts 0. Taking states 3 and 4 as touches dropped presses and
+passed resting fingers.
+
+Pressure separates them (labelled captures, 229 contacts): hover, rest
+and one-frame flickers stay below 60, every deliberate press passes 100.
+A record is a touch when its state is not 0 and its pressure reaches 64.
+
+Palms pass that gate when pressed. They are larger: a dragging finger
+measures a 662-757 major axis, a pressed palm 3000-4360, and by area
+(major times minor) palms 2.8M-8M against at most 2.2M for a hard
+finger press. A finger's first three or four frames can be palm-sized,
+so a contact becomes a palm after eight consecutive large frames at
+touch pressure (frames below the gate neither count nor reset), or at
+once from 12M, and stays one while it is reported. It is a finger again
+below 2M: the controller gives a lifted palm's ID to the next finger.
+
+The thresholds are match data; boards without a filter keep their state
+check.
+
+Originally from iPhOmarchy patches/0035 (7634f234abd2), 0036
+(2bde906a7ae3), 0037 (b0596de41057), 0038 (136547cacafc) and 0039
+(c35f24bb9ac3), as in GPU-WIP/jade/kernel/0021 (apple_z2.c
+bce4e6c701a7) with the tuned values of GPU-WIP/jade/README.md
+(pres_min 64, tool_max 3000, tool_area_max 5000000, tool_area_hard
+12000000, tool_area_release 2000000, latch_frames 8), iPhOmarchy 7952dce.
+
+Assisted-by: LLM
+---
+ drivers/input/touchscreen/apple_z2.c | 103 ++++++++++++++++++++++++++-
+ 1 file changed, 101 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index c80f958fa..083fecc19 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -214,6 +214,28 @@ struct apple_z2_report_write {
+ 	u8 data[11];
+ };
+ 
++/**
++ * struct apple_z2_contact_filter - which reported contacts are touches
++ * @pressure_min:	least pressure of a touch
++ * @palm_major:		contact major axis of a palm
++ * @palm_area:		contact area (major times minor axis) of a palm
++ * @palm_frames:	consecutive palm-sized frames that mark a contact a palm
++ * @palm_area_instant:	area that marks a contact a palm at once
++ * @palm_area_release:	area below which a palm is a finger again
++ *
++ * A palm stays one while it is reported, unless it shrinks below
++ * @palm_area_release: the controller reuses the contact ID of a lifted
++ * palm for the next finger.
++ */
++struct apple_z2_contact_filter {
++	u16 pressure_min;
++	u16 palm_major;
++	u32 palm_area;
++	u8 palm_frames;
++	u32 palm_area_instant;
++	u32 palm_area_release;
++};
++
+ /**
+  * struct apple_z2_gen2_boot - iPhone 8 Plus style boot completion
+  * @regs:		registers written again after the firmware file, before
+@@ -266,6 +288,8 @@ struct apple_z2_gen2_boot {
+  * @pull_filler:	filler byte of the interrupt-data request
+  * @data_checksum_end:	the data phase carries its checksum in its last two
+  *			bytes
++ * @contact_filter:	which contacts of an iPhone 7 Plus style report are
++ *			touches; without it, those in state 3 or 4
+  */
+ struct apple_z2_chip_info {
+ 	const char *name;
+@@ -285,6 +309,7 @@ struct apple_z2_chip_info {
+ 	bool blob_count_minus_one;
+ 	u8 pull_filler;
+ 	bool data_checksum_end;
++	const struct apple_z2_contact_filter *contact_filter;
+ };
+ 
+ struct apple_z2 {
+@@ -353,6 +378,9 @@ struct apple_z2 {
+ 	const char *fw_name;
+ 	u8 *tx_buf;
+ 	u8 *rx_buf;
++	/* contact_filter state per slot */
++	DECLARE_BITMAP(palm, APPLE_Z2_D21_SLOTS);
++	u8 palm_frames[APPLE_Z2_D21_SLOTS];
+ };
+ 
+ static bool apple_z2_uses_ipad_protocol(const struct apple_z2 *z2)
+@@ -630,9 +658,51 @@ static void apple_z2_parse_j172_touches(struct apple_z2 *z2,
+ 	input_sync(z2->input_dev);
+ }
+ 
++/*
++ * The D21 state byte does not tell a touch from a hovering or resting
++ * finger, so pressure does: hover and rest stay below 60, presses pass 100.
++ * Large contacts are palms when they stay large: a finger's first frames
++ * can be palm-sized too.
++ */
++static bool apple_z2_contact_is_touch(struct apple_z2 *z2,
++				      const struct apple_z2_finger *finger,
++				      int slot)
++{
++	const struct apple_z2_contact_filter *filter = z2->info->contact_filter;
++	u32 major = le16_to_cpu(finger->tool_major);
++	u32 area = major * le16_to_cpu(finger->tool_minor);
++	bool pressed = le16_to_cpu(finger->pressure) >= filter->pressure_min;
++	bool large = major >= filter->palm_major || area >= filter->palm_area;
++
++	if (slot >= APPLE_Z2_D21_SLOTS)
++		return false;
++	if (area < filter->palm_area_release) {
++		clear_bit(slot, z2->palm);
++		z2->palm_frames[slot] = 0;
++	}
++	if (area >= filter->palm_area_instant) {
++		set_bit(slot, z2->palm);
++	} else if (large && pressed) {
++		/* Frames below the pressure gate neither count nor reset. */
++		if (z2->palm_frames[slot] < U8_MAX)
++			z2->palm_frames[slot]++;
++		if (z2->palm_frames[slot] >= filter->palm_frames)
++			set_bit(slot, z2->palm);
++	} else if (!large) {
++		z2->palm_frames[slot] = 0;
++	}
++	if (!finger->state) {
++		clear_bit(slot, z2->palm);
++		z2->palm_frames[slot] = 0;
++	}
++
++	return finger->state && pressed && !test_bit(slot, z2->palm);
++}
++
+ static void apple_z2_parse_touches(struct apple_z2 *z2,
+ 				   const u8 *msg, size_t msg_len)
+ {
++	DECLARE_BITMAP(seen, APPLE_Z2_D21_SLOTS) = { };
+ 	s16 abs_x;
+ 	s16 abs_y;
+ 	s16 orientation;
+@@ -681,8 +751,15 @@ static void apple_z2_parse_touches(struct apple_z2 *z2,
+ 			dev_warn(&z2->spidev->dev, "unable to get slot for finger\n");
+ 			continue;
+ 		}
+-		slot_valid = fingers[i].state == APPLE_Z2_TOUCH_STARTED ||
+-			     fingers[i].state == APPLE_Z2_TOUCH_MOVED;
++		if (z2->info->contact_filter) {
++			slot_valid = apple_z2_contact_is_touch(z2, &fingers[i],
++							       slot);
++			if (slot < APPLE_Z2_D21_SLOTS)
++				set_bit(slot, seen);
++		} else {
++			slot_valid = fingers[i].state == APPLE_Z2_TOUCH_STARTED ||
++				     fingers[i].state == APPLE_Z2_TOUCH_MOVED;
++		}
+ 		input_mt_slot(z2->input_dev, slot);
+ 		if (!input_mt_report_slot_state(z2->input_dev, MT_TOOL_FINGER, slot_valid))
+ 			continue;
+@@ -726,6 +803,15 @@ static void apple_z2_parse_touches(struct apple_z2 *z2,
+ 		input_report_abs(z2->input_dev, ABS_MT_TOUCH_MINOR,
+ 				 le16_to_cpu(fingers[i].touch_minor));
+ 	}
++	if (z2->info->contact_filter) {
++		/* A contact left out of the report has lifted. */
++		for (i = 0; i < APPLE_Z2_D21_SLOTS; i++) {
++			if (!test_bit(i, seen)) {
++				clear_bit(i, z2->palm);
++				z2->palm_frames[i] = 0;
++			}
++		}
++	}
+ 	input_mt_sync_frame(z2->input_dev);
+ 	input_sync(z2->input_dev);
+ }
+@@ -1134,6 +1220,8 @@ static void apple_z2_reset_protocol(struct apple_z2 *z2)
+ 	z2->runtime_frame_valid = false;
+ 	z2->surface_descriptor_valid = false;
+ 	z2->control_reads = 0;
++	bitmap_zero(z2->palm, APPLE_Z2_D21_SLOTS);
++	memset(z2->palm_frames, 0, sizeof(z2->palm_frames));
+ }
+ 
+ static int apple_z2_advance_protocol(struct apple_z2 *z2,
+@@ -4659,6 +4747,16 @@ static const struct apple_z2_gen2_boot apple_z2_d21_boot = {
+ 	.kick_reads = 40,
+ };
+ 
++/* Measured on the panel: see apple_z2_contact_is_touch(). */
++static const struct apple_z2_contact_filter apple_z2_d21_contacts = {
++	.pressure_min = 64,
++	.palm_major = 3000,
++	.palm_area = 5000000,
++	.palm_frames = 8,
++	.palm_area_instant = 12000000,
++	.palm_area_release = 2000000,
++};
++
+ static const struct apple_z2_chip_info apple_z2_d21_info = {
+ 	.name = "iPhone10,2 Touchscreen",
+ 	.variant = APPLE_Z2_VARIANT_D21,
+@@ -4674,6 +4772,7 @@ static const struct apple_z2_chip_info apple_z2_d21_info = {
+ 	.blob_count_minus_one = true,
+ 	.pull_filler = 0xaa,
+ 	.data_checksum_end = true,
++	.contact_filter = &apple_z2_d21_contacts,
+ };
+ 
+ static const struct apple_z2_chip_info apple_z2_n61_info = {

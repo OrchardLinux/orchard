@@ -1,0 +1,97 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: dugs <dugahol@protonmail.com>
+Date: Fri, 20 Nov 2026 07:44:06 +0800
+Subject: [PATCH] arm64: dts: apple: t8015-d21: Add the touchscreen
+
+Describe the iPhone 8 Plus touch controller on spi1, from the D21 ADT
+(/arm-io/spi1/multi-touch): chip select GPIO 0x8a, reset GPIO 0x21,
+interrupt GPIO 102, the touch clock, and its two supplies in the order
+iOS powers them (power-sequence: power_ana, power_ldo, clock_enable):
+
+- function-power_ana = dpLE(0x302), the touch high-voltage switch in the
+  Chestnut display PMIC (I2C 0x27 on i2c0, register 0x05 bit 4). Without
+  it the controller scans but never queues a contact frame.
+- function-power_ldo = pKW4('rBK3', 0x5020000), the core rail, an SMC
+  function.
+
+The firmware is the C1F5E,4 personality of D21.mtprops (firmware
+0x0773), which the unit runs; the C1F5E,3 image boots but scans at half
+rate. The alias lets m1n1 copy the unit's four calibrations
+(multi-touch, orb-gap, orb-force, shape-dynamic-accel) to the node.
+
+Originally from iPhOmarchy patches/0020 ("input: apple-z2: D21 chestnut
+touch-HV supply; PMIC + regulator + DTS", fb913fdd5f4f), patches/0040
+(b2533c59a2a0), dtb/d21-boot-wifi.dts and docs/touch-bringup.md,
+iPhOmarchy 5921728.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8015-d21.dts | 57 +++++++++++++++++++++++++
+ 1 file changed, 57 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t8015-d21.dts b/arch/arm64/boot/dts/apple/t8015-d21.dts
+index a902ba7f1..578e30137 100644
+--- a/arch/arm64/boot/dts/apple/t8015-d21.dts
++++ b/arch/arm64/boot/dts/apple/t8015-d21.dts
+@@ -11,4 +11,61 @@
+ / {
+ 	compatible = "apple,d21", "apple,t8015", "apple,arm-platform";
+ 	model = "Apple iPhone 8 Plus (Global)";
++
++	/* m1n1 copies the ADT's touch calibrations to this node. */
++	aliases {
++		touchscreen0 = &touchscreen;
++	};
++};
++
++/* The display PMIC, ADT "display-pmu,chestnut". */
++&i2c0 {
++	status = "okay";
++
++	pmic@27 {
++		compatible = "apple,chestnut-pmic";
++		reg = <0x27>;
++		#address-cells = <1>;
++		#size-cells = <1>;
++
++		/* ADT multi-touch function-power_ana = dpLE(0x302) */
++		touch_hv: regulator-touch-hv {
++			compatible = "apple,chestnut-touch-hv-regulator";
++			regulator-name = "touch-hv";
++		};
++	};
++};
++
++&smc_regulators {
++	status = "okay";
++
++	/* ADT multi-touch function-power_ldo = pKW4('rBK3', 0x5020000) */
++	touch_core: regulator-touch-core {
++		apple,key-id = "rBK3";
++		apple,function = <0x05020000>;
++		regulator-name = "touch-core";
++	};
++};
++
++/* The touch controller (ADT "hid-transport,k1"), chip select GPIO 0x8a. */
++&spi1 {
++	cs-gpios = <&pinctrl_ap 138 GPIO_ACTIVE_LOW>;
++	status = "okay";
++
++	touchscreen: touchscreen@0 {
++		compatible = "apple,d21-touchscreen";
++		reg = <0>;
++		spi-max-frequency = <3000000>;
++		spi-cpol;
++		spi-cpha;
++		apple,z2-no-init-ack;
++		interrupts-extended = <&pinctrl_ap 102 IRQ_TYPE_EDGE_FALLING>;
++		reset-gpios = <&pinctrl_ap 33 GPIO_ACTIVE_LOW>;
++		hv-supply = <&touch_hv>;
++		core-supply = <&touch_core>;
++		clocks = <&touchclk>;
++		firmware-name = "apple/dfrmtfw-d21-c1f5e-4.bin";
++		touchscreen-size-x = <1080>;
++		touchscreen-size-y = <1920>;
++	};
+ };

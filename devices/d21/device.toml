@@ -21,7 +21,7 @@ platform = "apple-16k"
 dtb = "t8015-d21" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until bring-up needs it.
+recipe = "firmware.json" # Public recipe, not firmware bytes: the touch firmware (D21.mtprops C1F5E,4).
 
 [support]
 status = "experimental"
@@ -33,7 +33,7 @@ status = "experimental"
 display = "untested"
 screen_off = "missing"
 backlight = "untested"
-touch = "missing"
+touch = "untested" # apple_z2 D21 variant (C1F5E,4 firmware from the recipe, calibration from the ADT); works on the contributor's unit, not yet run from Orchard's tree.
 buttons = "missing"
 accelerometer = "missing"
 gyroscope = "missing"
