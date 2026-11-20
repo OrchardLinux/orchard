@@ -1,0 +1,94 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: dugs <dugahol@protonmail.com>
+Date: Fri, 20 Nov 2026 07:39:04 +0800
+Subject: [PATCH] Input: apple_z2: Stop restarting a controller that never
+ delivers a frame
+
+The control-only stall recovery bounds failed boots within one recovery
+(three attempts), but not repeated successful ones: a controller that
+boots fine and then stalls again without a single valid frame is
+restarted forever, every few seconds, for as long as it stalls.
+
+Count the recoveries since the last valid frame and give up after five,
+leaving the interrupt masked with an error in the log. Any valid frame
+resets the count, and so does a resume, which boots the controller from
+scratch. An idle controller is unaffected: it raises no interrupts, so
+it never enters the stall detector.
+
+This closes the gap the stall recovery left open (repeated successful
+recoveries followed by another stall). Measured on the iPhone 8 Plus
+(D21), where a wedged controller restart-looped until the cap stopped
+it.
+
+Originally from iPhOmarchy patches/0042 ("input: apple_z2: D21 bounded
+runtime recovery (Orchard 79f5e69 port)", 170831592b6a, its
+APPLE_Z2_D21_MAX_DEAD_RESTARTS) and fix 4 of PR-to-Orchard/README.md
+(iPhOmarchy 5921728).
+
+Assisted-by: LLM
+---
+ drivers/input/touchscreen/apple_z2.c | 20 ++++++++++++++++++--
+ 1 file changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index b13901d3e..a4201ca80 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -62,6 +62,7 @@
+ #define APPLE_Z2_CONTROL_GAP_MS          250
+ #define APPLE_Z2_CONTROL_RESTARTS        3
+ #define APPLE_Z2_CONTROL_RETRY_MS        1000
++#define APPLE_Z2_CONTROL_RECOVERIES      5
+ #define APPLE_Z2_CMD_SIZE                16
+ #define APPLE_Z2_RAW_XFER_MAX_SIZE       64
+ #define APPLE_Z2_GEN2_MIN_RESULT_SIZE    64
+@@ -243,6 +244,7 @@ struct apple_z2 {
+ 	bool boot_due;		/* resumed: boot once every device is back */
+ 	unsigned int rearm_attempts;
+ 	unsigned int control_reads;
++	unsigned int stall_recoveries;	/* restarts since the last frame */
+ 	unsigned long control_since;
+ 	unsigned long control_last;
+ 	bool recovering;
+@@ -1925,6 +1927,8 @@ static bool apple_z2_control_stalled(struct apple_z2 *z2)
+ 	    z2->protocol_state != APPLE_Z2_STATE_REPORTS_READY)
+ 		return false;
+ 
++	if (z2->runtime_frame_valid)
++		z2->stall_recoveries = 0;
+ 	if (!z2->runtime_control_reply || z2->runtime_frame_valid ||
+ 	    z2->runtime_queue_empty) {
+ 		z2->control_reads = 0;
+@@ -2220,11 +2224,22 @@ static void apple_z2_queue_control_recovery(struct apple_z2 *z2)
+ 	if (z2->recovering || z2->stopping)
+ 		return;
+ 
+-	dev_warn_ratelimited(&z2->spidev->dev,
+-			     "control-only touch stall, restarting\n");
+ 	apple_z2_release_contacts(z2);
+ 	z2->irq_on = false;
+ 	disable_irq_nosync(z2->spidev->irq);
++	/*
++	 * Restarts that boot but never deliver a frame would otherwise loop
++	 * for as long as the controller stalls. Any frame resets the count.
++	 */
++	if (z2->stall_recoveries >= APPLE_Z2_CONTROL_RECOVERIES) {
++		dev_err(&z2->spidev->dev,
++			"touch stalled again after %u restarts without a frame, giving up\n",
++			z2->stall_recoveries);
++		return;
++	}
++	z2->stall_recoveries++;
++	dev_warn_ratelimited(&z2->spidev->dev,
++			     "control-only touch stall, restarting\n");
+ 	z2->recovering = true;
+ 	z2->rearm_attempts = 0;
+ 	schedule_delayed_work(&z2->rearm_work, 0);
+@@ -4597,6 +4612,7 @@ static int apple_z2_resume(struct device *dev)
+ 
+ 	z2->stopping = false;
+ 	z2->recovering = false;
++	z2->stall_recoveries = 0;
+ 	z2->boot_due = true;
+ 	return 0;
+ }
