@@ -72,8 +72,9 @@ ADT has no such property. Its window is 0x5000 bytes, so five channels 0x1000
 apart; MCA0, 1, 3 and 4 use channels 0, 1, 3 and 4 (`function-mclk_frequency`).
 The reference rate is in `/arm-io` `clock-frequencies`, which the IPSW ADT
 leaves zero for iBoot to fill in; it has to be read from the live ADT (m1n1
-exposes it as MTD `adt`). iOS special-cases a 342857142 Hz reference
-(2.4 GHz / 7) for precision, a hint but not proof of the J81's rate.
+exposes it as MTD `adt`). A running J81 reports 342857142 Hz (2.4 GHz / 7)
+at index 10 (clock-id 0x10a minus 0x100), the rate iOS special-cases for
+precision.
 
 **I2S switch.** iOS binds `AppleAE2I2SSwitch3` to `i2s-switch,s5l8960x`, the
 layout `s8000-mca.c` programs. MCA3's route is `aud3` to `pin3`.
@@ -103,7 +104,7 @@ record starts like J71t's.
 | MAX98721 driver | written, builds; DT nodes kept back until the read-only probe |
 | NCO (`apple,t7001-nco`, 0x1000 channel stride) | written, builds |
 | DT: SIO, I2S switch, MCA3, NCO in `t7001.dtsi` (disabled); SmartIO enabled on the Air 2 | written |
-| NCO reference rate | open: read from the live ADT |
+| NCO reference rate | 342857142 Hz (live ADT `clock-frequencies[10]`); NCO, I2S switch and MCA3 enabled on the Air 2 |
 | DT: amplifiers and sound card (`audio-graph-card2`, two codecs on one link) | kept back until the read-only probe |
 
 ## Speaker safety
@@ -122,4 +123,5 @@ static).
 | 2026-11-19 | ADT and kernelcache analysis (offline) | hardware above identified; no device access |
 | 2026-11-19 | SmartIO firmware recipe | `t7000-smartio.bin` extracted, sha256 matches |
 | 2026-11-19 | SmartIO V1 backend, MCA v1, MAX98721 driver (offline) | build as modules for apple-4k; patch audit passes for apple-4k and apple-16k; not run on hardware |
+| 2026-11-20 | Live ADT read from Omarchy (read-only) | NCO reference 342857142 Hz |
 | 2026-11-20 | NCO variant and DT nodes (offline) | NCO layout from iOS's `AppleS5L8960XNCO`; patch audit passes for apple-4k and apple-16k; not run on hardware |

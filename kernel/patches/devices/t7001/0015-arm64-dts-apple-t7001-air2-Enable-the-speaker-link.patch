@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 11:35:49 +0100
+Subject: [PATCH] arm64: dts: apple: t7001-air2: Enable the speaker link
+
+Set the NCO reference to the rate iBoot reports in a running J81's
+Apple device tree (/arm-io clock-frequencies[10] = 342857142 Hz, 2.4 GHz
+/ 7; the IPSW device tree leaves it 0), and enable the NCO, the
+i2s-switch and MCA3 with its route from aud3 to pin3. No codec is
+attached yet, so no sound card appears.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+---
+ arch/arm64/boot/dts/apple/t7001-air2.dtsi | 23 +++++++++++++++++++++++
+ 1 file changed, 23 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t7001-air2.dtsi b/arch/arm64/boot/dts/apple/t7001-air2.dtsi
+index 1d33fef01..29e355181 100644
+--- a/arch/arm64/boot/dts/apple/t7001-air2.dtsi
++++ b/arch/arm64/boot/dts/apple/t7001-air2.dtsi
+@@ -198,6 +198,29 @@ &sio {
+ 	status = "okay";
+ };
+ 
++/*
++ * The NCO reference as iBoot reports it in a running J81's ADT
++ * (/arm-io clock-frequencies[10], the NCO's first clock-id 0x10a):
++ * 2.4 GHz / 7. iOS special-cases this rate for its divider precision.
++ */
++&nco_clkref {
++	clock-frequency = <342857142>;
++};
++
++&nco {
++	status = "okay";
++};
++
++&i2s_switch {
++	status = "okay";
++};
++
++/* The speaker link: MCA3 to pad 3 (ADT function-i2s_route aud3 -> pin3) */
++&mca3 {
++	apple,i2s-switch = <&i2s_switch 3 3>;
++	status = "okay";
++};
++
+ &serial5 {
+ 	pinctrl-0 = <&uart5_pins>;
+ 	pinctrl-names = "default";
+-- 
+2.56.0
+
