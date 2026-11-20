@@ -11,6 +11,12 @@ is missing or empty.
 
 ## Unreleased
 
+### Devices
+
+- iPad Air 2 (Wi-Fi): internal storage works, so Omarchy installs with
+  `orchard install` and starts from the iPad with `orchard launch`, next to
+  iPadOS. The A8X storage controller (ANS1) has a kernel driver now.
+
 ### Install & launch
 
 - On Linux, `orchard run` and `orchard launch` use the released Pongo again
