@@ -1,0 +1,138 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 12:09:31 +0100
+Subject: [PATCH] arm64: dts: apple: t7001-air2: Add the speakers
+
+Describe the two MAX98721 amplifiers on I2C1 at 0x31 and 0x34 (Apple's
+/arm-io/i2c1 audio-speaker nodes; both read revision 0x80 on a J81) and
+a sound card for them: MCA3 drives both on one TDM link, 8 slots of 16
+bits, amplifier 0x31 in slot 0 and 0x34 in slot 1. One CPU to two
+codecs is audio-graph-card2's "semi-multi" link.
+
+The amplifiers' interrupts (GPIO 8 and 9) and the 0x31 amplifier's
+"function-alive" GPIO 101 are not described yet.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+---
+ arch/arm64/boot/dts/apple/t7001-air2.dtsi | 94 ++++++++++++++++++++++-
+ 1 file changed, 91 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t7001-air2.dtsi b/arch/arm64/boot/dts/apple/t7001-air2.dtsi
+index 29e355181..98320109c 100644
+--- a/arch/arm64/boot/dts/apple/t7001-air2.dtsi
++++ b/arch/arm64/boot/dts/apple/t7001-air2.dtsi
+@@ -185,12 +185,46 @@ rtc_offset: rtc-offset@4 {
+ };
+ 
+ /*
+- * Speaker amplifiers (two MAX98721, at 0x31 and 0x34 in Apple's device
+- * tree). No driver binds them yet; the bus is enabled so they can be
+- * identified from user space.
++ * The two speaker amplifiers, fed by MCA3 in TDM slots 0 (0x31) and 1
++ * (0x34); both read revision 0x80 on a J81. Their driver holds them off
++ * until a sound card runs a stream through them. Their interrupts (GPIO 8
++ * and 9) and the 0x31 amplifier's "function-alive" GPIO 101 are not
++ * described yet.
+  */
+ &i2c1 {
+ 	status = "okay";
++
++	speaker_amp0: amplifier@31 {
++		compatible = "maxim,max98721";
++		reg = <0x31>;
++		#sound-dai-cells = <0>;
++		sound-name-prefix = "Amp0";
++
++		port {
++			amp0_ep: endpoint {
++				remote-endpoint = <&speaker_amp0_ep>;
++				dai-tdm-slot-num = <8>;
++				dai-tdm-slot-width = <16>;
++				dai-tdm-slot-rx-mask = <1>;		/* slot 0 */
++			};
++		};
++	};
++
++	speaker_amp1: amplifier@34 {
++		compatible = "maxim,max98721";
++		reg = <0x34>;
++		#sound-dai-cells = <0>;
++		sound-name-prefix = "Amp1";
++
++		port {
++			amp1_ep: endpoint {
++				remote-endpoint = <&speaker_amp1_ep>;
++				dai-tdm-slot-num = <8>;
++				dai-tdm-slot-width = <16>;
++				dai-tdm-slot-rx-mask = <0 1>;		/* slot 1 */
++			};
++		};
++	};
+ };
+ 
+ /* SmartIO: the DMA engine of every MCA and of spi1 */
+@@ -219,6 +253,60 @@ &i2s_switch {
+ &mca3 {
+ 	apple,i2s-switch = <&i2s_switch 3 3>;
+ 	status = "okay";
++
++	mca3_port: port {
++		mca3_ep: endpoint {
++			remote-endpoint = <&speakers_cpu_ep>;
++			format = "dsp_a";
++			bitclock-master;
++			frame-master;
++		};
++	};
++};
++
++/*
++ * The speakers: MCA3 playing to both amplifiers on one TDM link
++ * (audio-graph-card2 "semi-multi", one CPU to two codecs). Channel 0 is
++ * slot 0 (amplifier 0x31), channel 1 slot 1 (0x34).
++ */
++/ {
++	sound-speakers {
++		compatible = "audio-graph-card2";
++		label = "J81 Speakers";
++		links = <&mca3_port>;
++
++		multi {
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			ports@0 {
++				reg = <0>;
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				port@0 {
++					reg = <0>;
++					speakers_cpu_ep: endpoint {
++						remote-endpoint = <&mca3_ep>;
++					};
++				};
++
++				port@1 {
++					reg = <1>;
++					speaker_amp0_ep: endpoint {
++						remote-endpoint = <&amp0_ep>;
++					};
++				};
++
++				port@2 {
++					reg = <2>;
++					speaker_amp1_ep: endpoint {
++						remote-endpoint = <&amp1_ep>;
++					};
++				};
++			};
++		};
++	};
+ };
+ 
+ &serial5 {
+-- 
+2.56.0
+
