@@ -100,35 +100,50 @@ def newc(files):
     return bytes(out)
 
 
+PROGRAMS = ('orchard-write', 'dropbear', 'resize2fs', 'tune2fs')
+# Newer than the oldest releases: the USB receiver, and what it runs to finish an install.
+RECEIVER = 'orchard-install-usb'
+FINISHING = {'install_device.py': D.__file__, 'boot-entries': remote.BOOT_ENTRIES}
+
+
 def install_tools(archive):
     """{name: bytes} out of the release's install-tools.tar.gz: the programs, and the start
-    script and DHCP setup, which releases before they were packed lack (then this checkout's)."""
+    script and DHCP setup, which releases before they were packed lack (then this checkout's).
+    With the USB receiver, which older releases lack, also its finishing program and boot-entries
+    script (this checkout's where the release has the receiver but not them)."""
     with tarfile.open(archive) as opened:
         names = set(opened.getnames())
-        found = {name: opened.extractfile(name).read() for name in ('orchard-write', 'dropbear', 'resize2fs', 'tune2fs')}
+        found = {name: opened.extractfile(name).read() for name in PROGRAMS}
         for name in ('run', 'udhcpd.conf'):
             found[name] = opened.extractfile(name).read() if name in names else (ADD_ON / name).read_bytes()
+        if RECEIVER in names:
+            found[RECEIVER] = opened.extractfile(RECEIVER).read()
+            for name, fallback in FINISHING.items():
+                found[name] = opened.extractfile(name).read() if name in names else Path(fallback).read_bytes()
     return found
 
 
-def add_on(tools, ecid, authorized_keys, host_key):
+def add_on(tools, ecid, authorized_keys=None, host_key=None):
+    """The archive appended to the initrd. AUTHORIZED_KEYS and HOST_KEY are the SSH install's;
+    an install over the USB receiver needs neither."""
     tools = install_tools(tools)
     directory, program, data = stat.S_IFDIR | 0o755, stat.S_IFREG | 0o755, stat.S_IFREG | 0o644
     private = stat.S_IFREG | 0o600
-    return newc({'install': (directory, b''),
-                 'install/run': (data, tools['run']),
-                 'install/udhcpd.conf': (data, tools['udhcpd.conf']),
-                 'install/orchard-write': (program, tools['orchard-write']),
-                 'install/dropbear': (program, tools['dropbear']),
-                 'install/resize2fs': (program, tools['resize2fs']),
-                 'install/tune2fs': (program, tools['tune2fs']),
-                 'install/ecid': (data, f'{ecid:x}\n'.encode()),
-                 'install/authorized_keys': (data, authorized_keys.encode()),
-                 'install/host_key': (private, host_key),
-                 'root': (stat.S_IFDIR | 0o700, b''),
-                 # Dropbear looks its user up.
-                 'etc': (directory, b''),
-                 'etc/passwd': (data, b'root:x:0:0:root:/root:/bin/sh\n')})
+    files = {'install': (directory, b''),
+             'install/run': (data, tools['run']),
+             'install/udhcpd.conf': (data, tools['udhcpd.conf'])}
+    files.update({f'install/{name}': (program, tools[name]) for name in (*PROGRAMS, RECEIVER) if name in tools})
+    files.update({f'install/{name}': (data, tools[name]) for name in FINISHING if name in tools})
+    files['install/ecid'] = (data, f'{ecid:x}\n'.encode())
+    if authorized_keys is not None:
+        files['install/authorized_keys'] = (data, authorized_keys.encode())
+    if host_key is not None:
+        files['install/host_key'] = (private, host_key)
+    files.update({'root': (stat.S_IFDIR | 0o700, b''),
+                  # Dropbear looks its user up.
+                  'etc': (directory, b''),
+                  'etc/passwd': (data, b'root:x:0:0:root:/root:/bin/sh\n')})
+    return newc(files)
 
 
 def layer_boot_files(layer, devicetree):
