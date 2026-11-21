@@ -16,6 +16,9 @@ is missing or empty.
 - iPad Air 2 (Wi-Fi): internal storage works, so Omarchy installs with
   `orchard install` and starts from the iPad with `orchard launch`, next to
   iPadOS. The A8X storage controller (ANS1) has a kernel driver now.
+- iPad Air 2 (Wi-Fi): it charges. The Lightning charger driver supports the
+  iPad Air 2's D2207 PMIC, so a computer's charging port or an Apple adapter
+  gets up to 1.5 A instead of iBoot's 100 mA.
 
 ### Install & launch
 
