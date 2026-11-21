@@ -1,0 +1,122 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dugs <dugahol@protonmail.com>
+Date: Fri, 20 Nov 2026 17:20:00 +0800
+Subject: [PATCH] Input: apple_z2: Use the working D21 init order
+
+The D21 boot woke the controller only after pulling interrupt data and
+declaring the interrupt.  A pull issued while the controller is still
+asleep answers with a zero-length header and wedges the queue, so the
+kicks that should start delivery read zeros and the controller sends one
+frame at most.
+
+Follow the order of the working D21 setup instead: wake first, no pull
+before arming, declare the level interrupt and sample the scan counter
+right before the touch arm.  With it the controller delivers its first
+valid frame.
+
+Ported from iPhOmarchy 86d244b (patches/d21-import-shared/0038) onto the
+shared driver without the diagnostic logging it was tested with.
+
+Assisted-by: LLM
+Signed-off-by: Dugs <dugahol@protonmail.com>
+---
+ drivers/input/touchscreen/apple_z2.c | 55 ++++++++++++++++++----------
+ 1 file changed, 35 insertions(+), 20 deletions(-)
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index 905333e49..77720ca9a 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -44,7 +44,6 @@
+ #define APPLE_Z2_REPORT_ENABLE           0xaf
+ #define APPLE_Z2_D11_REPORT_ENABLE       0xe2
+ #define APPLE_Z2_D21_SLOTS               10
+-#define APPLE_Z2_D21_SETTLE_MS           2260
+ #define APPLE_Z2_D21_REG_SETTLE_MS       50
+ #define APPLE_Z2_J172_HEADER_SIZE         32
+ #define APPLE_Z2_J172_CONTACT_SIZE        48
+@@ -3914,15 +3913,24 @@ static int apple_z2_gen2_init_locked(struct apple_z2 *z2)
+ 	unsigned int i;
+ 	u16 len;
+ 	u8 status;
++	bool armed_once = false;
+ 	int error;
+ 
+ 	error = apple_z2_read_device_info_locked(z2);
+ 	if (error)
+ 		dev_warn(&z2->spidev->dev, "device information failed: %d\n",
+ 			 error);
+-	error = apple_z2_read_packet(z2);
++
++	/*
++	 * Wake the controller before any interrupt-data pull.  A pull issued
++	 * while it is still asleep answers with a zero-length header and
++	 * leaves the queue wedged: the first later kick sees that stale header
++	 * and every one after it gets a zero MISO reply.
++	 */
++	error = apple_z2_z2_cmd_locked(z2, APPLE_Z2_CMD_WAKE, 0, "gen2-wake");
+ 	if (error)
+ 		return error;
++	usleep_range(2000, 2100);
+ 
+ 	error = apple_z2_read_report_info_locked(z2, APPLE_Z2_REPORT_SURFACE,
+ 						 &status, &len, "gen2-d9");
+@@ -3938,26 +3946,8 @@ static int apple_z2_gen2_init_locked(struct apple_z2 *z2)
+ 	error = apple_z2_gen2_read_optional(z2, 0xdb, 3, "gen2-db");
+ 	if (!error)
+ 		error = apple_z2_gen2_read_optional(z2, 0x73, 3, "gen2-73");
+-	for (i = 0; !error && i < 4; i++) {
+-		error = apple_z2_read_packet(z2);
+-		if (z2->runtime_queue_empty ||
+-		    (!z2->runtime_frame_valid && !z2->runtime_control_reply))
+-			break;
+-	}
+-	if (error)
+-		return error;
+-
+-	/* Masked until booted: the level line stays asserted meanwhile. */
+-	apple_z2_irq_off(z2);
+-	error = apple_z2_gen1_set_level_irq(z2);
+ 	if (error)
+ 		return error;
+-	msleep(APPLE_Z2_D21_SETTLE_MS);
+-
+-	error = apple_z2_z2_cmd_locked(z2, APPLE_Z2_CMD_WAKE, 0, "gen2-wake");
+-	if (error)
+-		return error;
+-	usleep_range(2200, 2300);
+ 
+ 	if (!apple_z2_read_report_info_locked(z2, 0x9d, &status, &len,
+ 					      "gen2-9d") &&
+@@ -3979,6 +3969,31 @@ static int apple_z2_gen2_init_locked(struct apple_z2 *z2)
+ 
+ 	for (i = 0; i < boot->num_arm; i++) {
+ 		arm = &boot->arm[i];
++		if (!armed_once && arm->report == 0xc8) {
++			unsigned int p;
++
++			armed_once = true;
++			/*
++			 * Declare the interrupt level-low, masked until booted,
++			 * and sample the scan counter before the touch arm.
++			 */
++			apple_z2_irq_off(z2);
++			error = apple_z2_gen1_set_level_irq(z2);
++			if (error)
++				return error;
++			for (p = 0; p < boot->kick_reads; p++) {
++				status = 0;
++				len = 0;
++				if (!apple_z2_read_report_info_locked(z2, 0x28,
++								      &status,
++								      &len,
++								      "gen2-28") &&
++				    len >= 1 && len <= APPLE_Z2_RX_BUF_SIZE - 5)
++					apple_z2_read_report_locked(z2, 0x28, len,
++								    "gen2-28-read");
++				msleep(100);
++			}
++		}
+ 		error = apple_z2_write_report_locked(z2, arm->report, arm->data,
+ 						     arm->len, "gen2-arm");
+ 		if (error)

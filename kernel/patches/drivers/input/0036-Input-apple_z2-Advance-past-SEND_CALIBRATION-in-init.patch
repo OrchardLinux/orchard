@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dugs <dugahol@protonmail.com>
+Date: Fri, 20 Nov 2026 16:55:00 +0800
+Subject: [PATCH] Input: apple_z2: Advance past SEND_CALIBRATION in initial
+ config
+
+The initial-config scan skipped the SEND_CALIBRATION payload without
+advancing fw_idx, so the next iteration parsed the payload as a command and
+returned -EINVAL.  The device's real C1F5E,3 firmware was consequently
+unusable and a synthetic C1F5E,4 container was required.  Advance over the
+record like every other command.
+
+Assisted-by: LLM
+Signed-off-by: Dugs <dugahol@protonmail.com>
+---
+ drivers/input/touchscreen/apple_z2.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index 77720ca9a..9a0ebd12e 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -4353,8 +4353,10 @@ static int apple_z2_apply_initial_config(struct apple_z2 *z2)
+ 		size = get_unaligned_le32(fw->data + fw_idx);
+ 		fw_idx += sizeof(__le32);
+ 
+-		if (load_cmd == LOAD_COMMAND_SEND_CALIBRATION)
++		if (load_cmd == LOAD_COMMAND_SEND_CALIBRATION) {
++			fw_idx = round_up(fw_idx + size, 4);
+ 			continue;
++		}
+ 		if (size > fw->size - fw_idx)
+ 			return -EINVAL;
+ 		if (load_cmd == LOAD_COMMAND_SEND_CALIBRATION_V2) {

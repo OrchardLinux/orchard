@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dugs <dugahol@protonmail.com>
+Date: Fri, 20 Nov 2026 17:05:00 +0800
+Subject: [PATCH] Input: apple_z2: Allow firmware without a SET_CONFIG record
+
+The initial-config scan returned -EINVAL when no SET_CONFIG record was
+present, forcing the device's real C1F5E,3 firmware to be replaced with a
+synthetic C1F5E,4 container just to carry a config record.  Boards with
+fixed_timing take their timing from match data, so no config is required;
+accept firmware that has none.
+
+Assisted-by: LLM
+Signed-off-by: Dugs <dugahol@protonmail.com>
+---
+ drivers/input/touchscreen/apple_z2.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index 9a0ebd12e..d254d0c52 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -4375,7 +4375,8 @@ static int apple_z2_apply_initial_config(struct apple_z2 *z2)
+ 		fw_idx = round_up(fw_idx + size, 4);
+ 	}
+ 
+-	return -EINVAL;
++	/* No SET_CONFIG: boards with fixed_timing take all timing from match data. */
++	return 0;
+ }
+ 
+ static int apple_z2_boot_preamble(struct apple_z2 *z2, bool full_duplex)
