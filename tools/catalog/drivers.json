@@ -404,6 +404,7 @@
     "n102": [
       "backlight",
       "buttons",
+      "touch",
       "usb_network",
       "usb_serial"
     ],
