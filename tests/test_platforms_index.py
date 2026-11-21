@@ -7,6 +7,7 @@ import tomllib
 import unittest
 from unittest import mock
 
+from orchard import hardware
 from orchard.image import platform, platforms_index
 
 
@@ -43,12 +44,28 @@ class PlatformsIndex(unittest.TestCase):
         self.assertEqual((index['schema'], index['kind'], index['commit']), (1, 'orchard.platforms', 'abc'))
         self.assertEqual(sorted(index['platforms']), platform.platforms())
         self.assertNotIn('apple-armv7', index['platforms'])
-        entries = [*index['loaders'].values(), index['install_tools'], *index['platforms'].values()]
+        entries = [*index['loaders'].values(), index['install_tools'], index['board_data'], *index['platforms'].values()]
         self.assertEqual(sorted(index['loaders']), ['m1n1', 'pongo'])
         for entry in entries:
             data = (self.published / entry['file']).read_bytes()
             self.assertEqual((entry['bytes'], entry['sha256']), (len(data), hashlib.sha256(data).hexdigest()))
             self.assertNotIn('/', entry['file'])
+
+    def test_board_data_is_the_board_files_and_reproducible(self):
+        self.build()
+        archive = self.published / 'board-data.tar.gz'
+        first = archive.read_bytes()
+        with tarfile.open(archive) as opened:
+            names = opened.getnames()
+            self.assertEqual(opened.extractfile('devices/j71b/device.toml').read(),
+                             hardware.board_data_files()['devices/j71b/device.toml'].read_bytes())
+        self.assertIn('features.toml', names)
+        self.assertIn('chips/t8010.toml', names)
+        self.assertIn('platforms/apple-16k.toml', names)
+        self.assertTrue(all(name.split('/')[0] in hardware.BOARD_DATA for name in names))
+        archive.unlink()
+        platforms_index.write_board_data(archive)
+        self.assertEqual(archive.read_bytes(), first)
 
     def test_install_tools_are_only_the_installer_programs_and_reproducible(self):
         self.build()

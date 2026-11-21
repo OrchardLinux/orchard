@@ -164,6 +164,10 @@
     },
     "install_tools": {
       "$ref": "#/$defs/receipt"
+    },
+    "board_data": {
+      "$ref": "#/$defs/receipt",
+      "description": "orchard's board data (devices/, chips/, platforms/, features.toml) for installers that read only the release."
     }
   },
   "required": [

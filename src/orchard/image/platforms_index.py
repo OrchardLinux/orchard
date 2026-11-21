@@ -55,11 +55,27 @@ def write_install_tools(tools, output):
             archive.addfile(member, io.BytesIO(data))
 
 
+def write_board_data(output, root=None):
+    """The board data (hardware.board_data_files) as a reproducible archive, so an installer that
+    has only a release knows its boards without a separate catalog."""
+    from .. import hardware
+    files = hardware.board_data_files(root)
+    with output.open('xb') as raw, gzip.GzipFile(fileobj=raw, mode='wb', filename='', mtime=0) as compressed, \
+            tarfile.open(fileobj=compressed, mode='w|', format=tarfile.PAX_FORMAT) as archive:
+        for name, path in files.items():
+            data = path.read_bytes()
+            member = tarfile.TarInfo(name)
+            member.size, member.mode = len(data), 0o644
+            member.uname = member.gname = 'root'
+            archive.addfile(member, io.BytesIO(data))
+
+
 def receipts(document):
     """Every file an index names. The 32-bit index keeps its loaders by kind and board."""
     loaders = [entry for value in document['loaders'].values()
                for entry in ([value] if 'sha256' in value else value.values())]
-    return [*loaders, document['install_tools'], *document['platforms'].values()]
+    return [*loaders, document['install_tools'], *([document['board_data']] if 'board_data' in document else []),
+            *document['platforms'].values()]
 
 
 def build(directory, *, kernels, tools, commit, loaders=None):
@@ -73,9 +89,11 @@ def build(directory, *, kernels, tools, commit, loaders=None):
     layers = {name: platform.build(name, directory, bundle=bundle, busybox=tools / 'busybox')
               for name, bundle in kernels.items()}
     write_install_tools(tools, directory / 'install-tools.tar.gz')
+    write_board_data(directory / 'board-data.tar.gz')
     document = {'schema': 1, 'kind': 'orchard.platforms', 'commit': commit,
                 'loaders': {path.stem: receipt(path) for path in (directory / name for name in LOADERS)},
                 'install_tools': receipt(directory / 'install-tools.tar.gz'),
+                'board_data': receipt(directory / 'board-data.tar.gz'),
                 'platforms': layers}
     (directory / 'platforms.toml').write_text(toml(document))
     return document
@@ -95,9 +113,13 @@ def build_armv7(directory, *, kernels, tools, commit, loaders):
     layers = {name: platform.build(name, directory, bundle=bundle, busybox=tools / 'busybox', root_architecture='arm')
               for name, bundle in kernels.items()}
     write_install_tools(tools, directory / 'install-tools-armv7.tar.gz')
+    board_data = directory / 'board-data.tar.gz'
+    if not board_data.exists():     # the same bytes as the arm64 index's, when both share DIRECTORY
+        write_board_data(board_data)
     document = {'schema': 1, 'kind': 'orchard.platforms', 'architecture': 'arm', 'commit': commit,
                 'loaders': {'cascadia': cascadia},
                 'install_tools': receipt(directory / 'install-tools-armv7.tar.gz'),
+                'board_data': receipt(board_data),
                 'platforms': layers}
     (directory / INDEX['arm']).write_text(toml(document))
     return document
