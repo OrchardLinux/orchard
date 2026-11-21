@@ -25,6 +25,18 @@ is missing or empty.
 - A7 and A8 devices (ANS1 storage) no longer reset back to iOS when
   `orchard launch` starts a system from internal storage: m1n1 freed its
   storage command queue twice while shutting storage down.
+- Installers can talk to the device's install system over raw USB, with no
+  SSH, network or keys, and the install finishes on the device even if the
+  cable drops after the system image is written (docs/install-protocol.md).
+  The graphical installer uses it; serial and SSH stay available.
+- `orchard ssh-access` lets this computer sign in over SSH to a system
+  installed without SSH access: it signs in once on the device's USB serial
+  console with the user's password and adds this computer's keys.
+- When the Orchard package repository can't be reached, the install stops
+  with an error instead of quietly installing a kernel that then never
+  updates through the package manager.
+- On Linux hosts that need it, the USB port reset after checkm8 now also
+  works with palera1n 3.
 
 ### Development
 
