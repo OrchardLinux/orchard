@@ -602,15 +602,17 @@ def mount_new_root(connection, node, boot_node):
           timeout=60)
 
 
-def kernel_package(connection, layer, directory):
+def kernel_package(connection, layer, directory, base=None):
     """The root's kernel package, pacstrap's way: the published linux-orchard-PLATFORM that wraps this layer.
 
     Downloaded here (kernel_packages.py), uploaded to /run/orchard, and installed by the root's own
     pacman or apk (install_device.py). None when the root has neither or no published package wraps
     exactly this layer (a nightly or local layer): the layer's files are installed then.
+    BASE is the release's install.base; releases without it are asked about their root.
+    A repository that can't be reached is an error, not a missing package.
     """
     from . import kernel_packages
-    base = shell(connection, kernel_packages.DETECT).decode().strip()
+    base = base or shell(connection, kernel_packages.DETECT).decode().strip()
     if base not in kernel_packages.ARCH:
         return None
     layer_sha256 = hashlib.sha256(Path(layer).read_bytes()).hexdigest()
