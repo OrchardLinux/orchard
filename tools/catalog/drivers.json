@@ -403,10 +403,13 @@
     ],
     "n102": [
       "backlight",
+      "bluetooth_audio",
+      "bluetooth_input",
       "buttons",
       "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "wifi"
     ],
     "n51": [
       "backlight",
