@@ -1,0 +1,195 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sun, 22 Nov 2026 06:40:25 +0800
+Subject: [PATCH] Input: apple_z2: Log each D21 start-up stage (test build)
+
+Test build only: one dmesg line per stage of the D21 start-up (boot
+registers, calibration, report setup, the 0x28 samples, the arming
+writes and the kicks), so a silent controller shows where it stops.
+
+d21_settle_ms adds the iPad 6 settle and a late wake before the touch
+arm, as in the JADE known-good kernel; 0 (the default) leaves the order
+as it is.
+
+Assisted-by: LLM
+---
+ drivers/input/touchscreen/apple_z2.c | 64 ++++++++++++++++++++++------
+ 1 file changed, 51 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index 64bc0f4e5..068b77bcd 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -3894,6 +3894,14 @@ static int apple_z2_gen2_send_calibration(struct apple_z2 *z2,
+ }
+ 
+ /* Reads a report @times times if the controller has it; absent is fine. */
++/* Test build: each D21 start-up stage in dmesg, and the iPad 6 settle as an option. */
++#define D21_STAGE(z2, fmt, ...) \
++	dev_info(&(z2)->spidev->dev, "D21 stage: " fmt "\n", ##__VA_ARGS__)
++static unsigned int d21_settle_ms;
++module_param(d21_settle_ms, uint, 0444);
++MODULE_PARM_DESC(d21_settle_ms,
++		 "D21: settle this long, then wake, before the touch arm (JADE: 2260; 0: off)");
++
+ static int apple_z2_gen2_read_optional(struct apple_z2 *z2, u8 report,
+ 				       unsigned int times, const char *tag)
+ {
+@@ -3902,11 +3910,13 @@ static int apple_z2_gen2_read_optional(struct apple_z2 *z2, u8 report,
+ 	u16 len;
+ 	int error;
+ 
+-	if (apple_z2_read_report_info_locked(z2, report, &status, &len, tag) ||
+-	    !len)
++	error = apple_z2_read_report_info_locked(z2, report, &status, &len, tag);
++	D21_STAGE(z2, "%s info err=%d status=%u len=%u", tag, error, status, len);
++	if (error || !len)
+ 		return 0;
+ 	for (i = 0; i < times; i++) {
+ 		error = apple_z2_read_report_locked(z2, report, len, tag);
++		D21_STAGE(z2, "%s read %u err=%d", tag, i + 1, error);
+ 		if (error)
+ 			return error;
+ 	}
+@@ -3933,6 +3943,7 @@ static int apple_z2_gen2_init_locked(struct apple_z2 *z2)
+ 	int error;
+ 
+ 	error = apple_z2_read_device_info_locked(z2);
++	D21_STAGE(z2, "device info err=%d", error);
+ 	if (error)
+ 		dev_warn(&z2->spidev->dev, "device information failed: %d\n",
+ 			 error);
+@@ -3944,18 +3955,21 @@ static int apple_z2_gen2_init_locked(struct apple_z2 *z2)
+ 	 * and every one after it gets a zero MISO reply.
+ 	 */
+ 	error = apple_z2_z2_cmd_locked(z2, APPLE_Z2_CMD_WAKE, 0, "gen2-wake");
++	D21_STAGE(z2, "wake err=%d", error);
+ 	if (error)
+ 		return error;
+ 	usleep_range(2000, 2100);
+ 
+ 	error = apple_z2_read_report_info_locked(z2, APPLE_Z2_REPORT_SURFACE,
+ 						 &status, &len, "gen2-d9");
++	D21_STAGE(z2, "d9 info err=%d status=%u len=%u", error, status, len);
+ 	if (error)
+ 		return error;
+ 	error = apple_z2_read_report_locked(z2, APPLE_Z2_REPORT_SURFACE, len,
+ 					    "gen2-d9-read");
+ 	if (!error)
+ 		error = apple_z2_store_surface_descriptor(z2, len);
++	D21_STAGE(z2, "d9 read+store err=%d", error);
+ 	if (error)
+ 		return error;
+ 
+@@ -3965,9 +3979,9 @@ static int apple_z2_gen2_init_locked(struct apple_z2 *z2)
+ 	if (error)
+ 		return error;
+ 
+-	if (!apple_z2_read_report_info_locked(z2, 0x9d, &status, &len,
+-					      "gen2-9d") &&
+-	    !(status == 2 && !len)) {
++	error = apple_z2_read_report_info_locked(z2, 0x9d, &status, &len, "gen2-9d");
++	D21_STAGE(z2, "9d info err=%d status=%u len=%u", error, status, len);
++	if (!error && !(status == 2 && !len)) {
+ 		error = apple_z2_write_report_locked(z2, 0x9d, rep9d,
+ 						     sizeof(rep9d), "gen2-9d-1");
+ 		if (error)
+@@ -3979,9 +3993,11 @@ static int apple_z2_gen2_init_locked(struct apple_z2 *z2)
+ 			error = apple_z2_write_report_locked(z2, 0xbf, repbf,
+ 							     sizeof(repbf),
+ 							     "gen2-bf");
++		D21_STAGE(z2, "9d/bf writes err=%d", error);
+ 		if (error)
+ 			return error;
+ 	}
++	error = 0;
+ 
+ 	for (i = 0; i < boot->num_arm; i++) {
+ 		arm = &boot->arm[i];
+@@ -3995,23 +4011,36 @@ static int apple_z2_gen2_init_locked(struct apple_z2 *z2)
+ 			 */
+ 			apple_z2_irq_off(z2);
+ 			error = apple_z2_gen1_set_level_irq(z2);
++			D21_STAGE(z2, "level irq err=%d", error);
+ 			if (error)
+ 				return error;
+ 			for (p = 0; p < boot->kick_reads; p++) {
++				int info, read = -1;
++
+ 				status = 0;
+ 				len = 0;
+-				if (!apple_z2_read_report_info_locked(z2, 0x28,
+-								      &status,
+-								      &len,
+-								      "gen2-28") &&
+-				    len >= 1 && len <= APPLE_Z2_RX_BUF_SIZE - 5)
+-					apple_z2_read_report_locked(z2, 0x28, len,
+-								    "gen2-28-read");
++				info = apple_z2_read_report_info_locked(z2, 0x28, &status,
++									&len, "gen2-28");
++				if (!info && len >= 1 && len <= APPLE_Z2_RX_BUF_SIZE - 5)
++					read = apple_z2_read_report_locked(z2, 0x28, len,
++									   "gen2-28-read");
++				D21_STAGE(z2, "28 sample %u info=%d status=%u len=%u read=%d first=%02x",
++					  p + 1, info, status, len, read, z2->rx_buf[5]);
+ 				msleep(100);
+ 			}
++			if (d21_settle_ms) {
++				msleep(d21_settle_ms);
++				error = apple_z2_z2_cmd_locked(z2, APPLE_Z2_CMD_WAKE, 0,
++							       "gen2-late-wake");
++				D21_STAGE(z2, "settle %u ms, late wake err=%d", d21_settle_ms, error);
++				if (error)
++					return error;
++				usleep_range(2200, 2300);
++			}
+ 		}
+ 		error = apple_z2_write_report_locked(z2, arm->report, arm->data,
+ 						     arm->len, "gen2-arm");
++		D21_STAGE(z2, "arm %02x len=%u err=%d", arm->report, arm->len, error);
+ 		if (error)
+ 			return error;
+ 	}
+@@ -4019,6 +4048,9 @@ static int apple_z2_gen2_init_locked(struct apple_z2 *z2)
+ 	/* Without these the controller sends a frame or two and stops. */
+ 	for (i = 0; i < boot->kick_reads; i++) {
+ 		error = apple_z2_read_packet(z2);
++		D21_STAGE(z2, "kick %u err=%d empty=%d valid=%d control=%d", i + 1, error,
++			  z2->runtime_queue_empty, z2->runtime_frame_valid,
++			  z2->runtime_control_reply);
+ 		if (error)
+ 			return error;
+ 		msleep(100);
+@@ -4037,22 +4069,28 @@ static int apple_z2_gen2_finish_boot(struct apple_z2 *z2,
+ 	/* Right after the file the first register write can be refused. */
+ 	msleep(APPLE_Z2_D21_REG_SETTLE_MS);
+ 	error = apple_z2_gen2_write_regs(z2, boot->regs, boot->num_regs);
+-	if (!error)
++	D21_STAGE(z2, "boot registers err=%d", error);
++	if (!error) {
+ 		error = apple_z2_gen2_send_calibration(z2, fw);
++		D21_STAGE(z2, "calibration err=%d", error);
++	}
+ 	/* The same holds for the first write after the calibration. */
+ 	if (!error) {
+ 		msleep(APPLE_Z2_D21_REG_SETTLE_MS);
+ 		error = apple_z2_gen2_write_regs(z2, boot->post_cal_regs,
+ 						 boot->num_post_cal_regs);
++		D21_STAGE(z2, "post-calibration registers err=%d", error);
+ 	}
+ 	if (!error) {
+ 		msleep(50);
+ 		error = apple_z2_gen2_init_locked(z2);
++		D21_STAGE(z2, "report setup err=%d", error);
+ 	}
+ 	if (!error) {
+ 		z2->protocol_state = APPLE_Z2_STATE_REPORTS_READY;
+ 		z2->booted = true;
+ 		error = apple_z2_read_packet(z2);
++		D21_STAGE(z2, "first read err=%d valid=%d", error, z2->runtime_frame_valid);
+ 	}
+ 	mutex_unlock(&z2->io_lock);
+ 	if (error)
+-- 
+2.54.0 (Apple Git-157)
+
