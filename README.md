@@ -61,7 +61,10 @@ system.
 default. To use Wi-Fi instead, pass an SSH address, for example
 `orchard shell --host 192.168.0.19 --user tablet` or
 `orchard exec --host 192.168.0.19 --user tablet -- uname -a`. The installed
-system must allow this computer's Orchard SSH key. For a RAM payload, use
+system must allow this computer's Orchard SSH key: the installer offers that as
+its last question, and `orchard ssh-access` adds it later to a system installed
+without it, by signing in once on the device's USB serial console with the
+user's password. For a RAM payload, use
 `--host 192.168.0.19 --ram` instead; it connects as root with the RAM key.
 The payload must have SSH and Wi-Fi configured.
 

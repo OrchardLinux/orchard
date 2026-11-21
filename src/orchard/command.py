@@ -101,6 +101,9 @@ def main():
     configure = commands.add_parser('setup', help='show what this host needs to build and boot, then set it up; safe to rerun')
     configure.add_argument('-y', '--yes', action='store_true', help='apply without asking')
     commands.add_parser('doctor', help='show what this host has and lacks for building and booting; changes nothing')
+    access = commands.add_parser('ssh-access', help="let this computer sign in to the installed system over SSH: "
+                                 "signs in once on its USB serial console with the user's password")
+    access.add_argument('--user', help="the installed system's user (default: the one remembered, else asked)")
     boot = commands.add_parser('boot', help='boot recovery from a manifest or explicit image')
     boot.add_argument('source', nargs='?', help='registered distro, local TOML or exact HTTPS URL')
     boot.add_argument('--manifest', '--release', dest='manifest')
@@ -208,6 +211,10 @@ def main():
                 ram_session.push(args.local, args.remote, serial=args.serial, user=args.user, host=args.host, ram=args.ram)
             else:
                 ram_session.pull(args.remote, args.local, serial=args.serial, user=args.user, host=args.host, ram=args.ram)
+            return
+        if args.action == 'ssh-access':
+            from orchard import ssh_access
+            ssh_access.grant(args.user)
             return
         if args.action in ('setup', 'doctor'):
             from orchard import host_setup
