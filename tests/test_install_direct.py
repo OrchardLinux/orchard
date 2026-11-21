@@ -82,6 +82,19 @@ class Payload(unittest.TestCase):
         self.assertIn(b'root:x:0:0', archive)
         self.assertTrue(archive.startswith(b'070701'))
 
+    def test_the_start_script_comes_from_the_release_when_it_has_one(self):
+        self.assertEqual(direct.install_tools(self.tools)['run'], (direct.ADD_ON / 'run').read_bytes())
+        newer = self.work / 'newer.tar.gz'
+        with tarfile.open(newer, 'w:gz') as archive:
+            for name, data in [(name, name.encode()) for name in platforms_index.INSTALL_TOOLS] + \
+                    [('run', b'#!/bin/sh\nRELEASE\n'), ('udhcpd.conf', b'RELEASE-DHCP\n')]:
+                member = tarfile.TarInfo(name)
+                member.size = len(data)
+                archive.addfile(member, io.BytesIO(data))
+        archive = direct.add_on(newer, 0x1234, 'ssh-ed25519 KEY\n', b'HOST')
+        self.assertIn(b'#!/bin/sh\nRELEASE\n', archive)
+        self.assertIn(b'RELEASE-DHCP\n', archive)
+
     def test_a_key_made_for_ssh_converts_to_dropbears_form(self):
         path = self.work / 'key'
         subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', path], check=True)

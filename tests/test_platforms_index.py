@@ -56,8 +56,13 @@ class PlatformsIndex(unittest.TestCase):
         first = archive.read_bytes()
         with tarfile.open(archive) as opened:
             members = opened.getmembers()
-        self.assertEqual([member.name for member in members], list(platforms_index.INSTALL_TOOLS))
-        self.assertTrue(all(member.mode == 0o755 and member.mtime == 0 for member in members))
+        self.assertEqual([member.name for member in members],
+                         [*platforms_index.INSTALL_TOOLS, *platforms_index.INSTALL_DATA])
+        self.assertEqual([member.mode for member in members],
+                         [0o755] * len(platforms_index.INSTALL_TOOLS) + [0o644] * len(platforms_index.INSTALL_DATA))
+        self.assertTrue(all(member.mtime == 0 for member in members))
+        with tarfile.open(archive) as opened:
+            self.assertEqual(opened.extractfile('run').read(), (platforms_index.INSTALL_FILES / 'run').read_bytes())
         archive.unlink()
         platforms_index.write_install_tools(self.tools, archive)
         self.assertEqual(archive.read_bytes(), first)

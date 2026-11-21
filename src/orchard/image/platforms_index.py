@@ -21,11 +21,16 @@ import tarfile
 import tempfile
 import tomllib
 
+from ..hardware import ROOT
 from . import platform
 from .integrity import sha
 from .publish import toml
 
 INSTALL_TOOLS = ('orchard-write', 'dropbear', 'resize2fs', 'tune2fs')
+# The installer system's start script and DHCP setup, packed beside the tools so
+# an installer that only has the release can build the add-on.
+INSTALL_FILES = ROOT / 'boot/initramfs/install'
+INSTALL_DATA = ('run', 'udhcpd.conf')
 LOADERS = ('pongo.bin', 'm1n1.bin')
 REPOSITORY = 'OrchardLinux/orchard'
 # The index of each root architecture (orchard's kernel ARCH names).
@@ -37,13 +42,15 @@ def receipt(path):
 
 
 def write_install_tools(tools, output):
-    """The static programs the installer adds to a kernel's initrd, as a reproducible archive."""
+    """What the installer adds to a kernel's initrd, as a reproducible archive: the static
+    programs, then its start script and DHCP setup."""
+    files = [(tools / name, 0o755) for name in INSTALL_TOOLS] + [(INSTALL_FILES / name, 0o644) for name in INSTALL_DATA]
     with output.open('xb') as raw, gzip.GzipFile(fileobj=raw, mode='wb', filename='', mtime=0) as compressed, \
             tarfile.open(fileobj=compressed, mode='w|', format=tarfile.PAX_FORMAT) as archive:
-        for name in INSTALL_TOOLS:
-            data = (tools / name).read_bytes()
-            member = tarfile.TarInfo(name)
-            member.size, member.mode = len(data), 0o755
+        for path, mode in files:
+            data = path.read_bytes()
+            member = tarfile.TarInfo(path.name)
+            member.size, member.mode = len(data), mode
             member.uname = member.gname = 'root'
             archive.addfile(member, io.BytesIO(data))
 

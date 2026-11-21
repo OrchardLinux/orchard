@@ -101,9 +101,14 @@ def newc(files):
 
 
 def install_tools(archive):
-    """{name: program} out of the release's install-tools.tar.gz."""
+    """{name: bytes} out of the release's install-tools.tar.gz: the programs, and the start
+    script and DHCP setup, which releases before they were packed lack (then this checkout's)."""
     with tarfile.open(archive) as opened:
-        return {name: opened.extractfile(name).read() for name in ('orchard-write', 'dropbear', 'resize2fs', 'tune2fs')}
+        names = set(opened.getnames())
+        found = {name: opened.extractfile(name).read() for name in ('orchard-write', 'dropbear', 'resize2fs', 'tune2fs')}
+        for name in ('run', 'udhcpd.conf'):
+            found[name] = opened.extractfile(name).read() if name in names else (ADD_ON / name).read_bytes()
+    return found
 
 
 def add_on(tools, ecid, authorized_keys, host_key):
@@ -111,8 +116,8 @@ def add_on(tools, ecid, authorized_keys, host_key):
     directory, program, data = stat.S_IFDIR | 0o755, stat.S_IFREG | 0o755, stat.S_IFREG | 0o644
     private = stat.S_IFREG | 0o600
     return newc({'install': (directory, b''),
-                 'install/run': (data, (ADD_ON / 'run').read_bytes()),
-                 'install/udhcpd.conf': (data, (ADD_ON / 'udhcpd.conf').read_bytes()),
+                 'install/run': (data, tools['run']),
+                 'install/udhcpd.conf': (data, tools['udhcpd.conf']),
                  'install/orchard-write': (program, tools['orchard-write']),
                  'install/dropbear': (program, tools['dropbear']),
                  'install/resize2fs': (program, tools['resize2fs']),
