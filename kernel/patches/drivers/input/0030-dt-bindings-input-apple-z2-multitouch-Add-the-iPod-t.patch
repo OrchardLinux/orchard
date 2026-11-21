@@ -1,0 +1,85 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 12:39:17 +0100
+Subject: [PATCH] dt-bindings: input: apple,z2-multitouch: Add the iPod touch 6
+
+Describe the N102 N1 touchscreen, whose core supply is an I2C PMIC
+regulator instead of a GPIO-controlled LDO.
+
+Assisted-by: LLM
+---
+ .../touchscreen/apple,z2-multitouch.yaml      | 30 +++++++++++++++----
+ 1 file changed, 24 insertions(+), 6 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml b/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml
+index b9d5dce..aa4d8ef 100644
+--- a/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml
++++ b/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml
+@@ -25,6 +25,7 @@ properties:
+       - apple,d11-touchscreen
+       - apple,d111-touchscreen
+       - apple,n61-touchscreen
++      - apple,n102-touchscreen
+ 
+   interrupts:
+     maxItems: 1
+@@ -68,9 +69,6 @@ properties:
+   clocks:
+     maxItems: 1
+ 
+-  ana-supply:
+-    description: N61 analog touchscreen supply from the Chestnut high-voltage switch
+-
+   apple,z2-prox-cal-blob:
+     $ref: /schemas/types.yaml#/definitions/uint8-array
+     maxItems: 128
+@@ -185,6 +183,7 @@ allOf:
+             - apple,j71t-touchscreen
+             - apple,j81-touchscreen
+             - apple,j96-touchscreen
++            - apple,n102-touchscreen
+     then:
+       properties:
+         pinctrl-names:
+@@ -195,7 +194,6 @@ allOf:
+         display-sync-gpios: false
+         display-sync1-gpios: false
+         hv-supply: false
+-        core-supply: false
+         spi-cpha: false
+         spi-cpol: false
+         apple,z2-bpw16-min-len: false
+@@ -203,11 +201,31 @@ allOf:
+       required:
+         - clocks
+         - ana-supply
+-        - power-ldo-gpios
++      if:
++        properties:
++          compatible:
++            const: apple,n102-touchscreen
++      then:
++        properties:
++          power-ldo-gpios: false
++        required:
++          - core-supply
++      else:
++        properties:
++          core-supply: false
++        required:
++          - power-ldo-gpios
+     else:
+       properties:
+-        ana-supply: false
+         attn-gpios: false
++      if:
++        properties:
++          compatible:
++            not:
++              const: apple,n61-touchscreen
++      then:
++        properties:
++          ana-supply: false
+   - if:
+       properties:
+         compatible:
