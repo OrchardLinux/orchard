@@ -1,0 +1,7 @@
+# orchard.toml: ipod-gpu-drm, minimal-boot with the constant USB serial, the kernel's modules
+# (powervr and its dependencies) and the A8 GPU test (rootfs/, staged by ./build.sh).
+name = "ipod-gpu-drm"
+
+[payload]
+transport = false
+modules = true
