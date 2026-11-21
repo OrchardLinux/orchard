@@ -14,12 +14,24 @@ no faults over a 514k-job soak. Experimental: dEQP has not run, so the
 chip has no `[gpu]` entry yet. Test with
 [`examples/ipod-gpu-drm`](../../examples/ipod-gpu-drm/README.md).
 
+## Internal storage
+
+The flash sits behind ANS1, as on the iPad Air 2, with iOS 12.4's ANS
+firmware (RTKit 10.2). `asp` shows the user area as `asp0n1` and the nine
+auxiliary namespaces (LLB, firmware, NVRAM, SysCfg, ...) read-only. The
+write unlock opens the whole controller, so the driver refuses every
+command it does not need: only the user area is written.
+
+To keep iOS, shrink its APFS container first (resize-apfs) and install
+Orchard into the free space of `asp0n1`. A DFU restore brings iOS back; it
+keeps SysCfg, which Linux never writes.
+
 ## Open work
 
 - GPU: per-job firmware overhead, parameter-manager pool growth inside a
   scene, and submitting a fragment job behind its geometry job
   (`a8_joint`) by default.
-- Storage, touch, Wi-Fi and the battery gauge are not described yet.
+- Touch, Wi-Fi and the battery gauge are not described yet.
 
 ## Unmerged code
 

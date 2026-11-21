@@ -246,7 +246,7 @@ class InferredInstall(unittest.TestCase):
         from orchard import hardware
         boards = {path.parent.name for path in DESCRIPTORS if not hardware.install_blockers(path.parent.name)}
         self.assertEqual(boards, {'d10', 'd101', 'd11', 'd111', 'd20', 'd201', 'd21', 'd211', 'd22', 'd221',
-                                  'j171', 'j172', 'j71b', 'j71t', 'j72b', 'j72t', 'j81'})
+                                  'j171', 'j172', 'j71b', 'j71t', 'j72b', 'j72t', 'j81', 'n102'})
 
     def test_data_can_name_a_method_this_code_does_not_implement(self):
         from orchard import hardware
