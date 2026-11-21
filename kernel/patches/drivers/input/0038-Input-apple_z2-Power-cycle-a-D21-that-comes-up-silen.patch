@@ -1,0 +1,118 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dugs <dugahol@protonmail.com>
+Date: Fri, 20 Nov 2026 17:20:00 +0800
+Subject: [PATCH] Input: apple_z2: Power-cycle a D21 that comes up silent
+
+The D21 picks its delivery mode when its core rail comes up and can pick
+one with its scan engine stopped: it answers the first boot kick with a
+frame and then nothing, no interrupts and no touches, until it is power
+cycled. Three boots in a row came up that way.
+
+A live controller answers some later kick with a frame. When none does,
+queue the existing control-stall restart, which power-cycles the
+controller and boots it again, and retry from there while it stays
+silent, up to APPLE_Z2_CONTROL_RESTARTS times.
+
+[Reworked from iPhOmarchy 7bed359 (patches/d21-import-shared/0043): the
+idle check uses delivered kick frames instead of the 0x28 scan counter,
+which stayed constant on live controllers too, and the restart reuses the
+control-stall recovery instead of a separate work item.]
+
+Assisted-by: LLM
+Signed-off-by: Dugs <dugahol@protonmail.com>
+---
+ drivers/input/touchscreen/apple_z2.c | 38 +++++++++++++++++++++++++---
+ 1 file changed, 34 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index d254d0c52..35d5918ea 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -343,6 +343,7 @@ struct apple_z2 {
+ 	unsigned int rearm_attempts;
+ 	unsigned int control_reads;
+ 	unsigned int stall_recoveries;	/* restarts since the last frame */
++	bool boot_silent;		/* D21: no frame after the first kick */
+ 	unsigned long control_since;
+ 	unsigned long control_last;
+ 	bool recovering;
+@@ -2361,7 +2362,7 @@ static void apple_z2_control_rearm_work(struct work_struct *work)
+ {
+ 	struct apple_z2 *z2 = container_of(to_delayed_work(work),
+ 					   struct apple_z2, rearm_work);
+-	bool retry;
++	bool retry, silent;
+ 	int error;
+ 
+ 	mutex_lock(&z2->io_lock);
+@@ -2380,19 +2381,30 @@ static void apple_z2_control_rearm_work(struct work_struct *work)
+ 	error = apple_z2_boot(z2);
+ 
+ 	mutex_lock(&z2->io_lock);
+-	retry = error && !z2->stopping &&
++	silent = !error && z2->boot_silent;
++	retry = (error || silent) && !z2->stopping &&
+ 		z2->rearm_attempts < APPLE_Z2_CONTROL_RESTARTS;
+ 	if (!retry)
+ 		z2->recovering = false;
+-	if (retry)
++	if (retry) {
++		if (silent && z2->irq_on) {
++			/* Our caller's synchronize_irq() waits for the handler. */
++			z2->irq_on = false;
++			disable_irq_nosync(z2->spidev->irq);
++		}
+ 		schedule_delayed_work(&z2->rearm_work,
+ 				      msecs_to_jiffies(APPLE_Z2_CONTROL_RETRY_MS));
++	}
+ 	mutex_unlock(&z2->io_lock);
+ 
+ 	if (error)
+ 		dev_err(&z2->spidev->dev,
+ 			"touch control-stall restart %u failed: %d\n",
+ 			z2->rearm_attempts, error);
++	else if (silent)
++		dev_warn(&z2->spidev->dev,
++			 "touch controller still silent after restart %u%s\n",
++			 z2->rearm_attempts, retry ? "" : ", giving up");
+ 	else
+ 		dev_info(&z2->spidev->dev,
+ 			 "touch recovered from control-only stall\n");
+@@ -4000,11 +4012,18 @@ static int apple_z2_gen2_init_locked(struct apple_z2 *z2)
+ 			return error;
+ 	}
+ 
+-	/* Without these the controller sends a frame or two and stops. */
++	/*
++	 * Without these the controller sends a frame or two and stops. A live
++	 * controller answers some kick after the first with a frame; one that
++	 * came up with its scan engine stopped answers only the first.
++	 */
++	z2->boot_silent = true;
+ 	for (i = 0; i < boot->kick_reads; i++) {
+ 		error = apple_z2_read_packet(z2);
+ 		if (error)
+ 			return error;
++		if (i && z2->runtime_frame_valid)
++			z2->boot_silent = false;
+ 		msleep(100);
+ 	}
+ 
+@@ -4040,6 +4059,17 @@ static int apple_z2_gen2_finish_boot(struct apple_z2 *z2,
+ 		return error;
+ 
+ 	apple_z2_irq_on(z2);
++
++	/*
++	 * The D21 picks its delivery mode when its core rail comes up and may
++	 * pick one with the scan engine stopped. A power cycle rolls again.
++	 */
++	mutex_lock(&z2->io_lock);
++	if (z2->boot_silent && !z2->recovering) {
++		dev_warn(&z2->spidev->dev, "touch controller came up silent, power-cycling it\n");
++		apple_z2_queue_control_recovery(z2);
++	}
++	mutex_unlock(&z2->io_lock);
+ 	return 0;
+ }
+ 
