@@ -679,7 +679,7 @@ static char *record;                       /* the completion record, JSON */
 static char error_code[32], error_message[300];
 static char staged[MAX_STAGED][MAX_NAME + 1];
 static int staged_count;
-static char device_ecid[20], board[64], boot_id[64];
+static char device_ecid[20], board[128], boot_id[64];
 static int identity_ok;
 static char identity_problem[200];
 
@@ -1010,7 +1010,7 @@ static int find_disk(char *message, size_t size)
     for (int tries = 0; tries < 300; tries++) {
         DIR *d = opendir("/sys/class/block");
         struct dirent *e;
-        char found[2][64];
+        char found[2][256];
         int count = 0;
         while (d && (e = readdir(d))) {
             char partition[400];
@@ -1024,11 +1024,11 @@ static int find_disk(char *message, size_t size)
         if (d)
             closedir(d);
         if (count > 1) {
-            snprintf(message, size, "More than one internal disk: %s, %s", found[0], found[1]);
+            snprintf(message, size, "More than one internal disk: %.60s, %.60s", found[0], found[1]);
             return -1;
         }
         if (count == 1) {
-            snprintf(cfg.disk, sizeof(cfg.disk), "/dev/%s", found[0]);
+            snprintf(cfg.disk, sizeof(cfg.disk), "/dev/%.200s", found[0]);
             return 0;
         }
         usleep(100000);
