@@ -54,6 +54,10 @@ is missing or empty.
 - A launcher may quit right after choosing a boot entry. m1n1 used to wait
   for the computer to read its last answer before starting Linux, so the
   device stayed on the boot splash when the launcher had already gone.
+- Orchard's Pongo is built from palera1n's PongoOS, at the revision
+  palera1n 3.0.0-beta.4 uses, so the same quiet Pongo also boots iPadOS
+  through palera1n with its overlay; with the old one iPadOS came up
+  without it and half hung.
 - On Linux, `orchard run` and `orchard launch` use the released Pongo again
   instead of asking for a Mac with Xcode: the release lookup picked the
   moving `nightly` tag, which publishes no checksums.
