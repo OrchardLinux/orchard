@@ -403,6 +403,7 @@
     ],
     "n102": [
       "backlight",
+      "battery",
       "bluetooth_audio",
       "bluetooth_input",
       "buttons",
