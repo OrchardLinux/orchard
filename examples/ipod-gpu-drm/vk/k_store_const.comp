@@ -1,0 +1,6 @@
+#version 450
+// The Metal k_store_const of tools/gpu-userspace/shaders/basic.metal (captured on the A8 by a8-shadercap):
+// out[tid] = 0x12345678, one workgroup of 32 threads as a8-shadercap dispatched it.
+layout(local_size_x = 32) in;
+layout(set = 0, binding = 0, std430) buffer Out { uint d[]; } o;
+void main() { o.d[gl_GlobalInvocationID.x] = 0x12345678u; }
