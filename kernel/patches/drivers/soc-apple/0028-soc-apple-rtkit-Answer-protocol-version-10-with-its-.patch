@@ -1,0 +1,123 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nick Chan <towinchenmi@gmail.com>
+Date: Mon, 22 Dec 2025 21:25:12 +0800
+Subject: [PATCH] soc: apple: rtkit: Answer protocol version 10 with its minor
+ version
+
+RTKit protocol version 10 firmware (iOS 11 to 13) sends its minor version
+in the HELLO field that later versions use for the minimum version, and
+takes it back in the reply. Keep it, reply with it, and let drivers read
+the version: the endpoints of some coprocessors move between 10.0 and
+10.2.
+
+[Orchard: from HoolockLinux/linux ans1 ed8528f: the minor-version handshake
+of 4b179996821a ("soc: apple: rtkit: Add protcol version 10 support") and
+apple_rtkit_protocol_version() of ac12267a258a ("soc: apple: rtkit: Prepare
+support for older protocol versions"), with 4b179996821a's author date.
+Reduced to what the iPod touch 6's ANS (RTKit 10.2, iOS 12.4) needs, on top
+of Hoolock's RTKit 10 support (hoolock/070-smc 0008-0009) instead of
+replacing it: the app endpoints keep starting at 6 for every 10.x and the
+10.0 power state handling is not carried. The message is new; the original
+ones describe the parts not carried.]
+Signed-off-by: Nick Chan <towinchenmi@gmail.com>
+Assisted-by: LLM
+---
+  drivers/soc/apple/rtkit-internal.h |    1 +
+  drivers/soc/apple/rtkit.c          |   28 +++++++++++++++++++++++++---
+  include/linux/soc/apple/rtkit.h    |   11 +++++++++++
+  3 files changed, 37 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/soc/apple/rtkit-internal.h b/drivers/soc/apple/rtkit-internal.h
+index 5f91dea..820588e 100644
+--- a/drivers/soc/apple/rtkit-internal.h
++++ b/drivers/soc/apple/rtkit-internal.h
+@@ -36,6 +36,7 @@ struct apple_rtkit {
+ 
+ 	int boot_result;
+ 	int version;
++	u16 minor_ver;
+ 	u8 app_ep_start;
+ 
+ 	unsigned int iop_power_state;
+diff --git a/drivers/soc/apple/rtkit.c b/drivers/soc/apple/rtkit.c
+index 569206c..76e0d0b 100644
+--- a/drivers/soc/apple/rtkit.c
++++ b/drivers/soc/apple/rtkit.c
+@@ -122,6 +122,16 @@ static void apple_rtkit_management_rx_hello(struct apple_rtkit *rtk, u64 msg)
+ 	int max_ver = FIELD_GET(APPLE_RTKIT_MGMT_HELLO_MAXVER, msg);
+ 	int want_ver = min(APPLE_RTKIT_MAX_SUPPORTED_VERSION, max_ver);
+ 
++	/*
++	 * Protocol version 10 firmware puts its minor version where later
++	 * versions put the minimum version, and expects it back in the reply.
++	 */
++	rtk->minor_ver = 0;
++	if (max_ver == 10) {
++		rtk->minor_ver = min_ver;
++		min_ver = max_ver;
++	}
++
+ 	dev_dbg(rtk->dev, "RTKit: Min ver %d, max ver %d\n", min_ver, max_ver);
+ 
+ 	if (min_ver > APPLE_RTKIT_MAX_SUPPORTED_VERSION) {
+@@ -136,8 +146,8 @@ static void apple_rtkit_management_rx_hello(struct apple_rtkit *rtk, u64 msg)
+ 		goto abort_boot;
+ 	}
+ 
+-	dev_info(rtk->dev, "RTKit: Initializing (protocol version %d)\n",
+-		 want_ver);
++	dev_info(rtk->dev, "RTKit: Initializing (protocol version %d.%d)\n",
++		 want_ver, rtk->minor_ver);
+ 	rtk->version = want_ver;
+ 
+ 	if (rtk->version < 11)
+@@ -145,7 +155,10 @@ static void apple_rtkit_management_rx_hello(struct apple_rtkit *rtk, u64 msg)
+ 	else
+ 		rtk->app_ep_start = APPLE_RTKIT_APP_ENDPOINT_START_V11;
+ 
+-	reply = FIELD_PREP(APPLE_RTKIT_MGMT_HELLO_MINVER, want_ver);
++	if (rtk->version == 10)
++		reply = FIELD_PREP(APPLE_RTKIT_MGMT_HELLO_MINVER, rtk->minor_ver);
++	else
++		reply = FIELD_PREP(APPLE_RTKIT_MGMT_HELLO_MINVER, want_ver);
+ 	reply |= FIELD_PREP(APPLE_RTKIT_MGMT_HELLO_MAXVER, want_ver);
+ 	apple_rtkit_management_send(rtk, APPLE_RTKIT_MGMT_HELLO_REPLY, reply);
+ 
+@@ -952,6 +965,15 @@ u8 apple_rtkit_app_ep_to_ep(struct apple_rtkit *rtk, u8 app_ep)
+ }
+ EXPORT_SYMBOL_GPL(apple_rtkit_app_ep_to_ep);
+ 
++void apple_rtkit_protocol_version(struct apple_rtkit *rtk, u16 *major_ver,
++				  u16 *minor_ver)
++{
++	*major_ver = rtk->version;
++	if (minor_ver)
++		*minor_ver = rtk->minor_ver;
++}
++EXPORT_SYMBOL_GPL(apple_rtkit_protocol_version);
++
+ int apple_rtkit_idle(struct apple_rtkit *rtk)
+ {
+ 	int ret;
+diff --git a/include/linux/soc/apple/rtkit.h b/include/linux/soc/apple/rtkit.h
+index ef33268..c415eb3 100644
+--- a/include/linux/soc/apple/rtkit.h
++++ b/include/linux/soc/apple/rtkit.h
+@@ -201,6 +201,17 @@ int apple_rtkit_poll(struct apple_rtkit *rtk);
+  */
+ u8 apple_rtkit_app_ep_to_ep(struct apple_rtkit *rtk, u8 app_ep);
+ 
++/*
++ * Get the RTKit protocol version the firmware was booted with. The minor
++ * version is only reported by protocol version 10 firmware, 0 otherwise.
++ *
++ * @rtk:            RTKit reference
++ * @major_ver:      Pointer to store the major version
++ * @minor_ver:      Optional, pointer to store the minor version
++ */
++void apple_rtkit_protocol_version(struct apple_rtkit *rtk, u16 *major_ver,
++				  u16 *minor_ver);
++
+ /* Terminal only: bounded requests, no callback join or buffer release. */
+ int apple_rtkit_shutdown_terminal(struct apple_rtkit *rtk);
+ 
