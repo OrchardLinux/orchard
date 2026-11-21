@@ -1,0 +1,105 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sat, 21 Nov 2026 22:26:25 +0800
+Subject: [PATCH] Input: apple_z2: Settle a D21 before the write after its
+ calibration
+
+The D21 boot completion writes the boot sequence registers 50 ms after
+the firmware file, because right after it the controller can refuse the
+first write. The write after the calibration records went out at once.
+
+The iPhOmarchy D21 driver, which brings the controller up live on most
+boots, settles 50 ms before each of its two register lists, the one after
+the calibration included (poke_delay_ms). Its measurements (iPhOmarchy
+patches/0033) found that a refusal is a matter of timing only, that a
+boot with a refused write degrades, and that writing it again leaves the
+controller silent.
+
+Settle before the post-calibration write too, and warn when the
+controller refuses a register write or a calibration record; until now
+the acknowledgement was not read.
+
+Only the D21 has gen2_boot match data; other boards are unchanged.
+
+Assisted-by: LLM
+---
+ drivers/input/touchscreen/apple_z2.c | 25 ++++++++++++++++++++++---
+ 1 file changed, 22 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index d254d0c52..64bc0f4e5 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -252,8 +252,9 @@ struct apple_z2_contact_filter {
+  * calibration request, with the calibration records in front of it. These
+  * controllers keep the calibration only when it arrives after that request,
+  * so the records are sent once the file is done, between @regs and
+- * @post_cal_regs. The first register write right after the file can be
+- * refused; @regs repeat the boot sequence after a settle time.
++ * @post_cal_regs. The first register write right after the file or the
++ * calibration can be refused, so both lists follow a settle time; @regs
++ * repeat the boot sequence.
+  */
+ struct apple_z2_gen2_boot {
+ 	const struct apple_z2_hbpp_reg *regs;
+@@ -346,6 +347,7 @@ struct apple_z2 {
+ 	unsigned long control_since;
+ 	unsigned long control_last;
+ 	bool recovering;
++	u16 blob_ack;			/* gen2 boot: last blob's acknowledgement */
+ 	unsigned long last_wake;
+ 	bool wake_valid;
+ 	bool ana_enabled;
+@@ -3604,10 +3606,18 @@ static int apple_z2_send_firmware_blob(struct apple_z2 *z2, const u8 *data,
+ 		dev_dbg(&z2->spidev->dev, "HBPP14 ready\n");
+ 	}
+ 
++	/* iPhone 8 Plus boot completion checks that its writes were taken. */
++	if (z2->info->gen2_boot) {
++		memset(z2->rx_buf, 0, ack_xfer.len);
++		ack_xfer.rx_buf = z2->rx_buf;
++	}
++	z2->blob_ack = 0;
+ 	if (!init || !z2->no_init_ack) {
+ 		error = spi_sync_transfer(z2->spidev, &ack_xfer, 1);
+ 		if (error)
+ 			return error;
++		if (ack_xfer.rx_buf)
++			z2->blob_ack = get_unaligned_be16(z2->rx_buf);
+ 		apple_z2_post_ack_delay(z2);
+ 	}
+ 	if ((apple_z2_uses_ipad_protocol(z2) || apple_z2_is_iphone7_plus(z2)) && init) {
+@@ -3827,6 +3837,9 @@ static int apple_z2_gen2_write_regs(struct apple_z2 *z2,
+ 		error = apple_z2_send_firmware_blob(z2, blob, size, false, false);
+ 		if (error)
+ 			return error;
++		if (!z2->blob_ack)
++			dev_warn(&z2->spidev->dev,
++				 "register %#010x write refused\n", regs[i].addr);
+ 	}
+ 
+ 	return 0;
+@@ -3869,6 +3882,9 @@ static int apple_z2_gen2_send_calibration(struct apple_z2 *z2,
+ 								    false, false);
+ 				if (error)
+ 					return error;
++				if (!z2->blob_ack)
++					dev_warn(&z2->spidev->dev,
++						 "%s refused\n", property);
+ 			}
+ 		}
+ 		fw_idx = round_up(fw_idx + size, 4);
+@@ -4023,9 +4039,12 @@ static int apple_z2_gen2_finish_boot(struct apple_z2 *z2,
+ 	error = apple_z2_gen2_write_regs(z2, boot->regs, boot->num_regs);
+ 	if (!error)
+ 		error = apple_z2_gen2_send_calibration(z2, fw);
+-	if (!error)
++	/* The same holds for the first write after the calibration. */
++	if (!error) {
++		msleep(APPLE_Z2_D21_REG_SETTLE_MS);
+ 		error = apple_z2_gen2_write_regs(z2, boot->post_cal_regs,
+ 						 boot->num_post_cal_regs);
++	}
+ 	if (!error) {
+ 		msleep(50);
+ 		error = apple_z2_gen2_init_locked(z2);
