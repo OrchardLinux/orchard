@@ -1,0 +1,170 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 12:02:00 +0100
+Subject: [PATCH] drm/imagination: apple: Let a chip read its GPU ID and lay
+ out its heaps
+
+Two things the next chip, the A8 (T7000), does its own way:
+
+- Its Rogue registers may be read only while the core is in Fender
+  state 1 and the GPU's PLL is locked; an access outside that hangs the
+  whole SoC. Its ID is CORE_REVISION and CORE_ID, read as 32-bit words.
+  A chip can now provide read_gpu_id(), which pvr_load_gpu_id() uses in
+  place of the generic register decode; the gpuid module parameter
+  still overrides both.
+
+- Its firmware puts the code heaps at 0x3_00000000 and the general heap
+  at 0x1_00000000, not below powervr's Apple heaps. A chip can now give
+  its own heap table, which DEV_QUERY and every heap check use.
+
+The A9 and A10 provide neither, so their ID read and heaps are as before.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_apple.c      | 28 ++++++++++++++++++++
+ drivers/gpu/drm/imagination/pvr_apple.h      | 12 +++++++++
+ drivers/gpu/drm/imagination/pvr_apple_chip.h |  7 +++++
+ drivers/gpu/drm/imagination/pvr_device.c     |  8 +++++-
+ drivers/gpu/drm/imagination/pvr_vm.c         |  8 +++++-
+ 5 files changed, 61 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_apple.c b/drivers/gpu/drm/imagination/pvr_apple.c
+index 2f3105c6a3..56e8ac1f93 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple.c
++++ b/drivers/gpu/drm/imagination/pvr_apple.c
+@@ -2125,6 +2125,34 @@ void pvr_apple_device_info_init(struct pvr_device *pvr_dev)
+ 	pvr_dev->features.isp_samples_per_pixel = 2;
+ }
+ 
++/**
++ * pvr_apple_read_gpu_id() - Read the GPU ID the chip's own way
++ * @pvr_dev: Target device, powered.
++ * @gpu_id: Where the ID goes.
++ *
++ * Return: 0, -%ENOENT for a chip whose ID is read from the Rogue registers
++ * as on any Rogue core, or another negative error.
++ */
++int pvr_apple_read_gpu_id(struct pvr_device *pvr_dev, struct pvr_gpu_id *gpu_id)
++{
++	const struct pvr_apple_chip *chip = pvr_dev->device_data->apple_chip;
++
++	if (!pvr_device_is_apple(pvr_dev) || !chip->read_gpu_id)
++		return -ENOENT;
++	return chip->read_gpu_id(to_apple(pvr_dev), gpu_id);
++}
++
++/**
++ * pvr_apple_chip_heaps() - The chip's own userspace heaps
++ * @pvr_dev: Target device.
++ *
++ * Return: the chip's heap table, or %NULL for powervr's Apple heaps.
++ */
++const struct drm_pvr_heap *pvr_apple_chip_heaps(const struct pvr_device *pvr_dev)
++{
++	return pvr_dev->device_data->apple_chip->heaps;
++}
++
+ /**
+  * pvr_apple_takes_jobs() - Whether the chip's firmware is given jobs
+  * @pvr_dev: Target device.
+diff --git a/drivers/gpu/drm/imagination/pvr_apple.h b/drivers/gpu/drm/imagination/pvr_apple.h
+index 09a21e5d93..850c4e8d02 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple.h
++++ b/drivers/gpu/drm/imagination/pvr_apple.h
+@@ -14,7 +14,9 @@
+ 
+ struct dentry;
+ struct dma_fence;
++struct drm_pvr_heap;
+ struct pvr_apple_chip;
++struct pvr_gpu_id;
+ struct pvr_context;
+ struct pvr_device;
+ struct pvr_job;
+@@ -168,6 +170,8 @@ int pvr_apple_reset(struct pvr_device *pvr_dev);
+ int pvr_apple_suspend(struct pvr_device *pvr_dev);
+ int pvr_apple_resume(struct pvr_device *pvr_dev);
+ void pvr_apple_device_info_init(struct pvr_device *pvr_dev);
++int pvr_apple_read_gpu_id(struct pvr_device *pvr_dev, struct pvr_gpu_id *gpu_id);
++const struct drm_pvr_heap *pvr_apple_chip_heaps(const struct pvr_device *pvr_dev);
+ bool pvr_apple_takes_jobs(struct pvr_device *pvr_dev);
+ bool pvr_apple_free_list_has_pages(struct pvr_device *pvr_dev);
+ u32 pvr_apple_stream_musthave(struct pvr_device *pvr_dev, enum pvr_stream_type type,
+@@ -208,6 +212,14 @@ static inline int pvr_apple_reset(struct pvr_device *pvr_dev) { return -ENODEV;
+ static inline int pvr_apple_suspend(struct pvr_device *pvr_dev) { return 0; }
+ static inline int pvr_apple_resume(struct pvr_device *pvr_dev) { return 0; }
+ static inline void pvr_apple_device_info_init(struct pvr_device *pvr_dev) {}
++static inline int pvr_apple_read_gpu_id(struct pvr_device *pvr_dev, struct pvr_gpu_id *gpu_id)
++{
++	return -ENOENT;
++}
++static inline const struct drm_pvr_heap *pvr_apple_chip_heaps(const struct pvr_device *pvr_dev)
++{
++	return NULL;
++}
+ static inline bool pvr_apple_takes_jobs(struct pvr_device *pvr_dev) { return false; }
+ static inline bool pvr_apple_free_list_has_pages(struct pvr_device *pvr_dev) { return true; }
+ static inline u32 pvr_apple_stream_musthave(struct pvr_device *pvr_dev,
+diff --git a/drivers/gpu/drm/imagination/pvr_apple_chip.h b/drivers/gpu/drm/imagination/pvr_apple_chip.h
+index 7ee08eae97..655fa5b375 100644
+--- a/drivers/gpu/drm/imagination/pvr_apple_chip.h
++++ b/drivers/gpu/drm/imagination/pvr_apple_chip.h
+@@ -220,6 +220,11 @@ struct pvr_apple {
+  * @write_geom: Write geometry job @seq and its work-ring entry.
+  * @write_frag: Write fragment job @seq and its work-ring entry.
+  * @report_hang: Log what else the firmware recorded about a job that timed out.
++ * @heaps: The userspace heaps (DRM_PVR_HEAP_*), if not powervr's Apple heaps
++ *	below 2^38. Optional.
++ * @read_gpu_id: Read the GPU's ID (BVNC) the chip's own way, with the core
++ *	powered by @boot. Optional: the Rogue registers are read as on any
++ *	Rogue core.
+  *
+  * The functions from @kick to @write_frag are for a firmware that takes one
+  * command per engine at a time from a fixed place, named by the work ring's
+@@ -277,6 +282,8 @@ struct pvr_apple_chip {
+ 	unsigned int gate_off_ms;
+ 	/* With the firmware's interrupt taken: microseconds between checks while jobs are pending */
+ 	unsigned int irq_poll_us;
++	const struct drm_pvr_heap *heaps;
++	int (*read_gpu_id)(struct pvr_apple *apple, struct pvr_gpu_id *gpu_id);
+ 
+ 	int (*init)(struct pvr_apple *apple);
+ 	int (*boot)(struct pvr_apple *apple);
+diff --git a/drivers/gpu/drm/imagination/pvr_device.c b/drivers/gpu/drm/imagination/pvr_device.c
+index e5065f8042..01f9f6041c 100644
+--- a/drivers/gpu/drm/imagination/pvr_device.c
++++ b/drivers/gpu/drm/imagination/pvr_device.c
+@@ -605,7 +605,13 @@ pvr_load_gpu_id(struct pvr_device *pvr_dev)
+ 	struct pvr_gpu_id *gpu_id = &pvr_dev->gpu_id;
+ 
+ 	if (!pvr_gpuid_override || !pvr_gpuid_override[0]) {
+-		pvr_gpuid_decode_reg(pvr_dev, gpu_id);
++		/* An Apple chip may read its ID its own way */
++		int err = pvr_apple_read_gpu_id(pvr_dev, gpu_id);
++
++		if (err == -ENOENT)
++			pvr_gpuid_decode_reg(pvr_dev, gpu_id);
++		else if (err)
++			return err;
+ 	} else {
+ 		drm_warn(from_pvr_device(pvr_dev),
+ 			 "Using custom GPU ID (BVNC) provided by the user!");
+diff --git a/drivers/gpu/drm/imagination/pvr_vm.c b/drivers/gpu/drm/imagination/pvr_vm.c
+index 37cf116ce0..05b1b965b2 100644
+--- a/drivers/gpu/drm/imagination/pvr_vm.c
++++ b/drivers/gpu/drm/imagination/pvr_vm.c
+@@ -1250,7 +1250,13 @@ static_assert(ARRAY_SIZE(pvr_apple_heaps) == ARRAY_SIZE(pvr_heaps));
+ 
+ static const struct drm_pvr_heap *pvr_device_heaps(const struct pvr_device *pvr_dev)
+ {
+-	return pvr_device_is_apple(pvr_dev) ? pvr_apple_heaps : pvr_heaps;
++	const struct drm_pvr_heap *heaps;
++
++	if (!pvr_device_is_apple(pvr_dev))
++		return pvr_heaps;
++	/* A chip may lay its heaps out as its firmware does */
++	heaps = pvr_apple_chip_heaps(pvr_dev);
++	return heaps ?: pvr_apple_heaps;
+ }
+ 
+ int
