@@ -25,16 +25,17 @@ coldplug() {
     done
 }
 
-# Storage: fence every NVMe namespace and partition read-only once they appear.
+# Storage: fence every namespace and partition of the internal disk read-only once they
+# appear: NVMe on A9 and later, ANS1 (asp) on A7-A8X.
 (
     i=0
-    while [ ! -e /sys/class/block/nvme0n1 ] && [ "$i" -lt 60 ]; do
+    while [ ! -e /sys/class/block/nvme0n1 ] && [ ! -e /sys/class/block/asp0n1 ] && [ "$i" -lt 60 ]; do
         coldplug
         sleep 1
         i=$((i + 1))
     done
     sleep 2
-    for d in /sys/class/block/nvme*; do
+    for d in /sys/class/block/nvme* /sys/class/block/asp*; do
         [ -e "$d" ] && blockdev --setro "/dev/${d##*/}"
     done
     echo "$i" > /run/storage-fence

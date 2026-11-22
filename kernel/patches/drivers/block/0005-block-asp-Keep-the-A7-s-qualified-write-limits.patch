@@ -1,0 +1,122 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: thisiscamk <100883750+thisiscamk@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 09:15:00 +0800
+Subject: [PATCH] block: asp: Keep the A7's qualified write limits
+
+The A7's controller (J72) left the first write after a read-only start
+hanging: it starts a garbage collection that lasted 49 s once and 115 s
+another time, longer than the 30 s request timeout, and the request was
+never completed. thisiscamk's driver writes and flushes on the J72 with
+one request in flight, 4 KiB per request and three minutes for a write
+or flush; reads and the A8 and A8X never needed them.
+
+Give the A7 those limits through the match data. The A8 and A8X list
+their own compatible first and keep the defaults.
+
+[Orchard: from thisiscamk/ipad-air-j72-linux 2a257d6,
+ code/current/kernel/0001-j72-installed-kernel-snapshot.patch
+ (drivers/block/asp.c: queue depth 1, max_hw_sectors 8,
+ asp_request_timeout_ms).]
+
+Assisted-by: LLM
+Signed-off-by: thisiscamk <100883750+thisiscamk@users.noreply.github.com>
+---
+ drivers/block/asp.c | 35 ++++++++++++++++++++++++++++++++---
+ 1 file changed, 32 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/block/asp.c b/drivers/block/asp.c
+index 029d22830..d887ebf17 100644
+--- a/drivers/block/asp.c
++++ b/drivers/block/asp.c
+@@ -21,6 +21,7 @@
+ #include <linux/of.h>
+ #include <linux/of_address.h>
+ #include <linux/of_platform.h>
++#include <linux/property.h>
+ #include <linux/once.h>
+ #include <linux/platform_device.h>
+ #include <linux/soc/apple/rtkit.h>
+@@ -218,6 +219,18 @@ struct asp_queue {
+ 	struct gendisk *disk;
+ };
+ 
++/*
++ * What one SoC's controller needs. The A7's (J72) answers writes only within
++ * thisiscamk's qualified limits: one request in flight, 4 KiB each, and up to
++ * three minutes for a write or flush, as its first write starts a garbage
++ * collection of 49 s, once 115 s (his driver, ipad-air-j72-linux 2a257d6).
++ */
++struct asp_variant {
++	unsigned int queue_depth;
++	unsigned int max_hw_sectors;
++	unsigned int write_timeout_ms;
++};
++
+ struct apple_asp {
+ 	void *__iomem akf_base;
+ 	sector_t capacity;
+@@ -237,6 +250,7 @@ struct apple_asp {
+ 	mempool_t *iod_mempool;
+ 	u32 lba_size;
+ 	u8 ep;
++	const struct asp_variant *variant;
+ };
+ 
+ struct asp_iod {
+@@ -622,6 +636,9 @@ static blk_status_t apple_asp_queue_rq(struct blk_mq_hw_ctx *hctx,
+ 	if (iod->sg)
+ 		asp_setup_hw_sgl(asp, iod);
+ 
++	if (asp->variant && asp->variant->write_timeout_ms &&
++	    (iod->cmd.op == ASP_CMD_WRITE_USERAREA || iod->cmd.op == ASP_CMD_FLUSH))
++		req->timeout = msecs_to_jiffies(asp->variant->write_timeout_ms);
+ 	blk_mq_start_request(req);
+ 
+ 	ret = apple_asp_submit_cmd(asp, &iod->cmd);
+@@ -801,7 +818,8 @@ static int apple_asp_start_disk(struct apple_asp *asp)
+ 
+ 	asp->tagset.ops = &apple_asp_queue_ops;
+ 	asp->tagset.nr_hw_queues = 1;
+-	asp->tagset.queue_depth = ASP_NUM_TAGS;
++	asp->tagset.queue_depth = asp->variant && asp->variant->queue_depth ?
++				  asp->variant->queue_depth : ASP_NUM_TAGS;
+ 	asp->tagset.timeout = msecs_to_jiffies(ASP_TIMEOUT_MS);
+ 	asp->tagset.numa_node = NUMA_NO_NODE;
+ 	asp->tagset.cmd_size = sizeof(struct asp_iod);
+@@ -887,7 +905,8 @@ static int apple_asp_start_disk(struct apple_asp *asp)
+ 
+ 	struct queue_limits lim = {
+ 		.logical_block_size = ASP_LBA_SIZE,
+-		.max_hw_sectors = ASP_CMD_MAX_SECTORS,
++		.max_hw_sectors = asp->variant && asp->variant->max_hw_sectors ?
++				  asp->variant->max_hw_sectors : ASP_CMD_MAX_SECTORS,
+ 		/* only constrianted by max_hw_sectors */
+ 		.max_segments = USHRT_MAX,
+ 		.max_segment_size = UINT_MAX,
+@@ -1232,6 +1251,7 @@ static int apple_asp_probe(struct platform_device *pdev)
+ 		return PTR_ERR(asp->akf_base);
+ 
+ 	asp->dev = dev;
++	asp->variant = device_get_match_data(dev);
+ 
+ 	/* limit of ARMv7 long descriptor format */
+ 	if (dma_set_mask_and_coherent(dev, DMA_BIT_MASK(40)))
+@@ -1318,8 +1338,17 @@ static void apple_asp_remove(struct platform_device *pdev)
+ }
+ 
+ 
++static const struct asp_variant asp_s5l8960x = {
++	.queue_depth = 1,
++	.max_hw_sectors = 8,
++	.write_timeout_ms = 180000,
++};
++
++/* The A8 and A8X list their own compatible first and keep the defaults. */
+ static const struct of_device_id apple_asp_of_match[] = {
+-	{ .compatible = "apple,s5l8960x-ans" },
++	{ .compatible = "apple,t7000-ans" },
++	{ .compatible = "apple,t7001-ans" },
++	{ .compatible = "apple,s5l8960x-ans", .data = &asp_s5l8960x },
+ 	{}
+ };
+ MODULE_DEVICE_TABLE(of, apple_asp_of_match);

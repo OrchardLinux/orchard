@@ -2424,30 +2424,52 @@ static unsigned current_epoch(void)
     return e;
 }
 
+/* What the link has delivered and the session has not read yet. Each read asks for a whole chunk,
+ * a multiple of every bulk packet size and larger than any message: a FunctionFS read is one USB
+ * request, and a request shorter than the host's transfer would end inside a packet and lose the
+ * rest of it. So the host may put any number of messages, or parts of them, in one transfer. */
+#define LINK_CHUNK (MAX_PAYLOAD + (64u << 10))
+static unsigned char link_buffer[LINK_CHUNK];
+static size_t link_start, link_end;
+
+static void link_drop(void)
+{
+    link_start = link_end = 0;
+}
+
 static int read_full(int fd, void *data, size_t size)
 {
-    for (char *p = data; size;) {
-        ssize_t n = read(fd, p, size);
-        if (n < 0 && errno == EINTR)
-            continue;
-        if (n <= 0)
-            return -1;
-        p += n;
-        size -= n;
+    for (unsigned char *p = data; size;) {
+        if (link_start == link_end) {
+            ssize_t n = read(fd, link_buffer, sizeof(link_buffer));
+            if (n < 0 && errno == EINTR)
+                continue;
+            if (n <= 0)
+                return -1;
+            link_start = 0;
+            link_end = n;
+        }
+        size_t take = link_end - link_start < size ? link_end - link_start : size;
+        memcpy(p, link_buffer + link_start, take);
+        link_start += take;
+        p += take;
+        size -= take;
     }
     return 0;
 }
 
-/* Messages until the link ends. The device reads exactly each header and payload, so the host may
- * split its transfers however it likes and needs no zero-length packets. */
+/* Messages until the link ends. Messages are read out of whole transfers, so the host may split
+ * or combine them in its transfers however it likes and needs no zero-length packets. */
 static void session(int in)
 {
     static unsigned char payload[MAX_PAYLOAD];
     unsigned char header[8];
     unsigned started = current_epoch();
+    link_drop();
     while (!read_full(in, header, 8)) {
         if (current_epoch() != started) {
-            /* SET_INTERFACE or a new configuration: a fresh session; the old one's transfer is cut. */
+            /* SET_INTERFACE or a new configuration: a fresh session; the old one's transfer is cut,
+             * and with it what was left of the old session's last transfer. */
             cut_transfer();
             output_reset(KEEP_FD, 0);
             started = current_epoch();
@@ -2458,7 +2480,8 @@ static void session(int in)
             cut_transfer();
             answer_error("protocol", "Malformed message header; send SET_INTERFACE to start a fresh session");
             /* The framing is lost: drop everything until the session starts afresh. */
-            while (current_epoch() == started && read(in, payload, 512) > 0)
+            link_drop();
+            while (current_epoch() == started && read(in, link_buffer, sizeof(link_buffer)) > 0)
                 ;
             return;
         }
