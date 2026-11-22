@@ -30,6 +30,9 @@ is missing or empty.
   backlight, the Home button, USB serial and networking and reading its
   internal storage work. `orchard install` is offered; writing to the
   storage is untested so far. Wi-Fi and audio come later.
+- iPad mini 2 (Wi-Fi): Wi-Fi works on an installed system. A kernel transport,
+  from thisiscamk's iPad Air work, brings up the A7's HSIC link to the
+  BCM43241 radio, and `orchard-a7-wifi.service` starts it at boot.
 
 ### Install & launch
 
