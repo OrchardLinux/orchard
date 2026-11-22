@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sun, 22 Nov 2026 22:35:32 +0800
+Subject: [PATCH] Input: apple_z2: Start a D21 with the working configuration's
+ last write
+
+The D21 boot wrote 0x10003458 = 1 after the calibration and 6 to
+0x10003058. The working configuration (d21-touch.service gold line,
+corrected 2026-11-03 from D21.mtprops) writes 3 to 0x10003058 and ends
+with 0x10003400 = 1. Without that write the firmware loads, answers the
+first kick and never starts scanning; since the core rail is cut before
+every power-up, every start is a cold one and stays dead.
+
+Assisted-by: LLM
+---
+ drivers/input/touchscreen/apple_z2.c | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index fa03abfa4..8fb33b202 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -4861,19 +4861,20 @@ static const struct apple_z2_chip_info apple_z2_d111_info = {
+ /*
+  * iPhone 8 Plus (D21), personality C1F5E,4 of D21.mtprops: the iPhone 7
+  * Plus boot and report layout with the generation-1 data phase. @regs are
+- * the personality's boot sequence; 0x10003458 after the calibration is the
+- * write of the tested configuration.
++ * the boot sequence of the working configuration (DUGS's d21-touch.service
++ * gold line): five writes, the calibration, then 0x10003400 = 1, which
++ * starts the controller. Without it a cold-booted D21 never scans.
+  */
+ static const struct apple_z2_hbpp_reg apple_z2_d21_regs[] = {
+ 	{ 0x10003060, 0x17d3 },	/* fll-mval */
+ 	{ 0x1000305c, 2 },	/* reference clock divider */
+-	{ 0x10003058, 6 },
++	{ 0x10003058, 3 },
+ 	{ 0x10003000, 3 },
+ 	{ 0x10003518, 1 },	/* clk32-clock-enable */
+ };
+ 
+ static const struct apple_z2_hbpp_reg apple_z2_d21_post_cal_regs[] = {
+-	{ 0x10003458, 1 },
++	{ 0x10003400, 1 },
+ };
+ 
+ /*
+-- 
+2.54.0 (Apple Git-157)
+
