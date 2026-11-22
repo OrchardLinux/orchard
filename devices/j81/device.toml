@@ -31,7 +31,7 @@ status = "experimental"
 # States: working, untested, missing, none (features.toml).
 [features]
 display = "working"
-screen_off = "untested"
+screen_off = "working" # dark on idle and on Power, Home or Power lights it again; J81 2026-11-20
 backlight = "working"
 touch = "working"
 buttons = "working"
@@ -48,8 +48,8 @@ cellular = "none"
 battery = "working"
 charging = "missing"
 charging_control = "missing"
-suspend = "untested"
-resume = "untested"
+suspend = "working" # s2idle from idle and from Power, cable in and out, 5 of 5 (21 s to 1 h; about 2%/h battery); J81 2026-11-20
+resume = "working" # Home or Power wakes it: display, touch, Wi-Fi, Bluetooth and USB network come back; J81 2026-11-20
 usb_serial = "working"
 usb_network = "working"
 usb_host = "missing"
