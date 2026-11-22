@@ -8,6 +8,7 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+import urllib.error
 from unittest import mock
 
 from orchard import install_device as D
@@ -72,9 +73,17 @@ class Repository(unittest.TestCase):
                     K.download(entry, directory)
             self.assertIsNone(K.apk_entry(index, 'none'))
 
-    def test_an_unreachable_repository_is_no_package(self):
+    def test_an_unreachable_repository_is_an_error_and_a_missing_package_is_none(self):
         with mock.patch.object(K, 'open_url', side_effect=OSError('offline')):
+            with self.assertRaises(K.Unavailable):
+                K.resolve('pacman', 'apple-16k', 'arm64', 'aa')
+        missing = urllib.error.HTTPError('url', 404, 'Not Found', {}, None)
+        with mock.patch.object(K, 'open_url', side_effect=missing):
             self.assertIsNone(K.resolve('pacman', 'apple-16k', 'arm64', 'aa'))
+        failing = urllib.error.HTTPError('url', 503, 'Unavailable', {}, None)
+        with mock.patch.object(K, 'open_url', side_effect=failing):
+            with self.assertRaises(K.Unavailable):
+                K.resolve('pacman', 'apple-16k', 'arm64', 'aa')
 
     def test_the_layer_names_its_platform(self):
         with tempfile.TemporaryDirectory() as directory:

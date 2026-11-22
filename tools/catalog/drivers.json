@@ -314,6 +314,7 @@
       "usb_serial"
     ],
     "j81": [
+      "audio_output",
       "backlight",
       "battery",
       "bluetooth_audio",

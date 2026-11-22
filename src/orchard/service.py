@@ -275,7 +275,8 @@ def install_direct(adapter, device, name, files, firmware_files, boot_files, cha
                 direct.mount_new_root(connection, root_node, boot_node)
                 progress.mark('Root mounted')
                 # The kernel as the root's own package, from the Orchard package repository.
-                plan['kernel_package'] = direct.kernel_package(connection, assets['layer'], directory)
+                plan['kernel_package'] = direct.kernel_package(connection, assets['layer'], directory,
+                                                                base=boot_record.get('base'))
                 progress.mark('Kernel package ' + ('ready' if plan['kernel_package'] else 'not published; layer files'))
                 replaced = (plan.get('remove') or {}).get('partuuid')
                 plan['present'] = [p['partuuid'] for p in partitions if p['partuuid'] != replaced]

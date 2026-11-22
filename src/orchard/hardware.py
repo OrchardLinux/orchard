@@ -44,6 +44,21 @@ def data_root():
     raise ValueError('No device catalog yet: connect to the network once')
 
 
+# What a release ships for installers that read only the release (board-data.tar.gz).
+BOARD_DATA = ('devices', 'chips', 'platforms', 'features.toml')
+
+
+def board_data_files(root=None):
+    """{relative path: Path} of the board data a release ships, sorted; ROOT (default: data_root())."""
+    root = Path(root or data_root())
+    files = {}
+    for name in BOARD_DATA:
+        path = root / name
+        for item in (sorted(p for p in path.rglob('*') if p.is_file()) if path.is_dir() else [path]):
+            files[item.relative_to(root).as_posix()] = item
+    return files
+
+
 def data_revision():
     """What this run's device data is, for a log or a report."""
     path = data_root()
