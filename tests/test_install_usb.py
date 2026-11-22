@@ -268,6 +268,12 @@ class Requests(Receiver):
                                 'boot_id': '5f0c7a5e-0000-4000-8000-000000000001', 'phase': 'ready', 'staged': [],
                                 'stream': None, 'record': None, 'error': None})
 
+    def test_messages_combined_in_one_write_are_each_answered(self):
+        frame = struct.pack('<BBHI', INFO, 0, 0, 2) + b'{}'
+        self.link.socket.sendall(frame * 3)
+        for _ in range(3):
+            self.assertEqual(self.ok(self.link.answer())['phase'], 'ready')
+
     def test_inspect_reports_install_devices_layout_and_the_disk_size(self):
         layout = self.ok(self.link.request(INSPECT))
         header, entries = read_gpt(self.disk)
@@ -491,6 +497,20 @@ class WrongDevice(Receiver):
 
 
 del Receiver
+
+
+class KernelConfigs(unittest.TestCase):
+    def test_the_install_system_can_add_its_functionfs_instance(self):
+        # The legacy g_ffs gadget, built in, puts f_fs into single-device mode: every
+        # configfs ffs.* instance after it fails with EBUSY, and the receiver never starts.
+        for config in sorted((ROOT / 'kernel/configs').glob('*/config')):
+            settings = config.read_text().splitlines()
+            if 'CONFIG_USB_CONFIGFS_F_FS=y' not in settings:
+                continue
+            with self.subTest(config.parent.name):
+                self.assertNotIn('CONFIG_USB_FUNCTIONFS=y', settings)
+                self.assertNotIn('CONFIG_USB_FUNCTIONFS=m', settings)
+
 
 if __name__ == '__main__':
     unittest.main()

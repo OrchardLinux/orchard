@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "device": "iPad4,2",
+  "firmware": [
+    {
+      "ipsw": {
+        "version": "12.5.7",
+        "build": "16H81",
+        "url": "https://updates.cdn-apple.com/2023FCSWinter/fullrestores/032-14132/A3C10B93-0E34-405D-8A92-92AA354BABF0/iPad_64bit_12.5.7_16H81_Restore.ipsw",
+        "bytes": 2961469678,
+        "sha256": "780aa5b20fa9fb5770c18311663bd098dbbf8e89311675a19b4860303edc0cd9"
+      },
+      "selected_by": "firmware-recipe",
+      "inputs": {
+        "BuildManifest.plist": {
+          "ipsw": {
+            "zip": "BuildManifest.plist"
+          },
+          "sha256": "7fcf7e124fb24d866d0a8d4457b88d31b13b552186a3b3e0ee6157eda7383ce3"
+        },
+        "iBSS": {
+          "ipsw": {
+            "zip": "Firmware/dfu/iBSS.ipad4.RELEASE.im4p"
+          },
+          "sha256": "31f76ad7071c895e97854fb434a6b25504b4717524fe265c9bb270bc643e6386"
+        },
+        "iBEC": {
+          "ipsw": {
+            "zip": "Firmware/dfu/iBEC.ipad4.RELEASE.im4p"
+          },
+          "sha256": "9797c275d302f97fcada56285776f2e279c71ccf7e774e9c088f4d9aa7578972"
+        },
+        "DeviceTree": {
+          "ipsw": {
+            "zip": "Firmware/all_flash/DeviceTree.j72ap.im4p"
+          },
+          "sha256": "9ed5dff4e68e7c69f07cd2b4cbac21b24b32cd931cea477789fbf24d434a5d47"
+        }
+      }
+    }
+  ],
+  "methods": {}
+}
