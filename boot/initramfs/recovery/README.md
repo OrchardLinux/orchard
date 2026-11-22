@@ -6,6 +6,7 @@ Public recovery includes all modules, indexes, device scripts, a Python runtime 
 
 - `python -m orchard.image.prepare_runtime`: stage public files using explicit base, module and root-receipt inputs.
 - `python -m orchard.image.recovery`: pack the runtime and assemble loader, bootargs, the DTBs, kernel and initramfs.
+- `orchard-write.c`, `orchard-install-usb.c`: the installer's static image writer and its raw-USB receiver ([install protocol](../../../docs/install-protocol.md)); `build-tools` builds them with the other static tools, and they ship in `install-tools.tar.gz`, not in recovery images.
 - `init`: early pseudo-filesystems, USB key provisioning, and the switch to the installed system after `orchard-device start`.
 - Device operations (`bootstrap`, `status`) and the storage fence: hardware `runtime/recovery/`; shared payload generation: `orchard.image.runtime`.
 - Distro assembly is owned by its consumer, not this package; see [BUILD.md](../../../../BUILD.md).

@@ -269,7 +269,7 @@ final class SimulatorView: NSView {
             // A bezel press that never moved never began.
             if edgePress == nil {
                 if touchMode || edgeTouch { hardware?.touch("end", x: touchPosition.x, y: touchPosition.y) }
-                else { hardware?.pointer(x: touchPosition.x, y: touchPosition.y, buttons: 0) }
+                else { let p = screenPoint(touchPosition); hardware?.pointer(x: p.x, y: p.y, buttons: 0) }
             }
             edgePress = nil
             guestPointerDown = false
@@ -294,7 +294,22 @@ final class SimulatorView: NSView {
         let point = devicePoint(event)
         touchPosition = NSPoint(x: (point.x - displayRect.minX) / displayRect.width,
                                 y: (point.y - displayRect.minY) / displayRect.height)
-        hardware?.pointer(x: touchPosition.x, y: touchPosition.y, buttons: buttons)
+        let p = screenPoint(touchPosition)
+        hardware?.pointer(x: p.x, y: p.y, buttons: buttons)
+    }
+
+    // The USB tablet's position is the guest's screen as it shows, turned with
+    // the device: unlike touch (mapped to the panel, which turns it), labwc
+    // spreads an absolute pointer over the layout as it is. A panel point
+    // (0...1, upright) to that screen, as the window holds the device; the
+    // guest turns its screen the same way unless its rotation lock holds it.
+    private func screenPoint(_ p: NSPoint) -> NSPoint {
+        switch orientation {
+        case .normal: return p
+        case .leftUp: return NSPoint(x: 1 - p.y, y: p.x)
+        case .bottomUp: return NSPoint(x: 1 - p.x, y: 1 - p.y)
+        case .rightUp: return NSPoint(x: p.y, y: 1 - p.x)
+        }
     }
 
     private var viewScale: CGFloat { bounds.width / canvas.width }

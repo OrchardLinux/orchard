@@ -68,6 +68,22 @@ class PortReset(unittest.TestCase):
         self.assertEqual(watcher.resets, 1)
         self.assertEqual(self.control.read_text(), '0')
 
+    def test_palera1n_3_without_a_disconnect_line_is_reset_too(self):
+        self.log.write_text(' - <Info>: Checkmate?\n')
+        watcher = self.watch(settle_unlogged=0.2)
+
+        def returns_after_first_reset():
+            while watcher.resets < 1:
+                time.sleep(0.02)
+            with self.log.open('a') as log:
+                log.write(' - <Info>: Found download mode device\n')
+        helper = threading.Thread(target=returns_after_first_reset)
+        helper.start()
+        watcher.join(5)
+        helper.join(5)
+        self.assertEqual(watcher.resets, 1)
+        self.assertEqual(self.control.read_text(), '0')
+
     def test_gives_up_after_the_attempts_and_leaves_the_port_enabled(self):
         self.log.write_text(CHECKMATE)
         watcher = self.watch(attempts=2)

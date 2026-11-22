@@ -1,9 +1,11 @@
 # Install boot, sourced by orchard's initrd after its modules load. BusyBox and the tools beside this
-# file are all there is here; the host drives the rest over SSH (src/orchard/install_direct.py).
-# Serial and SSH come up first, whatever happens later. Setting root hands back to the normal boot.
+# file are all there is here. A host drives the install over raw USB through orchard-install-usb
+# (docs/install-protocol.md), or over SSH (src/orchard/install_direct.py, the Python CLI).
+# Serial and SSH come up whatever happens later. Setting root hands back to the normal boot.
 board=$(tr '\000' '\n' < /proc/device-tree/compatible | head -1)
 mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run
-mkdir -p /dev/pts /run/orchard /sys/kernel/config /root/.ssh
+mkdir -p /dev/pts /run/orchard /sys/kernel/config /root/.ssh /etc/dropbear
+chmod 700 /run/orchard
 mark() { echo "$(cut -d' ' -f1 /proc/uptime) $1" >> /run/orchard/timeline; }
 mark 'install hook starts, modules loaded'
 mount -t devpts -o mode=0620,ptmxmode=0666 devpts /dev/pts
@@ -21,6 +23,23 @@ echo 500 > "$g/configs/c.1/MaxPower"
 mkdir "$g/functions/ncm.usb0" "$g/functions/acm.usb0"
 ln -s "$g/functions/ncm.usb0" "$g/configs/c.1/ncm.usb0"
 ln -s "$g/functions/acm.usb0" "$g/configs/c.1/acm.usb0"
+# The receiver first: its descriptors must be written before the gadget binds. If it doesn't come
+# up within 5 s, the gadget binds without it, and serial and SSH still work.
+ffs=/dev/usb-ffs/install
+receiver=
+if [ -x /install/orchard-install-usb ] && mkdir "$g/functions/ffs.install" && mkdir -p "$ffs" &&
+        mount -t functionfs install "$ffs"; then
+    /install/orchard-install-usb > /run/orchard/install-usb.log 2>&1 &
+    receiver=$!
+    n=0
+    while [ ! -e "$ffs/ep2" ] && [ $n -lt 50 ]; do sleep 0.1; n=$((n + 1)); done
+    if [ -e "$ffs/ep2" ]; then
+        ln -s "$g/functions/ffs.install" "$g/configs/c.1/ffs.install"
+        mark 'receiver ready'
+    else
+        mark 'receiver did not start'
+    fi
+fi
 basename "$(ls -d /sys/class/udc/* | head -1)" > "$g/UDC"
 mark 'gadget bound'
 ip address add 172.16.42.1/30 dev usb0
@@ -32,10 +51,15 @@ mark 'network up'
 udhcpd -f /install/udhcpd.conf &
 (while :; do getty -n -l /bin/sh ttyGS0 115200 vt100; sleep 1; done) &
 keeper=$!
-cp /install/authorized_keys /root/.ssh/authorized_keys
-chmod 700 /root/.ssh; chmod 600 /root/.ssh/authorized_keys
+# SSH for the CLI and for debugging, in the background. Without authorized_keys it lets no one in.
+# The CLI pins the host key it passes; otherwise Dropbear makes one on the first connection (-R).
+if [ -e /install/authorized_keys ]; then
+    cp /install/authorized_keys /root/.ssh/authorized_keys
+fi
+chmod 700 /root/.ssh; chmod 600 /root/.ssh/authorized_keys 2>/dev/null
+if [ -e /install/host_key ]; then key='-r /install/host_key'; else key='-R'; fi
 # -W: Dropbear's default receive window would halve the stream.
-/install/dropbear -F -E -s -g -j -k -W 4194304 -P /run/dropbear.pid -r /install/host_key -p 22 > /run/dropbear.log 2>&1 &
+/install/dropbear -F -E -s -g -j -k -W 4194304 -P /run/dropbear.pid $key -p 22 > /run/dropbear.log 2>&1 &
 mark 'dropbear started'
 while [ ! -e /run/orchard/done ]; do sleep 0.1; done
 root=$(cat /run/orchard/done)
@@ -44,7 +68,14 @@ name=$(sed -n 's/^NAME=//p' /run/orchard/os-release 2>/dev/null | head -1 | tr -
 kill "$keeper" 2>/dev/null
 killall dropbear udhcpd getty 2>/dev/null
 udc=$(cat "$g/UDC")
-echo '' > "$g/UDC"; echo 0x4145 > "$g/idProduct"; echo "${name:-Linux}" > "$g/strings/0x409/product"
+echo '' > "$g/UDC"
+# The receiver's interface goes with this boot: the installed system's gadget has none.
+rm -f "$g/configs/c.1/ffs.install"
+if [ -n "$receiver" ]; then
+    kill "$receiver" 2>/dev/null; wait "$receiver" 2>/dev/null
+    umount "$ffs" 2>/dev/null; rmdir "$g/functions/ffs.install" 2>/dev/null
+fi
+echo 0x4145 > "$g/idProduct"; echo "${name:-Linux}" > "$g/strings/0x409/product"
 echo "BOOT:$(cat /proc/sys/kernel/random/boot_id) BOARD:${board#apple,}" > "$g/strings/0x409/serialnumber"
 echo "$udc" > "$g/UDC"
 umount /dev/pts 2>/dev/null

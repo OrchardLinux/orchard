@@ -1,0 +1,99 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: thisiscamk <100883750+thisiscamk@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 12:00:00 +0800
+Subject: [PATCH] regulator: apple-pmic-touch: Add the D2089 touchscreen
+ supplies
+
+The iPad Air (J72) touchscreen controller takes its analog supply from
+D2089 LDO 15 (register 0x84 bit 2) and its core supply from register
+0x85 bit 1. LDOs 13 to 15 also need the shared analog bias in bits 0
+and 1 of register 0x84.
+
+Add both supplies. The analog supply sets the bias with its own enable
+bit and leaves it set when it turns off, as for the D2207's shared LDO
+bits, since other LDOs may depend on it.
+
+[Orchard: from thisiscamk/ipad-air-j72-linux 2a257d6,
+ code/current/kernel/0001-j72-installed-kernel-snapshot.patch
+ (drivers/regulator/apple-pmic-touch-regulator.c). His registers and
+ bits; reworked for the final stack: the bias is kept on the analog
+ supply instead of a separate regulator that refuses to turn off while
+ another LDO is on, and the bypassed read-back checks and the probe
+ refusal of a supply that firmware left on are left out (bring-up
+ guards).]
+Assisted-by: LLM
+Signed-off-by: thisiscamk <100883750+thisiscamk@users.noreply.github.com>
+---
+ .../regulator/apple-pmic-touch-regulator.c    | 52 +++++++++++++++++++
+ 1 file changed, 52 insertions(+)
+
+diff --git a/drivers/regulator/apple-pmic-touch-regulator.c b/drivers/regulator/apple-pmic-touch-regulator.c
+index 627d51b8f..49e241471 100644
+--- a/drivers/regulator/apple-pmic-touch-regulator.c
++++ b/drivers/regulator/apple-pmic-touch-regulator.c
+@@ -20,6 +20,50 @@ static const struct regulator_ops apple_pmic_touch_regulator_ops = {
+ 	.is_enabled = regulator_is_enabled_regmap,
+ };
+ 
++/*
++ * D2089 (Anya, A7 iPad Air): the touchscreen analog supply is LDO 15 at
++ * register 0x84 bit 2. LDOs 13 to 15 share the analog bias in bits 0 and 1
++ * of that register, which must be set with any of them; like on the D2207
++ * the bias stays set when the touchscreen supply turns off, as other users
++ * may need it. The touchscreen core supply is register 0x85 bit 1.
++ */
++#define APPLE_D2089_LDO_BIAS_SHARED	0x03
++
++static int apple_d2089_touch_analog_enable(struct regulator_dev *rdev)
++{
++	return regmap_update_bits(rdev_get_regmap(rdev), rdev->desc->enable_reg,
++				  rdev->desc->enable_mask | APPLE_D2089_LDO_BIAS_SHARED,
++				  rdev->desc->enable_val | APPLE_D2089_LDO_BIAS_SHARED);
++}
++
++static const struct regulator_ops apple_d2089_touch_analog_ops = {
++	.enable = apple_d2089_touch_analog_enable,
++	.disable = regulator_disable_regmap,
++	.is_enabled = regulator_is_enabled_regmap,
++};
++
++static const struct regulator_desc apple_d2089_touch_analog = {
++	.name = "d2089-touch-analog",
++	.ops = &apple_d2089_touch_analog_ops,
++	.type = REGULATOR_VOLTAGE,
++	.owner = THIS_MODULE,
++	.enable_reg = 0x84,
++	.enable_mask = 0x04,
++	.enable_val = 0x04,
++	.disable_val = 0,
++};
++
++static const struct regulator_desc apple_d2089_touch_core = {
++	.name = "d2089-touch-core",
++	.ops = &apple_pmic_touch_regulator_ops,
++	.type = REGULATOR_VOLTAGE,
++	.owner = THIS_MODULE,
++	.enable_reg = 0x85,
++	.enable_mask = 0x02,
++	.enable_val = 0x02,
++	.disable_val = 0,
++};
++
+ static const struct regulator_desc apple_d2186_touch_core = {
+ 	.name = "d2186-touch-core",
+ 	.ops = &apple_pmic_touch_regulator_ops,
+@@ -177,6 +221,14 @@ static int apple_pmic_touch_regulator_probe(struct platform_device *pdev)
+ }
+ 
+ static const struct of_device_id apple_pmic_touch_regulator_of_match[] = {
++	{
++		.compatible = "apple,d2089-touch-analog-regulator",
++		.data = &apple_d2089_touch_analog,
++	},
++	{
++		.compatible = "apple,d2089-touch-core-regulator",
++		.data = &apple_d2089_touch_core,
++	},
+ 	{
+ 		.compatible = "apple,d2186-touch-core-regulator",
+ 		.data = &apple_d2186_touch_core,
