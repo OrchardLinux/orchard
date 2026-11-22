@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: thisiscamk <100883750+thisiscamk@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 12:00:00 +0800
+Subject: [PATCH] dt-bindings: regulator: apple,pmic-touch-regulator: Add the
+ D2089 supplies
+
+The touchscreen of the A7 iPad Air takes an analog and a core supply
+from the D2089 PMIC. Add their compatibles.
+
+[Orchard: from thisiscamk/ipad-air-j72-linux 2a257d6,
+ code/current/kernel/0001-j72-installed-kernel-snapshot.patch
+ (Documentation/devicetree/bindings/regulator/apple,pmic-touch-regulator.yaml);
+ the separate analog-bias regulator and its bias-supply property are
+ left out, as the driver now keeps the shared bias like on the D2207.]
+Assisted-by: LLM
+Signed-off-by: thisiscamk <100883750+thisiscamk@users.noreply.github.com>
+---
+ .../bindings/regulator/apple,pmic-touch-regulator.yaml        | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/devicetree/bindings/regulator/apple,pmic-touch-regulator.yaml b/Documentation/devicetree/bindings/regulator/apple,pmic-touch-regulator.yaml
+index 45521f912..f02ee8ccb 100644
+--- a/Documentation/devicetree/bindings/regulator/apple,pmic-touch-regulator.yaml
++++ b/Documentation/devicetree/bindings/regulator/apple,pmic-touch-regulator.yaml
+@@ -10,7 +10,7 @@ maintainers:
+   - Paul Praschl <praschlpaul@g-p.at>
+ 
+ description:
+-  Fixed touchscreen supply switches provided by the D2186, D2207, Adelyn,
++  Fixed touchscreen supply switches provided by the D2089, D2186, D2207, Adelyn,
+   Angel, Chestnut and Acorn PMICs. The compatible identifies both the PMIC and the physical supply;
+   register layout is an implementation detail of the regulator driver.
+ 
+@@ -24,6 +24,8 @@ properties:
+       - apple,adelyn-touch-core-regulator
+       - apple,angel-touch-analog-regulator
+       - apple,chestnut-touch-hv-regulator
++      - apple,d2089-touch-analog-regulator
++      - apple,d2089-touch-core-regulator
+       - apple,d2186-touch-core-regulator
+       - apple,d2207-touch-analog-regulator
+ 

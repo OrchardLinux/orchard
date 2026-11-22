@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 20:42:11 +0100
+Subject: [PATCH] arm64: dts: apple: t7001-air2: Enable I2C1
+
+I2C1 carries the iPad Air 2's two speaker amplifiers (MAX98721, at 0x31
+and 0x34 in Apple's device tree). Enable the bus without clients so the
+amplifiers can be identified from user space before a codec driver is
+written.
+
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/apple/t7001-air2.dtsi | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t7001-air2.dtsi b/arch/arm64/boot/dts/apple/t7001-air2.dtsi
+index d4b114f73..6f7db2f1c 100644
+--- a/arch/arm64/boot/dts/apple/t7001-air2.dtsi
++++ b/arch/arm64/boot/dts/apple/t7001-air2.dtsi
+@@ -174,6 +174,15 @@ rtc_offset: rtc-offset@4 {
+ 	};
+ };
+ 
++/*
++ * Speaker amplifiers (two MAX98721, at 0x31 and 0x34 in Apple's device
++ * tree). No driver binds them yet; the bus is enabled so they can be
++ * identified from user space.
++ */
++&i2c1 {
++	status = "okay";
++};
++
+ &serial5 {
+ 	pinctrl-0 = <&uart5_pins>;
+ 	pinctrl-names = "default";

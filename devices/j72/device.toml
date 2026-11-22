@@ -1,0 +1,62 @@
+# iPad Air (Cellular) — J72: hardware identity, boot assets and firmware recipe.
+# iPad Air support comes from Cam K's (thisiscamk) port, thisiscamk/ipad-air-j72-linux
+# (2a257d6, 2026-11-16). "Seen working" below cites his repository: README.md's table,
+# J72-PROGRESS.md and the result files named per feature. He ran his own 7.3 kernel;
+# features whose driver Orchard carries in a different form stay "untested" until he
+# runs this branch.
+schema = 1
+kind = "hardware.device"
+
+[device]
+profile = "j72"
+name = "iPad Air (Cellular)"
+apple_products = ["iPad4,2"]
+dt_compatible = ["apple,j72"]
+
+# BDID: ApChipID/ApBoardID of the j72ap identities in the 16H81 (iOS 12.5.7) BuildManifest.plist.
+[match.dfu]
+chip = 0x8960
+board = 0x12
+
+[boot]
+methods = ["checkm8-pongo"] # history/plans-and-reports/NATIVE-CLI-BOOT-2026-11-03.md: Orchard RAM boot through checkra1n/Pongo
+
+[kernel]
+platform = "apple-4k"  # kernel/series/apple-4k, kernel/configs/apple-4k: A7 has no 16 KiB pages
+dtb = "s5l8960x-j72"   # arch/arm64/boot/dts/apple/<dtb>.dtb
+
+[firmware]
+recipe = "firmware.json" # Relative to this device.toml; public recipe, not firmware bytes.
+
+[support]
+status = "experimental"
+
+# States: working, untested, missing, none (features.toml).
+[features]
+display = "working" # README.md, J72-PROGRESS.md: portrait desktop on the boot framebuffer
+screen_off = "untested"
+backlight = "working" # README.md, J72-PROGRESS.md: brightness changes confirmed
+touch = "working" # Orchard's apple_z2 J72 variant: 2,252 events in a 20 s hardware-check touch run, no apple-z2/SPI error (thisiscamk, 2026-11-22)
+buttons = "working" # README.md, J72-PROGRESS.md: Home button confirmed
+accelerometer = "missing"
+gyroscope = "missing"
+light_sensor = "missing"
+touch_id = "none"
+storage_read = "working" # Orchard's asp with the RTKit 10 fixes: 128 GB device and its three partitions read, no I/O error (hardware-check, thisiscamk, 2026-11-22)
+storage_write = "untested" # his driver wrote and flushed (J72-PROGRESS.md) behind J72 write gates that Orchard does not carry
+wifi = "missing" # works on his kernel (README.md) through a J72 HSIC transport module that is not in Orchard yet; firmware recipe is ready
+bluetooth_input = "missing"
+bluetooth_audio = "missing"
+cellular = "missing"
+battery = "untested" # works on his serdev HDQ frontend (README.md); here the gauge runs on the w1-uart HDQ master
+charging = "missing" # his guarded charging is experimental and not in Orchard (code/UPSTREAM-PLAN.md)
+charging_control = "missing"
+suspend = "untested"
+resume = "untested"
+usb_serial = "working" # history/plans-and-reports/NATIVE-CLI-BOOT-2026-11-03.md: Orchard RAM console over USB serial
+usb_network = "working" # same report: NCM and SSH
+usb_host = "missing"
+audio_output = "missing" # both speakers work on his kernel (README.md, code/current/audio) through an overlay module not in Orchard
+audio_input = "missing"
+camera = "missing"
+video_decode_hevc = "missing"
