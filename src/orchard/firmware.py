@@ -119,27 +119,36 @@ def measure(profile, clock, progress, *, hardware=None):
 
 
 def _produce(profile, recipe, outputs, clock, progress):
-    """{destination: bytes} of OUTPUTS, from only the IPSW inputs they need."""
+    """{destination: bytes} of OUTPUTS, from only the IPSW inputs they need.
+
+    An input may name another pinned restore image (`restore`); each image is
+    opened only when an input needs it.
+    """
     from .apple.remote_ipsw import Ipsw
     from .apple.firmware_keys import KeyStore
-    source = recipe['ipsw']
     task = progress.task('Apple firmware')
     task.phase('Downloading only the needed parts')
     task.reset_transfer()
-    # Byte ranges of one IPSW: the total is known only at the end, so count files.
-    files, done = len(recipe['inputs']), [0]
-    with clock.exclude('download'):
-        ipsw = Ipsw(source['url'], source['bytes'], keys=KeyStore(source['sha256']),
-                    on_bytes=lambda sent: task.transfer(
-                        sent, None, prefix=f'{min(done[0], files)} of {files} files  '))
+    # Byte ranges of IPSWs: the total is known only at the end, so count files.
+    files, done, opened = len(recipe['inputs']), [0], {}
 
+    def open_ipsw(source):
+        if source['url'] not in opened:
+            opened[source['url']] = Ipsw(source['url'], source['bytes'], keys=KeyStore(source['sha256']),
+                                         on_bytes=lambda sent: task.transfer(
+                                             sent, None, prefix=f'{min(done[0], files)} of {files} files  '))
+        return opened[source['url']]
+
+    with clock.exclude('download'):
         def read_input(name):
             done[0] += 1
             location = recipe['inputs'][name]['ipsw']
+            ipsw = open_ipsw(location.get('restore', recipe['ipsw']))
             if 'zip' in location:
                 return ipsw.member(location['zip'])
             if 'kernelcache' in location:
-                return ipsw.kernelcache(profile + 'ap')
+                board = location['kernelcache']
+                return ipsw.kernelcache(board if isinstance(board, str) else profile + 'ap')
             return ipsw.system_file(location['rootfs'])
 
         result = recipes.run(recipe, read_input, outputs)

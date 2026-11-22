@@ -13,9 +13,14 @@ implements.
 - `ipsw`: the pinned restore image (version, build, URL, size, sha256).
 - `inputs`: named sources. Each lists where to find it:
   - `ipsw`: `{"rootfs": path}`, `{"zip": member}` or `{"kernelcache": true}`;
+    or `{"kernelcache": "<board>ap", "restore": {…}}`: that board's
+    kernelcache from another pinned restore image (same fields as `ipsw`),
+    for firmware the board's own image doesn't have in the build its driver
+    was written for;
   - `device` (optional): the same file's path on a running iPadOS, or
     `{"kernelcache": "active"}`.
-  An optional `sha256` pins the input.
+  An optional `sha256` pins the input. An input from another restore image
+  must have one.
 - `outputs`: installed files. Each has a `destination` under
   `lib/firmware/`, a pinned `sha256`, and `steps`. The first step names an
   `input`; each later step takes the previous step's result instead. A step
@@ -145,6 +150,8 @@ The CLI used to do that; it isn't needed for recipes any more.
 | `vxd-firmware-from-kernelcache@1` | `input` (kernelcache) | the VXD (DEVA) video decoder firmware from AppleD5500 |
 | `agx-g9p-firmware-from-kernelcache@1` | `input` (kernelcache) | the A10 GPU firmware from AGXFirmwareKextG9PRTBuddy |
 | `agx-g5p-ldr-from-kernelcache@1` | `input` (kernelcache) | the A9 GPU firmware (a META LDR) from AGXFirmwareKextG5P; size and digest are pinned |
+| `agx-g4p-ldr-from-kernelcache@1` | `input` (kernelcache) | the A8 GPU firmware (a META LDR) from AGXFirmwareKextG4P: the LDR whose hash is the output's |
+| `agx-g4p-border-from-kernelcache@1` | `input` (kernelcache) | the A8 GPU's border colour table, 0x800 bytes of AGXG4P's data, whose hash is the output's |
 | `im4p-payload@1` | `input` | the payload of an IM4P container |
 | `aop-image@1` | `coprocessor` | one image (`AOP`, `AOP_ext`) of an AOP firmware container, the OSSerializeBinary payload of `Firmware/AOP/aopfw-*.im4p` |
 | `z2fw-from-mtprops@1` | `input`, `profile`, `packet`, `load_address`, `hbpp_version` | Z2 touch firmware with calibration records |
@@ -257,3 +264,4 @@ verified output to `/lib/firmware/apple/gfx-s8003.bin`, named like the A10's
 Apple's LDR, byte for byte. No payload patch, calibration, firmware bytes or
 captured job is stored in the source tree. Other C0 revisions and other
 boards require separate digest qualification.
+
