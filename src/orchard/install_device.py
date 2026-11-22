@@ -675,13 +675,17 @@ def install_firmware(bundle, root, *, size, sha256):
                     continue
                 if not (member.isfile() and name.startswith('lib/firmware/')):
                     raise InstallError('unsafe-archive', 'Firmware bundle may contain only firmware files')
+                mode = 0o600 if name in (
+                    'lib/firmware/apple/j120/usb-input-limit-calibration-hv.bin',
+                    'lib/firmware/apple/j120/usb-input-limit-calibration-initrd.cpio.gz',
+                ) else 0o644
                 parent, leaf = parent_fd(root_fd, 'usr/' + name)
                 try:
-                    fd = os.open(leaf, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644, dir_fd=parent)
+                    fd = os.open(leaf, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, mode, dir_fd=parent)
                     with os.fdopen(fd, 'wb') as output:
                         output.write(archive.extractfile(member).read())
                         os.fchown(output.fileno(), 0, 0)
-                        os.fchmod(output.fileno(), 0o644)
+                        os.fchmod(output.fileno(), mode)
                     count += 1
                 finally:
                     os.close(parent)

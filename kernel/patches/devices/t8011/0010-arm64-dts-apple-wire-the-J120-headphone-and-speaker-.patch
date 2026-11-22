@@ -1,0 +1,174 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 22:38:31 +0100
+Subject: [PATCH] arm64: dts: apple: wire the J120 headphone and speaker cards
+
+Assisted-by: LLM
+---
+ .../boot/dts/apple/t8011-j120-audio.dtsi      | 87 +++++++++++++++++++
+ .../boot/dts/apple/t8011-j120-speakers.dtsi   | 51 +++++++++++
+ arch/arm64/boot/dts/apple/t8011-j120.dts      |  2 +
+ 3 files changed, 140 insertions(+)
+ create mode 100644 arch/arm64/boot/dts/apple/t8011-j120-audio.dtsi
+ create mode 100644 arch/arm64/boot/dts/apple/t8011-j120-speakers.dtsi
+
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120-audio.dtsi b/arch/arm64/boot/dts/apple/t8011-j120-audio.dtsi
+new file mode 100644
+index 000000000..cfac5c476
+--- /dev/null
++++ b/arch/arm64/boot/dts/apple/t8011-j120-audio.dtsi
+@@ -0,0 +1,87 @@
++// SPDX-License-Identifier: GPL-2.0+ OR MIT
++
++&i2c2 {
++	status = "okay";
++
++	jack_codec: audio-codec@48 {
++		compatible = "cirrus,cs42l83";
++		reg = <0x48>;
++		reset-gpios = <&pinctrl_ap 67 GPIO_ACTIVE_HIGH>;
++		interrupts-extended = <&pinctrl_ap 50 IRQ_TYPE_LEVEL_LOW>;
++		#sound-dai-cells = <0>;
++		sound-name-prefix = "Jack";
++	};
++};
++
++/ {
++	nco_clkref: clock-ref-nco {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		clock-frequency = <800000000>;
++		clock-output-names = "nco_ref";
++	};
++
++	sound-headphones {
++		compatible = "simple-audio-card";
++		simple-audio-card,name = "J120 Headphones";
++		simple-audio-card,format = "i2s";
++		simple-audio-card,bitclock-master = <&jack_cpu>;
++		simple-audio-card,frame-master = <&jack_cpu>;
++		simple-audio-card,widgets = "Headphone", "Headphones";
++		simple-audio-card,routing = "Headphones", "Jack HP";
++		simple-audio-card,pin-switches = "Headphones";
++		simple-audio-card,aux-devs = <&jack_codec>;
++
++		jack_cpu: simple-audio-card,cpu {
++			sound-dai = <&mca4>;
++		};
++
++		simple-audio-card,codec {
++			sound-dai = <&jack_codec>;
++		};
++	};
++
++	soc {
++		i2s_switch: syscon@20a004000 {
++			compatible = "apple,t8010-i2s-switch", "syscon";
++			reg = <0x2 0x0a004000 0x0 0x1000>;
++		};
++
++		aop_i2s_switch: syscon@210540000 {
++			compatible = "apple,t8010-aop-i2s-switch", "syscon";
++			reg = <0x2 0x10540000 0x0 0x1000>;
++		};
++
++		aop_i2s_oe: syscon@210000600 {
++			compatible = "apple,t8010-aop-i2s-oe", "syscon";
++			reg = <0x2 0x10000600 0x0 0x4>;
++		};
++
++		mca4: mca@20a0b0000 {
++			compatible = "apple,t8010-mca-i2s";
++			reg = <0x2 0x0a0b0000 0x0 0x4000>,
++			      <0x2 0x0a002010 0x0 0x4>;
++			reg-names = "mca", "mclk";
++			interrupts = <AIC_IRQ 229 IRQ_TYPE_LEVEL_HIGH>;
++			power-domains = <&ps_mca4>;
++			clocks = <&nco 4>;
++			clock-names = "bitclk";
++			dmas = <&sio 0x30>;
++			dma-names = "tx";
++			#clock-cells = <0>;
++			clock-output-names = "mca4-mclk";
++			#sound-dai-cells = <0>;
++			apple,i2s-switch = <&i2s_switch 4 4>;
++			apple,aop-i2s-route = <&aop_i2s_switch 0x0 0x00010101>,
++					      <&aop_i2s_switch 0xc 0x00080818>,
++					      <&aop_i2s_oe 0x0 0xf>;
++		};
++
++		nco: clock-controller@20e044000 {
++			compatible = "apple,t8010-nco";
++			reg = <0x2 0x0e044000 0x0 0x14000>;
++			clocks = <&nco_clkref>;
++			#clock-cells = <1>;
++		};
++	};
++};
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120-speakers.dtsi b/arch/arm64/boot/dts/apple/t8011-j120-speakers.dtsi
+new file mode 100644
+index 000000000..b421dfc2a
+--- /dev/null
++++ b/arch/arm64/boot/dts/apple/t8011-j120-speakers.dtsi
+@@ -0,0 +1,51 @@
++// SPDX-License-Identifier: GPL-2.0+ OR MIT
++
++&i2c1 {
++	status = "okay";
++};
++
++&{/soc} {
++
++	mca2: mca@20a0a8000 {
++		compatible = "apple,t8011-mca";
++		reg = <0x2 0x0a0a8000 0x0 0x4000>,
++			  <0x2 0x0a002008 0x0 0x4>;
++		reg-names = "mca", "mclk";
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 227 IRQ_TYPE_LEVEL_HIGH>;
++		power-domains = <&ps_mca2>;
++		clocks = <&nco 2>;
++		clock-names = "bitclk";
++		dmas = <&sio 0x2c>, <&sio 0x2d>;
++		dma-names = "tx", "rx";
++		#clock-cells = <0>;
++		clock-output-names = "mca2-mclk";
++		#sound-dai-cells = <0>;
++		apple,i2s-switch = <&i2s_switch 2 2>;
++	};
++};
++
++&{/} {
++	speaker_amps: speaker-transport-codec {
++		compatible = "apple,j120-speaker-amplifiers";
++		reset-gpios = <&pinctrl_ap 119 GPIO_ACTIVE_LOW>;
++		speaker-buses = <&i2c1>, <&i2c2>;
++		#sound-dai-cells = <0>;
++	};
++
++	sound-speaker-transport {
++		compatible = "simple-audio-card";
++		simple-audio-card,name = "J120 Speakers";
++		simple-audio-card,format = "dsp_a";
++		simple-audio-card,bitclock-master = <&speaker_cpu>;
++		simple-audio-card,frame-master = <&speaker_cpu>;
++
++		speaker_cpu: simple-audio-card,cpu {
++			sound-dai = <&mca2>;
++		};
++
++		simple-audio-card,codec {
++			sound-dai = <&speaker_amps>;
++		};
++	};
++};
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120.dts b/arch/arm64/boot/dts/apple/t8011-j120.dts
+index d45a64cfa..6ace619fa 100644
+--- a/arch/arm64/boot/dts/apple/t8011-j120.dts
++++ b/arch/arm64/boot/dts/apple/t8011-j120.dts
+@@ -301,3 +301,5 @@ &vxd {
+ };
+ 
+ #include "t8011-j120-microphones.dtsi"
++#include "t8011-j120-audio.dtsi"
++#include "t8011-j120-speakers.dtsi"

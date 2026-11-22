@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 09:11:15 +0100
+Subject: [PATCH] power: supply: verify Tristar fallback on IRQ storms
+
+Keep the last verified limit if a storm-triggered fallback write or readback fails, and flag the discrepancy as unverified.
+
+Assisted-by: LLM
+---
+ drivers/power/supply/apple_tristar_charger.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/power/supply/apple_tristar_charger.c b/drivers/power/supply/apple_tristar_charger.c
+index 9e6381985..cfe8a36fb 100644
+--- a/drivers/power/supply/apple_tristar_charger.c
++++ b/drivers/power/supply/apple_tristar_charger.c
+@@ -1429,10 +1429,11 @@ static void tristar_source_event(struct tristar_charger *chg)
+ 		chg->storm_count = 0;
+ 	}
+ 	if (++chg->storm_count > TRISTAR_IRQ_STORM) {
+-		dev_crit(chg->dev, "PMU source events storming; holding the fallback\n");
+-		chg->chip->write_limit(chg, chg->chip->fallback_code);
+-		WRITE_ONCE(chg->code, chg->chip->fallback_code);
+ 		WRITE_ONCE(chg->phase, TRISTAR_FAULT);
++		if (tristar_set_code(chg, chg->chip->fallback_code))
++			dev_crit(chg->dev, "PMU source events storming; input limit unverified\n");
++		else
++			dev_crit(chg->dev, "PMU source events storming; holding the fallback\n");
+ 		for (i = TRISTAR_IRQ_SOURCE; i < chg->nirqs; i++)
+ 			disable_irq_nosync(chg->irqs[i]);
+ 	}

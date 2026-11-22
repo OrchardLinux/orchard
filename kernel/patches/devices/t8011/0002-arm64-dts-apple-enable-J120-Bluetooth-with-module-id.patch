@@ -1,0 +1,91 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tompta1 <546706+tompta1@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 12:55:41 +0100
+Subject: [PATCH] arm64: dts: apple: enable J120 Bluetooth with module identity
+
+Wire UART3, the shared Autumn enable GPIO, unit-address alias and Wi-Fi OTP vendor cell for the J120 module. Retain the cleaned touch, Wi-Fi and AOP board support.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8011-j120.dts | 40 +++++++++++++++++++++++-
+ 1 file changed, 39 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120.dts b/arch/arm64/boot/dts/apple/t8011-j120.dts
+index 0c6e23a13..7e210104a 100644
+--- a/arch/arm64/boot/dts/apple/t8011-j120.dts
++++ b/arch/arm64/boot/dts/apple/t8011-j120.dts
+@@ -16,6 +16,7 @@ / {
+ 
+ 	aliases {
+ 		aop = &aop;
++		bluetooth0 = &bluetooth;
+ 		touchscreen0 = &touchscreen;
+ 		wifi0 = &wifi;
+ 	};
+@@ -100,6 +101,32 @@ wlan_uart2: wlan-platform-control@20a0c8000 {
+ 		status = "okay";
+ 	};
+ 
++	serial3: serial@20a0cc000 {
++		compatible = "apple,t8010-uart", "apple,s5l-uart";
++		reg = <0x2 0x0a0cc000 0x0 0x4000>;
++		reg-io-width = <4>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 219 IRQ_TYPE_LEVEL_HIGH>;
++		clocks = <&clkref>, <&clkref>;
++		clock-names = "uart", "clk_uart_baud0";
++		power-domains = <&ps_uart3>;
++		pinctrl-0 = <&bluetooth_uart3_pins>;
++		pinctrl-names = "default";
++		uart-has-rtscts;
++		status = "okay";
++
++		bluetooth: bluetooth {
++			compatible = "apple,j120-bcm4355c0-bt", "brcm,bcm4355c0-bt";
++			max-speed = <3000000>;
++			shutdown-gpios = <&autumn_gpio 0 GPIO_ACTIVE_HIGH>;
++			device-wakeup-gpios = <&pinctrl_ap 166 GPIO_ACTIVE_HIGH>;
++			nvmem-cells = <&bluetooth_module_vendor>;
++			nvmem-cell-names = "module-vendor";
++			/* Filled from this unit's ADT by m1n1. */
++			local-bd-address = [00 00 00 00 00 00];
++		};
++	};
++
+ 	pcie0_dart2: iommu@603008000 {
+ 		compatible = "apple,t8011-dart", "apple,s5l8960x-dart";
+ 		reg = <0x6 0x03008000 0x0 0x4000>;
+@@ -184,6 +211,11 @@ wifi: wifi@0,0 {
+ 				reg = <0x10000 0x0 0x0 0x0 0x0>;
+ 				brcm,board-type = "apple,j120";
+ 
++				nvmem-layout {
++					compatible = "brcm,apple-otp-layout";
++					bluetooth_module_vendor: module-vendor {};
++				};
++
+ 			};
+ 		};
+ 	};
+@@ -222,6 +254,12 @@ wlan_uart2_pins: wlan-uart2-pins {
+ 			 <APPLE_PINMUX(152, 1)>;
+ 	};
+ 
++	/* The native UART3 node describes TX and RTS. */
++	bluetooth_uart3_pins: bluetooth-uart3-pins {
++		pinmux = <APPLE_PINMUX(145, 1)>,
++			 <APPLE_PINMUX(147, 1)>;
++	};
++
+ 	touch_sync_active: touch-sync-active-pins {
+ 		pinmux = <APPLE_PINMUX(205, 1)>,
+ 			 <APPLE_PINMUX(206, 1)>,
+@@ -241,7 +279,7 @@ autumn_gpio: gpio {
+ 		compatible = "apple,d2401-pmic-gpio";
+ 		gpio-controller;
+ 		#gpio-cells = <2>;
+-		gpio-reserved-ranges = <0 1>, <2 18>;
++		gpio-reserved-ranges = <2 18>;
+ 		status = "okay";
+ 	};
+ };

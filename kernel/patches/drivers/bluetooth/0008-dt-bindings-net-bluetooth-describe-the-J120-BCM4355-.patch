@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tompta1 <546706+tompta1@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 12:55:32 +0100
+Subject: [PATCH] dt-bindings: net: bluetooth: describe the J120 BCM4355 C0
+ module
+
+Describe the module vendor NVMEM cell and bootloader-provided unit address/calibration required by J120 Apple radio setup. Do not embed per-unit data in the board sources.
+
+Assisted-by: LLM
+---
+ .../net/bluetooth/brcm,bluetooth.yaml         | 39 ++++++++++++++++++-
+ 1 file changed, 38 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml b/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml
+index 793857de0..3875b42de 100644
+--- a/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml
++++ b/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml
+@@ -19,7 +19,9 @@ properties:
+           - const: brcm,bcm4355c0-bt
+           - const: brcm,bcm4345c5
+       - items:
+-          - const: apple,j71t-bcm4355c0-bt
++          - enum:
++              - apple,j71t-bcm4355c0-bt
++              - apple,j120-bcm4355c0-bt
+           - const: brcm,bcm4355c0-bt
+       - items:
+           - enum:
+@@ -103,6 +105,29 @@ properties:
+   vddio-supply:
+     description: phandle to regulator supply for VDDIO
+ 
++  local-bd-address:
++    $ref: /schemas/types.yaml#/definitions/uint8-array
++    minItems: 6
++    maxItems: 6
++    description: Device Bluetooth address in least significant byte first order
++
++  brcm,taurus-cal-blob:
++    $ref: /schemas/types.yaml#/definitions/uint8-array
++    minItems: 1
++    maxItems: 15073280
++    description:
++      Per-device Taurus calibration supplied by the bootloader. Do not put
++      calibration bytes in board source files. The transport supports at most
++      65536 blocks of 230 bytes.
++
++  nvmem-cells:
++    maxItems: 1
++    description: Vendor identity of the shared Wi-Fi/Bluetooth module.
++
++  nvmem-cell-names:
++    items:
++      - const: module-vendor
++
+   brcm,bt-pcm-int-params:
+     $ref: /schemas/types.yaml#/definitions/uint8-array
+     minItems: 5
+@@ -145,9 +170,21 @@ required:
+ 
+ dependencies:
+   brcm,requires-autobaud-mode: [ shutdown-gpios ]
++  nvmem-cells: [ nvmem-cell-names ]
++  nvmem-cell-names: [ nvmem-cells ]
+ 
+ allOf:
+   - $ref: /schemas/serial/serial-peripheral-props.yaml#
++  - if:
++      properties:
++        compatible:
++          contains:
++            const: apple,j120-bcm4355c0-bt
++    then:
++      required:
++        - nvmem-cells
++        - nvmem-cell-names
++        - local-bd-address
+   - if:
+       not:
+         properties:

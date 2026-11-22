@@ -47,3 +47,25 @@ def validate(blob):
     if len(device_ids) != 1 or not device_ids[0]:
         raise ValueError('Ambiguous device identity in ADT')
     return device_ids[0]
+
+
+def j120_charger_calibration(blob, ecid):
+    """Extract the calibrated D2355 input-current table for the connected unit."""
+    from .adt_tree import parse
+    if validate(blob) != ecid:
+        raise ValueError('Calibration ADT identity differs from the selected device')
+    tree = parse(blob)
+    if tree.properties.get('model', b'').rstrip(b'\0') != b'iPad7,1':
+        raise ValueError('Expected a J120 calibration ADT')
+    tables = [node.properties.get('usb-input-limit-calibration-hv', b'')
+              for path, node in tree.walk() if path == '/device-tree/charger']
+    if len(tables) != 1 or len(tables[0]) != 84:
+        raise ValueError('Expected one J120 charger calibration table')
+    words = struct.unpack('<21i', tables[0])
+    if words[0] not in (1, 2, 3):
+        raise ValueError('Invalid D2355 calibration selector')
+    for offset in range(1, 21, 5):
+        row = words[offset:offset + 5]
+        if row[0] <= 0 or any(a >= b for a, b in zip(row, row[1:])):
+            raise ValueError('Invalid D2355 calibration range')
+    return tables[0]

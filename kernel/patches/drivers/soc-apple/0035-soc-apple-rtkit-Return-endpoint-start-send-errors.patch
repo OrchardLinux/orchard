@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Thu, 19 Nov 2026 10:53:20 +0100
+Subject: [PATCH] soc: apple: rtkit: Return endpoint start send errors
+
+The management send can fail, but apple_rtkit_start_ep() currently returns zero after it. Propagate the send error so application drivers can stop initialization when the firmware could not be sent the endpoint start request.
+
+Assisted-by: LLM
+---
+ drivers/soc/apple/rtkit.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/drivers/soc/apple/rtkit.c b/drivers/soc/apple/rtkit.c
+index b54688f56..ccadd6c4e 100644
+--- a/drivers/soc/apple/rtkit.c
++++ b/drivers/soc/apple/rtkit.c
+@@ -676,9 +676,7 @@ int apple_rtkit_start_ep(struct apple_rtkit *rtk, u8 endpoint)
+ 
+ 	msg = FIELD_PREP(APPLE_RTKIT_MGMT_STARTEP_EP, endpoint);
+ 	msg |= APPLE_RTKIT_MGMT_STARTEP_FLAG;
+-	apple_rtkit_management_send(rtk, APPLE_RTKIT_MGMT_STARTEP, msg);
+-
+-	return 0;
++	return apple_rtkit_management_send(rtk, APPLE_RTKIT_MGMT_STARTEP, msg);
+ }
+ EXPORT_SYMBOL_GPL(apple_rtkit_start_ep);
+ 

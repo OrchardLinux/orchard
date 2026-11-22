@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 23:15:12 +0100
+Subject: [PATCH] arm64: dts: apple: describe both J120 ambient light sensors
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8011-j120.dts | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120.dts b/arch/arm64/boot/dts/apple/t8011-j120.dts
+index 290298e6d..805602626 100644
+--- a/arch/arm64/boot/dts/apple/t8011-j120.dts
++++ b/arch/arm64/boot/dts/apple/t8011-j120.dts
+@@ -345,6 +345,20 @@ &ps_pcie_ref {
+ 	status = "okay";
+ };
+ 
++&i2c3 {
++	status = "okay";
++
++	light-sensor@29 {
++		compatible = "apple,ct709";
++		reg = <0x29>;
++	};
++
++	light-sensor@39 {
++		compatible = "apple,ct709";
++		reg = <0x39>;
++	};
++};
++
+ &vxd {
+ 	status = "okay";
+ };

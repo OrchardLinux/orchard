@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Sat, 21 Nov 2026 00:44:34 +0100
+Subject: [PATCH] arm64: dts: apple: identify the J120 ambient calibration
+ target
+
+Orchard uses als0 to pass the per-unit factory light calibration to Linux. Point it at the CT709 at address 0x29. The shared factory record contains the calibration for both sensor orientations.
+
+Assisted-by: LLM
+Signed-off-by: tom <tompt@seznam.cz>
+---
+ arch/arm64/boot/dts/apple/t8011-j120.dts | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120.dts b/arch/arm64/boot/dts/apple/t8011-j120.dts
+index 99abcdcfd..426c16b41 100644
+--- a/arch/arm64/boot/dts/apple/t8011-j120.dts
++++ b/arch/arm64/boot/dts/apple/t8011-j120.dts
+@@ -15,6 +15,7 @@ / {
+ 	model = "Apple iPad Pro 2 (12.9-inch) (Wi-Fi)";
+ 
+ 	aliases {
++		als0 = &als0;
+ 		nvme-hmb = &nvme_hmb;
+ 		aop = &aop;
+ 		bluetooth0 = &bluetooth;
+@@ -359,7 +360,7 @@ &ps_pcie_ref {
+ &i2c3 {
+ 	status = "okay";
+ 
+-	light-sensor@29 {
++	als0: light-sensor@29 {
+ 		compatible = "apple,ct709";
+ 		reg = <0x29>;
+ 	};

@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Sun, 22 Nov 2026 02:35:33 +0100
+Subject: [PATCH] arm64: dts: apple: add the J120 magnetic cover switch
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8011-j120.dts | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120.dts b/arch/arm64/boot/dts/apple/t8011-j120.dts
+index 776307625..2336e7d74 100644
+--- a/arch/arm64/boot/dts/apple/t8011-j120.dts
++++ b/arch/arm64/boot/dts/apple/t8011-j120.dts
+@@ -289,6 +289,10 @@ nvmem-layout {
+ };
+ 
+ &august_pmic {
++	cover-switch {
++		compatible = "apple,j120-cover-switch";
++	};
++
+ 	touch_analog: regulator-touch-analog {
+ 		compatible = "apple,august-touch-analog-regulator";
+ 		regulator-name = "touch-analog";

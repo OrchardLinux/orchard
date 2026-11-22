@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 16:51:33 +0100
+Subject: [PATCH] arm64: dts: apple: enable Tristar in the J120 charging
+ profile
+
+The installed base explicitly disables the Tristar node. Enable it with the PMIC charger to satisfy the client dependency at probe.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8011-j120-charging-1a.dts | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120-charging-1a.dts b/arch/arm64/boot/dts/apple/t8011-j120-charging-1a.dts
+index 31ed853b0..88c4e61c8 100644
+--- a/arch/arm64/boot/dts/apple/t8011-j120-charging-1a.dts
++++ b/arch/arm64/boot/dts/apple/t8011-j120-charging-1a.dts
+@@ -1,6 +1,10 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ #include "t8011-j120-charging.dts"
+ 
++&tristar_test {
++	status = "okay";
++};
++
+ &d2355_test {
+ 	status = "okay";
+ };

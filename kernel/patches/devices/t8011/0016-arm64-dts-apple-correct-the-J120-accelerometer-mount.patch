@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Sat, 21 Nov 2026 11:27:00 +0100
+Subject: [PATCH] arm64: dts: apple: correct the J120 accelerometer mount
+ matrix
+
+With the Home button down, the accelerometer reports negative Y. Inverting the two in-plane axes makes SensorProxy report bottom-up and rotates the display by 180 degrees. Use the identity matrix, verified via a runtime override in portrait and landscape.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8011-j120.dts | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120.dts b/arch/arm64/boot/dts/apple/t8011-j120.dts
+index 426c16b41..c413f9169 100644
+--- a/arch/arm64/boot/dts/apple/t8011-j120.dts
++++ b/arch/arm64/boot/dts/apple/t8011-j120.dts
+@@ -75,8 +75,8 @@ pressure {
+ };
+ 
+ &aop_accel {
+-	mount-matrix = "-1", "0", "0",
+-		       "0", "-1", "0",
++	mount-matrix = "1", "0", "0",
++		       "0", "1", "0",
+ 		       "0", "0", "1";
+ };
+ 

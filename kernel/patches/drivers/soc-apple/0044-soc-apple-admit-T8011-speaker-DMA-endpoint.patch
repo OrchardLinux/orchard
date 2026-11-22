@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 15:57:03 +0100
+Subject: [PATCH] soc: apple: admit T8011 speaker DMA endpoint
+
+The J120 MCA2 describes SmartIO transmit endpoint 0x2c. Admit it alongside the existing headphone and microphone endpoints.
+
+Assisted-by: LLM
+---
+ drivers/soc/apple/apple-sio-core.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/soc/apple/apple-sio-core.c b/drivers/soc/apple/apple-sio-core.c
+index b7a968293..f4caefda8 100644
+--- a/drivers/soc/apple/apple-sio-core.c
++++ b/drivers/soc/apple/apple-sio-core.c
+@@ -1187,8 +1187,9 @@ static const struct apple_sio_hw apple_sio_t7000_hw = {
+ 	.num_dma_ranges = ARRAY_SIZE(apple_sio_t7000_dma_ranges),
+ };
+ 
+-/* J120 MCA4 transmit and PDM receive. */
++/* J120 ADT: MCA2 speaker TX, MCA4 headphone TX and PDM microphone RX. */
+ static const struct apple_sio_dma_range apple_sio_t8011_dma_ranges[] = {
++	{ 0x2c, 0x2c },
+ 	{ 0x30, 0x30 },
+ 	{ 0x5b, 0x5b },
+ };

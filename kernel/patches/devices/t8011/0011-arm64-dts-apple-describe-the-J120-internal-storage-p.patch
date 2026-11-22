@@ -1,0 +1,153 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 22:42:34 +0100
+Subject: [PATCH] arm64: dts: apple: describe the J120 internal storage port
+ and DART
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8011-j120.dts | 67 ++++++++++++++++++++----
+ 1 file changed, 58 insertions(+), 9 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120.dts b/arch/arm64/boot/dts/apple/t8011-j120.dts
+index 6ace619fa..6a9e491c5 100644
+--- a/arch/arm64/boot/dts/apple/t8011-j120.dts
++++ b/arch/arm64/boot/dts/apple/t8011-j120.dts
+@@ -15,12 +15,25 @@ / {
+ 	model = "Apple iPad Pro 2 (12.9-inch) (Wi-Fi)";
+ 
+ 	aliases {
++		nvme-hmb = &nvme_hmb;
+ 		aop = &aop;
+ 		bluetooth0 = &bluetooth;
+ 		touchscreen0 = &touchscreen;
+ 		wifi0 = &wifi;
+ 	};
+ 
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		/* m1n1 fills this from this boot's ADT sart-region. */
++		nvme_hmb: nvme-hmb@0 {
++			reg = <0 0 0 0>;
++			no-map;
++		};
++	};
++
+ 	/* WLAN REG_ON is driven by the Autumn PMIC. */
+ 	wlan_vdd: regulator-wlan-vdd {
+ 		compatible = "regulator-fixed";
+@@ -127,6 +140,19 @@ bluetooth: bluetooth {
+ 		};
+ 	};
+ 
++	pcie0_dart0: iommu@601008000 {
++		compatible = "apple,t8011-dart", "apple,s5l8960x-dart";
++		reg = <0x6 0x01008000 0x0 0x4000>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 271 IRQ_TYPE_LEVEL_HIGH>;
++		power-domains = <&ps_pcie>;
++		#iommu-cells = <5>;
++		apple,error-reflector = /bits/ 64 <0x20fffc000>;
++		apple,fetch-config = <0x000e0303>;
++		apple,diag-config = <0x00000100>;
++		status = "okay";
++	};
++
+ 	pcie0_dart2: iommu@603008000 {
+ 		compatible = "apple,t8011-dart", "apple,s5l8960x-dart";
+ 		reg = <0x6 0x03008000 0x0 0x4000>;
+@@ -152,9 +178,10 @@ pcie0: pcie@610000000 {
+ 		      <0x6 0x03000000 0x0 0x4000>,
+ 		      <0x6 0x04000000 0x0 0x4000>,
+ 		      <0x6 0x05000000 0x0 0x4000>,
+-		      <0x6 0x06000000 0x0 0x4000>;
++		      <0x6 0x06000000 0x0 0x4000>,
++		      <0x6 0x01004000 0x0 0x4000>;
+ 		reg-names = "config", "rc", "phy", "phy-ip",
+-			    "port0", "port1", "port2", "port3", "port4", "port5";
++			    "port0", "port1", "port2", "port3", "port4", "port5", "nvmmu";
+ 
+ 		interrupt-parent = <&aic>;
+ 		interrupts = <AIC_IRQ 270 IRQ_TYPE_LEVEL_HIGH>,
+@@ -162,8 +189,9 @@ pcie0: pcie@610000000 {
+ 			     <AIC_IRQ 276 IRQ_TYPE_LEVEL_HIGH>,
+ 			     <AIC_IRQ 279 IRQ_TYPE_LEVEL_HIGH>,
+ 			     <AIC_IRQ 282 IRQ_TYPE_LEVEL_HIGH>,
+-			     <AIC_IRQ 285 IRQ_TYPE_LEVEL_HIGH>;
+-		interrupt-names = "port0", "port1", "port2", "port3", "port4", "port5";
++			     <AIC_IRQ 285 IRQ_TYPE_LEVEL_HIGH>,
++			     <AIC_IRQ 272 IRQ_TYPE_EDGE_RISING>;
++		interrupt-names = "port0", "port1", "port2", "port3", "port4", "port5", "nvmmu";
+ 		interrupt-controller;
+ 		#interrupt-cells = <1>;
+ 
+@@ -171,9 +199,12 @@ pcie0: pcie@610000000 {
+ 		msi-parent = <&pcie0>;
+ 		msi-ranges = <&aic AIC_IRQ 288 IRQ_TYPE_EDGE_RISING 32>;
+ 		apple,msi-doorbell = <0xbffff000>;
++		apple,nvme-hmb = <&nvme_hmb>;
++		apple,nvmmu-iova = <0xbc000000>;
+ 
+-		/* Bus 1 serves the only enabled child, Wi-Fi on port 2. */
+-		iommu-map = <0x100 &pcie0_dart2 0 0x0 0x80000000 0x0 0x3ffff000 1>;
++		/* Storage is bus 1; Wi-Fi is bus 2, each behind its own DART. */
++		iommu-map = <0x100 &pcie0_dart0 0 0x0 0x80000000 0x0 0x3c000000 1>,
++			    <0x200 &pcie0_dart2 0 0x0 0x80000000 0x0 0x3ffff000 1>;
+ 		iommu-map-mask = <0xff00>;
+ 
+ 		#address-cells = <3>;
+@@ -185,15 +216,29 @@ pcie0: pcie@610000000 {
+ 		power-domains = <&ps_pcie>;
+ 		clocks = <&ps_pcie_aux>, <&ps_pcie_ref>;
+ 		clock-names = "aux", "ref";
+-		pinctrl-0 = <&wifi_clkreq>;
++		pinctrl-0 = <&storage_clkreq>, <&wifi_clkreq>;
+ 		pinctrl-names = "default";
+ 		status = "okay";
+ 
++		storage_port: pci@0,0 {
++			compatible = "pciclass,0604";
++			device_type = "pci";
++			reg = <0 0 0 0 0>;
++			bus-range = <1 1>;
++			max-link-speed = <3>;
++			reset-gpios = <&pinctrl_ap 10 GPIO_ACTIVE_LOW>;
++			apple,msi-vector-range = <0 8>;
++			apple,manual-availability-iommu = <&pcie0_dart0 0>;
++			#address-cells = <3>;
++			#size-cells = <2>;
++			ranges;
++		};
++
+ 		pci@2,0 {
+ 			compatible = "apple,j120-wifi-pcie-port", "pciclass,0604";
+ 			device_type = "pci";
+ 			reg = <0x1000 0x0 0x0 0x0 0x0>;
+-			bus-range = <1 1>;
++			bus-range = <2 2>;
+ 			max-link-speed = <1>;
+ 			reset-gpios = <&pinctrl_ap 100 GPIO_ACTIVE_LOW>;
+ 			apple,msi-vector-range = <16 4>;
+@@ -208,7 +253,7 @@ pci@2,0 {
+ 
+ 			wifi: wifi@0,0 {
+ 				compatible = "pci14e4,43dc";
+-				reg = <0x10000 0x0 0x0 0x0 0x0>;
++				reg = <0x20000 0x0 0x0 0x0 0x0>;
+ 				brcm,board-type = "apple,j120";
+ 
+ 				nvmem-layout {
+@@ -245,6 +290,10 @@ touchclk: clock-controller@78000 {
+ &pinctrl_ap {
+ 	compatible = "apple,t8011-pinctrl", "apple,s8000-pinctrl", "apple,pinctrl";
+ 
++	storage_clkreq: storage-clkreq-pins {
++		pinmux = <APPLE_PINMUX(13, 1)>;
++	};
++
+ 	wifi_clkreq: wifi-clkreq-pins {
+ 		pinmux = <APPLE_PINMUX(101, 1)>;
+ 	};

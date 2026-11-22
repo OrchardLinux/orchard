@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 08:56:58 +0100
+Subject: [PATCH] power: supply: report the cached J120 battery cycle count
+
+Expose CycleCount in the J120 profile. Treat a failed optional cycle read as unavailable so it cannot abort a battery uevent with otherwise valid pack readings.
+
+Assisted-by: LLM
+---
+ drivers/power/supply/bq27xxx_battery.c     | 3 ++-
+ drivers/power/supply/bq27xxx_battery_hdq.c | 1 +
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/power/supply/bq27xxx_battery.c b/drivers/power/supply/bq27xxx_battery.c
+index 18dcd87c9..6369b922f 100644
+--- a/drivers/power/supply/bq27xxx_battery.c
++++ b/drivers/power/supply/bq27xxx_battery.c
+@@ -2191,7 +2191,8 @@ static void bq27xxx_battery_refresh_cache(struct bq27xxx_device_info *di)
+ 
+ 	if (bq27xxx_cache_has_prop(di, POWER_SUPPLY_PROP_CYCLE_COUNT)) {
+ 		ret = bq27xxx_battery_read_cyct(di, &value);
+-		bq27xxx_cache_value(&cache.cycle_count, ret, &value);
++		/* Keep optional telemetry errors out of the battery uevent. */
++		bq27xxx_cache_value(&cache.cycle_count, ret ? -ENODATA : 0, &value);
+ 	}
+ 
+ 	if (bq27xxx_cache_has_prop(di, POWER_SUPPLY_PROP_POWER_AVG)) {
+diff --git a/drivers/power/supply/bq27xxx_battery_hdq.c b/drivers/power/supply/bq27xxx_battery_hdq.c
+index 424ff7081..8d939390e 100644
+--- a/drivers/power/supply/bq27xxx_battery_hdq.c
++++ b/drivers/power/supply/bq27xxx_battery_hdq.c
+@@ -52,6 +52,7 @@ static const enum power_supply_property bq27540_j120_cache_props[] = {
+ 	POWER_SUPPLY_PROP_TEMP,
+ 	POWER_SUPPLY_PROP_CHARGE_NOW,
+ 	POWER_SUPPLY_PROP_CHARGE_FULL,
++	POWER_SUPPLY_PROP_CYCLE_COUNT,
+ };
+ 
+ struct bq27xxx_hdq_data {

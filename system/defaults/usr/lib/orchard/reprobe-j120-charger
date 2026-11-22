@@ -1,0 +1,3 @@
+#!/bin/sh
+# Kernel device names arrive as one udev argument.
+printf '%s' "$1" > /sys/bus/platform/drivers_probe

@@ -1,0 +1,355 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 22:40:48 +0100
+Subject: [PATCH] PCI: apple-h9p: bring up the J120 storage port alongside
+ Wi-Fi
+
+Assisted-by: LLM
+---
+ drivers/pci/controller/pcie-apple-h9p.c | 227 +++++++++++++++++++-----
+ 1 file changed, 187 insertions(+), 40 deletions(-)
+
+diff --git a/drivers/pci/controller/pcie-apple-h9p.c b/drivers/pci/controller/pcie-apple-h9p.c
+index 494f90ff9..7905c62c2 100644
+--- a/drivers/pci/controller/pcie-apple-h9p.c
++++ b/drivers/pci/controller/pcie-apple-h9p.c
+@@ -673,6 +673,22 @@ static const struct apple_h9p_tunable t8011_rc_common_tunables[] = {
+ };
+ 
+ /* J120 Wi-Fi port2 register settings, in native firmware order. */
++static const struct apple_h9p_tunable t8011_storage_config_tunables[] = {
++	{ 0x0164, 0x00f8ff00, 0x00000000 },
++	{ 0x08a8, 0x00ffff0f, 0x00001001 },
++	{ 0x08e0, 0x00000005, 0x00000005 },
++};
++
++static const struct apple_h9p_tunable t8011_storage_port_tunables[] = {
++	{ 0x0090, 0x00ffffff, 0x0003a980 },
++	{ 0x0130, 0x0000000f, 0x00000007 },
++	{ 0x0134, 0x00000001, 0x00000001 },
++	{ 0x0138, 0x00007f7f, 0x00000000 },
++	{ 0x013c, 0x00000003, 0x00000002 },
++	{ 0x0140, 0x0073ffff, 0x00703d09 },
++	{ 0x0130, 0x00000002, 0x00000000 },
++};
++
+ static const struct apple_h9p_tunable t8011_wifi_config_tunables[] = {
+ 	{ 0x0164, 0x00f8ff00, 0x00000000 },
+ 	{ 0x08a8, 0x00ffff0f, 0x00001001 },
+@@ -2185,6 +2201,16 @@ static int apple_h9p_enable_rc_port(struct apple_h9p_pcie *pcie,
+  * T8011 uses LINKSTS bit 2 for pipe-clock gating. Require two consecutive
+  * ungated samples, as AppleT8011PCIePort does, but always keep a deadline.
+  */
++static void apple_j120_set_nvme_mode(struct apple_h9p_pcie *pcie,
++				     bool enable)
++{
++	if (enable) {
++		writel(1, pcie->base_rc + H9P_RC_COMMON_CTL1);
++		usleep_range(100, 200);
++	}
++	h9p_writel_flush(enable, pcie->base_rc + T8011_RC_NAND_SYSCLK);
++}
++
+ static int apple_t8011_wait_pipe_clock(struct apple_h9p_pcie *pcie, unsigned int port)
+ {
+ 	ktime_t deadline = ktime_add_us(ktime_get(), 250000);
+@@ -2214,7 +2240,8 @@ static int apple_t8011_enable_rc_port(struct apple_h9p_pcie *pcie, unsigned int
+ 	ret = apple_h9p_wait(rc + T8011_RC_COMMON_STAT, BIT(4), BIT(4), BIT(4),
+ 			     250000);
+ 	if (ret) {
+-		dev_err(pcie->dev, "port %u common port-ready wait failed: %d\n", port, ret);
++		dev_err(pcie->dev, "port %u common port-ready wait failed: %d (RC[%#x]=%#x)\n",
++			port, ret, T8011_RC_COMMON_STAT, readl(rc + T8011_RC_COMMON_STAT));
+ 		return ret;
+ 	}
+ 
+@@ -2223,7 +2250,9 @@ static int apple_t8011_enable_rc_port(struct apple_h9p_pcie *pcie, unsigned int
+ 	ret = apple_h9p_wait(rc + T8011_RC_PORT_STAT(port), BIT(0), 0, 0,
+ 			     250000);
+ 	if (ret) {
+-		dev_err(pcie->dev, "port %u port reset wait failed: %d\n", port, ret);
++		dev_err(pcie->dev, "port %u port reset wait failed: %d (RC[%#x]=%#x)\n",
++			port, ret, T8011_RC_PORT_STAT(port),
++			readl(rc + T8011_RC_PORT_STAT(port)));
+ 		return ret;
+ 	}
+ 
+@@ -2238,7 +2267,8 @@ static int apple_t8011_enable_rc_port(struct apple_h9p_pcie *pcie, unsigned int
+ 
+ 	ret = apple_t8011_wait_pipe_clock(pcie, port);
+ 	if (ret) {
+-		dev_err(pcie->dev, "port %u pipe clock wait failed: %d\n", port, ret);
++		dev_err(pcie->dev, "port %u pipe clock wait failed: %d (LINKSTS=%#x)\n",
++			port, ret, readl(pcie->base_port[port] + H9P_PORT_LINKSTS));
+ 		return ret;
+ 	}
+ 
+@@ -2569,6 +2599,77 @@ static void apple_j120_pcie_power_off(void *data)
+ 	pcie->pwrctrl_powered = false;
+ }
+ 
++static void apple_j120_storage_disable(void *data)
++{
++	struct apple_h9p_pcie *pcie = data;
++
++	h9p_rmw(pcie->base_port[0] + H9P_PORT_LTSSMCTL, H9P_PORT_LTSSM_ENABLE, 0);
++	if (gpiod_direction_output(pcie->perst[0], 1))
++		dev_warn(pcie->dev, "failed to assert storage PERST#\n");
++	apple_j120_set_nvme_mode(pcie, false);
++}
++
++static int apple_j120_setup_storage_port(struct apple_h9p_pcie *pcie,
++					 enum apple_h9p_port_result *result)
++{
++	void __iomem *config = pcie->base_config;
++	void __iomem *base = pcie->base_port[0];
++	u32 linksts;
++	u64 cap;
++	int ret;
++
++	ret = gpiod_direction_output(pcie->perst[0], 1);
++	if (ret)
++		return ret;
++
++	apple_j120_set_nvme_mode(pcie, true);
++	ret = apple_t8011_enable_rc_port(pcie, 0, false, false, 100);
++	if (ret) {
++		apple_j120_set_nvme_mode(pcie, false);
++		return ret;
++	}
++
++	ret = devm_add_action_or_reset(pcie->dev, apple_j120_storage_disable, pcie);
++	if (ret)
++		return ret;
++
++	ret = apple_dart_reload_configuration(pcie->manual_dart[0], pcie->manual_dart_sid[0]);
++	if (ret)
++		return ret;
++
++	cap = apple_h9p_read_pci_cap(pcie, 0, PCI_CAP_ID_EXP);
++	if (!cap)
++		return -ENODEV;
++	pcie->pcie_cap[0] = cap;
++	h9p_rmww(config + cap + PCI_EXP_LNKCTL2, PCI_EXP_LNKCTL2_TLS, H9P_LINK_SPEED_8GT);
++	apple_h9p_apply_tunables(config, t8011_storage_config_tunables,
++				 ARRAY_SIZE(t8011_storage_config_tunables));
++	apple_h9p_apply_tunables(base, t8011_storage_port_tunables,
++				 ARRAY_SIZE(t8011_storage_port_tunables));
++
++	h9p_rmw(config + 0x8e0, 0, BIT(0));
++	h9p_rmw(config + 0x80c, 0, BIT(17));
++	h9p_rmw(config + 0x890, 0, BIT(9) | BIT(12));
++
++	writel(H9P_PORT_IRQMASK_PRE_LINK, base + H9P_PORT_IRQMASK);
++	writel(H9P_PORT_IRQSTAT_PRE_LINK, base + H9P_PORT_IRQSTAT);
++	h9p_rmw(base + H9P_PORT_ENABLE, 0, H9P_PORT_ENABLE_APPLE);
++	writel(apple_h9p_msi_control(pcie, 0), base + H9P_PORT_MSICTL);
++	writel(apple_h9p_msi_vector_base(pcie, 0), base + H9P_PORT_MSIVECBASE);
++	writel(H9P_PORT_IRQMASK_LINK_UP, base + H9P_PORT_IRQMASK);
++
++	ret = gpiod_direction_output(pcie->perst[0], 0);
++	if (ret)
++		return ret;
++	h9p_rmw(base + H9P_PORT_LTSSMCTL, 0, H9P_PORT_LTSSM_ENABLE);
++	ret = apple_h9p_wait_link(pcie, 0, &linksts);
++	if (ret)
++		return ret;
++
++	*result = APPLE_H9P_PORT_READY;
++	return 0;
++}
++
+ static int apple_t8011_setup_port(struct apple_h9p_pcie *pcie, unsigned int port,
+ 				  enum apple_h9p_port_result *result)
+ {
+@@ -2582,6 +2683,8 @@ static int apple_t8011_setup_port(struct apple_h9p_pcie *pcie, unsigned int port
+ 	*result = APPLE_H9P_PORT_DISABLED;
+ 	if (port >= pcie->num_ports)
+ 		return -EOPNOTSUPP;
++	if (!port)
++		return apple_j120_setup_storage_port(pcie, result);
+ 	if (port != 2)
+ 		return -EOPNOTSUPP;
+ 	speed = pcie->max_link_speed[port] ?: H9P_LINK_SPEED_2_5GT;
+@@ -2649,47 +2752,50 @@ static int apple_t8011_setup_port(struct apple_h9p_pcie *pcie, unsigned int port
+ 	return 0;
+ }
+ 
+-/* Validate the J120 profile before enabling link clocks or programming PCIe. */
+-static int apple_j120_pcie_parse(struct apple_h9p_pcie *pcie)
++static int apple_j120_pcie_parse_port(struct apple_h9p_pcie *pcie,
++				     unsigned int port, unsigned int bus,
++				     const u32 *map)
+ {
+-	struct device_node *np = pcie->dev->of_node;
+ 	struct platform_device *dart_pdev;
+ 	struct device_node *mapped;
+ 	struct resource dart_res;
+ 	resource_size_t dart_base;
+-	unsigned int port;
+-	u32 aperture;
+-	u32 map[8], doorbell, mask;
++	u32 aperture, bus_range[2];
+ 	int ret;
+ 
+-	if (pcie->num_ports != 6 || pcie->lane_cfg ||
+-	    pcie->preinit_phy_ports || pcie->link_retry_ports ||
+-	    pcie->hardware_trained_phy_ports || pcie->inherited_perst_ports)
+-		return -EOPNOTSUPP;
+-
+-	if (pcie->enabled_ports != BIT(2))
++	switch (port) {
++	case 0:
++		aperture = 0x3c000000;
++		dart_base = 0x601008000ULL;
++		if (pcie->msi_first[port] || pcie->msi_count[port] != 8 ||
++		    pcie->max_link_speed[port] != H9P_LINK_SPEED_8GT ||
++		    of_property_present(pcie->port_nodes[port], "vdd-supply") ||
++		    of_property_present(pcie->port_nodes[port], "apple,wlan-uart"))
++			return -EINVAL;
++		break;
++	case 2:
++		aperture = 0x3ffff000;
++		dart_base = 0x603008000ULL;
++		if (pcie->msi_first[port] != 16 || pcie->msi_count[port] != 4 ||
++		    pcie->max_link_speed[port] != H9P_LINK_SPEED_2_5GT ||
++		    !of_device_is_compatible(pcie->port_nodes[port], "apple,j120-wifi-pcie-port") ||
++		    !of_property_present(pcie->port_nodes[port], "vdd-supply") ||
++		    !of_property_present(pcie->port_nodes[port], "apple,wlan-uart"))
++			return -EINVAL;
++		break;
++	default:
+ 		return -EOPNOTSUPP;
+-	port = 2;
+-	aperture = 0x3ffff000;
+-	dart_base = 0x603008000ULL;
+-	if (pcie->msi_first[port] != 16 || pcie->msi_count[port] != 4 ||
+-	    pcie->max_link_speed[port] != H9P_LINK_SPEED_2_5GT ||
+-	    pcie->deferred_power_ports != BIT(2) ||
+-	    !of_device_is_compatible(pcie->port_nodes[port], "apple,j120-wifi-pcie-port") ||
+-	    !of_property_present(pcie->port_nodes[port], "vdd-supply") ||
+-	    !of_property_present(pcie->port_nodes[port], "apple,wlan-uart"))
+-		return -EINVAL;
++	}
+ 	if (!pcie->manual_dart[port] || pcie->manual_dart_sid[port] ||
+ 	    !of_device_is_compatible(pcie->port_nodes[port], "pciclass,0604"))
+ 		return -EINVAL;
+ 
+-	ret = of_property_count_u32_elems(np, "iommu-map");
+-	if (ret != ARRAY_SIZE(map))
+-		return -EINVAL;
+-	ret = of_property_read_u32_array(np, "iommu-map", map, ARRAY_SIZE(map));
++	ret = of_property_read_u32_array(pcie->port_nodes[port], "bus-range",
++					 bus_range, ARRAY_SIZE(bus_range));
+ 	if (ret)
+ 		return ret;
+-	if (map[0] != 0x100 || map[2] || map[3] || map[4] != 0x80000000 ||
++	if (bus_range[0] != bus || bus_range[1] != bus ||
++	    map[0] != (bus << 8) || map[2] || map[3] || map[4] != 0x80000000 ||
+ 	    map[5] || map[6] != aperture || map[7] != 1)
+ 		return -EINVAL;
+ 	mapped = of_find_node_by_phandle(map[1]);
+@@ -2706,6 +2812,38 @@ static int apple_j120_pcie_parse(struct apple_h9p_pcie *pcie)
+ 	if (ret)
+ 		return ret;
+ 
++	/* Every enabled port's DART must bind before starting the shared PHY. */
++	dart_pdev = of_find_device_by_node(pcie->manual_dart[port]);
++	if (!dart_pdev)
++		return -EPROBE_DEFER;
++	ret = device_is_bound(&dart_pdev->dev) ? 0 : -EPROBE_DEFER;
++	platform_device_put(dart_pdev);
++	return ret;
++}
++
++/* Validate both independent J120 ports before enabling the common PHY. */
++static int apple_j120_pcie_parse(struct apple_h9p_pcie *pcie)
++{
++	struct device_node *np = pcie->dev->of_node;
++	u32 map[16], doorbell, mask;
++	unsigned int port, bus = 1, cells;
++	int ret;
++
++	if (pcie->num_ports != 6 || pcie->lane_cfg ||
++	    pcie->preinit_phy_ports || pcie->link_retry_ports ||
++	    pcie->hardware_trained_phy_ports || pcie->inherited_perst_ports ||
++	    !pcie->enabled_ports || (pcie->enabled_ports & ~(BIT(0) | BIT(2))))
++		return -EOPNOTSUPP;
++	if (pcie->deferred_power_ports != (pcie->enabled_ports & BIT(2)))
++		return -EINVAL;
++
++	cells = hweight32(pcie->enabled_ports) * 8;
++	ret = of_property_count_u32_elems(np, "iommu-map");
++	if (ret != cells)
++		return -EINVAL;
++	ret = of_property_read_u32_array(np, "iommu-map", map, cells);
++	if (ret)
++		return ret;
+ 	ret = of_property_read_u32(np, "iommu-map-mask", &mask);
+ 	if (ret || mask != 0xff00)
+ 		return -EINVAL;
+@@ -2713,13 +2851,16 @@ static int apple_j120_pcie_parse(struct apple_h9p_pcie *pcie)
+ 	if (ret || doorbell != H9P_DEFAULT_MSI_DOORBELL)
+ 		return -EINVAL;
+ 
+-	/* Wait for DART registration before starting the shared PHY. */
+-	dart_pdev = of_find_device_by_node(pcie->manual_dart[port]);
+-	if (!dart_pdev)
+-		return -EPROBE_DEFER;
+-	ret = device_is_bound(&dart_pdev->dev) ? 0 : -EPROBE_DEFER;
+-	platform_device_put(dart_pdev);
+-	return ret;
++	/* Bus assignment follows ascending root-port order, as PCI enumeration. */
++	for (port = 0; port < H9P_MAX_PORTS; port++) {
++		if (!(pcie->enabled_ports & BIT(port)))
++			continue;
++		ret = apple_j120_pcie_parse_port(pcie, port, bus, &map[(bus - 1) * 8]);
++		if (ret)
++			return ret;
++		bus++;
++	}
++	return 0;
+ }
+ 
+ static int apple_t8010_setup_common(struct apple_h9p_pcie *pcie)
+@@ -2798,7 +2939,9 @@ static int apple_t8011_setup_common(struct apple_h9p_pcie *pcie)
+ 	ret = apple_h9p_wait(pcie->base_rc + T8011_RC_COMMON_STAT,
+ 			     BIT(0), BIT(0), BIT(0), 250000);
+ 	if (ret) {
+-		dev_err(pcie->dev, "common PHY initialization wait failed: %d\n", ret);
++		dev_err(pcie->dev, "common PHY initialization wait failed: %d (RC[%#x]=%#x)\n",
++			ret, T8011_RC_COMMON_STAT,
++			readl(pcie->base_rc + T8011_RC_COMMON_STAT));
+ 		return ret;
+ 	}
+ 
+@@ -4230,7 +4373,7 @@ static int apple_h9p_pcie_map_resources(struct platform_device *pdev,
+ 			return PTR_ERR(pcie->base_port[i]);
+ 	}
+ 
+-	if (pcie->hw->has_nvmmu) {
++	if (pcie->hw->has_nvmmu && (pcie->enabled_ports & BIT(0))) {
+ 		pcie->nvmmu.base =
+ 			devm_platform_ioremap_resource_byname(pdev, "nvmmu");
+ 		if (IS_ERR(pcie->nvmmu.base))
+@@ -4594,15 +4737,19 @@ static const struct apple_h9p_hw apple_h9p_hw_t7000 = {
+ 	.no_port_irqs = true,
+ };
+ 
+-/* J120 uses separate Wi-Fi and storage enumeration profiles. */
++/* J120 uses separate Wi-Fi and storage profiles. */
+ static const struct apple_h9p_hw apple_h9p_hw_j120 = {
+ 	.num_ports = 6,
+ 	.parse = apple_j120_pcie_parse,
+ 	.setup_common = apple_t8011_setup_common,
+ 	.setup_port = apple_t8011_setup_port,
+ 	.link_settle_ms = 100,
++	/* AppleT8011PCIe's AppleNVMeMMU polls the init bit itself, not bit 4. */
++	.nvmmu_init_busy = H9P_NVMMU_TCB_CTRL_INIT,
+ 	.has_clocks = true,
+ 	.has_phy = true,
++	.has_nvmmu = true,
++	.nvmmu_optional = true,
+ };
+ 
+ static const struct apple_h9p_hw apple_h9p_hw_t8010 = {

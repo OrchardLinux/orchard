@@ -1,0 +1,3 @@
+# The built-in driver can probe before the installed root supplies this
+# unit's calibration. Retry an unbound charger during rootfs coldplug.
+ACTION=="add", SUBSYSTEM=="platform", ENV{OF_COMPATIBLE_0}=="apple,d2355-tristar-charger", TEST!="driver", TEST=="/lib/firmware/apple/j120/usb-input-limit-calibration-hv.bin", RUN+="/usr/lib/orchard/reprobe-j120-charger %k"

@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 11:19:14 +0100
+Subject: [PATCH] arm64: dts: apple: enable J120 stereo microphone capture
+
+Describe SmartIO, the AOP audio clock, and the two-channel PDM capture path on J120.
+
+Assisted-by: LLM
+---
+ .../dts/apple/t8011-j120-microphones.dtsi     | 59 +++++++++++++++++++
+ arch/arm64/boot/dts/apple/t8011-j120.dts      |  2 +
+ 2 files changed, 61 insertions(+)
+ create mode 100644 arch/arm64/boot/dts/apple/t8011-j120-microphones.dtsi
+
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120-microphones.dtsi b/arch/arm64/boot/dts/apple/t8011-j120-microphones.dtsi
+new file mode 100644
+index 000000000..da7cf64c7
+--- /dev/null
++++ b/arch/arm64/boot/dts/apple/t8011-j120-microphones.dtsi
+@@ -0,0 +1,59 @@
++// SPDX-License-Identifier: GPL-2.0+ OR MIT
++
++/ {
++	dmics: audio-codec {
++		compatible = "dmic-codec";
++		#sound-dai-cells = <0>;
++		num-channels = <2>;
++	};
++
++	sound-microphones {
++		compatible = "simple-audio-card";
++		simple-audio-card,name = "J120 Microphones";
++
++		simple-audio-card,cpu {
++			sound-dai = <&pdm>;
++		};
++
++		simple-audio-card,codec {
++			sound-dai = <&dmics>;
++		};
++	};
++
++	soc {
++		sio: dma-controller@20ae00000 {
++			compatible = "apple,t8011-sio";
++			reg = <0x2 0x0ae00000 0x0 0x10000>;
++			reg-names = "a7iop";
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 209 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 208 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 211 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 210 IRQ_TYPE_LEVEL_HIGH>;
++			power-domains = <&ps_sio>;
++			firmware-name = "apple/t8011-smartio.bin";
++			#dma-cells = <1>;
++		};
++
++		pdm: pdm@20a0b4000 {
++			compatible = "apple,t8011-pdm";
++			reg = <0x2 0x0a0b4000 0x0 0x1000>,
++			      <0x2 0x0a120000 0x0 0x4000>,
++			      <0x2 0x0a124000 0x0 0x4000>;
++			reg-names = "pdm", "dec0", "dec1";
++			interrupts = <AIC_IRQ 236 IRQ_TYPE_LEVEL_HIGH>;
++			clocks = <&aop_audio>;
++			power-domains = <&ps_hfd0>;
++			dmas = <&sio 0x5b>;
++			dma-names = "rx";
++			#sound-dai-cells = <0>;
++		};
++	};
++};
++
++&aop {
++	aop_audio: aop_audio {
++		compatible = "apple,t8010-aop-audio";
++		#clock-cells = <0>;
++	};
++};
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120.dts b/arch/arm64/boot/dts/apple/t8011-j120.dts
+index f8131255b..d45a64cfa 100644
+--- a/arch/arm64/boot/dts/apple/t8011-j120.dts
++++ b/arch/arm64/boot/dts/apple/t8011-j120.dts
+@@ -299,3 +299,5 @@ &ps_pcie_ref {
+ &vxd {
+ 	status = "okay";
+ };
++
++#include "t8011-j120-microphones.dtsi"

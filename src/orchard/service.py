@@ -193,6 +193,13 @@ def check_started(connection, user, ready, progress, seconds=180, *, hosts=None,
             if ready else 'The system did not answer over SSH within 3 minutes')
 
 
+def install_mixin(adapter, connection, firmware, directory):
+    if adapter.PROFILE != 'j120':
+        return adapter.prepare_mixin(firmware, directory)
+    tree = remote.read_unit_adt(connection)
+    return adapter.prepare_mixin(firmware, directory, unit_adt=tree, ecid=connection.scope.device.ecid)
+
+
 def install_direct(adapter, device, name, files, firmware_files, boot_files, chain_files, secrets, answered, *,
                    clock, input_fn, secrets_fn, progress):
     """An install from a block image: no recovery, see install_direct.py."""
@@ -239,7 +246,7 @@ def install_direct(adapter, device, name, files, firmware_files, boot_files, cha
                 root = record['assets']['root']
                 progress.section('Installing ' + name)
                 progress.step('Preparing the installation')
-                mixin, mixin_record = adapter.prepare_mixin(firmware, Path(directory) / 'mixin')
+                mixin, mixin_record = install_mixin(adapter, connection, firmware, Path(directory) / 'mixin')
                 remote.put(connection, mixin.read_bytes(), 'firmware.tar.gz')
                 layer = record['assets']['layer']
                 remote.put(connection, assets['layer'].read_bytes(), 'platform.tar.gz', timeout=600)
@@ -413,7 +420,7 @@ def install(manifest=None, *, input_fn=input, secrets_fn=ask_secrets, progress=N
         progress.section('Installing ' + name)
         progress.step('Preparing the installation')
         with tempfile.TemporaryDirectory(prefix='installation-', dir=private) as directory:
-            mixin, mixin_record = adapter.prepare_mixin(firmware, Path(directory) / 'mixin')
+            mixin, mixin_record = install_mixin(adapter, connection, firmware, Path(directory) / 'mixin')
             remote.put(connection, mixin.read_bytes(), 'firmware.tar.gz')
         layer = record['assets']['layer']
         remote.put(connection, assets['layer'].read_bytes(), 'platform.tar.gz', timeout=600)

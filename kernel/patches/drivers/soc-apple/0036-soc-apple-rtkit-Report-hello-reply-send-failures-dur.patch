@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Thu, 19 Nov 2026 10:58:39 +0100
+Subject: [PATCH] soc: apple: rtkit: Report hello reply send failures during
+ boot
+
+If the hello reply cannot be sent, endpoint discovery will not complete. Wake the boot waiter with the mailbox error using the existing handshake failure path, instead of waiting for the endpoint-map timeout.
+
+Assisted-by: LLM
+---
+ drivers/soc/apple/rtkit.c | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/soc/apple/rtkit.c b/drivers/soc/apple/rtkit.c
+index ccadd6c4e..68ae42a7f 100644
+--- a/drivers/soc/apple/rtkit.c
++++ b/drivers/soc/apple/rtkit.c
+@@ -121,6 +121,7 @@ static void apple_rtkit_management_rx_hello(struct apple_rtkit *rtk, u64 msg)
+ 	int min_ver = FIELD_GET(APPLE_RTKIT_MGMT_HELLO_MINVER, msg);
+ 	int max_ver = FIELD_GET(APPLE_RTKIT_MGMT_HELLO_MAXVER, msg);
+ 	int want_ver = min(APPLE_RTKIT_MAX_SUPPORTED_VERSION, max_ver);
++	int ret = -EINVAL;
+ 
+ 	/*
+ 	 * Protocol 10 firmware carries its minor version in the HELLO's
+@@ -161,12 +162,12 @@ static void apple_rtkit_management_rx_hello(struct apple_rtkit *rtk, u64 msg)
+ 	reply = FIELD_PREP(APPLE_RTKIT_MGMT_HELLO_MINVER,
+ 			   rtk->version == 10 ? rtk->minor_version : want_ver);
+ 	reply |= FIELD_PREP(APPLE_RTKIT_MGMT_HELLO_MAXVER, want_ver);
+-	apple_rtkit_management_send(rtk, APPLE_RTKIT_MGMT_HELLO_REPLY, reply);
+-
+-	return;
++	ret = apple_rtkit_management_send(rtk, APPLE_RTKIT_MGMT_HELLO_REPLY, reply);
++	if (!ret)
++		return;
+ 
+ abort_boot:
+-	rtk->boot_result = -EINVAL;
++	rtk->boot_result = ret;
+ 	complete_all(&rtk->epmap_completion);
+ }
+ 

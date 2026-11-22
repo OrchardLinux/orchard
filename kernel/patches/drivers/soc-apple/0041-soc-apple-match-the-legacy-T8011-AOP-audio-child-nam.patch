@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 23:00:35 +0100
+Subject: [PATCH] soc: apple: match the legacy T8011 AOP audio child name
+
+Assisted-by: LLM
+---
+ drivers/soc/apple/aop.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/soc/apple/aop.c b/drivers/soc/apple/aop.c
+index ac2066540..e036f64ed 100644
+--- a/drivers/soc/apple/aop.c
++++ b/drivers/soc/apple/aop.c
+@@ -532,6 +532,10 @@ static void apple_aop_register_service(struct work_struct *work)
+ 	char name[32];
+ 
+ 	np = of_get_child_by_name(aop->dev->of_node, rw->service.name);
++	/* Earlier T8011 trees named the firmware's aop_audio service aop-audio. */
++	if (!np && !strcmp(rw->service.name, "aop_audio") &&
++	    of_device_is_compatible(aop->dev->of_node, "apple,t8011-aop"))
++		np = of_get_child_by_name(aop->dev->of_node, "aop-audio");
+ 	if (!np || !of_device_is_available(np))
+ 		goto out;
+ 

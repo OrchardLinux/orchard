@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 09:52:27 +0100
+Subject: [PATCH] arm64: dts: apple: enable the J120 video decoder
+
+The J120 VXD decoded 720p H.264 and HEVC through V4L2 stateless requests. Each of 96 frames per codec matched software decoding.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8011-j120.dts | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120.dts b/arch/arm64/boot/dts/apple/t8011-j120.dts
+index 7e210104a..f8131255b 100644
+--- a/arch/arm64/boot/dts/apple/t8011-j120.dts
++++ b/arch/arm64/boot/dts/apple/t8011-j120.dts
+@@ -295,3 +295,7 @@ &ps_pcie_aux {
+ &ps_pcie_ref {
+ 	status = "okay";
+ };
++
++&vxd {
++	status = "okay";
++};

@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 11:44:04 +0100
+Subject: [PATCH] w1: avoid recursive family autoload during reconnect
+
+Reconnecting a slave already runs inside family registration or removal with the master list locked. Attach using the current family mapping without waiting for a module whose init or exit needs to complete the same reconnect.
+
+Assisted-by: LLM
+---
+ drivers/w1/w1.c | 21 +++++++++++++++------
+ 1 file changed, 15 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/w1/w1.c b/drivers/w1/w1.c
+index fd6098cbb..e92d425dc 100644
+--- a/drivers/w1/w1.c
++++ b/drivers/w1/w1.c
+@@ -728,7 +728,8 @@ static int __w1_attach_slave_device(struct w1_slave *sl)
+ 	return 0;
+ }
+ 
+-int w1_attach_slave_device(struct w1_master *dev, struct w1_reg_num *rn)
++static int w1_attach_slave(struct w1_master *dev, struct w1_reg_num *rn,
++			   bool load_family)
+ {
+ 	struct w1_slave *sl;
+ 	struct w1_family *f;
+@@ -756,10 +757,12 @@ int w1_attach_slave_device(struct w1_master *dev, struct w1_reg_num *rn)
+ 	dev_info(&dev->dev, "Attaching one wire slave %02x.%012llx crc %02x\n",
+ 		  rn->family, (unsigned long long)rn->id, rn->crc);
+ 
+-	/* slave modules need to be loaded in a context with unlocked mutex */
+-	mutex_unlock(&dev->mutex);
+-	request_module("w1-family-0x%02X", rn->family);
+-	mutex_lock(&dev->mutex);
++	if (load_family) {
++		/* Family registration may take the master mutex. */
++		mutex_unlock(&dev->mutex);
++		request_module("w1-family-0x%02X", rn->family);
++		mutex_lock(&dev->mutex);
++	}
+ 
+ 	spin_lock(&w1_flock);
+ 	f = w1_family_registered(rn->family);
+@@ -792,6 +795,11 @@ int w1_attach_slave_device(struct w1_master *dev, struct w1_reg_num *rn)
+ 	return 0;
+ }
+ 
++int w1_attach_slave_device(struct w1_master *dev, struct w1_reg_num *rn)
++{
++	return w1_attach_slave(dev, rn, true);
++}
++
+ int w1_unref_slave(struct w1_slave *sl)
+ {
+ 	struct w1_master *dev = sl->master;
+@@ -909,8 +917,9 @@ void w1_reconnect_slaves(struct w1_family *f, int attach)
+ 				/* If it was already in use let the automatic
+ 				 * scan pick it up again later.
+ 				 */
++				/* Reconnect runs inside family registration or removal. */
+ 				if (!w1_slave_detach(sl))
+-					w1_attach_slave_device(dev, &rn);
++					w1_attach_slave(dev, &rn, false);
+ 				mutex_lock(&dev->list_mutex);
+ 			}
+ 		}

@@ -228,6 +228,22 @@ put() {
     mv -f "$2.new" "$2"
 }
 
+put_initrd() {
+    # The built-in J120 charger requests its unit calibration before switch_root.
+    addon=$r/usr/lib/firmware/apple/j120/usb-input-limit-calibration-initrd.cpio.gz
+    if [ "$devicetree" != t8011-j120.dtb ] || [ ! -f "$addon" ] || [ -L "$addon" ]; then
+        put "$1" "$2"
+        return
+    fi
+    if [ -f "$2" ] && command -v cmp > /dev/null 2>&1 &&
+        cat "$1" "$addon" | cmp -s - "$2"; then
+        return
+    fi
+    # Linux accepts concatenated initramfs archives.
+    (umask 077; cat "$1" "$addon" > "$2.new")
+    mv -f "$2.new" "$2"
+}
+
 # The BLS architecture: arm for a 32-bit ARM zImage (magic 0x016f2818 at 0x24), aa64 otherwise.
 architecture() {
     magic=$(od -An -tx1 -j 36 -N 4 "$1" 2>/dev/null | tr -d ' \n')
@@ -246,7 +262,7 @@ write_entry() {
     directory=$boot/$token/$version
     mkdir -p "$directory" "$boot/loader/entries"
     put "$source/vmlinuz" "$directory/linux"
-    put "$source/initrd" "$directory/initrd"
+    put_initrd "$source/initrd" "$directory/initrd"
     put "$source/dtb/$devicetree" "$directory/$devicetree"
     if [ -f "$splash" ] && [ ! -L "$splash" ]; then
         put "$splash" "$directory/splash"

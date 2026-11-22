@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tompta1 <546706+tompta1@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 11:39:51 +0100
+Subject: [PATCH] dt-bindings: regulator: describe the August touch analog
+ supply
+
+Add the J120 analog LDO compatible to the existing Apple PMIC touch regulator binding.
+
+Assisted-by: LLM
+---
+ .../bindings/regulator/apple,pmic-touch-regulator.yaml         | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/devicetree/bindings/regulator/apple,pmic-touch-regulator.yaml b/Documentation/devicetree/bindings/regulator/apple,pmic-touch-regulator.yaml
+index f02ee8ccb..df5ab7032 100644
+--- a/Documentation/devicetree/bindings/regulator/apple,pmic-touch-regulator.yaml
++++ b/Documentation/devicetree/bindings/regulator/apple,pmic-touch-regulator.yaml
+@@ -11,7 +11,7 @@ maintainers:
+ 
+ description:
+   Fixed touchscreen supply switches provided by the D2089, D2186, D2207, Adelyn,
+-  Angel, Chestnut and Acorn PMICs. The compatible identifies both the PMIC and the physical supply;
++  Angel, August, Chestnut and Acorn PMICs. The compatible identifies both the PMIC and the physical supply;
+   register layout is an implementation detail of the regulator driver.
+ 
+ allOf:
+@@ -23,6 +23,7 @@ properties:
+       - apple,acorn-touch-analog-regulator
+       - apple,adelyn-touch-core-regulator
+       - apple,angel-touch-analog-regulator
++      - apple,august-touch-analog-regulator
+       - apple,chestnut-touch-hv-regulator
+       - apple,d2089-touch-analog-regulator
+       - apple,d2089-touch-core-regulator

@@ -4,6 +4,7 @@ import io
 import json
 from pathlib import Path
 import shutil
+import stat
 import tarfile
 
 from .cache import cache_root
@@ -147,9 +148,15 @@ def _produce(profile, recipe, outputs, clock, progress):
     return result
 
 
-def mixin(profile, firmware_dir, outdir):
+def mixin(profile, firmware_dir, outdir, *, unit_adt=None, ecid=None):
     """Stage the recipe's outputs under their destinations and pack the data-only mixin."""
     recipe = recipe_for(profile)
+    calibration = None
+    if unit_adt is not None:
+        if profile != 'j120':
+            raise ValueError('Unit charger calibration is supported on J120 only')
+        from .apple.adt import j120_charger_calibration
+        calibration = j120_charger_calibration(unit_adt, ecid)
     if outdir.exists():
         raise ValueError('Choose a new private output directory')
     outdir.mkdir(parents=True, mode=0o700)
@@ -164,4 +171,19 @@ def mixin(profile, firmware_dir, outdir):
         shutil.copyfile(source, target)
         target.chmod(0o600)
         files[output['destination']] = {'bytes': target.stat().st_size, 'sha256': output['sha256']}
+    if calibration is not None:
+        from .image import initramfs
+
+        name = 'lib/firmware/apple/j120/usb-input-limit-calibration-hv.bin'
+        checksum = hashlib.sha256(calibration).hexdigest()
+        store_input(prepared / 'firmware' / name, calibration, checksum)
+        files[name] = {'bytes': len(calibration), 'sha256': checksum}
+        addon_name = 'lib/firmware/apple/j120/usb-input-limit-calibration-initrd.cpio.gz'
+        entries = {parent.as_posix(): (stat.S_IFDIR | 0o755, b'')
+                   for parent in Path(name).parents if parent != Path('.')}
+        entries[name] = (stat.S_IFREG | 0o600, calibration)
+        addon = prepared / 'firmware' / addon_name
+        initramfs.write(entries, addon)
+        addon.chmod(0o600)
+        files[addon_name] = {'bytes': addon.stat().st_size, 'sha256': digest(addon)}
     return pack_mixin(prepared, {'schema': 1, 'profile': profile, 'files': files}, outdir)

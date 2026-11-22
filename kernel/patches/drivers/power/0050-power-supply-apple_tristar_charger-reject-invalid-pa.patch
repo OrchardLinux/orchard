@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 04:17:55 +0100
+Subject: [PATCH] power: supply: apple_tristar_charger: reject invalid pack
+ capacity
+
+Reject successful capacity reads outside 0..100 before using the pack
+snapshot. An invalid SOC currently passes the D2355 pack check when
+temperature, voltage and current are in range, retaining a higher input
+limit. Returning -ERANGE makes the required-telemetry guard withdraw to
+the fallback instead.
+
+Assisted-by: LLM
+---
+ drivers/power/supply/apple_tristar_charger.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/power/supply/apple_tristar_charger.c b/drivers/power/supply/apple_tristar_charger.c
+index 54bbd0970..9e6381985 100644
+--- a/drivers/power/supply/apple_tristar_charger.c
++++ b/drivers/power/supply/apple_tristar_charger.c
+@@ -374,6 +374,8 @@ static int tristar_read_pack(struct tristar_pack *pack)
+ 		ret = -ENODEV;
+ 	if (!ret)
+ 		ret = power_supply_get_property(battery, POWER_SUPPLY_PROP_CAPACITY, &val);
++	if (!ret && (val.intval < 0 || val.intval > 100))
++		ret = -ERANGE;
+ 	if (!ret) {
+ 		pack->capacity = val.intval;
+ 		ret = power_supply_get_property(battery, POWER_SUPPLY_PROP_TEMP, &val);

@@ -1,0 +1,221 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 22:47:43 +0100
+Subject: [PATCH] arm64: dts: apple: use guarded charging on J120
+
+Assisted-by: LLM
+---
+ .../boot/dts/apple/t8011-j120-charger.dtsi    | 71 +++++++++++++++++
+ .../boot/dts/apple/t8011-j120-charging-1a.dts | 23 +-----
+ .../boot/dts/apple/t8011-j120-charging.dts    | 76 ++++---------------
+ arch/arm64/boot/dts/apple/t8011-j120.dts      |  2 +
+ 4 files changed, 87 insertions(+), 85 deletions(-)
+ create mode 100644 arch/arm64/boot/dts/apple/t8011-j120-charger.dtsi
+
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120-charger.dtsi b/arch/arm64/boot/dts/apple/t8011-j120-charger.dtsi
+new file mode 100644
+index 000000000..09aff4ae8
+--- /dev/null
++++ b/arch/arm64/boot/dts/apple/t8011-j120-charger.dtsi
+@@ -0,0 +1,71 @@
++// SPDX-License-Identifier: GPL-2.0-only
++
++&i2c0 {
++	tristar_test: port-controller@1a {
++		compatible = "nxp,cbtl1610";
++		reg = <0x1a>;
++		status = "okay";
++	};
++
++	d2355_test: pmic@75 {
++		compatible = "apple,d2355-pmic", "apple,i2c-pmic";
++		reg = <0x75>;
++		#address-cells = <1>;
++		#size-cells = <1>;
++		status = "okay";
++
++		d2355_events_test: events {
++			compatible = "apple,d2355-pmic-events";
++			status = "okay";
++			interrupt-parent = <&pinctrl_ap>;
++			interrupts = <204 IRQ_TYPE_LEVEL_LOW>;
++			interrupt-controller;
++			#interrupt-cells = <2>;
++			#address-cells = <0>;
++		};
++
++		charger_test: charger@80 {
++			compatible = "apple,d2355-tristar-charger";
++			reg = <0x80 0x0a>, <0x443 0x0c>, <0x4000 0x03>;
++			reg-names = "status", "control", "adc";
++			interrupts-extended = <&d2355_events_test 80 IRQ_TYPE_EDGE_RISING>,
++				<&august_events_test 168 IRQ_TYPE_EDGE_RISING>,
++				<&d2355_events_test 40 IRQ_TYPE_EDGE_RISING>,
++				<&d2355_events_test 42 IRQ_TYPE_EDGE_RISING>,
++				<&d2355_events_test 53 IRQ_TYPE_EDGE_RISING>;
++			apple,tristar = <&tristar_test>;
++			apple,adc-pmic = <&august_pmic>;
++			firmware-name = "apple/j120/usb-input-limit-calibration-hv.bin";
++			/* Conservative RAM-test window, not vendor production limits. */
++			apple,pack-limits = <150 350 3400000 4200000 (-2000000) 2000000>;
++			input-current-limit-microamp = <1000000>;
++			status = "okay";
++			port {
++				charger_usb_test: endpoint {
++					remote-endpoint = <&usb_charger_test>;
++				};
++			};
++		};
++	};
++};
++
++&august_pmic {
++	august_events_test: events {
++		compatible = "apple,august-pmic-events";
++		interrupt-parent = <&pinctrl_aop>;
++		interrupts = <26 IRQ_TYPE_LEVEL_LOW>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++		#address-cells = <0>;
++		status = "okay";
++	};
++};
++
++&usb2dev {
++	usb-role-switch;
++	port {
++		usb_charger_test: endpoint {
++			remote-endpoint = <&charger_usb_test>;
++		};
++	};
++};
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120-charging-1a.dts b/arch/arm64/boot/dts/apple/t8011-j120-charging-1a.dts
+index 88c4e61c8..4197b9a45 100644
+--- a/arch/arm64/boot/dts/apple/t8011-j120-charging-1a.dts
++++ b/arch/arm64/boot/dts/apple/t8011-j120-charging-1a.dts
+@@ -1,23 +1,2 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+-#include "t8011-j120-charging.dts"
+-
+-&tristar_test {
+-	status = "okay";
+-};
+-
+-&d2355_test {
+-	status = "okay";
+-};
+-
+-&d2355_events_test {
+-	status = "okay";
+-};
+-
+-&august_events_test {
+-	status = "okay";
+-};
+-
+-&charger_test {
+-	input-current-limit-microamp = <1000000>;
+-	status = "okay";
+-};
++#include "t8011-j120.dts"
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120-charging.dts b/arch/arm64/boot/dts/apple/t8011-j120-charging.dts
+index 15acef055..6a4f73bd9 100644
+--- a/arch/arm64/boot/dts/apple/t8011-j120-charging.dts
++++ b/arch/arm64/boot/dts/apple/t8011-j120-charging.dts
+@@ -1,73 +1,23 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+-/* Local RAM experiment only. No automatic charger/event activation. */
+ #include "t8011-j120.dts"
+-#include "t8011-j120-hdq.dtsi"
+ 
+-&i2c0 {
+-	tristar_test: port-controller@1a {
+-		compatible = "nxp,cbtl1610";
+-		reg = <0x1a>;
+-	};
+-
+-	d2355_test: pmic@75 {
+-		compatible = "apple,d2355-pmic", "apple,i2c-pmic";
+-		reg = <0x75>;
+-		#address-cells = <1>;
+-		#size-cells = <1>;
+-		status = "disabled";
++&tristar_test {
++	/delete-property/ status;
++};
+ 
+-		d2355_events_test: events {
+-			compatible = "apple,d2355-pmic-events";
+-			status = "disabled";
+-			interrupt-parent = <&pinctrl_ap>;
+-			interrupts = <204 IRQ_TYPE_LEVEL_LOW>;
+-			interrupt-controller;
+-			#interrupt-cells = <2>;
+-			#address-cells = <0>;
+-		};
++&d2355_test {
++	status = "disabled";
++};
+ 
+-		charger_test: charger@80 {
+-			compatible = "apple,d2355-tristar-charger";
+-			reg = <0x80 0x0a>, <0x443 0x0c>, <0x4000 0x03>;
+-			reg-names = "status", "control", "adc";
+-			interrupts-extended = <&d2355_events_test 80 IRQ_TYPE_EDGE_RISING>,
+-				<&august_events_test 168 IRQ_TYPE_EDGE_RISING>,
+-				<&d2355_events_test 40 IRQ_TYPE_EDGE_RISING>,
+-				<&d2355_events_test 42 IRQ_TYPE_EDGE_RISING>,
+-				<&d2355_events_test 53 IRQ_TYPE_EDGE_RISING>;
+-			apple,tristar = <&tristar_test>;
+-			apple,adc-pmic = <&august_pmic>;
+-			firmware-name = "apple/j120/usb-input-limit-calibration-hv.bin";
+-			/* Conservative RAM-test window, not vendor production limits. */
+-			apple,pack-limits = <150 350 3400000 4200000 (-2000000) 2000000>;
+-			input-current-limit-microamp = <500000>;
+-			status = "disabled";
+-			port {
+-				charger_usb_test: endpoint {
+-					remote-endpoint = <&usb_charger_test>;
+-				};
+-			};
+-		};
+-	};
++&d2355_events_test {
++	status = "disabled";
+ };
+ 
+-&august_pmic {
+-	august_events_test: events {
+-		compatible = "apple,august-pmic-events";
+-		interrupt-parent = <&pinctrl_aop>;
+-		interrupts = <26 IRQ_TYPE_LEVEL_LOW>;
+-		interrupt-controller;
+-		#interrupt-cells = <2>;
+-		#address-cells = <0>;
+-		status = "disabled";
+-	};
++&august_events_test {
++	status = "disabled";
+ };
+ 
+-&usb2dev {
+-	usb-role-switch;
+-	port {
+-		usb_charger_test: endpoint {
+-			remote-endpoint = <&charger_usb_test>;
+-		};
+-	};
++&charger_test {
++	input-current-limit-microamp = <500000>;
++	status = "disabled";
+ };
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120.dts b/arch/arm64/boot/dts/apple/t8011-j120.dts
+index 6a9e491c5..290298e6d 100644
+--- a/arch/arm64/boot/dts/apple/t8011-j120.dts
++++ b/arch/arm64/boot/dts/apple/t8011-j120.dts
+@@ -352,3 +352,5 @@ &vxd {
+ #include "t8011-j120-microphones.dtsi"
+ #include "t8011-j120-audio.dtsi"
+ #include "t8011-j120-speakers.dtsi"
++#include "t8011-j120-hdq.dtsi"
++#include "t8011-j120-charger.dtsi"

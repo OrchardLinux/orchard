@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 23:18:11 +0100
+Subject: [PATCH] dt-bindings: soc: apple: allow the AOP sensor mounting matrix
+
+J120 describes the gyroscope mounting orientation for the IIO driver. Accept mount-matrix on the motion service nodes as for the accelerometer.
+
+Assisted-by: LLM
+---
+ Documentation/devicetree/bindings/soc/apple/apple,aop.yaml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/soc/apple/apple,aop.yaml b/Documentation/devicetree/bindings/soc/apple/apple,aop.yaml
+index 89ab88843..6e5632498 100644
+--- a/Documentation/devicetree/bindings/soc/apple/apple,aop.yaml
++++ b/Documentation/devicetree/bindings/soc/apple/apple,aop.yaml
+@@ -92,6 +92,7 @@ patternProperties:
+           - apple,t8010-aop-gyro
+           - apple,t8010-aop-compass
+           - apple,t8010-aop-pressure
++      mount-matrix: true
+       status: true
+     required:
+       - compatible

@@ -1,0 +1,115 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tompta1 <546706+tompta1@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 11:39:56 +0100
+Subject: [PATCH] dt-bindings: soc: apple: describe A10 and A10X AOP resources
+
+Describe RTKit mailbox, SRAM, firmware and sensor children. Allow an optional board target and a bootloader-supplied unit identity without encoding per-unit values in source.
+
+Assisted-by: LLM
+---
+ .../bindings/soc/apple/apple,aop.yaml         | 96 +++++++++++++++++++
+ 1 file changed, 96 insertions(+)
+ create mode 100644 Documentation/devicetree/bindings/soc/apple/apple,aop.yaml
+
+diff --git a/Documentation/devicetree/bindings/soc/apple/apple,aop.yaml b/Documentation/devicetree/bindings/soc/apple/apple,aop.yaml
+new file mode 100644
+index 000000000..128887714
+--- /dev/null
++++ b/Documentation/devicetree/bindings/soc/apple/apple,aop.yaml
+@@ -0,0 +1,96 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/soc/apple/apple,aop.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Apple A10 and A10X Always-On Processor
++
++maintainers:
++  - Dalton Alexandre <alley.nightly_0b@icloud.com>
++
++description: |
++  The AOP loads RTKit firmware into SRAM and uses an A7 IOP mailbox and EPIC
++  services. Its main image and external segment are separate firmware files.
++  The SRAM resource must cover the firmware's RTSZ working extent and exclude
++  bootloader reservations. Firmware can only be started once per system boot.
++
++properties:
++  compatible:
++    enum:
++      - apple,t8010-aop
++      - apple,t8011-aop
++
++  reg:
++    items:
++      - description: AOP AKF registers
++      - description: Auto-boot control registers
++      - description: Reserved SRAM firmware and working region
++
++  reg-names:
++    items:
++      - const: akf
++      - const: control
++      - const: sram
++
++  mboxes:
++    maxItems: 1
++
++  mbox-names:
++    const: mbox
++
++  firmware-name:
++    $ref: /schemas/types.yaml#/definitions/string-array
++    items:
++      - description: Main AOP firmware image
++      - description: External AOP firmware segment
++
++  apple,aop-target:
++    $ref: /schemas/types.yaml#/definitions/uint32
++    description: |
++      Board target passed in the firmware's AOPt boot argument. If absent,
++      preserve the firmware default used by existing A10 boards.
++
++  apple,ecid:
++    $ref: /schemas/types.yaml#/definitions/uint64
++    description: |
++      Unit identity inserted by the bootloader for firmware initialization.
++      The driver consumes and removes this property. Do not encode an identity
++      in a source device tree.
++
++  accel:
++    type: object
++    additionalProperties: false
++    properties:
++      compatible:
++        const: apple,t8010-aop-accel
++      mount-matrix:
++        $ref: /schemas/types.yaml#/definitions/string-array
++        minItems: 9
++        maxItems: 9
++      status: true
++    required:
++      - compatible
++
++patternProperties:
++  "^(gyro|compass|pressure)$":
++    type: object
++    additionalProperties: false
++    properties:
++      compatible:
++        enum:
++          - apple,t8010-aop-gyro
++          - apple,t8010-aop-compass
++          - apple,t8010-aop-pressure
++      status: true
++    required:
++      - compatible
++
++required:
++  - compatible
++  - reg
++  - reg-names
++  - mboxes
++  - mbox-names
++
++additionalProperties: false

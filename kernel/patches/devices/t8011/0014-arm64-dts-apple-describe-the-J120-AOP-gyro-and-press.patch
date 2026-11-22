@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 23:17:06 +0100
+Subject: [PATCH] arm64: dts: apple: describe the J120 AOP gyro and pressure
+ services
+
+Provide the child nodes used for AOP service matching and per-unit calibration handoff. The J120 gyro has an identity orientation matrix.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8011-j120.dts | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120.dts b/arch/arm64/boot/dts/apple/t8011-j120.dts
+index 805602626..99abcdcfd 100644
+--- a/arch/arm64/boot/dts/apple/t8011-j120.dts
++++ b/arch/arm64/boot/dts/apple/t8011-j120.dts
+@@ -60,6 +60,17 @@ &aop {
+ 	firmware-name = "apple/aop-ipad7.bin", "apple/aop-ipad7-ext.bin";
+ 	apple,aop-target = <1>;
+ 	status = "okay";
++
++	gyro {
++		compatible = "apple,t8010-aop-gyro";
++		mount-matrix = "1", "0", "0",
++			       "0", "1", "0",
++			       "0", "0", "1";
++	};
++
++	pressure {
++		compatible = "apple,t8010-aop-pressure";
++	};
+ };
+ 
+ &aop_accel {

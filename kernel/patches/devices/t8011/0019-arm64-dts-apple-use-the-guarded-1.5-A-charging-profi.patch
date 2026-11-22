@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Sun, 22 Nov 2026 12:45:19 +0100
+Subject: [PATCH] arm64: dts: apple: use the guarded 1.5 A charging profile on
+ J120
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8011-j120.dts | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120.dts b/arch/arm64/boot/dts/apple/t8011-j120.dts
+index 877718c65..776307625 100644
+--- a/arch/arm64/boot/dts/apple/t8011-j120.dts
++++ b/arch/arm64/boot/dts/apple/t8011-j120.dts
+@@ -368,8 +368,9 @@ &ps_pcie_ref {
+ };
+ 
+ &i2c1 {
+-	adc@13 {
++	orion_vbus: adc@13 {
+ 		compatible = "apple,orion-bellatrix-vbus";
++		#io-channel-cells = <1>;
+ 		reg = <0x13>;
+ 	};
+ };
+@@ -397,3 +398,9 @@ &vxd {
+ #include "t8011-j120-speakers.dtsi"
+ #include "t8011-j120-hdq.dtsi"
+ #include "t8011-j120-charger.dtsi"
++
++&charger_test {
++	io-channels = <&orion_vbus 0>;
++	io-channel-names = "vbus";
++	input-current-limit-microamp = <1500000>;
++};

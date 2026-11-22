@@ -1,5 +1,4 @@
-# iPad Pro 2 (12.9-inch, Wi-Fi) (J120): identity from public sources
-# (tools/catalog/generate). In its platform's kernel, no bring-up yet; see docs/device-bring-up.md.
+# iPad Pro 12.9-inch (2017), Wi-Fi: J120 / iPad7,1 / A1670.
 schema = 1
 kind = "hardware.device"
 
@@ -14,46 +13,43 @@ chip = 0x8011
 board = 0x0c
 
 [boot]
-methods = ["checkm8-pongo"] # palera1n's device list (palera.in); not run with Orchard yet.
+methods = ["checkm8-pongo"] # RAM and tethered internal ext4 boot on J120.
 
 [kernel]
 platform = "apple-16k"
 dtb = "t8011-j120" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until bring-up needs it.
+recipe = "firmware.json" # Pinned touch, BCM4355 C0 WLAN and AOP firmware.
 
 [support]
 status = "experimental"
 
-# States: working, untested, missing, none (features.toml). Nothing here has run on
-# this board with Orchard: "untested" means a driver binds in its device tree
-# (tools/catalog/drivers.json), plus the display's boot console.
 [features]
-display = "untested"
+display = "working"
 screen_off = "missing"
-backlight = "untested"
-touch = "missing"
-buttons = "untested"
-accelerometer = "missing"
-gyroscope = "missing"
-light_sensor = "missing"
+backlight = "working"
+touch = "working"
+buttons = "working" # Power/Home and polled Smart Cover close. Cover-open wake needs an IRQ.
+accelerometer = "working"
+gyroscope = "untested"
+light_sensor = "working"
 touch_id = "missing"
-storage_read = "missing"
-storage_write = "missing"
-wifi = "missing"
-bluetooth_input = "missing"
-bluetooth_audio = "missing"
-cellular = "missing"
-battery = "missing"
-charging = "missing"
+storage_read = "working"
+storage_write = "working"
+wifi = "working"
+bluetooth_input = "working"
+bluetooth_audio = "working"
+cellular = "none"
+battery = "working"
+charging = "working" # Guarded Lightning charging.
 charging_control = "missing"
-suspend = "untested"
-resume = "untested"
-usb_serial = "untested"
-usb_network = "untested"
+suspend = "working"
+resume = "working"
+usb_serial = "working"
+usb_network = "working"
 usb_host = "missing"
-audio_output = "missing"
-audio_input = "missing"
+audio_output = "working"
+audio_input = "working"
 camera = "missing"
-video_decode_hevc = "missing"
+video_decode_hevc = "working"

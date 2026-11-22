@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 09:38:35 +0100
+Subject: [PATCH] arm64: dts: apple: describe the disabled T8011 video decoder
+
+Use the J120 device-tree register ranges, interrupt 169 and VDEC0 power domain. Leave activation for hardware qualification.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8011.dtsi | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t8011.dtsi b/arch/arm64/boot/dts/apple/t8011.dtsi
+index 9fa6dae21..d0800adfa 100644
+--- a/arch/arm64/boot/dts/apple/t8011.dtsi
++++ b/arch/arm64/boot/dts/apple/t8011.dtsi
+@@ -225,6 +225,15 @@ i2c3: i2c@20a113000 {
+ 			status = "disabled";
+ 		};
+ 
++		vxd: video-codec@208100000 {
++			compatible = "apple,t8011-vxd", "apple,t8010-vxd";
++			reg = <0x2 0x08100000 0x0 0x30000>,
++			      <0x2 0x08130000 0x0 0x1000>;
++			interrupts = <AIC_IRQ 169 IRQ_TYPE_LEVEL_HIGH>;
++			power-domains = <&ps_vdec0>;
++			status = "disabled";
++		};
++
+ 		bus@20c000000 {
+ 			compatible = "apple,t8011-usb-complex", "simple-pm-bus";
+ 			#address-cells = <2>;

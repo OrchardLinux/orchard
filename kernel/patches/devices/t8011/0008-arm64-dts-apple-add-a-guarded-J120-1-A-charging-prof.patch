@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 16:39:55 +0100
+Subject: [PATCH] arm64: dts: apple: add a guarded J120 1 A charging profile
+
+Provide a separate bootable device tree with the tested D2355 input limit, battery telemetry window and calibration requirement. Keep the base board available for recovery.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/Makefile            |  1 +
+ .../boot/dts/apple/t8011-j120-charging-1a.dts | 19 +++++++++++++++++++
+ 2 files changed, 20 insertions(+)
+ create mode 100644 arch/arm64/boot/dts/apple/t8011-j120-charging-1a.dts
+
+diff --git a/arch/arm64/boot/dts/apple/Makefile b/arch/arm64/boot/dts/apple/Makefile
+index 9fea43f76..ddf8d64ce 100644
+--- a/arch/arm64/boot/dts/apple/Makefile
++++ b/arch/arm64/boot/dts/apple/Makefile
+@@ -43,6 +43,7 @@ dtb-$(CONFIG_ARCH_APPLE) += t8010-j72b.dtb
+ dtb-$(CONFIG_ARCH_APPLE) += t8010-n112.dtb
+ dtb-$(CONFIG_ARCH_APPLE) += t8011-j105a.dtb
+ dtb-$(CONFIG_ARCH_APPLE) += t8011-j120.dtb
++dtb-$(CONFIG_ARCH_APPLE) += t8011-j120-charging-1a.dtb
+ dtb-$(CONFIG_ARCH_APPLE) += t8011-j121.dtb
+ dtb-$(CONFIG_ARCH_APPLE) += t8011-j207.dtb
+ dtb-$(CONFIG_ARCH_APPLE) += t8011-j208.dtb
+diff --git a/arch/arm64/boot/dts/apple/t8011-j120-charging-1a.dts b/arch/arm64/boot/dts/apple/t8011-j120-charging-1a.dts
+new file mode 100644
+index 000000000..31ed853b0
+--- /dev/null
++++ b/arch/arm64/boot/dts/apple/t8011-j120-charging-1a.dts
+@@ -0,0 +1,19 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include "t8011-j120-charging.dts"
++
++&d2355_test {
++	status = "okay";
++};
++
++&d2355_events_test {
++	status = "okay";
++};
++
++&august_events_test {
++	status = "okay";
++};
++
++&charger_test {
++	input-current-limit-microamp = <1000000>;
++	status = "okay";
++};

@@ -644,5 +644,14 @@ def kernel_package(connection, layer, directory, base=None):
 def unmount_new_root(connection, root_partuuid, boot=True):
     """Everything on storage, then the initrd carries on into the new root."""
     points = ('/newroot/boot ' if boot else '') + '/newroot/run/orchard /newroot/run /newroot/dev /newroot/sys /newroot/proc /newroot'
-    shell(connection, f'sync; for point in {points}; do umount "$point" || exit 1; done; sync', timeout=300)
+    commands = []
+    if boot:
+        commands.append("""boot_node=$(awk '$2 == "/newroot/boot" && $3 == "vfat" {print $1}' /proc/mounts)
+[ -b "$boot_node" ] || exit 1""")
+    commands.append(f'sync; for point in {points}; do umount "$point" || exit 1; done; sync')
+    if boot:
+        # Flush the FAT directory entries and metadata written during unmount
+        # before the next loader reads the partition directly.
+        commands.append('dd if=/dev/null of="$boot_node" conv=notrunc,fsync || exit 1')
+    shell(connection, '\n'.join(commands), timeout=300)
     shell(connection, f"echo {root_partuuid} > /run/orchard/done.part && mv /run/orchard/done.part /run/orchard/done")

@@ -96,6 +96,13 @@ def validate(document, *, schema=None):
             error = errors[0]
             location = '.'.join(map(str, error.absolute_path)) or '<manifest>'
             raise ManifestError(f'{location}: {error.message}')
+    if kind == 'orchard.install' and document.get('root', {}).get('format') == 'blocks':
+        if 'install_tools' not in document:
+            raise ManifestError('Block-image installation requires install_tools')
+        if 'map' not in document['root']:
+            raise ManifestError('Block-image installation requires root.map')
+        if ('m1n1' in document) == ('cascadia' in document):
+            raise ManifestError('Block-image installation requires exactly one of m1n1 or cascadia')
     for where, source in sources(document):
         check_source(source, where)
     if kind == 'hardware.device':

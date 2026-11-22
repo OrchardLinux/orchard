@@ -1,6 +1,8 @@
 """BlueTool's embedded Bluetooth firmware; board recipes and selections are callers' policy."""
 import hashlib
 
+from orchard.apple.macho import macho
+
 WRITE_RAM, LAUNCH_RAM = 0xfc4c, 0xfc4e
 
 
@@ -39,3 +41,28 @@ def hcd_from_binary(data, expected):
         if hashlib.sha256(data[start:end]).hexdigest() == expected:
             return data[start:end]
         offset = end
+
+
+def regulatory_from_binary(data, address, size, expected=None):
+    """Read a pinned, single-command regulatory table at its native VM address.
+
+    The recipe records the address/length from the board's native registration.
+    Both the BlueTool input and table output are hash-pinned by the recipe runner.
+    Only file-backed bytes in one unambiguous Mach-O segment are accepted.
+    """
+    if address < 0 or not 1 <= size <= 255:
+        raise ValueError('Invalid single-command Bluetooth regulatory range')
+    _, segments, _ = macho(data)
+    matches = [segment for segment in segments
+               if segment['vm'] <= address and
+               address + size <= segment['vm'] + segment['size']]
+    if len(matches) != 1:
+        raise ValueError('Bluetooth regulatory range must map to one file-backed segment')
+    segment = matches[0]
+    offset = segment['offset'] + address - segment['vm']
+    if offset + size > len(data):
+        raise ValueError('Truncated Bluetooth regulatory table')
+    table = data[offset:offset + size]
+    if expected is not None and hashlib.sha256(table).hexdigest() != expected:
+        raise ValueError('Bluetooth regulatory table differs from pinned hash')
+    return table

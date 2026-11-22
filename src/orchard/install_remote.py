@@ -32,6 +32,24 @@ def put(connection, data, name, timeout=120):
                           result.stderr.decode(errors='replace').strip()[-500:])
 
 
+def read_unit_adt(connection):
+    """Read the selected unit's named ADT partition over its pinned SSH session."""
+    connection.check()
+    command = r"""set -eu
+set -- $(sed -n 's/^mtd\([0-9][0-9]*\): \([0-9a-fA-F][0-9a-fA-F]*\) [0-9a-fA-F]* "adt"$/\1 \2/p' /proc/mtd)
+[ "$#" -eq 2 ]
+size=$((0x$2))
+[ "$size" -gt 0 ] && [ "$size" -le 16777216 ] || exit 1
+device=/dev/mtd${1}ro
+[ -c "$device" ]
+head -c "$size" "$device"
+"""
+    result = subprocess.run(connection.argv + [command], capture_output=True, timeout=30)
+    if result.returncode:
+        raise RemoteError("Could not read the selected unit's runtime ADT")
+    return result.stdout
+
+
 def put_scripts(connection):
     """install_device.py and the boot-entries script it runs, from this CLI."""
     put(connection, SCRIPT.read_bytes(), SCRIPT.name)

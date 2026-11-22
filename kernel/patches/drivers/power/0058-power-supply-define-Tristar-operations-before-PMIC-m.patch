@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Sun, 22 Nov 2026 21:11:03 +0100
+Subject: [PATCH] power: supply: define Tristar operations before PMIC match
+ data
+
+Clang warns about the file-scope tentative definitions while the operations type is incomplete. Declare the type before the two chip tables.
+
+Assisted-by: LLM
+---
+ drivers/power/supply/apple_tristar_charger.c | 48 ++++++++++----------
+ 1 file changed, 24 insertions(+), 24 deletions(-)
+
+diff --git a/drivers/power/supply/apple_tristar_charger.c b/drivers/power/supply/apple_tristar_charger.c
+index 5f2d06485..2eb0a6223 100644
+--- a/drivers/power/supply/apple_tristar_charger.c
++++ b/drivers/power/supply/apple_tristar_charger.c
+@@ -65,6 +65,30 @@
+ #define TRISTAR_CHG_ADC_START		BIT(7)	/* D2207 ADC control */
+ #define TRISTAR_CHG_ADC_LATCH		GENMASK(7, 3)	/* D2207 ADC control + 1 */
+ 
++struct tristar_charger;
++struct tristar_pack;
++
++/* Keep shared charging policy independent of the PMIC input-limit registers. */
++struct tristar_chip_info {
++	int (*prepare)(struct tristar_charger *chg);
++	bool (*pack_allows)(struct tristar_charger *chg, const struct tristar_pack *pack);
++	unsigned int status_size, control_size;
++	u8 adc_error_mask;
++	bool strict_limit_errors;
++	bool require_pack_telemetry;
++	bool invalidate_on_line;
++	int (*read_limit)(struct tristar_charger *chg, unsigned int *code);
++	int (*write_limit)(struct tristar_charger *chg, unsigned int code);
++	unsigned int (*code_ma)(struct tristar_charger *chg, unsigned int code);
++	unsigned int (*ma_code)(struct tristar_charger *chg, unsigned int ma);
++	int (*read_status)(struct tristar_charger *chg, unsigned int *status);
++	unsigned int handoff_code;
++	unsigned int attach_code;
++	unsigned int online_status;
++	unsigned int ramp_step_ms;
++	unsigned int fallback_code;
++};
++
+ /*
+  * Where a PMIC keeps the charger registers, relative to the banks the
+  * device tree gives, and how its ADC is driven. The functions are the same
+@@ -180,30 +204,6 @@ enum cbtl_route {
+ 	CBTL_ROUTE_UART2,
+ };
+ 
+-struct tristar_charger;
+-struct tristar_pack;
+-
+-/* Keep shared charging policy independent of the PMIC input-limit registers. */
+-struct tristar_chip_info {
+-	int (*prepare)(struct tristar_charger *chg);
+-	bool (*pack_allows)(struct tristar_charger *chg, const struct tristar_pack *pack);
+-	unsigned int status_size, control_size;
+-	u8 adc_error_mask;
+-	bool strict_limit_errors;
+-	bool require_pack_telemetry;
+-	bool invalidate_on_line;
+-	int (*read_limit)(struct tristar_charger *chg, unsigned int *code);
+-	int (*write_limit)(struct tristar_charger *chg, unsigned int code);
+-	unsigned int (*code_ma)(struct tristar_charger *chg, unsigned int code);
+-	unsigned int (*ma_code)(struct tristar_charger *chg, unsigned int ma);
+-	int (*read_status)(struct tristar_charger *chg, unsigned int *status);
+-	unsigned int handoff_code;
+-	unsigned int attach_code;
+-	unsigned int online_status;
+-	unsigned int ramp_step_ms;
+-	unsigned int fallback_code;
+-};
+-
+ struct tristar_charger {
+ 	const struct tristar_chip_info *chip;
+ 	void *chip_data;

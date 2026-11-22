@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Sun, 22 Nov 2026 14:52:45 +0100
+Subject: [PATCH] Input: apple_z2: let J120 runtime settle before discovery
+
+On J120, a warm bootstrap accepts the image, calibration and final boot writes but immediately querying DeviceInfo returns HBPP words instead of a runtime packet. A 100 ms settling interval after the readiness wait allowed a live reprobe and a subsequent device suspend/resume cycle to complete DeviceInfo and surface discovery. Keep this empirical delay scoped to J120. Full s2idle and repeated-cycle qualification remain pending.
+
+Assisted-by: LLM
+---
+ drivers/input/touchscreen/apple_z2.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index 8665e8843..a2dd2737e 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -4148,6 +4148,12 @@ static int apple_z2_upload_firmware(struct apple_z2 *z2)
+ 					 "J120 runtime readiness IRQ/state accepted\n");
+ 			if (apple_z2_uses_ipad_protocol(z2) || apple_z2_is_j120(z2)) {
+ 				apple_z2_irq_off(z2);
++				/*
++				 * J120 may signal before runtime commands are ready.
++				 * Allow startup to settle before querying DeviceInfo.
++				 */
++				if (apple_z2_is_j120(z2))
++					msleep(100);
+ 				error = apple_z2_read_device_info_locked(z2);
+ 				/* J71b: stay masked until its first reports are read. */
+ 				if (apple_z2_is_j71b(z2) || apple_z2_is_j120(z2))

@@ -20,6 +20,10 @@ def _bluetool_hcd(step, data, expected):
     return bluetool.hcd_from_binary(data, expected)
 
 
+def _bluetool_regulatory(step, data, expected):
+    return bluetool.regulatory_from_binary(data, step['address'], step['size'], expected)
+
+
 def _trx(step, data, expected):
     firmware, nvram = data
     return trx.add_nvram(firmware, nvram, step['placeholder_mac'])
@@ -113,6 +117,7 @@ STEPS = {
     'trx-add-nvram@1': (_trx, {'nvram': str, 'placeholder_mac': str}),
     'sgx543-from-kernelcache@1': (_sgx, {'build': str}),
     'bluetool-hcd@1': (_bluetool_hcd, {}),
+    'bluetool-regulatory@1': (_bluetool_regulatory, {'address': int, 'size': int}),
     # T8010 SmartIO kext (iPad 6/7, iPhone 7).
     'smartio-from-kernelcache@1': (_smartio, {}),
     # SmartIO kext named by bundle identifier (S8000 for A9).

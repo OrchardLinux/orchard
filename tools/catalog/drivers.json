@@ -108,10 +108,24 @@
       "wifi"
     ],
     "j120": [
+      "accelerometer",
+      "audio_input",
+      "audio_output",
       "backlight",
+      "battery",
+      "bluetooth_audio",
+      "bluetooth_input",
       "buttons",
+      "charging",
+      "gyroscope",
+      "light_sensor",
+      "storage_read",
+      "storage_write",
+      "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "video_decode_hevc",
+      "wifi"
     ],
     "j121": [
       "backlight",

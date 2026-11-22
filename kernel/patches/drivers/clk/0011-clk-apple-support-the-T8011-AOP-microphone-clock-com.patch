@@ -1,0 +1,129 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 11:08:43 +0100
+Subject: [PATCH] clk: apple: support the T8011 AOP microphone clock command
+
+T8011 firmware handles the audio clock command directly and rejects the wrapped PDM attach used by T8010. On T8011 send an EPIC prefix followed by the clock source and rate in Hz. Select the 24 MHz crystal for the J120 2.4 MHz PDM clock and disable the source when the clock is released.
+
+Assisted-by: LLM
+---
+ drivers/clk/clk-apple-aop-audio.c | 52 ++++++++++++++++++++++++-------
+ 1 file changed, 40 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/clk/clk-apple-aop-audio.c b/drivers/clk/clk-apple-aop-audio.c
+index 06164fe0a..af9be5162 100644
+--- a/drivers/clk/clk-apple-aop-audio.c
++++ b/drivers/clk/clk-apple-aop-audio.c
+@@ -10,7 +10,8 @@
+  * word to halt it. The calls are wrapped audio calls, as on the M1's AOP.
+  *
+  * The firmware talks to its devices only after they were attached, so the
+- * driver attaches "pdm0" when it binds.
++ * driver attaches "pdm0" when it binds on A10. A10X firmware instead
++ * accepts a direct clock command with a source index and a rate in Hz.
+  */
+ 
+ #include <linux/clk-provider.h>
+@@ -19,7 +20,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/soc/apple/aop.h>
+ 
+-#define AOP_AUDIO_WRAPPED_CALL		0x20
++#define AOP_AUDIO_COMMAND		0x20
+ #define AOP_AUDIO_CALL_ATTACH		0xc3000002
+ #define AOP_AUDIO_CALL_SET_PROP		0xc3000005
+ 
+@@ -28,6 +29,16 @@
+ #define AOP_AUDIO_PDM_CLOCK_START	0x78693020	/* 'xi0 ' */
+ #define AOP_AUDIO_PDM_CLOCK_STOP	0x6f666620	/* 'off ' */
+ 
++#define AOP_T8011_CLOCK_DISABLE		0
++#define AOP_T8011_CLOCK_XIO		1
++#define AOP_T8011_PDM_RATE		2400000
++
++struct aop_t8011_clock_config {
++	__le32 reserved;	/* EPIC prefix before the clock payload */
++	__le32 source;
++	__le32 rate;
++};
++
+ struct aop_audio_call_hdr {
+ 	__le32 zero0;
+ 	__le32 target;		/* 0xffffffff */
+@@ -56,6 +67,7 @@ struct aop_audio {
+ 	struct apple_aop_service service;
+ 	struct clk_hw hw;
+ 	unsigned long rate;
++	bool direct_clock;
+ };
+ 
+ static void aop_audio_hdr(struct aop_audio_call_hdr *hdr, u32 type, size_t size)
+@@ -72,7 +84,7 @@ static int aop_audio_call(struct aop_audio *audio, const void *call, size_t size
+ {
+ 	int ret;
+ 
+-	ret = apple_aop_call(&audio->service, AOP_AUDIO_WRAPPED_CALL, call, size,
++	ret = apple_aop_call(&audio->service, AOP_AUDIO_COMMAND, call, size,
+ 			     NULL, 0);
+ 	if (ret > 0) {
+ 		dev_err(audio->dev, "%s: firmware returned %#x\n", what, ret);
+@@ -92,11 +104,21 @@ static int aop_audio_pdm_clock(struct aop_audio *audio, u32 mode, u32 rate)
+ 		.mode = cpu_to_le32(mode),
+ 		.rate = cpu_to_le32(rate),
+ 	};
++	const char *what = mode == AOP_AUDIO_PDM_CLOCK_STOP ?
++			   "stop PDM clock" : "start PDM clock";
++
++	if (audio->direct_clock) {
++		struct aop_t8011_clock_config config = {
++			.source = cpu_to_le32(rate ? AOP_T8011_CLOCK_XIO :
++					      AOP_T8011_CLOCK_DISABLE),
++			.rate = cpu_to_le32(rate),
++		};
++
++		return aop_audio_call(audio, &config, sizeof(config), what);
++	}
+ 
+ 	aop_audio_hdr(&call.hdr, AOP_AUDIO_CALL_SET_PROP, sizeof(call));
+-	return aop_audio_call(audio, &call, sizeof(call),
+-			      mode == AOP_AUDIO_PDM_CLOCK_STOP ? "stop PDM clock" :
+-								 "start PDM clock");
++	return aop_audio_call(audio, &call, sizeof(call), what);
+ }
+ 
+ static struct aop_audio *to_aop_audio(struct clk_hw *hw)
+@@ -124,10 +146,12 @@ static unsigned long aop_audio_clk_recalc_rate(struct clk_hw *hw,
+ 	return to_aop_audio(hw)->rate;
+ }
+ 
+-/* The firmware derives the rate itself; any PDM rate is passed on. */
+ static int aop_audio_clk_determine_rate(struct clk_hw *hw,
+ 					struct clk_rate_request *req)
+ {
++	if (to_aop_audio(hw)->direct_clock)
++		return req->rate == AOP_T8011_PDM_RATE ? 0 : -EINVAL;
++
+ 	req->rate = clamp_t(unsigned long, req->rate, 1, U32_MAX);
+ 	return 0;
+ }
+@@ -170,11 +194,15 @@ static int aop_audio_probe(struct platform_device *pdev)
+ 		return -ENOMEM;
+ 	audio->dev = dev;
+ 	audio->service = *service;
+-
+-	aop_audio_hdr(&attach.hdr, AOP_AUDIO_CALL_ATTACH, sizeof(attach));
+-	ret = aop_audio_call(audio, &attach, sizeof(attach), "attach pdm0");
+-	if (ret)
+-		return ret;
++	audio->direct_clock = of_device_is_compatible(dev->parent->of_node,
++						       "apple,t8011-aop");
++
++	if (!audio->direct_clock) {
++		aop_audio_hdr(&attach.hdr, AOP_AUDIO_CALL_ATTACH, sizeof(attach));
++		ret = aop_audio_call(audio, &attach, sizeof(attach), "attach pdm0");
++		if (ret)
++			return ret;
++	}
+ 
+ 	init.name = devm_kasprintf(dev, GFP_KERNEL, "%s-pdm", dev_name(dev));
+ 	if (!init.name)

@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Sun, 22 Nov 2026 14:29:57 +0100
+Subject: [PATCH] Input: apple_z2: restart J120 touch after system resume
+
+The suspend callback powers the controller down on J120, but the resume callback skips scheduling a new firmware upload. Queue the existing post-resume work for J120 and leave report handling stopped until its runtime setup succeeds.
+
+Assisted-by: LLM
+---
+ drivers/input/touchscreen/apple_z2.c | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index c3f3587b0..8665e8843 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -5581,10 +5581,9 @@ static int apple_z2_resume(struct device *dev)
+ {
+ 	struct apple_z2 *z2 = spi_get_drvdata(to_spi_device(dev));
+ 
+-	if (apple_z2_is_j120(z2))
+-		return 0;
+-
+-	z2->stopping = false;
++	/* J120 clears stopping when firmware setup reaches runtime. */
++	if (!apple_z2_is_j120(z2))
++		z2->stopping = false;
+ 	z2->recovering = false;
+ 	z2->boot_due = true;
+ 	return 0;

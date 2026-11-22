@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tompta1 <546706+tompta1@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 11:39:50 +0100
+Subject: [PATCH] dt-bindings: spi: describe T8011 PIO status setup
+
+Allow the T8011 compatible before the T8010 and generic SPI fallbacks. Its long full-duplex PIO transfers require the native status configuration.
+
+Assisted-by: LLM
+---
+ Documentation/devicetree/bindings/spi/apple,spi.yaml | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/devicetree/bindings/spi/apple,spi.yaml b/Documentation/devicetree/bindings/spi/apple,spi.yaml
+index c8ed3039b..1fce58692 100644
+--- a/Documentation/devicetree/bindings/spi/apple,spi.yaml
++++ b/Documentation/devicetree/bindings/spi/apple,spi.yaml
+@@ -28,7 +28,9 @@ properties:
+   compatible:
+     oneOf:
+       - items:
+-          - const: apple,t8015-spi
++          - enum:
++              - apple,t8011-spi
++              - apple,t8015-spi
+           - const: apple,t8010-spi
+           - const: apple,spi
+       - items:

@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tompta1 <546706+tompta1@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 11:39:52 +0100
+Subject: [PATCH] pinctrl: apple: retain parent IRQ arrays for the GPIO
+ lifetime
+
+gpiolib retains the parent IRQ and handler-data arrays after registration. Allocate both with device-managed lifetime instead of freeing them on successful registration. Match T8011 to the existing S8000 mux implementation.
+
+Assisted-by: LLM
+---
+ drivers/pinctrl/pinctrl-apple-gpio.c | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/pinctrl/pinctrl-apple-gpio.c b/drivers/pinctrl/pinctrl-apple-gpio.c
+index b97023c97..df9366544 100644
+--- a/drivers/pinctrl/pinctrl-apple-gpio.c
++++ b/drivers/pinctrl/pinctrl-apple-gpio.c
+@@ -427,19 +427,20 @@ static int apple_gpio_register(struct apple_gpio_pinctrl *pctl)
+ 		gpio_irq_chip_set_chip(girq, &apple_gpio_irqchip);
+ 		girq->parent_handler = apple_gpio_irq_handler;
+ 
+-		girq->parents = kmalloc_array(girq->num_parents,
++		girq->parents = devm_kcalloc(pctl->dev, girq->num_parents,
+ 					      sizeof(*girq->parents),
+ 					      GFP_KERNEL);
+-		irq_data = kmalloc_objs(*irq_data, girq->num_parents);
++		irq_data = devm_kcalloc(pctl->dev, girq->num_parents,
++					 sizeof(*irq_data), GFP_KERNEL);
+ 		if (!girq->parents || !irq_data) {
+ 			ret = -ENOMEM;
+-			goto out_free_irq_data;
++			goto out_return;
+ 		}
+ 
+ 		for (i = 0; i < girq->num_parents; i++) {
+ 			ret = platform_get_irq(to_platform_device(pctl->dev), i);
+ 			if (ret < 0)
+-				goto out_free_irq_data;
++				goto out_return;
+ 
+ 			girq->parents[i] = ret;
+ 			pctl->irqgrps[i] = i;
+@@ -454,9 +455,7 @@ static int apple_gpio_register(struct apple_gpio_pinctrl *pctl)
+ 
+ 	ret = devm_gpiochip_add_data(pctl->dev, &pctl->gpio_chip, pctl);
+ 
+-out_free_irq_data:
+-	kfree(girq->parents);
+-	kfree(irq_data);
++out_return:
+ 
+ 	return ret;
+ }
+@@ -558,6 +557,7 @@ static const struct apple_gpio_soc_data apple_gpio_s8000_data = {
+ 
+ static const struct of_device_id apple_gpio_pinctrl_of_match[] = {
+ 	{ .compatible = "apple,s8000-pinctrl", .data = &apple_gpio_s8000_data },
++	{ .compatible = "apple,t8011-pinctrl", .data = &apple_gpio_s8000_data },
+ 	{ .compatible = "apple,t8103-pinctrl", },
+ 	{ .compatible = "apple,pinctrl", },
+ 	{ }

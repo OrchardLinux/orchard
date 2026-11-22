@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tompta1 <546706+tompta1@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 11:39:52 +0100
+Subject: [PATCH] dt-bindings: pinctrl: describe the T8011 S8000-compatible
+ GPIO block
+
+T8011 uses the existing S8000 pin-function semantics. Describe the explicit chip compatible and its two fallbacks.
+
+Assisted-by: LLM
+---
+ Documentation/devicetree/bindings/pinctrl/apple,pinctrl.yaml | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/pinctrl/apple,pinctrl.yaml b/Documentation/devicetree/bindings/pinctrl/apple,pinctrl.yaml
+index f08d2c4f5..0fb1d8cb0 100644
+--- a/Documentation/devicetree/bindings/pinctrl/apple,pinctrl.yaml
++++ b/Documentation/devicetree/bindings/pinctrl/apple,pinctrl.yaml
+@@ -17,6 +17,10 @@ description: |
+ properties:
+   compatible:
+     oneOf:
++      - items:
++          - const: apple,t8011-pinctrl
++          - const: apple,s8000-pinctrl
++          - const: apple,pinctrl
+       - items:
+           - enum:
+               - apple,t6020-pinctrl

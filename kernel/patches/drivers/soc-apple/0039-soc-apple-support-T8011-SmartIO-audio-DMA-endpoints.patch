@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 11:19:14 +0100
+Subject: [PATCH] soc: apple: support T8011 SmartIO audio DMA endpoints
+
+Allow the J120 audio firmware endpoints for MCA4 transmit and PDM receive.
+
+Assisted-by: LLM
+---
+ drivers/soc/apple/apple-sio-core.c | 16 +++++++++++++++-
+ 1 file changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/soc/apple/apple-sio-core.c b/drivers/soc/apple/apple-sio-core.c
+index c0558b16b..b7a968293 100644
+--- a/drivers/soc/apple/apple-sio-core.c
++++ b/drivers/soc/apple/apple-sio-core.c
+@@ -1187,10 +1187,23 @@ static const struct apple_sio_hw apple_sio_t7000_hw = {
+ 	.num_dma_ranges = ARRAY_SIZE(apple_sio_t7000_dma_ranges),
+ };
+ 
++/* J120 MCA4 transmit and PDM receive. */
++static const struct apple_sio_dma_range apple_sio_t8011_dma_ranges[] = {
++	{ 0x30, 0x30 },
++	{ 0x5b, 0x5b },
++};
++
++static const struct apple_sio_hw apple_sio_t8011_hw = {
++	.regs = &apple_sio_regs_v2,
++	.dma_ranges = apple_sio_t8011_dma_ranges,
++	.num_dma_ranges = ARRAY_SIZE(apple_sio_t8011_dma_ranges),
++};
++
+ static const struct of_device_id apple_sio_of_match[] = {
+ 	{ .compatible = "apple,t7000-sio", .data = &apple_sio_t7000_hw },
+ 	{ .compatible = "apple,s8000-sio", .data = &apple_sio_s8000_hw },
+ 	{ .compatible = "apple,t8010-sio", .data = &apple_sio_t8010_hw },
++	{ .compatible = "apple,t8011-sio", .data = &apple_sio_t8011_hw },
+ 	{}
+ };
+ MODULE_DEVICE_TABLE(of, apple_sio_of_match);
+@@ -1210,5 +1223,6 @@ module_platform_driver(apple_sio_driver);
+ MODULE_FIRMWARE("apple/t7000-smartio.bin");
+ MODULE_FIRMWARE("apple/s8000-smartio.bin");
+ MODULE_FIRMWARE("apple/t8010-smartio.bin");
+-MODULE_DESCRIPTION("Apple T7000/S8000/T8010 SmartIO coprocessor driver");
++MODULE_FIRMWARE("apple/t8011-smartio.bin");
++MODULE_DESCRIPTION("Apple T7000/S8000/T8010/T8011 SmartIO coprocessor driver");
+ MODULE_LICENSE("Dual MIT/GPL");

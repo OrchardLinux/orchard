@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Sat, 21 Nov 2026 00:46:31 +0100
+Subject: [PATCH] iio: light: ct709: check the auxiliary gain before sampling
+
+The fixed 16x capture uses gain index 4, which requires AUX=0 as well as GAIN=2. Reject unsupported auxiliary settings before writing to the device and allow the caller to sample again when the setting changes.
+
+Assisted-by: LLM
+Signed-off-by: tom <tompt@seznam.cz>
+---
+ drivers/iio/light/ams-ct709.c | 2 ++
+ drivers/iio/light/ams-ct709.h | 8 ++++++++
+ 2 files changed, 10 insertions(+)
+
+diff --git a/drivers/iio/light/ams-ct709.c b/drivers/iio/light/ams-ct709.c
+index 1bbb372ee..d3172c467 100644
+--- a/drivers/iio/light/ams-ct709.c
++++ b/drivers/iio/light/ams-ct709.c
+@@ -99,6 +99,8 @@ static int ct709_read_raw(struct iio_dev *indio,
+ 	}
+ 	d->deadline = ktime_get_ns() + 5ULL * NSEC_PER_SEC;
+ 	ret = als_once(&ct709_ops, d, &result);
++	if (ret == -EOPNOTSUPP && !result.changed)
++		goto out;
+ 	if (ret || !result.valid || !result.restored) {
+ 		d->faulted = true;
+ 		if (!ret)
+diff --git a/drivers/iio/light/ams-ct709.h b/drivers/iio/light/ams-ct709.h
+index 7f26a62ab..9e9fb24ff 100644
+--- a/drivers/iio/light/ams-ct709.h
++++ b/drivers/iio/light/ams-ct709.h
+@@ -89,6 +89,14 @@ static int als_once(const struct als_ops *o, void *ctx, struct als_result *r)
+ 		ret = -EPERM;
+ 		goto finish;
+ 	}
++	/* GAIN=2 gives the advertised 16x range only with AUX gain disabled. */
++	ret = als_read(o, ctx, 0x90, &v);
++	if (ret)
++		goto finish;
++	if (v != 0) {
++		ret = -EOPNOTSUPP;
++		goto finish;
++	}
+ 	/*
+ 	 * Configure only after exact original admission; any write can be
+ 	 * ambiguous.

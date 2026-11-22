@@ -1,0 +1,103 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tompta1 <546706+tompta1@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 11:39:57 +0100
+Subject: [PATCH] soc: apple: support the T8011 AOP firmware target
+
+Check the firmware RTSZ working extent against SRAM and optionally patch AOPt from board data. Match T8011 to the existing A10 AOP path. If firmware cannot halt after a probe error, retain the bound owner and its RTKit/DMA resources until reboot.
+
+Assisted-by: LLM
+---
+ drivers/soc/apple/aop.c | 34 ++++++++++++++++++++++++++++++++--
+ 1 file changed, 32 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/soc/apple/aop.c b/drivers/soc/apple/aop.c
+index 5c23317d1..ac2066540 100644
+--- a/drivers/soc/apple/aop.c
++++ b/drivers/soc/apple/aop.c
+@@ -71,6 +71,7 @@
+ #define APPLE_AOP_BOOTARG_SOCR		APPLE_AOP_FOURCC('S', 'O', 'C', 'R')
+ #define APPLE_AOP_BOOTARG_STKG		APPLE_AOP_FOURCC('S', 'T', 'K', 'G')
+ #define APPLE_AOP_MAX_BOOTARGS		10
++#define APPLE_AOP_BOOTARG_RTSZ		APPLE_AOP_FOURCC('R', 'T', 'S', 'Z')
+ 
+ #define APPLE_AOP_HALT_TIMEOUT_US	10000
+ 
+@@ -282,6 +283,7 @@ static int apple_aop_patch_bootargs(struct apple_aop *aop, u8 *image, size_t siz
+ 				    struct apple_aop_bootarg *args, unsigned int count)
+ {
+ 	size_t offset, end, pos;
++	bool runtime_size_found = false;
+ 	unsigned int i;
+ 
+ 	offset = get_unaligned_le32(image + APPLE_AOP_IMAGE_BOOTARGS_OFFSET);
+@@ -298,6 +300,15 @@ static int apple_aop_patch_bootargs(struct apple_aop *aop, u8 *image, size_t siz
+ 		if (len > end - pos)
+ 			return -EINVAL;
+ 
++		/* Native loading reserves max(image size, RTSZ), not just the file. */
++		if (key == APPLE_AOP_BOOTARG_RTSZ) {
++			if (len != sizeof(u32) || runtime_size_found)
++				return -EINVAL;
++			runtime_size_found = true;
++			if (get_unaligned_le32(image + pos) > aop->sram_size)
++				return -EINVAL;
++		}
++
+ 		for (i = 0; i < count; i++) {
+ 			if (args[i].key != key)
+ 				continue;
+@@ -354,11 +365,21 @@ static int apple_aop_load(struct apple_aop *aop, u64 ecid)
+ 	struct device_node *np = aop->dev->of_node;
+ 	u8 prng[32], nonce[8], guard[4], ncal = 0;
+ 	__le64 ecid_le = cpu_to_le64(ecid), ext_le, wrapper_le;
+-	__le32 target_le, chip_le, revision_le;
++	__le32 target_le = 0, chip_le, revision_le;
+ 	unsigned int count = 0;
++	u32 target;
++	bool has_target = !aop->hw->soc_bootargs &&
++			  of_property_present(np, "apple,aop-target");
+ 	u8 *image;
+ 	int ret;
+ 
++	if (has_target) {
++		ret = of_property_read_u32(np, "apple,aop-target", &target);
++		if (ret)
++			return dev_err_probe(aop->dev, ret, "invalid AOP target\n");
++		target_le = cpu_to_le32(target);
++	}
++
+ 	ret = of_property_read_string_index(np, "firmware-name", 0, &main_name);
+ 	if (!ret)
+ 		ret = of_property_read_string_index(np, "firmware-name", 1, &ext_name);
+@@ -423,6 +444,10 @@ static int apple_aop_load(struct apple_aop *aop, u64 ecid)
+ 		apple_aop_add_bootarg(args, &count, APPLE_AOP_BOOTARG_STKG, guard, sizeof(guard));
+ 	}
+ 
++	if (has_target)
++		apple_aop_add_bootarg(args, &count, APPLE_AOP_BOOTARG_AOPT,
++				      &target_le, sizeof(target_le));
++
+ 	ret = apple_aop_patch_bootargs(aop, image, main_fw->size, args, count);
+ 	if (ret)
+ 		dev_err(aop->dev, "unexpected boot arguments in %s: %d\n", main_name, ret);
+@@ -1082,7 +1107,11 @@ static int apple_aop_probe(struct platform_device *pdev)
+ 		apple_rtkit_free(aop->rtk);
+ 		apple_aop_free_buffers(aop);
+ 	} else {
+-		dev_err(dev, "failed to halt; keeping its memory\n");
++		/* RTKit still refers to the devm state: retain the bound device too. */
++		aop->removing = true;
++		platform_set_drvdata(pdev, aop);
++		dev_crit(dev, "failed to halt; retaining bound device until reboot\n");
++		return 0;
+ 	}
+ 	return ret;
+ 
+@@ -1125,6 +1154,7 @@ static const struct apple_aop_hw apple_aop_t8010_hw = {
+ static const struct of_device_id apple_aop_of_match[] = {
+ 	{ .compatible = "apple,s8000-aop", .data = &apple_aop_s8000_hw },
+ 	{ .compatible = "apple,t8010-aop", .data = &apple_aop_t8010_hw },
++	{ .compatible = "apple,t8011-aop", .data = &apple_aop_t8010_hw },
+ 	{}
+ };
+ MODULE_DEVICE_TABLE(of, apple_aop_of_match);

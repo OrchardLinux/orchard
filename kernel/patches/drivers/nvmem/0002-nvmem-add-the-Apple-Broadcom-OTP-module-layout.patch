@@ -1,0 +1,188 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tompta1 <546706+tompta1@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 12:55:37 +0100
+Subject: [PATCH] nvmem: add the Apple Broadcom OTP module layout
+
+Locate the V= module vendor field in bounded native SYS_VENDOR records and publish a read-only cell. Reject malformed and ambiguous records instead of guessing a firmware vendor.
+
+Assisted-by: LLM
+---
+ drivers/nvmem/layouts/Kconfig          |  11 ++
+ drivers/nvmem/layouts/Makefile         |   1 +
+ drivers/nvmem/layouts/brcm-apple-otp.c | 136 +++++++++++++++++++++++++
+ 3 files changed, 148 insertions(+)
+ create mode 100644 drivers/nvmem/layouts/brcm-apple-otp.c
+
+diff --git a/drivers/nvmem/layouts/Kconfig b/drivers/nvmem/layouts/Kconfig
+index 790b45bbf..6ad3d41fe 100644
+--- a/drivers/nvmem/layouts/Kconfig
++++ b/drivers/nvmem/layouts/Kconfig
+@@ -8,6 +8,17 @@ if NVMEM_LAYOUTS
+ 
+ menu "Layout Types"
+ 
++config NVMEM_LAYOUT_BRCM_APPLE_OTP
++	tristate "Apple Broadcom radio OTP layout"
++	help
++	  Parse Apple module identity records in Broadcom radio OTP and expose
++	  the module vendor as an NVMEM cell for the shared Bluetooth radio.
++	  The provider must supply the raw SYS_VENDOR record region. The vendor
++	  field is found from its contents so firmware selection does not depend
++	  on a fixed offset within a particular module revision.
++
++	  If unsure, say N.
++
+ config NVMEM_LAYOUT_APPLE_SYSCFG
+ 	tristate "Apple SysCfg layout support"
+ 	help
+diff --git a/drivers/nvmem/layouts/Makefile b/drivers/nvmem/layouts/Makefile
+index 912fa14d3..4de603a9f 100644
+--- a/drivers/nvmem/layouts/Makefile
++++ b/drivers/nvmem/layouts/Makefile
+@@ -8,3 +8,4 @@ obj-$(CONFIG_NVMEM_LAYOUT_SL28_VPD) += sl28vpd.o
+ obj-$(CONFIG_NVMEM_LAYOUT_APPLE_SYSCFG) += apple-syscfg.o
+ obj-$(CONFIG_NVMEM_LAYOUT_ONIE_TLV) += onie-tlv.o
+ obj-$(CONFIG_NVMEM_LAYOUT_U_BOOT_ENV) += u-boot-env.o
++obj-$(CONFIG_NVMEM_LAYOUT_BRCM_APPLE_OTP) += brcm-apple-otp.o
+diff --git a/drivers/nvmem/layouts/brcm-apple-otp.c b/drivers/nvmem/layouts/brcm-apple-otp.c
+new file mode 100644
+index 000000000..85969c053
+--- /dev/null
++++ b/drivers/nvmem/layouts/brcm-apple-otp.c
+@@ -0,0 +1,136 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* Apple module identity records in Broadcom radio OTP. */
++#include <linux/ctype.h>
++#include <linux/nvmem-consumer.h>
++#include <linux/nvmem-provider.h>
++#include <linux/of.h>
++#include <linux/slab.h>
++#include <linux/unaligned.h>
++
++#define BRCM_APPLE_SYS_VENDOR 0x15
++#define BRCM_APPLE_VENDOR_HEADER 8
++
++static int brcm_apple_otp_vendor(const u8 *data, size_t size,
++				 unsigned int *offset, unsigned int *bytes)
++{
++	const u8 *record, *chip_end, *board_end, *p, *end;
++	size_t pos = 0, length;
++	bool found = false;
++
++	while (pos < size) {
++		if (!data[pos] || data[pos] == 0xff)
++			break;
++		if (size - pos < 2)
++			return -EINVAL;
++		length = data[pos + 1];
++		if (length > size - pos - 2)
++			return -EINVAL;
++		if (data[pos] != BRCM_APPLE_SYS_VENDOR)
++			goto next;
++
++		record = data + pos + 2;
++		if (length < 6 ||
++		    get_unaligned_le32(record) != BRCM_APPLE_VENDOR_HEADER)
++			return -EINVAL;
++		chip_end = memchr(record + 4, 0, length - 4);
++		if (!chip_end || chip_end + 1 == record + length)
++			return -EINVAL;
++		p = chip_end + 1;
++		board_end = memchr(p, 0, record + length - p);
++		if (!board_end)
++			return -EINVAL;
++
++		while (p < board_end) {
++			while (p < board_end && isspace(*p))
++				p++;
++			if (p == board_end)
++				break;
++			if (board_end - p < 3 || p[1] != '=')
++				return -EINVAL;
++			end = p + 2;
++			while (end < board_end && !isspace(*end))
++				end++;
++			if (end == p + 2)
++				return -EINVAL;
++			if (*p == 'V') {
++				/* Ambiguous identities must never select firmware. */
++				if (found)
++					return -EINVAL;
++				*offset = p + 2 - data;
++				*bytes = end - p - 2;
++				found = true;
++			}
++			p = end;
++		}
++next:
++		pos += length + 2;
++	}
++
++	return found ? 0 : -ENOENT;
++}
++
++static int brcm_apple_otp_add_cells(struct nvmem_layout *layout)
++{
++	struct nvmem_device *nvmem = layout->nvmem;
++	struct device_node *np __free(device_node) =
++		of_nvmem_layout_get_container(nvmem);
++	struct nvmem_cell_info cell = { .name = "module-vendor" };
++	size_t size = nvmem_dev_size(nvmem);
++	u8 *data;
++	int ret;
++
++	if (!np || !size)
++		return -EINVAL;
++	data = kmalloc(size, GFP_KERNEL);
++	if (!data)
++		return -ENOMEM;
++	ret = nvmem_device_read(nvmem, 0, size, data);
++	if (ret < 0)
++		goto out_free;
++	if (ret != size) {
++		ret = -EIO;
++		goto out_free;
++	}
++	ret = brcm_apple_otp_vendor(data, size, &cell.offset, &cell.bytes);
++out_free:
++	kfree(data);
++	if (ret)
++		return ret;
++	cell.np = of_get_child_by_name(np, cell.name);
++	if (!cell.np)
++		return -ENOENT;
++	ret = nvmem_add_one_cell(nvmem, &cell);
++	if (ret)
++		of_node_put(cell.np);
++	return ret;
++}
++
++static int brcm_apple_otp_probe(struct nvmem_layout *layout)
++{
++	layout->add_cells = brcm_apple_otp_add_cells;
++	return nvmem_layout_register(layout);
++}
++
++static void brcm_apple_otp_remove(struct nvmem_layout *layout)
++{
++	nvmem_layout_unregister(layout);
++}
++
++static const struct of_device_id brcm_apple_otp_of_match[] = {
++	{ .compatible = "brcm,apple-otp-layout" },
++	{}
++};
++MODULE_DEVICE_TABLE(of, brcm_apple_otp_of_match);
++
++static struct nvmem_layout_driver brcm_apple_otp_driver = {
++	.driver = {
++		.name = "brcm-apple-otp-layout",
++		.of_match_table = brcm_apple_otp_of_match,
++	},
++	.probe = brcm_apple_otp_probe,
++	.remove = brcm_apple_otp_remove,
++};
++module_nvmem_layout_driver(brcm_apple_otp_driver);
++
++MODULE_LICENSE("GPL");
++MODULE_DESCRIPTION("NVMEM layout for Apple Broadcom module identity");

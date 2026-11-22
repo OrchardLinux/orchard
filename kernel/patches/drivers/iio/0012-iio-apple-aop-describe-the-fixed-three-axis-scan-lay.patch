@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Sat, 21 Nov 2026 00:03:53 +0100
+Subject: [PATCH] iio: apple-aop: describe the fixed three-axis scan layout
+
+The accelerometer and gyroscope push a complete XYZ scan. Advertise that layout so the IIO core can select the requested axes when a buffer consumer enables only a subset.
+
+Assisted-by: LLM
+---
+ drivers/iio/accel/apple_aop_accel.c | 4 ++++
+ drivers/iio/gyro/apple_aop_gyro.c   | 4 ++++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/drivers/iio/accel/apple_aop_accel.c b/drivers/iio/accel/apple_aop_accel.c
+index a6447e8a7..ec8999760 100644
+--- a/drivers/iio/accel/apple_aop_accel.c
++++ b/drivers/iio/accel/apple_aop_accel.c
+@@ -202,6 +202,9 @@ static const struct iio_chan_spec_ext_info apple_aop_accel_ext_info[] = {
+ 	.ext_info = apple_aop_accel_ext_info,				\
+ }
+ 
++/* Firmware reports always contain all three axes. */
++static const unsigned long apple_aop_accel_scan_masks[] = { GENMASK(2, 0), 0 };
++
+ static const struct iio_chan_spec apple_aop_accel_channels[] = {
+ 	APPLE_AOP_ACCEL_CHANNEL(X, 0),
+ 	APPLE_AOP_ACCEL_CHANNEL(Y, 1),
+@@ -257,6 +260,7 @@ static int apple_aop_accel_probe(struct platform_device *pdev)
+ 
+ 	indio_dev->name = "apple-aop-accel";
+ 	indio_dev->info = &apple_aop_accel_info;
++	indio_dev->available_scan_masks = apple_aop_accel_scan_masks;
+ 	indio_dev->channels = apple_aop_accel_channels;
+ 	indio_dev->num_channels = ARRAY_SIZE(apple_aop_accel_channels);
+ 	indio_dev->modes = INDIO_DIRECT_MODE;
+diff --git a/drivers/iio/gyro/apple_aop_gyro.c b/drivers/iio/gyro/apple_aop_gyro.c
+index 3341164bf..da79af983 100644
+--- a/drivers/iio/gyro/apple_aop_gyro.c
++++ b/drivers/iio/gyro/apple_aop_gyro.c
+@@ -189,6 +189,9 @@ static const struct iio_chan_spec_ext_info apple_aop_gyro_ext_info[] = {
+ 	.ext_info = apple_aop_gyro_ext_info,				\
+ }
+ 
++/* Firmware reports always contain all three axes. */
++static const unsigned long apple_aop_gyro_scan_masks[] = { GENMASK(2, 0), 0 };
++
+ static const struct iio_chan_spec apple_aop_gyro_channels[] = {
+ 	APPLE_AOP_GYRO_CHANNEL(X, 0),
+ 	APPLE_AOP_GYRO_CHANNEL(Y, 1),
+@@ -243,6 +246,7 @@ static int apple_aop_gyro_probe(struct platform_device *pdev)
+ 
+ 	indio_dev->name = "apple-aop-gyro";
+ 	indio_dev->info = &apple_aop_gyro_info;
++	indio_dev->available_scan_masks = apple_aop_gyro_scan_masks;
+ 	indio_dev->channels = apple_aop_gyro_channels;
+ 	indio_dev->num_channels = ARRAY_SIZE(apple_aop_gyro_channels);
+ 	indio_dev->modes = INDIO_DIRECT_MODE;

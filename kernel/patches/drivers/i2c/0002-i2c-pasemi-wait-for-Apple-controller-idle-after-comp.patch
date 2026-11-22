@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 13:30:32 +0100
+Subject: [PATCH] i2c: pasemi: wait for Apple controller idle after completion
+
+On T8010 and compatible Apple hardware, a combined read can report transfer-ended while busy is still set. Give the final STOP a bounded interval to settle before reporting a stuck bus. Preserve the existing error handling for NACK, timeout and arbitration loss.
+
+Assisted-by: LLM
+---
+ drivers/i2c/busses/i2c-pasemi-core.c     | 10 ++++++++++
+ drivers/i2c/busses/i2c-pasemi-core.h     |  1 +
+ drivers/i2c/busses/i2c-pasemi-platform.c |  3 +++
+ 3 files changed, 14 insertions(+)
+
+diff --git a/drivers/i2c/busses/i2c-pasemi-core.c b/drivers/i2c/busses/i2c-pasemi-core.c
+index 4d554ff9a..d5d6c4b7e 100644
+--- a/drivers/i2c/busses/i2c-pasemi-core.c
++++ b/drivers/i2c/busses/i2c-pasemi-core.c
+@@ -52,6 +52,7 @@
+ #define CTL_CLK_M	GENMASK(7, 0)
+ 
+ #define SMSTA_XFER_CLEAR	(SMSTA_XEN | SMSTA_MTO | SMSTA_MTN | SMSTA_TOM)
++#define SMSTA_XFER_ERROR	(SMSTA_TOM | SMSTA_MTO | SMSTA_MTA | SMSTA_MTN)
+ 
+ /*
+  * The hardware (supposedly) has a 25ms timeout for clock stretching, thus
+@@ -202,6 +203,15 @@ static int pasemi_smb_waitready(struct pasemi_smbus *smbus)
+ 		}
+ 	}
+ 
++	/* Apple's engine can report XEN before the final STOP makes it idle. */
++	if (smbus->wait_for_idle && (status & (SMSTA_XEN | SMSTA_XIP)) ==
++	    (SMSTA_XEN | SMSTA_XIP) && !(status & SMSTA_XFER_ERROR)) {
++		/* Preserve the existing bus-stuck error if the busy bit persists. */
++		readx_poll_timeout(ioread32, smbus->ioaddr + REG_SMSTA, status,
++				   !(status & SMSTA_XIP) || (status & SMSTA_XFER_ERROR),
++				   10, USEC_PER_MSEC);
++	}
++
+ 	/* Controller timeout? */
+ 	if (status & SMSTA_TOM) {
+ 		dev_err(smbus->dev, "Controller timeout, status 0x%08x\n", status);
+diff --git a/drivers/i2c/busses/i2c-pasemi-core.h b/drivers/i2c/busses/i2c-pasemi-core.h
+index 1381336bc..c81ce0d19 100644
+--- a/drivers/i2c/busses/i2c-pasemi-core.h
++++ b/drivers/i2c/busses/i2c-pasemi-core.h
+@@ -21,6 +21,7 @@ struct pasemi_smbus {
+ 	unsigned int		 ctl_flags;
+ 	int			 hw_rev;
+ 	int			 use_irq;
++	bool			 wait_for_idle;
+ 	void			 (*hw_init)(struct pasemi_smbus *smbus);
+ 	struct completion	 irq_completion;
+ };
+diff --git a/drivers/i2c/busses/i2c-pasemi-platform.c b/drivers/i2c/busses/i2c-pasemi-platform.c
+index ee51a01fc..248723b25 100644
+--- a/drivers/i2c/busses/i2c-pasemi-platform.c
++++ b/drivers/i2c/busses/i2c-pasemi-platform.c
+@@ -26,6 +26,7 @@
+ struct pasemi_platform_i2c_match_data {
+ 	void (*hw_init)(struct pasemi_smbus *smbus);
+ 	u32 ctl_flags;
++	bool wait_for_idle;
+ };
+ 
+ struct pasemi_platform_i2c_data {
+@@ -48,6 +49,7 @@ static void pasemi_platform_i2c_t8010_init(struct pasemi_smbus *smbus)
+ static const struct pasemi_platform_i2c_match_data t8010_i2c_data = {
+ 	.hw_init = pasemi_platform_i2c_t8010_init,
+ 	.ctl_flags = 0,
++	.wait_for_idle = true,
+ };
+ 
+ static int
+@@ -94,6 +96,7 @@ static int pasemi_platform_i2c_probe(struct platform_device *pdev)
+ 	if (match_data) {
+ 		smbus->hw_init = match_data->hw_init;
+ 		smbus->ctl_flags = match_data->ctl_flags;
++		smbus->wait_for_idle = match_data->wait_for_idle;
+ 	}
+ 
+ 	smbus->ioaddr = devm_platform_ioremap_resource(pdev, 0);
