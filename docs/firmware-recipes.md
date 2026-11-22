@@ -16,7 +16,7 @@ implements.
     or `{"kernelcache": "<board>ap", "restore": {…}}`: that board's
     kernelcache from another pinned restore image (same fields as `ipsw`),
     for firmware the board's own image doesn't have in the build its driver
-    was written for;
+    was written for (A8 GPU firmware below);
   - `device` (optional): the same file's path on a running iPadOS, or
     `{"kernelcache": "active"}`.
   An optional `sha256` pins the input. An input from another restore image
@@ -265,3 +265,32 @@ Apple's LDR, byte for byte. No payload patch, calibration, firmware bytes or
 captured job is stored in the source tree. Other C0 revisions and other
 boards require separate digest qualification.
 
+## T7000 G4P META firmware
+
+powervr's A8 variant loads two files: `apple/gfx-t7000.bin`, the META LDR
+from `com.apple.AGXFirmwareKextG4P`, byte for byte, and
+`apple/gfx-t7000-border.bin`, the first 0x800 bytes of the border colour
+table in `com.apple.AGXG4P`'s data. The driver was written and tested
+against the iPod touch 6's iOS 12.4 (16G77) image: it relies on that
+image's segment layout and object offsets. So every A8 board's recipe
+(N102, N56, N61, J96, J97) reads the N102 kernelcache of that restore
+image (`restore` above) and pins the same two hashes:
+
+| File | Bytes | SHA-256 |
+|---|---|---|
+| `gfx-t7000.bin` | 115534 | `0b60def67290391b4c6aa913d9a78a8105d6d9b03738175b8e5732689db1e5ba` |
+| `gfx-t7000-border.bin` | 2048 | `233ffc1d7db27d9f16db17e23a9ce33082b5a7b72061af3da510bca3c94aff3e` |
+
+The boards' own restore images, compared with it:
+
+- iOS 12.5.8 (16H88; N102, N56) and 12.5.1 (16H22; N61): the same LDR
+  except its build-date string and the 16-bit check word of the data block
+  that holds it.
+- iPadOS 15.8.8 (19H422; J96, J97): another firmware build (114794 bytes).
+  The driver has not run it.
+- Every one of them holds the same border colour table.
+
+The iOS 12 kernelcaches have no per-kext load addresses in their prelink
+metadata, so both steps find their data by structure: every LDR whose
+records walk cleanly; the 0x800-byte table that starts with 0x440 zero
+bytes and the word 0x02040000. The output's hash selects the one installed.

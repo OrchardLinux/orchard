@@ -1,5 +1,7 @@
-"""A8 (G4P) GPU firmware steps and inputs from another restore image. Synthetic bytes only."""
+"""A8 (G4P) GPU firmware steps and the A8 boards' recipes. Synthetic bytes only."""
 import hashlib
+import json
+from pathlib import Path
 import struct
 import unittest
 from unittest.mock import patch
@@ -7,6 +9,8 @@ from unittest.mock import patch
 from orchard import firmware, recipe
 from orchard.apple import agx
 
+ROOT = Path(__file__).resolve().parents[1]
+A8_BOARDS = ('n102', 'n56', 'n61', 'j96', 'j97')
 LDR = 'lib/firmware/apple/gfx-t7000.bin'
 BORDER = 'lib/firmware/apple/gfx-t7000-border.bin'
 
@@ -147,6 +151,25 @@ class RestoreInputs(unittest.TestCase):
         self.assertEqual(result, {'lib/firmware/a': b'kc', 'lib/firmware/b': b'own kernelcache'})
         self.assertEqual(sorted(opened), [('https://updates.cdn-apple.com/other.ipsw', 7),
                                           ('https://updates.cdn-apple.com/own.ipsw', 5)])
+
+
+class A8Recipes(unittest.TestCase):
+    def test_every_a8_board_installs_the_tested_gpu_firmware(self):
+        hashes = set()
+        for board in A8_BOARDS:
+            with self.subTest(board=board):
+                document = recipe.check(json.loads((ROOT / f'devices/{board}/firmware.json').read_text()))
+                outputs = {o['destination']: o for o in document['outputs']}
+                steps = {LDR: 'agx-g4p-ldr-from-kernelcache@1', BORDER: 'agx-g4p-border-from-kernelcache@1'}
+                for destination, step in steps.items():
+                    output = outputs[destination]
+                    name = output['steps'][0]['input']
+                    self.assertEqual(output['steps'], [{'step': step, 'input': name}])
+                    source = document['inputs'][name]
+                    self.assertEqual(source['ipsw']['kernelcache'], 'n102ap')
+                    self.assertEqual(source['ipsw']['restore']['build'], '16G77')
+                    hashes.add((destination, output['sha256'], source['sha256'], source['ipsw']['restore']['url']))
+        self.assertEqual(len(hashes), 2, 'every A8 board pins the same image')
 
 
 if __name__ == '__main__':
