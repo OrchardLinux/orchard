@@ -320,6 +320,7 @@
       "bluetooth_audio",
       "bluetooth_input",
       "buttons",
+      "charging",
       "touch",
       "usb_network",
       "usb_serial",
