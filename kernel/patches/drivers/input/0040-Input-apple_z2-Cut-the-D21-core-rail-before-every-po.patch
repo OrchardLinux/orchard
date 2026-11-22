@@ -1,0 +1,98 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sun, 22 Nov 2026 08:41:11 +0800
+Subject: [PATCH] Input: apple_z2: Cut the D21 core rail before every power-up
+
+The D21's core rail is an SMC function that the bootloader leaves on,
+and its regulator knows only the state it wrote last. Enabling it at
+probe kept the controller powered from before, so the 500 ms settle of
+the high-voltage supply before the core never happened: the controller
+sent a frame or two and fell silent, on every boot and every reload.
+
+Write the rail off and hold it off for 200 ms before each power-up, so
+each start, a module reload included, is a real power cycle in iOS's
+order. JADE's driver cuts this rail on every power-off and lands a live
+controller after a reload.
+
+Assisted-by: LLM
+---
+ drivers/input/touchscreen/apple_z2.c | 28 +++++++++++++++++++++++++---
+ 1 file changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index 068b77bcd..fa03abfa4 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -281,6 +281,9 @@ struct apple_z2_gen2_boot {
+  * @boot_timeout_ms:	boot interrupt timeout, if not the variant's
+  * @reset_hold_ms:	reset pulse before the boot preamble, if over 1 ms
+  * @hv_settle_us:	time the high-voltage supply settles before the core
++ * @core_cut_ms:	time the core supply is held off before every power-up,
++ *			for a core rail the bootloader leaves on and whose
++ *			regulator cannot read its state
+  *			supply, if over the default 2 ms
+  * @fixed_timing:	the firmware's configuration sets only the SPI mode;
+  *			the SPI timing stays the match data's
+@@ -309,6 +312,7 @@ struct apple_z2_chip_info {
+ 	unsigned int boot_timeout_ms;
+ 	unsigned int reset_hold_ms;
+ 	unsigned int hv_settle_us;
++	unsigned int core_cut_ms;
+ 	bool fixed_timing;
+ 	bool blob_count_minus_one;
+ 	u8 pull_filler;
+@@ -504,6 +508,9 @@ static void apple_z2_z2_checksum(u8 *cmd, unsigned int len);
+ static bool apple_z2_z2_checksum_valid(const u8 *cmd, unsigned int len);
+ static int apple_z2_hbpp_xfer(struct apple_z2 *z2, unsigned int len);
+ static int apple_z2_hbpp_nop(struct apple_z2 *z2);
++/* Test build: each D21 start-up stage in dmesg, and the iPad 6 settle as an option. */
++#define D21_STAGE(z2, fmt, ...) \
++	dev_info(&(z2)->spidev->dev, "D21 stage: " fmt "\n", ##__VA_ARGS__)
+ static void apple_z2_platform_power_off(struct apple_z2 *z2);
+ static int apple_z2_j71t_boot(struct apple_z2 *z2);
+ static int apple_z2_boot(struct apple_z2 *z2);
+@@ -2871,6 +2878,23 @@ static int apple_z2_iphone7_plus_power_on(struct apple_z2 *z2)
+ 
+ 	gpiod_set_value_cansleep(z2->reset_gpio, 1);
+ 
++	/*
++	 * The D21's core rail is an SMC function the bootloader leaves on, and
++	 * its regulator only knows what it wrote last: enabling it again keeps
++	 * the controller powered from before, and the high-voltage settle
++	 * below never happens. Cut it first, so every power-up, a reload
++	 * included, starts from off as on iOS.
++	 */
++	if (z2->info->core_cut_ms && !z2->core_enabled) {
++		error = regulator_enable(z2->core_supply);
++		if (!error)
++			error = regulator_disable(z2->core_supply);
++		D21_STAGE(z2, "core rail cut err=%d, off %u ms", error, z2->info->core_cut_ms);
++		if (error)
++			return error;
++		msleep(z2->info->core_cut_ms);
++	}
++
+ 	error = regulator_enable(z2->hv_supply);
+ 	if (error)
+ 		return error;
+@@ -3894,9 +3918,6 @@ static int apple_z2_gen2_send_calibration(struct apple_z2 *z2,
+ }
+ 
+ /* Reads a report @times times if the controller has it; absent is fine. */
+-/* Test build: each D21 start-up stage in dmesg, and the iPad 6 settle as an option. */
+-#define D21_STAGE(z2, fmt, ...) \
+-	dev_info(&(z2)->spidev->dev, "D21 stage: " fmt "\n", ##__VA_ARGS__)
+ static unsigned int d21_settle_ms;
+ module_param(d21_settle_ms, uint, 0444);
+ MODULE_PARM_DESC(d21_settle_ms,
+@@ -4900,6 +4921,7 @@ static const struct apple_z2_chip_info apple_z2_d21_info = {
+ 	.boot_timeout_ms = 5000,	/* the personality's first boot */
+ 	.reset_hold_ms = 25,
+ 	.hv_settle_us = 500000,
++	.core_cut_ms = 200,
+ 	.fixed_timing = true,
+ 	.blob_count_minus_one = true,
+ 	.pull_filler = 0xaa,
+-- 
+2.54.0 (Apple Git-157)
+
