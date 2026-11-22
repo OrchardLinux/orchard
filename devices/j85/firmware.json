@@ -14,7 +14,27 @@
         "zip": "Firmware/all_flash/DeviceTree.j85ap.im4p"
       },
       "sha256": "ed71ed5fef2b6ada426ba77619085eb962d0639c0eee2a12c3940d2ffbe63c39"
+    },
+    "J85.mtprops": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/multitouch/J85.mtprops"
+      },
+      "sha256": "05a9b027bf1985ae2ff80c69dbe16fb6083327f350aae47f6b2f4963d6bbdef2"
     }
   },
-  "outputs": []
+  "outputs": [
+    {
+      "destination": "lib/firmware/apple/j85-fwstart.z2fw",
+      "sha256": "a1c41dc571f7585827b37b96a794a5575fb71f46cf39818d85301ae37a22c27b",
+      "steps": [
+        {
+          "step": "z2fw-from-z2-packet@1",
+          "input": "J85.mtprops",
+          "profile": "C1F14,3",
+          "calibration_address": 268472320,
+          "calibration_size": 1024
+        }
+      ]
+    }
+  ]
 }
