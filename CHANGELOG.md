@@ -33,6 +33,9 @@ is missing or empty.
 
 ### Install & launch
 
+- A launcher may quit right after choosing a boot entry. m1n1 used to wait
+  for the computer to read its last answer before starting Linux, so the
+  device stayed on the boot splash when the launcher had already gone.
 - On Linux, `orchard run` and `orchard launch` use the released Pongo again
   instead of asking for a Mac with Xcode: the release lookup picked the
   moving `nightly` tag, which publishes no checksums.
