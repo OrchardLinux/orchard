@@ -1,5 +1,5 @@
 # iPhone 6s+ (S8000) (N66): identity from public sources
-# (tools/catalog/generate). In its platform's kernel, no bring-up yet; see docs/device-bring-up.md.
+# (tools/catalog/generate). RAM boots with storage read; see docs/device-bring-up.md.
 schema = 1
 kind = "hardware.device"
 
@@ -14,7 +14,7 @@ chip = 0x8000
 board = 0x06
 
 [boot]
-methods = ["checkm8-pongo"] # palera1n's device list (palera.in); not run with Orchard yet.
+methods = ["checkm8-pongo"] # palera1n 2.0.2's own Pongo, DFU entered from Recovery, Pongo bootr (2026-11-22)
 
 [kernel]
 platform = "apple-16k"
@@ -39,7 +39,7 @@ accelerometer = "untested"
 gyroscope = "untested"
 light_sensor = "missing"
 touch_id = "missing"
-storage_read = "missing"
+storage_read = "working" # NVMe 5 GT/s x2, 1 GiB read, no faults or timeouts (RAM boot 2026-11-22)
 storage_write = "missing"
 wifi = "missing"
 bluetooth_input = "missing"
