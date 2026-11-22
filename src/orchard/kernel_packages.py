@@ -20,6 +20,7 @@ import json
 from pathlib import Path
 import re
 import tarfile
+import urllib.error
 import zlib
 
 from .http import open_url
@@ -89,29 +90,47 @@ def apk_identity(data):
     raise ValueError('The apk package has no .PKGINFO')
 
 
+class Unavailable(OSError):
+    """The package repository couldn't be reached: an error to retry, never "no package"."""
+
+
+def fetch(url, timeout=60):
+    """URL's bytes; None if it doesn't exist (HTTP 404), Unavailable for any other failure."""
+    try:
+        with open_url(url, timeout=timeout) as response:
+            return response.read()
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        raise Unavailable(f'The Orchard package repository answered {error.code} for {url}') from error
+    except OSError as error:
+        raise Unavailable(f'The Orchard package repository is unreachable: {error}') from error
+
+
 def resolve(base, platform, architecture, layer_sha256):
     """The published linux-orchard-PLATFORM for BASE if it wraps exactly this layer: its entry and URL, else None.
 
     The package is the layer of an orchard release; installing another layer (a nightly, a local
     build, another release) must not swap in a different kernel, so the recipe's pin has to name
-    this layer's sha256 and the published version has to be that pin's release.
+    this layer's sha256 and the published version has to be that pin's release. Only that, a
+    package that isn't published, is None; a repository that can't be reached raises Unavailable.
     """
     arch = ARCH[base][architecture]
     name = 'linux-orchard-' + platform
     directory = INDEX[base].format(arch=arch)
-    try:
-        with open_url(f'{REPOSITORY}/{directory}', timeout=60) as response:
-            index = response.read()
-    except OSError:
+    index = fetch(f'{REPOSITORY}/{directory}')
+    if index is None:
         return None
     entry = (pacman_entry if base == 'pacman' else apk_entry)(index, name)
     if entry is None or not re.fullmatch(r'[A-Za-z0-9@._+-]+', entry['file'] or ''):
         return None
-    try:
-        with open_url(PIN.format(platform=platform), timeout=60) as response:
-            pin = json.loads(response.read())
-    except (OSError, ValueError):
+    pin = fetch(PIN.format(platform=platform))
+    if pin is None:
         return None
+    try:
+        pin = json.loads(pin)
+    except ValueError as error:
+        raise Unavailable(f'linux-orchard-{platform}\'s pin is not JSON') from error
     if pin.get('sha256') != layer_sha256 or not str(entry['version']).startswith(f'{pin.get("orchard")}-'):
         return None
     release = directory.rsplit('/', 1)[0]

@@ -521,7 +521,8 @@ def has_loader_patches(hardware):
 M1N1_INPUTS = ['boot/m1n1', 'boot/quiet/m1n1.patch', 'src/orchard/buildenv.py']
 TOOL_INPUTS = ['boot/initramfs/recovery/' + name for name in
                ('build-tools', 'build-tools-in-container', 'Containerfile', 'Containerfile.arm',
-                'install-toolchain', 'upstream.lock', 'check-tools.py', 'orchard-write.c')] + ['src/orchard/buildenv.py']
+                'install-toolchain', 'upstream.lock', 'check-tools.py', 'orchard-write.c',
+                'orchard-install-usb.c')] + ['src/orchard/buildenv.py']
 
 
 def recipe_work(components, recipe, key):
@@ -554,7 +555,7 @@ def _prepare_tools(hardware, components, architecture='arm64'):
         command(sys.executable, hardware / 'boot/initramfs/recovery/check-tools.py',
                 '--arch', architecture, *(work / 'bin' / name for name in
                                          ('busybox', 'dropbear', 'dropbearkey', 'wpa_supplicant', 'wpa_cli', 'iw',
-                                          'orchard-write', 'resize2fs', 'tune2fs')))
+                                          'orchard-write', 'orchard-install-usb', 'resize2fs', 'tune2fs')))
         for tool in (work / 'bin').iterdir():
             if tool.is_file() and not tool.is_symlink():
                 shutil.copyfile(tool, stage / tool.name)

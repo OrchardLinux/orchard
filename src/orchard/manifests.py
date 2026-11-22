@@ -41,7 +41,7 @@ def sources(document):
         for architecture, receipt in document.get('releases', {}).items():
             yield f'releases.{architecture}', receipt
     elif document['kind'] in ('orchard.install', 'orchard.boot'):
-        for name in ('root', 'boot', 'pongo', 'logo', 'm1n1', 'install_tools'):
+        for name in ('root', 'boot', 'pongo', 'logo', 'm1n1', 'install_tools', 'board_data'):
             if name in document:
                 yield name, document[name]
         if 'map' in document.get('root', {}):
