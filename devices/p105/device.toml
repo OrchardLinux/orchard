@@ -50,7 +50,8 @@ accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "missing"
 touch_id = "missing"
-# The 64 GB P105 read current logical pages matching the physical captures.
+# On the 64 GB P105, the whole logical disk matched an independent
+# reconstruction from raw flash captured during the same boot.
 # The PR #93 device trial used read-only internal volumes. The 16 GB
 # package's read-only layout (Cascadia's, mtd 0018) has not run on a tablet.
 storage_read = "working"

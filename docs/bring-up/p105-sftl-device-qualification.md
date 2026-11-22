@@ -118,6 +118,19 @@ hashes for 241 font files on System and 13 package manifests on Data.
 The file hashes stay on the measurement host for comparison after the
 erase trial and cold boot.
 
+## Whole-disk read on 20 November 2026
+
+The 64 GB P105 ran fusion `0989cf6` with the fix for checkpointed
+subtype-1 pages. All 954 logical ranges read from the iPad matched
+the SHA-256 hashes from an independent reconstruction of raw flash
+captured during the same boot. The comparison covered 64,000,000,000 bytes.
+
+The iPad and the independent decoder found 13,474 map runs, up from
+12,793 on 19 November. The checkpoint advanced from 189791520 to
+189814460 and the journal from 189808092 to 189958336. Both runs
+found 32 native context records. The same 29 live 4 KiB pages on
+block 896 matched their earlier iOS Data hashes.
+
 ## Repeating the checks
 
 Verify the running kernel notes against the measurement artifact and check
