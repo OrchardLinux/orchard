@@ -268,6 +268,12 @@ class Requests(Receiver):
                                 'boot_id': '5f0c7a5e-0000-4000-8000-000000000001', 'phase': 'ready', 'staged': [],
                                 'stream': None, 'record': None, 'error': None})
 
+    def test_messages_combined_in_one_write_are_each_answered(self):
+        frame = struct.pack('<BBHI', INFO, 0, 0, 2) + b'{}'
+        self.link.socket.sendall(frame * 3)
+        for _ in range(3):
+            self.assertEqual(self.ok(self.link.answer())['phase'], 'ready')
+
     def test_inspect_reports_install_devices_layout_and_the_disk_size(self):
         layout = self.ok(self.link.request(INSPECT))
         header, entries = read_gpt(self.disk)

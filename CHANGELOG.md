@@ -16,6 +16,10 @@ is missing or empty.
 - iPad Air 2 (Wi-Fi): internal storage works, so Omarchy installs with
   `orchard install` and starts from the iPad with `orchard launch`, next to
   iPadOS. The A8X storage controller (ANS1) has a kernel driver now.
+- iPad Air (Cellular): new, from thisiscamk's work. Touch, the display and
+  backlight, the Home button, USB serial and networking and reading its
+  internal storage work. `orchard install` is offered; writing to the
+  storage is untested so far. Wi-Fi and audio come later.
 
 ### Install & launch
 

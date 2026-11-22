@@ -35,22 +35,29 @@ check_system() {
 
 check_storage() {
     section "Storage"
-    if [ ! -e /sys/class/block/nvme0n1 ]; then
-        result SKIP "no NVMe storage"
+    # The internal disk: NVMe on A9 and later, ANS1 (asp) on A7-A8X.
+    disk=
+    for name in nvme0n1 asp0n1; do
+        [ -e "/sys/class/block/$name" ] && { disk=$name; break; }
+    done
+    if [ -z "$disk" ]; then
+        result SKIP "no NVMe or ANS1 storage"
         return
     fi
+    kind=${disk%%[0-9]*}
     writable=0
-    for ro in /sys/class/block/nvme*/ro; do
+    for ro in /sys/class/block/$kind*/ro; do
         [ "$(cat "$ro")" = 1 ] || writable=1
     done
-    if [ "$writable" = 0 ]; then result PASS "every NVMe namespace and partition read-only"
-    else result FAIL "an NVMe block device is still writable"; fi
+    if [ "$writable" = 0 ]; then result PASS "every $kind namespace and partition read-only"
+    else result FAIL "a $kind block device is still writable"; fi
+    say "  $disk: $(( $(cat /sys/class/block/$disk/size) * 512 )) bytes"
     start=$(uptime_s)
-    if dd if=/dev/nvme0n1 of=/dev/null bs=1M count=1024 2>>"$REPORT"; then
+    if dd if=/dev/$disk of=/dev/null bs=1M count=1024 2>>"$REPORT"; then
         seconds=$(( $(uptime_s) - start )); [ "$seconds" -gt 0 ] || seconds=1
         result PASS "read 1 GiB in ${seconds}s"
     else
-        result FAIL "1 GiB read from nvme0n1"
+        result FAIL "1 GiB read from $disk"
     fi
 }
 
@@ -173,7 +180,7 @@ check_display() {
 check_log() {
     section "Kernel log"
     dmesg > /run/dmesg.txt
-    bad=$(grep -iE 'dart.*(fault|error)|nvme.*(timeout|reset)|I/O error|WARNING:|BUG:|Oops|Unable to handle|hung_task|soft lockup|blocking DMA' /run/dmesg.txt)
+    bad=$(grep -iE 'dart.*(fault|error)|nvme.*(timeout|reset)|apple-asp.*(timeout|reset|crash)|I/O error|WARNING:|BUG:|Oops|Unable to handle|hung_task|soft lockup|blocking DMA' /run/dmesg.txt)
     if [ -z "$bad" ]; then
         result PASS "no IOMMU faults, NVMe timeouts, warnings or oopses"
     else

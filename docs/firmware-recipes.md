@@ -157,6 +157,7 @@ The CLI used to do that; it isn't needed for recipes any more.
 | `z2fw-from-mtprops@1` | `input`, `profile`, `packet`, `load_address`, `hbpp_version` | Z2 touch firmware with calibration records |
 | `z2fw-from-mtprops@2` | `input`, `profile`, `packet` | Z2 touch firmware from an mtprops packet array (iPhone 7 Plus) |
 | `z2fw-from-mtprops@3` | `input`, `profile`, `packet`, `touch_maximum`, `prox_maximum`, `fll_mval`, `ref_clk_div`, `clk32_clock_enable` | Legacy Gen1 Z2 touch firmware (iPhone 6), with full word counts, bounded calibration from the ADT and the board's kernel clock policy |
+| `z2fw-from-z2-packet@2` | `input`, `profile`, `calibration_address`, `calibration_size`, `prox_address`, `prox_size` | N1 touch firmware (iPad Air): SPI mode 0/HBPP 0x103, a zero proximity initialization packet, the unit's dynamic calibration and the unchanged legacy packet; reset, register calibration and execute stay in the driver |
 | `z2fw-from-mtfw@1` | `profile`, `otp_preflight` | Z2 touch firmware from an MTFW HBPP item list (iPad 7); each calibration loads Apple's default, then its record |
 | `hidspi-from-mtfw@1` | `profile` | the op list `apple_hidspi_ts` replays, from the MTFW of a HIDSPI controller (iPhone X); calibrations are named, not loaded |
 
