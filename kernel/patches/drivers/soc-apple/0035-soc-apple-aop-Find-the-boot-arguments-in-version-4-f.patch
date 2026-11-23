@@ -19,14 +19,19 @@ the iPhones' enabled AOP cannot come up at all. With it, the block at
 0x4f3a8 (0x19a bytes, STKG first) is patched and an iPhone 6s Plus
 reports AOP IS READY with its accelerometer, gyroscope and barometer.
 
-Pick the location by the header version and refuse images without the
-magic or with a version that isn't known.
+Take the version 4 location when the header says so, and keep the
+version 5 location for every other image, as before: the iPads' AOP
+images keep working whatever their header version.
 
+[Orchard: Henrik Klee: version 4 only selects the old location; images
+ without the magic or with another version keep the version 5 location
+ instead of being refused, so no board that boots its AOP today can lose
+ it]
 Assisted-by: LLM
 Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
 ---
- drivers/soc/apple/aop.c | 35 ++++++++++++++++++++++++++++-------
- 1 file changed, 28 insertions(+), 7 deletions(-)
+ drivers/soc/apple/aop.c | 28 +++++++++++++++++++++-------
+ 1 file changed, 21 insertions(+), 7 deletions(-)
 
 diff --git a/drivers/soc/apple/aop.c b/drivers/soc/apple/aop.c
 index 5c23317d1..7990ddb9b 100644
@@ -53,7 +58,7 @@ index 5c23317d1..7990ddb9b 100644
  
  #define APPLE_AOP_FOURCC(a, b, c, d)                                     \
  	(((u32)(a) << 24) | ((u32)(b) << 16) | ((u32)(c) << 8) | (u32)(d))
-@@ -281,11 +289,24 @@ static void apple_aop_add_bootarg(struct apple_aop_bootarg *args, unsigned int *
+@@ -281,11 +289,17 @@ static void apple_aop_add_bootarg(struct apple_aop_bootarg *args, unsigned int *
  static int apple_aop_patch_bootargs(struct apple_aop *aop, u8 *image, size_t size,
  				    struct apple_aop_bootarg *args, unsigned int count)
  {
@@ -63,18 +68,11 @@ index 5c23317d1..7990ddb9b 100644
  
 -	offset = get_unaligned_le32(image + APPLE_AOP_IMAGE_BOOTARGS_OFFSET);
 -	end = get_unaligned_le32(image + APPLE_AOP_IMAGE_BOOTARGS_SIZE);
-+	if (get_unaligned_le32(image + APPLE_AOP_IMAGE_MAGIC) != APPLE_AOP_IMAGE_MAGIC_UUID)
-+		return -EINVAL;
-+	switch (get_unaligned_le32(image + APPLE_AOP_IMAGE_VERSION)) {
-+	case 4:
++	if (get_unaligned_le32(image + APPLE_AOP_IMAGE_MAGIC) == APPLE_AOP_IMAGE_MAGIC_UUID &&
++	    get_unaligned_le32(image + APPLE_AOP_IMAGE_VERSION) == 4)
 +		location = APPLE_AOP_IMAGE_BOOTARGS_V4;
-+		break;
-+	case 5:
++	else
 +		location = APPLE_AOP_IMAGE_BOOTARGS_V5;
-+		break;
-+	default:
-+		return -EINVAL;
-+	}
 +
 +	offset = get_unaligned_le32(image + location);
 +	end = get_unaligned_le32(image + location + 4);

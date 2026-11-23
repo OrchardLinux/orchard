@@ -18,6 +18,10 @@ is missing or empty.
 - iPad mini 2 (Wi-Fi, A7): tested on the board. The display, backlight,
   buttons, internal storage reads, battery, charging, suspend and resume,
   USB serial and networking work, along with touch and Wi-Fi.
+- iPhone 6s Plus (A9): the accelerometer and gyroscope work, so the screen
+  follows the phone's orientation. The motion processor (AOP) now starts
+  with the iOS 15 firmware on every A9 iPhone (6s, 6s Plus, SE), with the
+  same sensor orientation; untested on the 6s and SE.
 
 ## [0.3.6] - 2026-11-24
 
