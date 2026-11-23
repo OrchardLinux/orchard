@@ -29,7 +29,7 @@ Every device Orchard installs on. ✅ works · ❌ doesn't work yet · – no su
 | iPhone SE | A9, Samsung | 🤔 | 🤔 | 🤔 | ❌ | ❌ | ❌ | ❌ | 🤔 | 🤔 | – |
 | iPhone SE | A9, TSMC | 🤔 | 🤔 | 🤔 | ❌ | ❌ | ❌ | ❌ | 🤔 | 🤔 | – |
 | iPad 6 (Cellular) | A10 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | 🤔 | – |
-| iPad 6 (Wi-Fi) | A10 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [henrikklee](https://github.com/henrikklee) |
+| iPad 6 (Wi-Fi) | A10 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [henrikklee](https://github.com/henrikklee), [stuart902](https://github.com/stuart902), [dl-alexandre](https://github.com/dl-alexandre), [tiktop101](https://github.com/tiktop101) |
 | iPad 7 (Cellular) | A10 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | 🤔 | – |
 | iPad 7 (Wi-Fi) | A10 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [jerricky26](https://github.com/jerricky26) |
 | iPhone 7 (Intel) | A10 | 🤔 | 🤔 | ❌ | ❌ | ❌ | ❌ | ❌ | 🤔 | 🤔 | – |

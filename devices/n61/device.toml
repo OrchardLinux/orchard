@@ -26,6 +26,7 @@ recipe = "firmware.json" # The GPU firmware comes from the iPod touch 6's iOS 12
 
 [support]
 status = "experimental"
+tested_by = ["amethyst-oak"] # issue #61
 
 # States: working, untested, missing, none (features.toml).
 [features]

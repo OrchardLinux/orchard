@@ -24,7 +24,7 @@ recipe = "firmware.json" # Relative to this device.toml; public recipe, not firm
 
 [support]
 status = "supported"
-tested_by = ["henrikklee"]
+tested_by = ["henrikklee", "stuart902", "dl-alexandre", "tiktop101"]
 
 # States: working, untested, missing, none (features.toml).
 [features]

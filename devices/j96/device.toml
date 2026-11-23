@@ -26,6 +26,7 @@ recipe = "firmware.json" # Pins this board's public IPSW; the GPU firmware comes
 
 [support]
 status = "experimental"
+tested_by = ["tcballard"] # omarchy-a issue #69
 
 # States: working, untested, missing, none (features.toml). "working" entries were seen
 # working on this board on the J96 bring-up kernel (Hoolock 6831bc7 plus this board's
