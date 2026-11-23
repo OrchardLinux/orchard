@@ -223,11 +223,14 @@
       "charging",
       "gyroscope",
       "light_sensor",
+      "storage_read",
+      "storage_write",
       "touch",
       "usb_host",
       "usb_network",
       "usb_serial",
-      "video_decode_hevc"
+      "video_decode_hevc",
+      "wifi"
     ],
     "j71t": [
       "accelerometer",
@@ -281,11 +284,14 @@
       "charging",
       "gyroscope",
       "light_sensor",
+      "storage_read",
+      "storage_write",
       "touch",
       "usb_host",
       "usb_network",
       "usb_serial",
-      "video_decode_hevc"
+      "video_decode_hevc",
+      "wifi"
     ],
     "j72t": [
       "accelerometer",
@@ -458,6 +464,10 @@
       "backlight",
       "buttons",
       "gyroscope",
+      "light_sensor",
+      "storage_read",
+      "storage_write",
+      "touch",
       "usb_network",
       "usb_serial"
     ],
@@ -466,6 +476,10 @@
       "backlight",
       "buttons",
       "gyroscope",
+      "light_sensor",
+      "storage_read",
+      "storage_write",
+      "touch",
       "usb_network",
       "usb_serial"
     ],
@@ -474,6 +488,10 @@
       "backlight",
       "buttons",
       "gyroscope",
+      "light_sensor",
+      "storage_read",
+      "storage_write",
+      "touch",
       "usb_network",
       "usb_serial"
     ],
@@ -482,6 +500,10 @@
       "backlight",
       "buttons",
       "gyroscope",
+      "light_sensor",
+      "storage_read",
+      "storage_write",
+      "touch",
       "usb_network",
       "usb_serial"
     ],
@@ -490,6 +512,10 @@
       "backlight",
       "buttons",
       "gyroscope",
+      "light_sensor",
+      "storage_read",
+      "storage_write",
+      "touch",
       "usb_network",
       "usb_serial"
     ]

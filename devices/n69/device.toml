@@ -1,5 +1,5 @@
 # iPhone SE (S8003) (N69): identity from public sources
-# (tools/catalog/generate). In its platform's kernel, no bring-up yet; see docs/device-bring-up.md.
+# (tools/catalog/generate). Storage, touch and light sensor as on the N66; see docs/device-bring-up.md.
 schema = 1
 kind = "hardware.device"
 
@@ -21,7 +21,7 @@ platform = "apple-16k"
 dtb = "s8003-n69" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until bring-up needs it.
+recipe = "firmware.json" # Pins this board's public IPSW; makes the touchscreen firmware.
 
 [support]
 status = "experimental"
@@ -33,14 +33,14 @@ status = "experimental"
 display = "untested"
 screen_off = "missing"
 backlight = "untested"
-touch = "missing"
+touch = "untested"
 buttons = "untested"
 accelerometer = "untested"
 gyroscope = "untested"
-light_sensor = "missing"
+light_sensor = "untested"
 touch_id = "missing"
-storage_read = "missing"
-storage_write = "missing"
+storage_read = "untested"
+storage_write = "untested"
 wifi = "missing"
 bluetooth_input = "missing"
 bluetooth_audio = "missing"

@@ -1,0 +1,130 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Mon, 23 Nov 2026 22:44:31 +0800
+Subject: [PATCH] arm64: dts: apple: s8000, s8003: Enable PCIe storage on every
+ A9 board
+
+Every A9 board keeps its NVMe storage on the same PCIe port. The IPSW
+device trees of N66, N66m, N71, N71m, N69, N69u, J71s, J72s, J71t and
+J72t agree on the root complex's registers, interrupts, MSI window and
+clock gates, on the storage port's PERST# (AP GPIO 160) and on the two
+DARTs and the NVMMU; they differ only in phandles and in the S8003's
+phy-ip window, which s8003.dtsi already describes. Enable the root
+complex and both DARTs with the SoC instead of in the iPhone 6s Plus
+(Samsung) and iPad 5 (TSMC) files, so storage comes up on every A9
+board, the Samsung iPad 5 included.
+
+DART 1 serves the Wi-Fi port, which every A9 board has as well; the
+iPad 5 file adds that port.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/s8000-n66.dts    | 13 -------------
+ arch/arm64/boot/dts/apple/s8000.dtsi       |  3 ---
+ arch/arm64/boot/dts/apple/s8003.dtsi       |  3 ---
+ arch/arm64/boot/dts/apple/s800x-ipad5.dtsi |  9 ---------
+ 4 files changed, 28 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/s8000-n66.dts b/arch/arm64/boot/dts/apple/s8000-n66.dts
+index 8c637f5..776473c 100644
+--- a/arch/arm64/boot/dts/apple/s8000-n66.dts
++++ b/arch/arm64/boot/dts/apple/s8000-n66.dts
+@@ -20,19 +20,6 @@
+ 	};
+ };
+ 
+-&pcie0_dart0 {
+-	status = "okay";
+-};
+-
+-&pcie0_dart1 {
+-	status = "okay";
+-};
+-
+-/* Storage only: the Wi-Fi port (pci-bridge1) isn't described yet. */
+-&pcie0 {
+-	status = "okay";
+-};
+-
+ &i2c2 {
+ 	status = "okay";
+ 
+diff --git a/arch/arm64/boot/dts/apple/s8000.dtsi b/arch/arm64/boot/dts/apple/s8000.dtsi
+index 250ae85..7dc8603 100644
+--- a/arch/arm64/boot/dts/apple/s8000.dtsi
++++ b/arch/arm64/boot/dts/apple/s8000.dtsi
+@@ -82,7 +82,6 @@
+ 		apple,error-reflector = /bits/ 64 <0x20fffc000>;
+ 		apple,fetch-config = <0x000e0303>;
+ 		apple,diag-config = <0x00000100>;
+-		status = "disabled";
+ 	};
+ 
+ 	pcie0_dart1: iommu@602008000 {
+@@ -95,7 +94,6 @@
+ 		apple,error-reflector = /bits/ 64 <0x20fffc000>;
+ 		apple,fetch-config = <0x000e0303>;
+ 		apple,diag-config = <0x00000100>;
+-		status = "disabled";
+ 	};
+ 
+ 	/*
+@@ -159,7 +157,6 @@
+ 				<&ps_pcie_link2>, <&ps_pcie_link3>;
+ 		power-domain-names = "core", "aux", "ref", "link0", "link1",
+ 				     "link2", "link3";
+-		status = "disabled";
+ 
+ 		/*
+ 		 * Storage. PERST# from the ADT pci-bridge0 function-perst;
+diff --git a/arch/arm64/boot/dts/apple/s8003.dtsi b/arch/arm64/boot/dts/apple/s8003.dtsi
+index 88b568c..eb46961 100644
+--- a/arch/arm64/boot/dts/apple/s8003.dtsi
++++ b/arch/arm64/boot/dts/apple/s8003.dtsi
+@@ -158,7 +158,6 @@
+ 		apple,error-reflector = /bits/ 64 <0x20fffc000>;
+ 		apple,fetch-config = <0x000e0303>;
+ 		apple,diag-config = <0x00000100>;
+-		status = "disabled";
+ 	};
+ 
+ 	pcie0_dart1: iommu@602008000 {
+@@ -171,7 +170,6 @@
+ 		apple,error-reflector = /bits/ 64 <0x20fffc000>;
+ 		apple,fetch-config = <0x000e0303>;
+ 		apple,diag-config = <0x00000100>;
+-		status = "disabled";
+ 	};
+ 
+ 	/*
+@@ -236,7 +234,6 @@
+ 				<&ps_pcie_link2>, <&ps_pcie_link3>;
+ 		power-domain-names = "core", "aux", "ref", "link0", "link1",
+ 				     "link2", "link3";
+-		status = "disabled";
+ 
+ 		/*
+ 		 * Storage. PERST# from the ADT pci-bridge0 function-perst;
+diff --git a/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi b/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
+index e51631d..c15bc28 100644
+--- a/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
++++ b/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
+@@ -392,18 +392,9 @@
+ 	status = "okay";
+ };
+ 
+-&pcie0_dart0 {
+-	status = "okay";
+-};
+-
+-&pcie0_dart1 {
+-	status = "okay";
+-};
+-
+ &pcie0 {
+ 	pinctrl-0 = <&wifi_clkreq_pins>;
+ 	pinctrl-names = "default";
+-	status = "okay";
+ 
+ 	/* Wi-Fi. PERST# from the ADT pci-bridge1 function-perst. */
+ 	pci@1,0 {

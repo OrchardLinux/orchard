@@ -41,6 +41,10 @@ is missing or empty.
   display, backlight and buttons work. The Samsung A9's PCIe storage
   controller works like the TSMC A9's without its phy-ip block. From
   ricktav's work.
+- iPhone 6s, iPhone 6s Plus (TSMC) and iPhone SE: storage, the touchscreen
+  and the light sensor are switched on as on the iPhone 6s Plus (Samsung),
+  and the iPad 5 (Samsung) gets storage and Wi-Fi like the TSMC model; not
+  tried on these devices yet.
 - iPod touch 6: internal storage works, so Omarchy installs with
   `orchard install` next to iOS. The touchscreen, backlight, buttons and
   Wi-Fi work, and Bluetooth comes up. From Berkay Kösebay's work.

@@ -14,7 +14,30 @@
         "zip": "Firmware/all_flash/DeviceTree.n71map.im4p"
       },
       "sha256": "958132d063ff5dd73568c250cc44426a4bbd5843ae95644c451cbcb146d12ca8"
+    },
+    "N71.mtprops": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/multitouch/N71.mtprops"
+      },
+      "device": "/usr/share/firmware/multitouch/N71.mtprops",
+      "sha256": "5bfab65fc0c6f7070338f06f0ac9a0d9b889fad8dcb083aeaab4623f462d613b"
     }
   },
-  "outputs": []
+  "outputs": [
+    {
+      "destination": "lib/firmware/apple/n71-fwstart.z2fw",
+      "sha256": "9fa520e5581e1a278c384a3702fda98951df50de71f2cdd6e9b2b62a2c6e4965",
+      "steps": [
+        {
+          "step": "z2fw-from-z2-packet@3",
+          "input": "N71.mtprops",
+          "profile": "C1F5B,1",
+          "calibration_address": 268472320,
+          "calibration_size": 1024,
+          "prox_address": 268473856,
+          "prox_size": 128
+        }
+      ]
+    }
+  ]
 }

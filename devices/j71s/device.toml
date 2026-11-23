@@ -1,7 +1,6 @@
 # iPad 5 (Wi-Fi, Samsung) (J71S, S8000 Samsung): hardware identity and firmware recipe.
-# Storage and Wi-Fi aren't described yet: this model can't install. The S8000
-# PCIe block has no phy-ip and needs none (its lanes come with the phy tunables);
-# the n66 reads its storage with it.
+# Storage and Wi-Fi as on the TSMC model: the S8000's PCIe block has no phy-ip and
+# needs none (its lanes come with the phy tunables); the n66 reads its storage with it.
 schema = 1
 kind = "hardware.device"
 
@@ -42,9 +41,9 @@ accelerometer = "untested"
 gyroscope = "untested"
 light_sensor = "untested"
 touch_id = "missing"
-storage_read = "missing"
-storage_write = "missing"
-wifi = "missing"
+storage_read = "untested"
+storage_write = "untested"
+wifi = "untested"
 bluetooth_input = "untested"
 bluetooth_audio = "untested"
 cellular = "none"
