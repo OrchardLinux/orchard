@@ -50,7 +50,7 @@ Every device Orchard installs on. ✅ works · ❌ doesn't work yet · – no su
 | iPhone 8 (GSM) | A11 | 🤔 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
 | iPhone 8 (Global) | A11 | 🤔 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
 | iPhone 8 Plus (GSM) | A11 | 🤔 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
-| iPhone 8 Plus (Global) | A11 | 🤔 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🤔 | ❌ | [ryzensnyper](https://github.com/ryzensnyper) |
+| iPhone 8 Plus (Global) | A11 | 🤔 | ❌ | 🤔 | ❌ | ❌ | ❌ | ❌ | 🤔 | ❌ | [ryzensnyper](https://github.com/ryzensnyper) |
 | iPhone X (GSM) | A11 | ✅ | ❌ | ✅ | 🤔 | ❌ | ❌ | ❌ | 🤔 | ❌ | [edulmartins](https://github.com/edulmartins) |
 | iPhone X (Global) | A11 | 🤔 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
 
@@ -235,7 +235,7 @@ Boards Orchard builds for. States: working, untested, missing, none (no such har
 | `j208` | untested | missing | untested | missing | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `d20` | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `d201` | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `d21` | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `d21` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `d211` | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `d22` | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `d221` | working | working | working | missing | working | working | missing | missing | missing | none | working | working | untested | missing | missing | missing | working | missing | missing | untested | untested | working | untested | missing | missing | missing | missing | missing |
@@ -292,7 +292,7 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `j208` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | – | yes | yes | – | – | – | – |
 | `d20` | experimental | yes | – | – | – | – | – | yes | yes | – | – | – | yes | – | yes | yes | – | – | – | – |
 | `d201` | experimental | yes | – | – | – | – | – | yes | yes | – | – | – | yes | – | yes | yes | – | – | – | – |
-| `d21` | experimental | yes | – | – | – | – | – | yes | yes | – | – | – | yes | – | yes | yes | – | – | – | – |
+| `d21` | experimental | yes | yes | – | – | – | – | yes | yes | – | – | – | yes | – | yes | yes | – | – | – | – |
 | `d211` | experimental | yes | – | – | – | – | – | yes | yes | – | – | – | yes | – | yes | yes | – | – | – | – |
 | `d22` | experimental | yes | yes | – | – | – | – | yes | yes | – | – | – | yes | – | yes | yes | – | – | – | – |
 | `d221` | experimental | yes | yes | – | – | – | – | yes | yes | yes | – | – | yes | – | yes | yes | – | – | – | – |
