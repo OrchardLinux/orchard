@@ -22,8 +22,9 @@ class N61Data(unittest.TestCase):
         self.assertEqual(self.device['kernel'], {'platform': 'apple-4k', 'dtb': 't7000-n61'})
         self.assertEqual(self.device['boot'], {'methods': ['checkm8-pongo']})
 
-    def test_installation_waits_for_storage_writes(self):
-        self.assertIn('its internal storage cannot be written yet', data.install_blockers('n61'))
+    def test_installation_follows_the_shared_a8_storage(self):
+        # ANS1 is on for every A8 board, so storage writes are untested, not missing.
+        self.assertEqual(data.install_blockers('n61'), [])
 
     def test_touch_recipe_selects_the_pinned_n61_gen1_profile(self):
         path = data.firmware_path('n61')

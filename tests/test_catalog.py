@@ -315,7 +315,7 @@ class InferredInstall(unittest.TestCase):
         self.assertEqual(boards, {'d10', 'd101', 'd11', 'd111', 'd20', 'd201', 'd21', 'd211', 'd22', 'd221',
                                   'j171', 'j172', 'j71', 'j71b', 'j71s', 'j71t', 'j72', 'j72b', 'j72s',
                                   'j72t', 'j73', 'j81', 'j82', 'j85', 'j85m', 'j86', 'j86m', 'j87', 'j87m',
-                                  'n102', 'n51', 'n53', 'n66', 'n66m', 'n69', 'n69u', 'n71', 'n71m'})
+                                  'j96', 'j97', 'n102', 'n51', 'n53', 'n56', 'n61', 'n66', 'n66m', 'n69', 'n69u', 'n71', 'n71m'})
 
     def test_data_can_name_a_method_this_code_does_not_implement(self):
         from orchard import hardware

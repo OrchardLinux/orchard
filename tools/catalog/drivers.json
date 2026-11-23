@@ -3,26 +3,38 @@
     "d10": [
       "accelerometer",
       "backlight",
+      "battery",
       "bluetooth_audio",
       "bluetooth_input",
       "buttons",
+      "charging",
       "gyroscope",
+      "light_sensor",
       "storage_read",
       "storage_write",
+      "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "video_decode_hevc",
+      "wifi"
     ],
     "d101": [
       "accelerometer",
       "backlight",
+      "battery",
       "bluetooth_audio",
       "bluetooth_input",
       "buttons",
+      "charging",
       "gyroscope",
+      "light_sensor",
       "storage_read",
       "storage_write",
+      "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "video_decode_hevc",
+      "wifi"
     ],
     "d11": [
       "accelerometer",
@@ -31,6 +43,7 @@
       "bluetooth_audio",
       "bluetooth_input",
       "buttons",
+      "charging",
       "gyroscope",
       "light_sensor",
       "storage_read",
@@ -38,6 +51,7 @@
       "touch",
       "usb_network",
       "usb_serial",
+      "video_decode_hevc",
       "wifi"
     ],
     "d111": [
@@ -47,6 +61,7 @@
       "bluetooth_audio",
       "bluetooth_input",
       "buttons",
+      "charging",
       "gyroscope",
       "light_sensor",
       "storage_read",
@@ -54,53 +69,65 @@
       "touch",
       "usb_network",
       "usb_serial",
+      "video_decode_hevc",
       "wifi"
     ],
     "d20": [
       "backlight",
       "battery",
+      "buttons",
       "storage_read",
       "storage_write",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "wifi"
     ],
     "d201": [
       "backlight",
       "battery",
+      "buttons",
       "storage_read",
       "storage_write",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "wifi"
     ],
     "d21": [
       "backlight",
       "battery",
+      "buttons",
       "storage_read",
       "storage_write",
       "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "wifi"
     ],
     "d211": [
       "backlight",
       "battery",
+      "buttons",
       "storage_read",
       "storage_write",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "wifi"
     ],
     "d22": [
       "backlight",
       "battery",
+      "buttons",
       "storage_read",
       "storage_write",
       "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "wifi"
     ],
     "d221": [
       "backlight",
       "battery",
+      "buttons",
       "storage_read",
       "storage_write",
       "touch",
@@ -450,6 +477,8 @@
       "backlight",
       "battery",
       "buttons",
+      "storage_read",
+      "storage_write",
       "touch",
       "usb_network",
       "usb_serial",
@@ -459,6 +488,8 @@
       "backlight",
       "battery",
       "buttons",
+      "storage_read",
+      "storage_write",
       "touch",
       "usb_network",
       "usb_serial",
@@ -509,89 +540,117 @@
     "n56": [
       "backlight",
       "battery",
+      "bluetooth_audio",
+      "bluetooth_input",
       "buttons",
+      "storage_read",
+      "storage_write",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "wifi"
     ],
     "n61": [
       "backlight",
       "battery",
+      "bluetooth_audio",
+      "bluetooth_input",
       "buttons",
+      "storage_read",
+      "storage_write",
       "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "wifi"
     ],
     "n66": [
       "accelerometer",
       "backlight",
+      "battery",
       "buttons",
+      "charging",
       "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
       "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "video_decode_hevc"
     ],
     "n66m": [
       "accelerometer",
       "backlight",
+      "battery",
       "buttons",
+      "charging",
       "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
       "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "video_decode_hevc"
     ],
     "n69": [
       "accelerometer",
       "backlight",
+      "battery",
       "buttons",
+      "charging",
       "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
       "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "video_decode_hevc"
     ],
     "n69u": [
       "accelerometer",
       "backlight",
+      "battery",
       "buttons",
+      "charging",
       "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
       "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "video_decode_hevc"
     ],
     "n71": [
       "accelerometer",
       "backlight",
+      "battery",
       "buttons",
+      "charging",
       "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
       "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "video_decode_hevc"
     ],
     "n71m": [
       "accelerometer",
       "backlight",
+      "battery",
       "buttons",
+      "charging",
       "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
       "touch",
       "usb_network",
-      "usb_serial"
+      "usb_serial",
+      "video_decode_hevc"
     ]
   },
   "kernels": {

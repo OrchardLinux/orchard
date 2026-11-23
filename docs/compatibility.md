@@ -26,33 +26,37 @@ Every device Orchard installs on. ✅ works · ❌ doesn't work yet · – no su
 | iPad mini 3 (Wi-Fi) | A7 | 🤔 | ❌ | 🤔 | ❌ | ❌ | ❌ | 🤔 | 🤔 | ❌ | – |
 | iPhone 5s (GSM) | A7 | 🤔 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
 | iPhone 5s (Global) | A7 | 🤔 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
+| iPad mini 4 (Cellular) | A8 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
+| iPad mini 4 (Wi-Fi) | A8 | 🤔 | 🤔 | 🤔 | ✅ | ❌ | ❌ | ❌ | 🤔 | ❌ | [tcballard](https://github.com/tcballard) |
+| iPhone 6 | A8 | 🤔 | 🤔 | ✅ | 🤔 | 🤔 | ❌ | ❌ | 🤔 | ❌ | [amethyst-oak](https://github.com/amethyst-oak) |
+| iPhone 6+ | A8 | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | ❌ | ❌ | 🤔 | ❌ | – |
 | iPod touch 6 | A8 | ✅ | ✅ | ✅ | ✅ | 🤔 | ❌ | ❌ | 🤔 | ❌ | [brkosebay](https://github.com/brkosebay) |
-| iPad Air 2 (Cellular) | A8X | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | ❌ | ❌ | 🤔 | ❌ | – |
+| iPad Air 2 (Cellular) | A8X | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | – |
 | iPad Air 2 (Wi-Fi) | A8X | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [ricktav](https://github.com/ricktav), [mattonik](https://github.com/mattonik) |
 | iPad 5 (Cellular) | A9, Samsung | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | – |
 | iPad 5 (Cellular) | A9, TSMC | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | – |
 | iPad 5 (Wi-Fi) | A9, Samsung | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | – |
 | iPad 5 (Wi-Fi) | A9, TSMC | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [brkosebay](https://github.com/brkosebay) |
-| iPhone 6s | A9, Samsung | 🤔 | 🤔 | 🤔 | ❌ | ❌ | ❌ | ❌ | 🤔 | 🤔 | – |
-| iPhone 6s | A9, TSMC | 🤔 | 🤔 | 🤔 | ❌ | ❌ | ❌ | ❌ | 🤔 | 🤔 | – |
-| iPhone 6s Plus | A9, Samsung | ✅ | 🤔 | ✅ | ❌ | ❌ | ❌ | ❌ | 🤔 | 🤔 | [ricktav](https://github.com/ricktav) |
-| iPhone 6s Plus | A9, TSMC | 🤔 | 🤔 | 🤔 | ❌ | ❌ | ❌ | ❌ | 🤔 | 🤔 | – |
-| iPhone SE | A9, Samsung | 🤔 | 🤔 | 🤔 | ❌ | ❌ | ❌ | ❌ | 🤔 | 🤔 | – |
-| iPhone SE | A9, TSMC | 🤔 | 🤔 | 🤔 | ❌ | ❌ | ❌ | ❌ | 🤔 | 🤔 | – |
-| iPad 6 (Cellular) | A10 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | 🤔 | – |
+| iPhone 6s | A9, Samsung | 🤔 | 🤔 | 🤔 | ❌ | ❌ | ❌ | 🤔 | 🤔 | 🤔 | – |
+| iPhone 6s | A9, TSMC | 🤔 | 🤔 | 🤔 | ❌ | ❌ | ❌ | 🤔 | 🤔 | 🤔 | – |
+| iPhone 6s Plus | A9, Samsung | ✅ | 🤔 | ✅ | ❌ | ❌ | ❌ | 🤔 | 🤔 | 🤔 | [ricktav](https://github.com/ricktav) |
+| iPhone 6s Plus | A9, TSMC | 🤔 | 🤔 | 🤔 | ❌ | ❌ | ❌ | 🤔 | 🤔 | 🤔 | – |
+| iPhone SE | A9, Samsung | 🤔 | 🤔 | 🤔 | ❌ | ❌ | ❌ | 🤔 | 🤔 | 🤔 | – |
+| iPhone SE | A9, TSMC | 🤔 | 🤔 | 🤔 | ❌ | ❌ | ❌ | 🤔 | 🤔 | 🤔 | – |
+| iPad 6 (Cellular) | A10 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | – |
 | iPad 6 (Wi-Fi) | A10 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [henrikklee](https://github.com/henrikklee), [stuart902](https://github.com/stuart902), [dl-alexandre](https://github.com/dl-alexandre), [tiktop101](https://github.com/tiktop101) |
-| iPad 7 (Cellular) | A10 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | 🤔 | – |
+| iPad 7 (Cellular) | A10 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | – |
 | iPad 7 (Wi-Fi) | A10 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [jerricky26](https://github.com/jerricky26) |
-| iPhone 7 (Intel) | A10 | 🤔 | 🤔 | ❌ | ❌ | ❌ | ❌ | ❌ | 🤔 | 🤔 | – |
-| iPhone 7 (Qualcomm) | A10 | 🤔 | 🤔 | ❌ | ❌ | ❌ | ❌ | ❌ | 🤔 | 🤔 | – |
-| iPhone 7 Plus (Intel) | A10 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | ❌ | ❌ | 🤔 | 🤔 | – |
-| iPhone 7 Plus (Qualcomm) | A10 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | ❌ | ❌ | 🤔 | 🤔 | – |
-| iPhone 8 (GSM) | A11 | 🤔 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
-| iPhone 8 (Global) | A11 | 🤔 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
-| iPhone 8 Plus (GSM) | A11 | 🤔 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
-| iPhone 8 Plus (Global) | A11 | 🤔 | ❌ | 🤔 | ❌ | ❌ | ❌ | ❌ | 🤔 | ❌ | [ryzensnyper](https://github.com/ryzensnyper) |
+| iPhone 7 (Intel) | A10 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | – |
+| iPhone 7 (Qualcomm) | A10 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | – |
+| iPhone 7 Plus (Intel) | A10 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | – |
+| iPhone 7 Plus (Qualcomm) | A10 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | – |
+| iPhone 8 (GSM) | A11 | 🤔 | ❌ | ❌ | 🤔 | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
+| iPhone 8 (Global) | A11 | 🤔 | ❌ | ❌ | 🤔 | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
+| iPhone 8 Plus (GSM) | A11 | 🤔 | ❌ | ❌ | 🤔 | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
+| iPhone 8 Plus (Global) | A11 | 🤔 | ❌ | 🤔 | 🤔 | ❌ | ❌ | ❌ | 🤔 | ❌ | [ryzensnyper](https://github.com/ryzensnyper) |
 | iPhone X (GSM) | A11 | ✅ | ❌ | ✅ | 🤔 | ❌ | ❌ | ❌ | 🤔 | ❌ | [edulmartins](https://github.com/edulmartins) |
-| iPhone X (Global) | A11 | 🤔 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
+| iPhone X (Global) | A11 | 🤔 | ❌ | 🤔 | 🤔 | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
 
 Not working on any device yet: Touch ID, cellular, cameras.
 
@@ -113,11 +117,11 @@ Which A9 do I have? iOS doesn't show it. In DFU mode, `orchard install` names th
 | A7 | iPad mini 3 (China) | `j87m` | iPad4,9 | experimental | yes | checkm8-pongo | yes | yes | 16H88 |
 | A7 | iPhone 5s (GSM) | `n51` | iPhone6,1 | experimental | yes | checkm8-pongo | yes | yes | 16H88 |
 | A7 | iPhone 5s (Global) | `n53` | iPhone6,2 | experimental | yes | checkm8-pongo | yes | yes | 16H88 |
-| A8 | iPad mini 4 (Wi-Fi) | `j96` | iPad5,1 | experimental | – | checkm8-pongo | yes | yes | 19H422 |
-| A8 | iPad mini 4 (Cellular) | `j97` | iPad5,2 | experimental | – | checkm8-pongo | yes | yes | 19H422 |
+| A8 | iPad mini 4 (Wi-Fi) | `j96` | iPad5,1 | experimental | yes | checkm8-pongo | yes | yes | 19H422 |
+| A8 | iPad mini 4 (Cellular) | `j97` | iPad5,2 | experimental | yes | checkm8-pongo | yes | yes | 19H422 |
 | A8 | iPod touch 6 | `n102` | iPod7,1 | experimental | yes | checkm8-pongo | yes | yes | 16H88 |
-| A8 | iPhone 6+ | `n56` | iPhone7,1 | experimental | – | checkm8-pongo | yes | yes | 16H88 |
-| A8 | iPhone 6 | `n61` | iPhone7,2 | experimental | – | checkm8-pongo | yes | yes | 16H22 |
+| A8 | iPhone 6+ | `n56` | iPhone7,1 | experimental | yes | checkm8-pongo | yes | yes | 16H88 |
+| A8 | iPhone 6 | `n61` | iPhone7,2 | experimental | yes | checkm8-pongo | yes | yes | 16H22 |
 | A8X | iPad Air 2 (Wi-Fi) | `j81` | iPad5,3 | experimental | yes | checkm8-pongo | yes | yes | 19H422 |
 | A8X | iPad Air 2 (Cellular) | `j82` | iPad5,4 | experimental | yes | checkm8-pongo | yes | yes | 19H422 |
 | A9, Samsung | iPad 5 (Wi-Fi, Samsung) | `j71s` | iPad6,11 | experimental | yes | checkm8-pongo | yes | yes | 20H350 |
@@ -200,44 +204,44 @@ Boards Orchard builds for. States: working, untested, missing, none (no such har
 | `j87m` | untested | missing | untested | missing | untested | untested | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `n51` | untested | missing | untested | missing | missing | untested | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `n53` | untested | missing | untested | missing | missing | untested | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `j96` | working | missing | working | untested | untested | working | missing | missing | missing | missing | missing | missing | working | missing | missing | none | working | missing | missing | untested | untested | working | working | missing | missing | missing | missing | missing |
-| `j97` | untested | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing | missing | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `n102` | working | missing | working | working | working | working | missing | missing | missing | none | working | working | working | untested | untested | none | missing | missing | missing | untested | untested | working | untested | missing | missing | missing | missing | missing |
-| `n56` | untested | missing | untested | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `n61` | working | untested | untested | untested | working | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | missing | missing | untested | untested | working | untested | missing | missing | missing | missing | missing |
+| `j96` | working | untested | working | untested | untested | working | missing | missing | missing | missing | untested | untested | working | missing | missing | none | working | missing | missing | untested | untested | working | working | missing | missing | missing | missing | missing |
+| `j97` | untested | untested | untested | untested | untested | untested | missing | missing | missing | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `n102` | working | untested | working | working | working | working | missing | missing | missing | none | working | working | working | untested | untested | none | missing | missing | missing | untested | untested | working | untested | missing | missing | missing | missing | missing |
+| `n56` | untested | untested | untested | untested | missing | untested | missing | missing | missing | missing | untested | untested | untested | untested | untested | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `n61` | working | untested | untested | untested | working | untested | missing | missing | missing | missing | untested | untested | untested | untested | untested | missing | untested | missing | missing | untested | untested | working | untested | missing | missing | missing | missing | missing |
 | `j81` | working | working | working | missing | working | working | missing | missing | missing | missing | working | working | working | working | working | none | working | working | working | working | working | working | working | missing | working | missing | missing | missing |
-| `j82` | untested | untested | untested | missing | untested | untested | missing | missing | missing | missing | untested | untested | untested | untested | untested | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `j82` | untested | untested | untested | missing | untested | untested | missing | missing | missing | missing | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | untested | untested | missing | untested | missing | missing | missing |
 | `j71s` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | none | untested | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested |
 | `j72s` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested |
-| `n66` | working | missing | working | untested | working | working | untested | untested | working | missing | working | working | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `n69u` | untested | missing | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `n71` | untested | missing | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `n66` | working | untested | working | untested | working | working | untested | untested | working | missing | working | working | missing | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | missing | missing | missing | missing | untested |
+| `n69u` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | missing | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | missing | missing | missing | missing | untested |
+| `n71` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | missing | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | missing | missing | missing | missing | untested |
 | `j71t` | working | working | working | working | working | working | working | working | working | missing | working | working | working | working | untested | none | working | working | working | working | working | working | working | working | working | working | missing | working |
 | `j72t` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested |
-| `n66m` | untested | missing | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `n69` | untested | missing | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `n71m` | untested | missing | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `n66m` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | missing | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | missing | missing | missing | missing | untested |
+| `n69` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | missing | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | missing | missing | missing | missing | untested |
+| `n71m` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | missing | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | missing | missing | missing | missing | untested |
 | `j127` | untested | missing | untested | missing | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `j128` | untested | missing | untested | missing | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `j98a` | untested | missing | untested | missing | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `j99a` | untested | missing | untested | missing | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `d10` | untested | untested | untested | untested | missing | untested | untested | untested | missing | missing | untested | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `d101` | untested | untested | untested | untested | missing | untested | untested | untested | missing | missing | untested | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `d11` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `d111` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `j171` | working | working | working | working | working | working | working | working | working | missing | working | working | working | working | working | none | working | working | missing | working | working | working | working | untested | working | working | missing | working |
-| `j172` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | untested | untested | untested | missing | untested |
+| `d10` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | missing | untested | untested | missing | untested | untested | untested | untested | missing | missing | missing | missing | untested |
+| `d101` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | missing | untested | untested | missing | untested | untested | untested | untested | missing | missing | missing | missing | untested |
+| `d11` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | missing | untested | untested | missing | untested | untested | untested | untested | missing | missing | missing | missing | untested |
+| `d111` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | missing | untested | untested | missing | untested | untested | untested | untested | missing | missing | missing | missing | untested |
+| `j171` | working | working | working | working | working | working | working | working | working | missing | working | working | working | working | working | none | working | working | untested | working | working | working | working | untested | working | working | missing | working |
+| `j172` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested |
 | `j71b` | working | working | working | working | working | working | working | untested | untested | missing | working | working | working | working | working | none | working | working | working | working | working | working | working | untested | working | working | missing | untested |
-| `j72b` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested |
+| `j72b` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested |
 | `j120` | untested | missing | untested | missing | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `j121` | untested | missing | untested | missing | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `j207` | untested | missing | untested | missing | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `j208` | untested | missing | untested | missing | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `d20` | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `d201` | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `d21` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `d211` | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `d22` | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `d20` | untested | untested | untested | missing | missing | untested | missing | missing | missing | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `d201` | untested | untested | untested | missing | missing | untested | missing | missing | missing | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `d21` | untested | untested | untested | missing | untested | untested | missing | missing | missing | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `d211` | untested | untested | untested | missing | missing | untested | missing | missing | missing | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `d22` | untested | untested | untested | missing | untested | untested | missing | missing | missing | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `d221` | working | working | working | missing | working | working | missing | missing | missing | none | working | working | untested | missing | missing | missing | working | missing | missing | untested | untested | working | untested | missing | missing | missing | missing | missing |
 
 ## Drivers
@@ -257,31 +261,31 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `j87m` | experimental | yes | yes | yes | – | – | – | yes | yes | – | – | – | yes | yes | yes | yes | – | yes | – | – |
 | `n51` | experimental | yes | – | yes | – | – | – | yes | yes | – | – | – | – | – | yes | yes | – | yes | – | – |
 | `n53` | experimental | yes | – | yes | – | – | – | yes | yes | – | – | – | – | – | yes | yes | – | yes | – | – |
-| `j96` | experimental | yes | yes | yes | – | – | – | – | – | yes | – | – | yes | – | yes | yes | – | – | – | – |
-| `j97` | experimental | yes | yes | yes | – | – | – | – | – | yes | – | – | yes | – | yes | yes | – | – | – | – |
+| `j96` | experimental | yes | yes | yes | – | – | – | yes | yes | yes | – | – | yes | – | yes | yes | – | – | – | – |
+| `j97` | experimental | yes | yes | yes | – | – | – | yes | yes | yes | – | – | yes | – | yes | yes | – | – | – | – |
 | `n102` | experimental | yes | yes | yes | – | – | – | yes | yes | yes | yes | yes | – | – | yes | yes | – | – | – | – |
-| `n56` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | yes | – | yes | yes | – | – | – | – |
-| `n61` | experimental | yes | yes | yes | – | – | – | – | – | – | – | – | yes | – | yes | yes | – | – | – | – |
+| `n56` | experimental | yes | – | yes | – | – | – | yes | yes | yes | yes | yes | yes | – | yes | yes | – | – | – | – |
+| `n61` | experimental | yes | yes | yes | – | – | – | yes | yes | yes | yes | yes | yes | – | yes | yes | – | – | – | – |
 | `j81` | experimental | yes | yes | yes | – | – | – | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes | – | – |
 | `j82` | experimental | yes | yes | yes | – | – | – | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes | – | – |
 | `j71s` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes |
 | `j72s` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes |
-| `n66` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | – | – | yes | yes | – | – | – | – |
-| `n69u` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | – | – | yes | yes | – | – | – | – |
-| `n71` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | – | – | yes | yes | – | – | – | – |
+| `n66` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | – | – | yes |
+| `n69u` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | – | – | yes |
+| `n71` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | – | – | yes |
 | `j71t` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes |
 | `j72t` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes |
-| `n66m` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | – | – | yes | yes | – | – | – | – |
-| `n69` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | – | – | yes | yes | – | – | – | – |
-| `n71m` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | – | – | yes | yes | – | – | – | – |
+| `n66m` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | – | – | yes |
+| `n69` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | – | – | yes |
+| `n71m` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | – | – | yes |
 | `j127` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | – | yes | yes | – | – | – | – |
 | `j128` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | – | yes | yes | – | – | – | – |
 | `j98a` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | – | yes | yes | – | – | – | – |
 | `j99a` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | – | yes | yes | – | – | – | – |
-| `d10` | experimental | yes | – | yes | yes | yes | – | yes | yes | – | yes | yes | – | – | yes | yes | – | – | – | – |
-| `d101` | experimental | yes | – | yes | yes | yes | – | yes | yes | – | yes | yes | – | – | yes | yes | – | – | – | – |
-| `d11` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes | yes | – | – | – | – |
-| `d111` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes | yes | – | – | – | – |
+| `d10` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes |
+| `d101` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes |
+| `d11` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes |
+| `d111` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes |
 | `j171` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
 | `j172` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
 | `j71b` | supported | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
@@ -290,12 +294,12 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `j121` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | – | yes | yes | – | – | – | – |
 | `j207` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | – | yes | yes | – | – | – | – |
 | `j208` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | – | yes | yes | – | – | – | – |
-| `d20` | experimental | yes | – | – | – | – | – | yes | yes | – | – | – | yes | – | yes | yes | – | – | – | – |
-| `d201` | experimental | yes | – | – | – | – | – | yes | yes | – | – | – | yes | – | yes | yes | – | – | – | – |
-| `d21` | experimental | yes | yes | – | – | – | – | yes | yes | – | – | – | yes | – | yes | yes | – | – | – | – |
-| `d211` | experimental | yes | – | – | – | – | – | yes | yes | – | – | – | yes | – | yes | yes | – | – | – | – |
-| `d22` | experimental | yes | yes | – | – | – | – | yes | yes | – | – | – | yes | – | yes | yes | – | – | – | – |
-| `d221` | experimental | yes | yes | – | – | – | – | yes | yes | yes | – | – | yes | – | yes | yes | – | – | – | – |
+| `d20` | experimental | yes | – | yes | – | – | – | yes | yes | yes | – | – | yes | – | yes | yes | – | – | – | – |
+| `d201` | experimental | yes | – | yes | – | – | – | yes | yes | yes | – | – | yes | – | yes | yes | – | – | – | – |
+| `d21` | experimental | yes | yes | yes | – | – | – | yes | yes | yes | – | – | yes | – | yes | yes | – | – | – | – |
+| `d211` | experimental | yes | – | yes | – | – | – | yes | yes | yes | – | – | yes | – | yes | yes | – | – | – | – |
+| `d22` | experimental | yes | yes | yes | – | – | – | yes | yes | yes | – | – | yes | – | yes | yes | – | – | – | – |
+| `d221` | experimental | yes | yes | yes | – | – | – | yes | yes | yes | – | – | yes | – | yes | yes | – | – | – | – |
 
 ### Where feature states and drivers disagree
 
@@ -315,24 +319,7 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `j87m` | Speakers | missing, but a driver binds |
 | `n51` | Speakers | missing, but a driver binds |
 | `n53` | Speakers | missing, but a driver binds |
-| `j82` | Charging | missing, but a driver binds |
-| `j82` | Speakers | missing, but a driver binds |
 | `j71s` | Microphone | untested, but no driver binds |
 | `j72s` | Microphone | untested, but no driver binds |
 | `j71t` | Microphone | working, but no driver binds |
 | `j72t` | Microphone | untested, but no driver binds |
-| `d10` | Bluetooth input devices | missing, but a driver binds |
-| `d10` | Bluetooth audio | missing, but a driver binds |
-| `d101` | Bluetooth input devices | missing, but a driver binds |
-| `d101` | Bluetooth audio | missing, but a driver binds |
-| `d11` | Bluetooth input devices | missing, but a driver binds |
-| `d11` | Bluetooth audio | missing, but a driver binds |
-| `d111` | Bluetooth input devices | missing, but a driver binds |
-| `d111` | Bluetooth audio | missing, but a driver binds |
-| `j172` | Bluetooth input devices | missing, but a driver binds |
-| `j172` | Bluetooth audio | missing, but a driver binds |
-| `j72b` | Bluetooth input devices | missing, but a driver binds |
-| `j72b` | Bluetooth audio | missing, but a driver binds |
-| `d22` | Touchscreen | missing, but a driver binds |
-| `d22` | Backlight | missing, but a driver binds |
-| `d221` | Buttons | working, but no driver binds |
