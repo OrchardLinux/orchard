@@ -6,6 +6,7 @@ kind = "hardware.device"
 [device]
 profile = "n66m"
 name = "iPhone 6s+ (S8003)"
+short_name = "iPhone 6s Plus"
 apple_products = ["iPhone8,2"]
 dt_compatible = ["apple,n66m"]
 
@@ -33,6 +34,7 @@ status = "experimental"
 display = "untested"
 screen_off = "missing"
 backlight = "untested"
+gpu_desktop = "untested"
 touch = "untested"
 buttons = "untested"
 accelerometer = "untested"

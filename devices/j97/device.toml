@@ -33,6 +33,7 @@ status = "experimental"
 display = "untested"
 screen_off = "missing"
 backlight = "untested"
+gpu_desktop = "untested"
 touch = "untested" # apple_z2 with the J96 data (C1F14,4): the ADT and mtprops match the J96's.
 buttons = "untested"
 accelerometer = "missing"

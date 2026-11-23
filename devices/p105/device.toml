@@ -38,12 +38,14 @@ reclaims = false
 
 [support]
 status = "experimental"
+tested_by = ["Shayne Legault"]
 
 # States: working, untested, missing, none (features.toml).
 [features]
 display = "untested"
 screen_off = "untested"
 backlight = "untested"
+gpu_desktop = "missing"
 touch = "untested"
 buttons = "untested"
 accelerometer = "missing"

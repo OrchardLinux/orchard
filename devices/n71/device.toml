@@ -6,6 +6,7 @@ kind = "hardware.device"
 [device]
 profile = "n71"
 name = "iPhone 6s (S8000)"
+short_name = "iPhone 6s"
 apple_products = ["iPhone8,1"]
 dt_compatible = ["apple,n71"]
 
@@ -33,6 +34,7 @@ status = "experimental"
 display = "untested"
 screen_off = "missing"
 backlight = "untested"
+gpu_desktop = "untested"
 touch = "untested"
 buttons = "untested"
 accelerometer = "untested"

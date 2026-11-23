@@ -39,6 +39,7 @@ status = "experimental"
 display = "working"
 screen_off = "missing"
 backlight = "working"
+gpu_desktop = "untested"
 touch = "untested" # apple_z2 (C1F14,4) never run here; multitouch worked on a local bring-up driver.
 buttons = "working"
 accelerometer = "missing"

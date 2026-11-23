@@ -6,6 +6,7 @@ kind = "hardware.device"
 [device]
 profile = "n69u"
 name = "iPhone SE (S8000)"
+short_name = "iPhone SE"
 apple_products = ["iPhone8,4"]
 dt_compatible = ["apple,n69u"]
 
@@ -33,6 +34,7 @@ status = "experimental"
 display = "untested"
 screen_off = "missing"
 backlight = "untested"
+gpu_desktop = "untested"
 touch = "untested"
 buttons = "untested"
 accelerometer = "untested"

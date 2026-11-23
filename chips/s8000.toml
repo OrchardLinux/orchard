@@ -10,8 +10,10 @@ page_size = 16384
 image_format = "im4p"
 platform = "apple-16k"
 stages = ["iBSS", "iBEC"]
+foundry = "Samsung"
 
 [evidence]
+foundry = "Apple dual-sourced the A9: CPID 0x8000 is Samsung 14 nm, 0x8003 TSMC 16 nm"
 page_size = "xnu-6153.141.1 osfmk/arm/proc_reg.h"
 platform = "xnu; same core as S8003, which ran on J71t"
 stages = "remote_boot two-stage CPID list"

@@ -21,6 +21,12 @@
           "minLength": 1,
           "maxLength": 256
         },
+        "short_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "The name without a chip or factory suffix, for tables that show the chip beside it. Defaults to name."
+        },
         "apple_products": {
           "type": "array",
           "minItems": 1,
@@ -152,6 +158,17 @@
             "supported",
             "experimental"
           ]
+        },
+        "tested_by": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "People who have tested Orchard on this board, by the names they go by in the project.",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
         }
       },
       "required": [
@@ -179,6 +196,14 @@
           ]
         },
         "backlight": {
+          "enum": [
+            "working",
+            "untested",
+            "missing",
+            "none"
+          ]
+        },
+        "gpu_desktop": {
           "enum": [
             "working",
             "untested",
@@ -383,6 +408,7 @@
         "display",
         "screen_off",
         "backlight",
+        "gpu_desktop",
         "touch",
         "buttons",
         "accelerometer",

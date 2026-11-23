@@ -36,6 +36,7 @@ status = "experimental"
 display = "untested" # simplefb on iBoot's scanout; a userspace dashboard drew to fb0 on the LCD.
 screen_off = "missing"
 backlight = "missing"
+gpu_desktop = "missing"
 touch = "untested" # Z2 bootload from userspace, then multitouch contacts on event0.
 buttons = "missing"
 accelerometer = "missing"

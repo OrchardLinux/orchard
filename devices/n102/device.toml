@@ -26,6 +26,7 @@ recipe = "firmware.json" # Pins this board's public IPSW: the touchscreen, Wi-Fi
 
 [support]
 status = "experimental"
+tested_by = ["Berkay Kösebay"]
 
 # States: working, untested, missing, none (features.toml). "untested" means a driver
 # binds in its device tree (tools/catalog/drivers.json).
@@ -33,6 +34,7 @@ status = "experimental"
 display = "working" # The console and the desktop.
 screen_off = "missing"
 backlight = "working" # DWI and the LM3534: brightness set and read back.
+gpu_desktop = "working"
 touch = "working" # N1 on apple_z2: 640x1136, several contacts.
 buttons = "working" # Home, power and both volume buttons (gpio-keys).
 accelerometer = "missing"

@@ -93,6 +93,22 @@ class Catalog(unittest.TestCase):
         for path in sorted(ROOT.glob('devices/*/boot.json')):
             with self.subTest(board=path.parent.name):
                 recipe.validate(json.loads(path.read_text()))
+        device = Draft202012Validator(json.loads((ROOT / 'schemas/v1/device.schema.json').read_text()))
+        for path in DESCRIPTORS:
+            with self.subTest(board=path.parent.name):
+                device.validate(tomllib.loads(path.read_text()))
+
+    def test_a_board_states_every_feature(self):
+        labels = tomllib.loads((ROOT / 'features.toml').read_text())
+        for path in DESCRIPTORS:
+            described = tomllib.loads(path.read_text())
+            if 'features' in described:
+                with self.subTest(board=path.parent.name):
+                    self.assertEqual(set(described['features']), set(labels))
+
+    def test_the_a9s_name_their_foundry(self):
+        self.assertEqual(CHIPS[0x8000]['foundry'], 'Samsung')
+        self.assertEqual(CHIPS[0x8003]['foundry'], 'TSMC')
 
     def test_palera1ns_boards_list_checkm8_pongo(self):
         for board in PALERA1N.split():
@@ -177,6 +193,59 @@ class GpuMilestones(unittest.TestCase):
         self.assertEqual(milestone({}), '–')
         self.assertEqual(milestone({'gpu': {'gles2': 'working'}}), 'GLES 2')
         self.assertEqual(milestone({'gpu': {'gles2': 'working', 'gles3': 'working'}}), 'GLES 3')
+
+
+class Glance(unittest.TestCase):
+    """The "Does my device work?" table at the top of the matrix."""
+
+    def table(self):
+        text = tool().render()
+        section = text.split('## Does my device work?', 1)[1].split('\n## ', 1)[0]
+        return section, [line for line in section.splitlines() if line.startswith('| ') and not line.startswith(('| Device', '| ---'))]
+
+    def test_it_comes_before_the_chips(self):
+        text = tool().render()
+        self.assertLess(text.index('## Does my device work?'), text.index('## Chips'))
+
+    def test_one_row_per_board_that_installs_with_the_chip_beside_the_device(self):
+        from orchard import hardware
+        _, rows = self.table()
+        installable = [tomllib.loads(path.read_text()) for path in DESCRIPTORS
+                       if not hardware.install_blockers(path.parent.name)]
+        self.assertEqual(len(rows), len(installable))
+        cells = {tuple(cell.strip() for cell in row.strip('|').split('|')[:2]) for row in rows}
+        self.assertIn(('iPhone 6s Plus', 'A9, Samsung'), cells)
+        self.assertIn(('iPad 5 (Wi-Fi)', 'A9, TSMC'), cells)
+        self.assertIn(('iPad 6 (Wi-Fi)', 'A10'), cells)
+
+    def test_the_short_name_drops_the_chip_and_falls_back_to_the_name(self):
+        _, rows = self.table()
+        self.assertFalse(any('S8000' in row or 'Samsung)' in row for row in rows))
+        self.assertTrue(any(row.startswith('| iPod touch 6 |') for row in rows))
+
+    def test_cells(self):
+        generate = tool()
+        self.assertEqual(generate.combined(['working', 'working']), 'working')
+        self.assertEqual(generate.combined(['working', 'untested']), 'untested')
+        self.assertEqual(generate.combined(['untested', 'missing']), 'missing')
+        self.assertEqual([generate.desktop(state) for state in ('working', 'untested', 'missing', 'none')],
+                         ['GPU', 'GPU (untested)', 'software', 'software'])
+        self.assertEqual(generate.chip_label({'name': 'A10'}), 'A10')
+        self.assertEqual(generate.chip_label({'name': 'A9', 'foundry': 'TSMC'}), 'A9, TSMC')
+
+    def test_features_no_board_has_are_named_from_the_data(self):
+        section, _ = self.table()
+        line = next(line for line in section.splitlines() if line.startswith('Not working on any device yet:'))
+        for label in ('cellular', 'cameras', 'Touch ID'):
+            self.assertIn(label, line)
+        self.assertNotIn('touchscreen', line.lower())
+        self.assertEqual(tool().in_a_sentence('Bluetooth audio'), 'Bluetooth audio')
+        self.assertEqual(tool().in_a_sentence('Wi-Fi'), 'Wi-Fi')
+
+    def test_tested_by_is_listed(self):
+        _, rows = self.table()
+        self.assertTrue(any(row.startswith('| iPad Air 2 (Wi-Fi) |') and row.endswith('| Rick, Martin Puškáč |')
+                            for row in rows))
 
 
 class BuildChoice(unittest.TestCase):

@@ -6,6 +6,7 @@ kind = "hardware.device"
 [device]
 profile = "n66"
 name = "iPhone 6s+ (S8000)"
+short_name = "iPhone 6s Plus"
 apple_products = ["iPhone8,2"]
 dt_compatible = ["apple,n66"]
 
@@ -25,6 +26,7 @@ recipe = "firmware.json" # Pins this board's public IPSW; makes the touchscreen 
 
 [support]
 status = "experimental"
+tested_by = ["Rick"]
 
 # States: working, untested, missing, none (features.toml). Nothing here has run on
 # this board with Orchard: "untested" means a driver binds in its device tree
@@ -33,6 +35,7 @@ status = "experimental"
 display = "working" # boot framebuffer, 1080x1920 (RAM boot and install 2026-11-23)
 screen_off = "missing"
 backlight = "working" # dark, bright and normal levels (RAM boot 2026-11-23)
+gpu_desktop = "untested"
 touch = "working" # N1 C1F5C, both firmware packets; multitouch, corners checked (RAM boot 2026-11-23)
 buttons = "working" # home, power, volume up/down, mute switch (RAM boot 2026-11-23)
 accelerometer = "untested"

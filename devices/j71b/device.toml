@@ -24,6 +24,7 @@ recipe = "firmware.json" # Relative to this device.toml; public recipe, not firm
 
 [support]
 status = "supported"
+tested_by = ["Henrik"]
 
 # States: working, untested, missing, none (features.toml).
 [features]
@@ -31,6 +32,7 @@ status = "supported"
 display = "working"
 screen_off = "working"
 backlight = "working"
+gpu_desktop = "working"
 touch = "working"
 buttons = "working" # Power, Home and volume keys in daily use on the desktop.
 accelerometer = "working"

@@ -428,6 +428,69 @@ def cell(value):
     return value if value else '–'
 
 
+def chip_label(chip):
+    """The chip as people know it: its marketing name, and the foundry where Apple used several."""
+    return f'{chip["name"]}, {chip["foundry"]}' if 'foundry' in chip else chip['name']
+
+
+SYMBOLS = {'working': '✅', 'untested': 'untested', 'missing': '❌', 'none': '–'}
+# The at-a-glance table: (column, the features.toml names it shows; several must all work).
+GLANCE = (('Touch', ('touch',)), ('Wi-Fi', ('wifi',)), ('Bluetooth', ('bluetooth_input',)),
+          ('Sound', ('audio_output',)), ('Charges', ('charging',)), ('Sleep', ('suspend', 'resume')),
+          ('Rotation', ('accelerometer',)))
+PROPER_NOUNS = ('Bluetooth',)
+
+
+def combined(states):
+    """One state for features that only help together: working if all are, missing if any is."""
+    for state in ('missing', 'untested', 'none'):
+        if state in states:
+            return state
+    return 'working'
+
+
+def desktop(state):
+    return {'working': 'GPU', 'untested': 'GPU (untested)'}.get(state, 'software')
+
+
+def in_a_sentence(label):
+    """A feature label as it reads mid-sentence: Cameras -> cameras, Touch ID stays."""
+    if label.split()[0] in PROPER_NOUNS or any(letter.isupper() for letter in label[1:]):
+        return label
+    return label[0].lower() + label[1:]
+
+
+def render_glance(rows, order, labels, known):
+    """Does my device work? One row per board that installs, the chip beside the device."""
+    lines = ['', '## Does my device work?', '',
+             'Every device Orchard installs on. ✅ works · untested = nobody has tried it yet · '
+             "❌ doesn't work yet · – no such hardware.",
+             '', '| Device | Chip | Installs | Desktop | ' + ' | '.join(column for column, _ in GLANCE) + ' | Tested by |',
+             '| --- | --- |' + ' --- |' * (len(GLANCE) + 3)]
+    foundries = False
+    for soc in sorted(rows, key=order.get):
+        chip = next(chip for chip in known.values() if chip['soc'] == soc)
+        boards = [(device['device'].get('short_name', device['device']['name']), profile, device)
+                  for profile, device in rows[soc] if can_install(profile, device)]
+        for name, _, device in sorted(boards):
+            foundries |= 'foundry' in chip
+            features = device['features']
+            cells = [SYMBOLS[combined([features[key] for key in keys])] for _, keys in GLANCE]
+            installs = SYMBOLS[features['storage_write']]
+            tested = ', '.join(device.get('support', {}).get('tested_by', [])) or '–'
+            lines.append(f'| {name} | {chip_label(chip)} | {installs} | {desktop(features["gpu_desktop"])} | '
+                         + ' | '.join(cells) + f' | {tested} |')
+    boards = [device['features'] for _, device in sum(rows.values(), []) if 'features' in device]
+    nowhere = [in_a_sentence(label) for name, label in labels.items()
+               if not any(features.get(name) == 'working' for features in boards)]
+    if nowhere:
+        lines += ['', f'Not working on any device yet: {", ".join(nowhere)}.']
+    if foundries:
+        lines += ['', "Which A9 do I have? iOS doesn't show it. In DFU mode, `orchard install` names the device "
+                  'before it asks to continue: S8000 or Samsung in the name means Samsung, otherwise TSMC.']
+    return lines
+
+
 def render():
     """The compatibility matrix, from the catalog alone."""
     known = chips()
@@ -446,6 +509,7 @@ def render():
              '- **Device tree:** the board has one in OrchardLinux/linux. It does not mean the board has booted.',
              '- **boot.json:** the Apple boot files are known. It does not mean a method runs on the board.',
              '- **GPU (dEQP):** the highest GLES suite that completes with no GPU hangs and only listed failures, through Zink.',
+             *render_glance(rows, order, tomllib.loads((ROOT / 'features.toml').read_text()), known),
              '', '## Chips', '',
              '| Chip | SoC | CPID | Core | Page size | Platform | Stages | GPU (dEQP) | Boards | In build | Device tree |',
              '| --- | --- | --- | --- | ---: | --- | --- | --- | ---: | ---: | ---: |']
@@ -459,7 +523,7 @@ def render():
                      f'{chip.get("page_size", "–")} | {cell(chip.get("platform"))} | {stages} | {gpu_milestone(chip)} | {len(boards)} | '
                      f'{building} | {trees} |')
     lines += ['', '## Boards', '',
-              '| Chip | Board | Device | Product | Status | Install | Methods | Firmware | Device tree | boot.json build |',
+              '| Chip | Device | Board | Product | Status | Install | Methods | Firmware | Device tree | boot.json build |',
               '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |']
     for soc in sorted(rows, key=order.get):
         chip = next(chip for chip in known.values() if chip['soc'] == soc)
@@ -469,7 +533,7 @@ def render():
             build = boot['firmware'][0]['ipsw']['build'] if boot else '–'
             dtb = device.get('kernel', device.get('catalog', {})).get('dtb')
             methods = ', '.join(device.get('boot', {}).get('methods', [])) or '–'
-            lines.append(f'| {chip["name"]} | `{profile}` | {device["device"]["name"]} | '
+            lines.append(f'| {chip_label(chip)} | {device["device"]["name"]} | `{profile}` | '
                          f'{", ".join(device["device"]["apple_products"])} | {status_of(device)} | '
                          f'{"yes" if can_install(profile, device) else "–"} | {methods} | '
                          f'{"yes" if (path / "firmware.json").is_file() else "–"} | {"yes" if dtb else "–"} | {build} |')

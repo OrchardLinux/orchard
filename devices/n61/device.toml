@@ -32,6 +32,7 @@ status = "experimental"
 display = "working" # The minimal-boot framebuffer console was visible on the LCD.
 screen_off = "untested"
 backlight = "untested"
+gpu_desktop = "untested"
 touch = "working" # Taps and swipes produced raw evdev contacts/releases in minimal-boot.
 buttons = "untested"
 accelerometer = "missing"

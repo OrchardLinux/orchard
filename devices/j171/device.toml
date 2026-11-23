@@ -27,6 +27,7 @@ recipe = "firmware.json" # Relative to this device.toml; public recipe, not firm
 
 [support]
 status = "experimental"
+tested_by = ["jerricky"]
 
 # States: working, untested, missing, none (features.toml).
 [features]
@@ -34,6 +35,7 @@ status = "experimental"
 display = "working"
 screen_off = "working" # panel fully black on idle blank and Smart Cover, normal picture back; J171 2026-11-19 (#175)
 backlight = "working"
+gpu_desktop = "working"
 touch = "working"
 buttons = "working"
 accelerometer = "working" # Needs apple/aop-ipad7c.bin from the firmware recipe; J171 2026-11-19 (#175)

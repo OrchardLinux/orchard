@@ -7,6 +7,7 @@ kind = "hardware.device"
 [device]
 profile = "j72s"
 name = "iPad 5 (Cellular, Samsung)"
+short_name = "iPad 5 (Cellular)"
 apple_products = ["iPad6,12"]
 dt_compatible = ["apple,j72s"]
 
@@ -35,6 +36,7 @@ status = "experimental"
 display = "untested"
 screen_off = "untested"
 backlight = "untested"
+gpu_desktop = "untested"
 touch = "untested"
 buttons = "untested"
 accelerometer = "untested"

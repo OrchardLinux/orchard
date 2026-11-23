@@ -57,6 +57,11 @@ is missing or empty.
 - iPod touch 6: internal storage works, so Omarchy installs with
   `orchard install` next to iOS. The touchscreen, backlight, buttons and
   Wi-Fi work, and Bluetooth comes up. From Berkay Kösebay's work.
+- The compatibility page opens with a "Does my device work?" table: every
+  device Orchard installs on, its chip beside it (Samsung or TSMC for the
+  A9), and whether it installs, has a GPU desktop, touch, Wi-Fi, Bluetooth,
+  sound, charging, sleep and rotation, and who has tested it. The README
+  links straight to it.
 
 ### Install & launch
 

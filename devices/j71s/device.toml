@@ -7,6 +7,7 @@ kind = "hardware.device"
 [device]
 profile = "j71s"
 name = "iPad 5 (Wi-Fi, Samsung)"
+short_name = "iPad 5 (Wi-Fi)"
 apple_products = ["iPad6,11"]
 dt_compatible = ["apple,j71s"]
 
@@ -35,6 +36,7 @@ status = "experimental"
 display = "untested"
 screen_off = "untested"
 backlight = "untested"
+gpu_desktop = "untested"
 touch = "untested"
 buttons = "untested"
 accelerometer = "untested"

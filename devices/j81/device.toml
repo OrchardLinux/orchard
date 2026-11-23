@@ -27,12 +27,14 @@ recipe = "firmware.json" # Relative to this device.toml; public recipe, not firm
 
 [support]
 status = "experimental"
+tested_by = ["Rick", "Martin Puškáč"]
 
 # States: working, untested, missing, none (features.toml).
 [features]
 display = "working"
 screen_off = "working" # dark on idle and on Power, Home or Power lights it again; J81 2026-11-20
 backlight = "working"
+gpu_desktop = "missing"
 touch = "working"
 buttons = "working"
 accelerometer = "missing"
