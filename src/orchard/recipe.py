@@ -91,6 +91,11 @@ def _z2_packet_n1(step, data, expected):
                                step['calibration_size'], step['prox_address'], step['prox_size'])
 
 
+def _z2_packets_n1(step, data, expected):
+    return z2packet.convert_n1_packets(data, step['profile'], step['calibration_address'],
+                                       step['calibration_size'], step['prox_address'], step['prox_size'])
+
+
 def _z2fw_packets(step, data, expected):
     profile = _touch_profile(data, step['profile'])
     output, _ = z2fw.convert_packets(profile, apple_xml(profile['Firmware Config']), packet=step['packet'])
@@ -143,6 +148,10 @@ STEPS = {
                                            'calibration_size': int}),
     # N1 legacy Z2 packet, zero proximity initialization, dynamic unit calibration.
     'z2fw-from-z2-packet@2': (_z2_packet_n1, {'profile': str, 'calibration_address': int,
+                                         'calibration_size': int, 'prox_address': int,
+                                         'prox_size': int}),
+    # N1 with a list of Z2 packets (iPhone 6s Plus), every packet sent in order.
+    'z2fw-from-z2-packet@3': (_z2_packets_n1, {'profile': str, 'calibration_address': int,
                                          'calibration_size': int, 'prox_address': int,
                                          'prox_size': int}),
     # mtprops with an array of preconstructed packets (iPhone 7 Plus), makez2fw's layout.

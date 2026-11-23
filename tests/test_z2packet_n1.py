@@ -108,3 +108,48 @@ class N1PacketConversion(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def second_packet(address=0x401900, payload=bytes(range(16, 32))):
+    header = struct.pack('>H', len(payload) // 4) + z2fw.xe32(address)
+    return z2packet.PREFIX + header + struct.pack('>H', sum(header)) + payload + z2fw.xe32(sum(payload))
+
+
+class N1PacketListConversion(unittest.TestCase):
+    """iPhone 6s Plus (C1F5C): "Constructed Firmware" is a list of packets."""
+
+    def document(self, packets):
+        return plistlib.dumps({'C1F5C,1': {'PreconstructedBootloadPacketType': 'Z2',
+                                          'Constructed Firmware': packets}})
+
+    def convert(self, packets, **kwargs):
+        params = {'profile': 'C1F5C,1', 'calibration_address': 0x10009000,
+                  'calibration_size': 1024, 'prox_address': 0x10009600, 'prox_size': 128}
+        return z2packet.convert_n1_packets(self.document(packets), **(params | kwargs))
+
+    def test_every_packet_is_sent_in_order_after_the_single_packet_records(self):
+        first = fixture()['C1F15,1']['Constructed Firmware']
+        records = z2fw.decode_container(self.convert([first, second_packet()]))
+        self.assertEqual([code for code, _ in records], [4, 1, 6, 1, 1])
+        single = z2fw.decode_container(convert())
+        self.assertEqual(records[:4], single)
+        self.assertEqual(records[4][1], second_packet())
+
+    def test_the_recipe_step_matches_the_converter(self):
+        first = fixture()['C1F15,1']['Constructed Firmware']
+        step = {'step': 'z2fw-from-z2-packet@3', 'input': 'mtprops', 'profile': 'C1F5C,1',
+                'calibration_address': 0x10009000, 'calibration_size': 1024,
+                'prox_address': 0x10009600, 'prox_size': 128}
+        data = self.document([first, second_packet()])
+        handler, _ = recipe.STEPS['z2fw-from-z2-packet@3']
+        self.assertEqual(handler(step, data, None), self.convert([first, second_packet()]))
+
+    def test_bad_lists_are_refused(self):
+        first = fixture()['C1F15,1']['Constructed Firmware']
+        cases = [(first, 'no list'), ([first], 'no list'), ([first, 'x'], 'no list'),
+                 ([second_packet(), first], 'load address'),
+                 ([first, second_packet(address=0x10009100)], 'overlaps'),
+                 ([first, second_packet(address=0x8)], 'packets overlap')]
+        for packets, error in cases:
+            with self.subTest(error=error), self.assertRaisesRegex(ValueError, error):
+                self.convert(packets)

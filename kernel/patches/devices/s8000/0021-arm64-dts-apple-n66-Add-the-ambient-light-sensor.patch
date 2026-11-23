@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 14:36:36 +0100
+Subject: [PATCH] arm64: dts: apple: n66: Add the ambient light sensor
+
+The iPhone 6s Plus's CT821 sits at 0x29 on I2C2, its interrupt on AP
+GPIO 131 (ADT i2c2/als). The als0 alias lets the loader pass the unit's
+LSCI calibration, which the tsl2583 driver loads.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/s8000-n66.dts | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/s8000-n66.dts b/arch/arm64/boot/dts/apple/s8000-n66.dts
+index e38b682ae..8d3c424cf 100644
+--- a/arch/arm64/boot/dts/apple/s8000-n66.dts
++++ b/arch/arm64/boot/dts/apple/s8000-n66.dts
+@@ -12,6 +12,10 @@
+ / {
+ 	compatible = "apple,n66", "apple,s8000", "apple,arm-platform";
+ 	model = "Apple iPhone 6s Plus (Samsung)";
++
++	aliases {
++		als0 = &als;	/* the loader copies the ADT's alsCalibration here */
++	};
+ };
+ 
+ &pcie0_dart0 {
+@@ -26,3 +30,14 @@ &pcie0_dart1 {
+ &pcie0 {
+ 	status = "okay";
+ };
++
++&i2c2 {
++	status = "okay";
++
++	/* ADT i2c2/als: als,ct821 @0x29, interrupt AP GPIO 131 */
++	als: light-sensor@29 {
++		compatible = "apple,ct821", "amstaos,tsl2581";
++		reg = <0x29>;
++		interrupts-extended = <&pinctrl_ap 131 IRQ_TYPE_LEVEL_LOW>;
++	};
++};

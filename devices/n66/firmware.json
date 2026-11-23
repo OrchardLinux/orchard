@@ -14,7 +14,30 @@
         "zip": "Firmware/all_flash/DeviceTree.n66ap.im4p"
       },
       "sha256": "3e5d36cbe1951d25e6f44e6d71088c1bb00c174e15df440109c92d9682fe173b"
+    },
+    "N66.mtprops": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/multitouch/N66.mtprops"
+      },
+      "device": "/usr/share/firmware/multitouch/N66.mtprops",
+      "sha256": "25ae6f50b174ecfe07eecc688c492859d68f80efc800f99ca92d191af7e9610f"
     }
   },
-  "outputs": []
+  "outputs": [
+    {
+      "destination": "lib/firmware/apple/n66-fwstart.z2fw",
+      "sha256": "e1bc06d1feaad0717216a64568a040dde847dc3b2aff79d3d29679115d61aaad",
+      "steps": [
+        {
+          "step": "z2fw-from-z2-packet@3",
+          "input": "N66.mtprops",
+          "profile": "C1F5C,1",
+          "calibration_address": 268472320,
+          "calibration_size": 1024,
+          "prox_address": 268473856,
+          "prox_size": 128
+        }
+      ]
+    }
+  ]
 }
