@@ -26,7 +26,7 @@ recipe = "firmware.json" # Pins this board's public IPSW; makes the touchscreen 
 
 [support]
 status = "experimental"
-tested_by = ["Rick"]
+tested_by = ["ricktav"]
 
 # States: working, untested, missing, none (features.toml). Nothing here has run on
 # this board with Orchard: "untested" means a driver binds in its device tree

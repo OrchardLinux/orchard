@@ -480,7 +480,8 @@ def render_glance(rows, order, labels, known):
         features = device['features']
         cells = [SYMBOLS[combined([features[key] for key in keys])] for _, keys in GLANCE]
         installs = SYMBOLS[features['storage_write']]
-        tested = ', '.join(device.get('support', {}).get('tested_by', [])) or '–'
+        tested = ', '.join(f'[{handle}](https://github.com/{handle})'
+                       for handle in device.get('support', {}).get('tested_by', [])) or '–'
         lines.append(f'| {name} | {chip_label(chip)} | {installs} | {desktop(features["gpu_desktop"])} | '
                      + ' | '.join(cells) + f' | {tested} |')
     boards = [device['features'] for _, device in sum(rows.values(), []) if 'features' in device]

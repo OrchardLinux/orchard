@@ -57,7 +57,7 @@ Reuse compiled components. Changing `init` should not rebuild Linux. The kernel 
 
 ## 4. Add your board's recipe
 
-Your board probably has a `devices/BOARD/` already, with its identity and `boot.json` from public sources (`tools/catalog/generate`). Bring-up fills in the rest of `device.toml`: `[kernel]`, `[boot]`, `[firmware]`, `[support]` and `[features]`. Installing becomes available by itself once the board has a kernel, a boot method, firmware and `storage_write` isn't `missing`. Notes that aren't a feature state go in the board's README. When `name` carries the chip (`iPhone 6s+ (S8000)`), `[device] short_name` gives it without (`iPhone 6s Plus`) for tables that show the chip beside it. `[support] tested_by` lists the people who have run Orchard on the board. Remove `[catalog]` when you add `[kernel]`. See [device compatibility](compatibility.md) for what is known about it.
+Your board probably has a `devices/BOARD/` already, with its identity and `boot.json` from public sources (`tools/catalog/generate`). Bring-up fills in the rest of `device.toml`: `[kernel]`, `[boot]`, `[firmware]`, `[support]` and `[features]`. Installing becomes available by itself once the board has a kernel, a boot method, firmware and `storage_write` isn't `missing`. Notes that aren't a feature state go in the board's README. When `name` carries the chip (`iPhone 6s+ (S8000)`), `[device] short_name` gives it without (`iPhone 6s Plus`) for tables that show the chip beside it. `[support] tested_by` lists the GitHub handles of the people who have run Orchard on the board. Remove `[catalog]` when you add `[kernel]`. See [device compatibility](compatibility.md) for what is known about it.
 
 In your worktree:
 

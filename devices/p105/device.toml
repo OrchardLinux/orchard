@@ -38,7 +38,7 @@ reclaims = false
 
 [support]
 status = "experimental"
-tested_by = ["Shayne Legault"]
+tested_by = ["shaynelegault"]
 
 # States: working, untested, missing, none (features.toml).
 [features]

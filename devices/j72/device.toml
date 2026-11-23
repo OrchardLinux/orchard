@@ -30,7 +30,7 @@ recipe = "firmware.json" # Relative to this device.toml; public recipe, not firm
 
 [support]
 status = "experimental"
-tested_by = ["Cam"]
+tested_by = ["thisiscamk"]
 
 # States: working, untested, missing, none (features.toml).
 [features]

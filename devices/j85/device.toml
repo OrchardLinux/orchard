@@ -26,7 +26,7 @@ recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until
 
 [support]
 status = "experimental"
-tested_by = ["Rick"]
+tested_by = ["ricktav"]
 
 # States: working, untested, missing, none (features.toml). "working" was seen on a
 # J85; "untested" means a driver binds in its device tree (tools/catalog/drivers.json),

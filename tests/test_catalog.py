@@ -244,7 +244,7 @@ class Glance(unittest.TestCase):
 
     def test_tested_by_is_listed(self):
         _, rows = self.table()
-        self.assertTrue(any(row.startswith('| iPad Air 2 (Wi-Fi) |') and row.endswith('| Rick, Martin Puškáč |')
+        self.assertTrue(any(row.startswith('| iPad Air 2 (Wi-Fi) |') and row.endswith('| [ricktav](https://github.com/ricktav), [mattonik](https://github.com/mattonik) |')
                             for row in rows))
 
 

@@ -25,7 +25,7 @@ recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until
 
 [support]
 status = "experimental"
-tested_by = ["Dugs"]
+tested_by = ["ryzensnyper"]
 
 # States: working, untested, missing, none (features.toml). Nothing here has run on
 # this board with Orchard: "untested" means a driver binds in its device tree
