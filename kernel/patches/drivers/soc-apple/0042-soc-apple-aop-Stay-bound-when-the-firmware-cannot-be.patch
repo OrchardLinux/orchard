@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tompta1 <546706+tompta1@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 03:31:54 +0800
+Subject: [PATCH] soc: apple: aop: Stay bound when the firmware cannot be
+ halted
+
+When probe fails after the firmware started and it then cannot be
+halted, the driver keeps the firmware's memory but returns the error, so
+the device is unbound and its devm state (the RTKit instance, mailbox and
+DMA buffers the running firmware still uses) is freed under it. Stay
+bound, marked as removing, until reboot instead. This only changes the
+failure path, on every board with an AOP.
+
+[Orchard: from OrchardLinux/orchard#205 (tompta1, 09038adf), split out of
+ kernel/patches/drivers/soc-apple/0034.]
+
+Assisted-by: LLM
+---
+ drivers/soc/apple/aop.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/soc/apple/aop.c b/drivers/soc/apple/aop.c
+index d54ff59b2..72a7dc112 100644
+--- a/drivers/soc/apple/aop.c
++++ b/drivers/soc/apple/aop.c
+@@ -1104,7 +1104,11 @@ static int apple_aop_probe(struct platform_device *pdev)
+ 		apple_rtkit_free(aop->rtk);
+ 		apple_aop_free_buffers(aop);
+ 	} else {
+-		dev_err(dev, "failed to halt; keeping its memory\n");
++		/* RTKit still refers to the devm state: retain the bound device too. */
++		aop->removing = true;
++		platform_set_drvdata(pdev, aop);
++		dev_crit(dev, "failed to halt; retaining bound device until reboot\n");
++		return 0;
+ 	}
+ 	return ret;
+ 
