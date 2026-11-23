@@ -51,6 +51,9 @@ is missing or empty.
   and the light sensor are switched on as on the iPhone 6s Plus (Samsung),
   and the iPad 5 (Samsung) gets storage and Wi-Fi like the TSMC model; not
   tried on these devices yet.
+- All A9 iPhones and the iPad 5 (Samsung): the GPU driver and the display
+  pipe driver are switched on as on the iPad 5 (TSMC), with the GPU firmware
+  from iPadOS 16.7.10; not tried on these devices yet.
 - iPod touch 6: internal storage works, so Omarchy installs with
   `orchard install` next to iOS. The touchscreen, backlight, buttons and
   Wi-Fi work, and Bluetooth comes up. From Berkay Kösebay's work.

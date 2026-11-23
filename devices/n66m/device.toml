@@ -21,7 +21,7 @@ platform = "apple-16k"
 dtb = "s8003-n66m" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # Pins this board's public IPSW; makes the touchscreen firmware.
+recipe = "firmware.json" # Pins this board's public IPSW; makes the touchscreen firmware, and the GPU firmware from the iPad 5's iPadOS 16.7.10.
 
 [support]
 status = "experimental"

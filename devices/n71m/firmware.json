@@ -21,6 +21,19 @@
       },
       "device": "/usr/share/firmware/multitouch/N71.mtprops",
       "sha256": "5bfab65fc0c6f7070338f06f0ac9a0d9b889fad8dcb083aeaab4623f462d613b"
+    },
+    "kernelcache-j71tap-20H350": {
+      "ipsw": {
+        "kernelcache": "j71tap",
+        "restore": {
+          "version": "16.7.10",
+          "build": "20H350",
+          "url": "https://updates.cdn-apple.com/2024SpringFCS/fullrestores/062-47889/FBBD9227-79D6-4FAA-91B9-D20E087BE0E7/iPad_64bit_TouchID_ASTC_16.7.10_20H350_Restore.ipsw",
+          "bytes": 5586431671,
+          "sha256": "1709e8e27b1c0c98dc7c64ae27b4e208b49835c24a95074d1aebe135342b3112"
+        }
+      },
+      "sha256": "c6b95fcf0efe52ee9258454d01d14adc9b0cb922d94c54a04a4ce11d1ae81e0a"
     }
   },
   "outputs": [
@@ -36,6 +49,16 @@
           "calibration_size": 1024,
           "prox_address": 268473856,
           "prox_size": 128
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/gfx-s8003.bin",
+      "sha256": "33ae20cbbe2498e4f119ba4e9a55467e4e0192d4c86d5bf1903adce63ffa5dca",
+      "steps": [
+        {
+          "step": "agx-g5p-ldr-from-kernelcache@1",
+          "input": "kernelcache-j71tap-20H350"
         }
       ]
     }
