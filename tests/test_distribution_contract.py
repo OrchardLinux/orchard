@@ -69,7 +69,7 @@ class DistributionContract(unittest.TestCase):
         self.assertEqual(document['shared']['m1n1'], str((root / 'm1n1.bin').resolve()))
         self.assertEqual(set(document['shared']['tools']),
                          {'busybox', 'dropbear', 'dropbearkey', 'wpa_supplicant', 'wpa_cli', 'iw',
-                          'orchard-write', 'resize2fs', 'tune2fs'})
+                          'orchard-write', 'orchard-install-usb', 'resize2fs', 'tune2fs'})
         self.assertIn('commit', document['orchard'])
         json.dumps(document)
 

@@ -11,6 +11,64 @@ is missing or empty.
 
 ## Unreleased
 
+### Devices
+
+- iPad Air 2 (Wi-Fi): internal storage works, so Omarchy installs with
+  `orchard install` and starts from the iPad with `orchard launch`, next to
+  iPadOS. The A8X storage controller (ANS1) has a kernel driver now.
+- iPad Air 2 (Wi-Fi): the speakers play, in stereo, through PipeWire. The
+  headphone jack and the microphones do not work yet.
+- iPad Air 2 (Wi-Fi): it charges. The Lightning charger driver supports the
+  iPad Air 2's D2207 PMIC, so a computer's charging port or an Apple adapter
+  gets up to 1.5 A instead of iBoot's 100 mA.
+- iPad Air 2 (Wi-Fi): sleep works. The iPad suspends when idle or on Power,
+  and Home or Power wakes it with Wi-Fi, Bluetooth and the USB network back.
+- iPad Air 2 (Wi-Fi): Bluetooth headphones play, and a Bluetooth keyboard with
+  touchpad works. Bluetooth runs at 3 Mbit/s instead of 115,200 baud, so
+  headphones no longer crackle and calls with the CVSD codec have sound.
+- iPad Air (Cellular): new, from thisiscamk's work. Touch, the display and
+  backlight, the Home button, USB serial and networking and reading its
+  internal storage work. `orchard install` is offered; writing to the
+  storage is untested so far. Wi-Fi and audio come later.
+
+### Install & launch
+
+- A launcher may quit right after choosing a boot entry. m1n1 used to wait
+  for the computer to read its last answer before starting Linux, so the
+  device stayed on the boot splash when the launcher had already gone.
+- On Linux, `orchard run` and `orchard launch` use the released Pongo again
+  instead of asking for a Mac with Xcode: the release lookup picked the
+  moving `nightly` tag, which publishes no checksums.
+- A7 and A8 devices (ANS1 storage) no longer reset back to iOS when
+  `orchard launch` starts a system from internal storage: m1n1 freed its
+  storage command queue twice while shutting storage down.
+- Installers can talk to the device's install system over raw USB, with no
+  SSH, network or keys, and the install finishes on the device even if the
+  cable drops after the system image is written (docs/install-protocol.md).
+  The graphical installer uses it; serial and SSH stay available.
+- `orchard ssh-access` lets this computer sign in over SSH to a system
+  installed without SSH access: it signs in once on the device's USB serial
+  console with the user's password and adds this computer's keys.
+- When the Orchard package repository can't be reached, the install stops
+  with an error instead of quietly installing a kernel that then never
+  updates through the package manager.
+- On Linux hosts that need it, the USB port reset after checkm8 now also
+  works with palera1n 3.
+
+### Development
+
+- Orchard Simulator: an iPhone 7 alongside the iPad 6 (Device menu), each in
+  a realistic frame. Rotate Left and Right (⌃⌘← and ⌃⌘→) turn the device,
+  and the desktop follows through the same rotation-sensor path as a real
+  tablet. The frame's buttons no longer take the keyboard away from the
+  guest, and the screen comes back by itself after the VM restarts.
+- Orchard Simulator: a Scale menu shows the guest at 50 %, 75 % or 100 %
+  of the Mac's pixels (100 % is pixel for pixel) or fitted to the screen,
+  and keeps the scale across device switches and rotation. Cmd+H and
+  Cmd+Option+H hide the simulator and other apps, as on any Mac app.
+- Orchard Simulator: a tap on the frame no longer touches the screen; a swipe
+  from the frame onto the screen still does.
+
 ## [0.3.2] - 2026-11-19
 
 ### Devices

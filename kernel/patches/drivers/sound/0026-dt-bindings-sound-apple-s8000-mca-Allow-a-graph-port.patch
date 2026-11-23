@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 12:09:53 +0100
+Subject: [PATCH] dt-bindings: sound: apple,s8000-mca: Allow a graph port
+
+The iPad Air 2's speaker card is an audio-graph-card2 card (one MCA,
+two amplifiers), which links to the MCA through a port.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+---
+ .../devicetree/bindings/sound/apple,s8000-mca.yaml          | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/sound/apple,s8000-mca.yaml b/Documentation/devicetree/bindings/sound/apple,s8000-mca.yaml
+index b17cd9939..fcadf6dbc 100644
+--- a/Documentation/devicetree/bindings/sound/apple,s8000-mca.yaml
++++ b/Documentation/devicetree/bindings/sound/apple,s8000-mca.yaml
+@@ -94,6 +94,12 @@ properties:
+   '#sound-dai-cells':
+     const: 0
+ 
++  port:
++    $ref: audio-graph-port.yaml#
++    unevaluatedProperties: false
++    description:
++      The link to the codecs when an audio-graph-card2 card uses this MCA.
++
+   '#clock-cells':
+     const: 0
+ 
+-- 
+2.56.0
+

@@ -175,6 +175,15 @@ all of a component's entries. `orchard cache --prune` keeps the five most recent
 used entries of each component (`--keep N` for another number) and removes
 unfinished builds.
 
+Builds also keep Orchard's directories, the shared cache and the store, under a
+size limit: 20 GiB, `ORCHARD_CACHE_BUDGET_GB` for another, 0 for none. Above
+it they delete the least recently used of what Orchard can make again: older
+component entries and work directories, downloaded release assets, and kernel
+trees without local edits. The newest entry of each component, work recipe and
+the newest kernel tree stay, a tree with local edits is never deleted, and
+nothing outside these two directories (your `out/` builds, a simulator disk) is
+touched. The compiler cache keeps itself under 2 GB.
+
 Entries store each file once: a file whose content and mode another entry already
 has becomes a hard link to the single copy in `components-v2/.objects/`. Kernel
 entries of one device mostly differ in a few files, so sharing makes about 90% of

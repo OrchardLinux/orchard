@@ -264,5 +264,6 @@ def resolve(manifest, profile, progress=None, clock=None, purpose='install'):
               'release': document.get('version'), 'name': document.get('name', 'Linux'),
               'default_root': document.get('install', {}).get('default_root', '/linux'),
               'account': document.get('install', {}).get('account'),
+              'base': document.get('install', {}).get('base'),
               'ready': document.get('install', {}).get('ready')}
     return record, paths

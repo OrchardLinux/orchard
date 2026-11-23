@@ -82,6 +82,40 @@ class Payload(unittest.TestCase):
         self.assertIn(b'root:x:0:0', archive)
         self.assertTrue(archive.startswith(b'070701'))
 
+    def test_the_start_script_comes_from_the_release_when_it_has_one(self):
+        self.assertEqual(direct.install_tools(self.tools)['run'], (direct.ADD_ON / 'run').read_bytes())
+        newer = self.work / 'newer.tar.gz'
+        with tarfile.open(newer, 'w:gz') as archive:
+            for name, data in [(name, name.encode()) for name in platforms_index.INSTALL_TOOLS] + \
+                    [('run', b'#!/bin/sh\nRELEASE\n'), ('udhcpd.conf', b'RELEASE-DHCP\n')]:
+                member = tarfile.TarInfo(name)
+                member.size = len(data)
+                archive.addfile(member, io.BytesIO(data))
+        archive = direct.add_on(newer, 0x1234, 'ssh-ed25519 KEY\n', b'HOST')
+        self.assertIn(b'#!/bin/sh\nRELEASE\n', archive)
+        self.assertIn(b'RELEASE-DHCP\n', archive)
+
+    def test_the_usb_receiver_brings_its_finishing_program_and_needs_no_ssh_keys(self):
+        archive = direct.add_on(self.tools, 0x1234)
+        for name in ('orchard-install-usb', 'install_device.py', 'boot-entries', 'ecid'):
+            self.assertIn(b'install/' + name.encode() + b'\0', archive)
+        self.assertIn(D.__doc__.splitlines()[0].encode(), archive)    # this checkout's, the release has none
+        for name in ('authorized_keys', 'host_key'):
+            self.assertNotIn(b'install/' + name.encode() + b'\0', archive)
+
+    def test_a_release_without_the_receiver_still_makes_the_ssh_add_on(self):
+        older = self.work / 'older.tar.gz'
+        with tarfile.open(older, 'w:gz') as archive:
+            for name in ('orchard-write', 'dropbear', 'resize2fs', 'tune2fs'):
+                member = tarfile.TarInfo(name)
+                member.size = len(name)
+                archive.addfile(member, io.BytesIO(name.encode()))
+        archive = direct.add_on(older, 0x1234, 'ssh-ed25519 KEY\n', b'HOST')
+        for name in ('orchard-write', 'authorized_keys', 'host_key', 'run'):
+            self.assertIn(b'install/' + name.encode() + b'\0', archive)
+        for name in ('orchard-install-usb', 'install_device.py'):
+            self.assertNotIn(b'install/' + name.encode() + b'\0', archive)
+
     def test_a_key_made_for_ssh_converts_to_dropbears_form(self):
         path = self.work / 'key'
         subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', path], check=True)
