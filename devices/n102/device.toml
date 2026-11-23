@@ -1,5 +1,5 @@
 # iPod touch 6 (N102): identity from public sources (tools/catalog/generate's read_firmware);
-# A8/T7000 like the iPhone 6. RAM-boots to a USB serial shell; GPU notes in README.md.
+# A8/T7000 like the iPhone 6. Installs to its internal storage next to iOS; notes in README.md.
 schema = 1
 kind = "hardware.device"
 
@@ -14,7 +14,7 @@ chip = 0x7000
 board = 0x10
 
 [boot]
-methods = ["checkm8-pongo"] # checkra1n then PongoOS and m1n1, RAM only.
+methods = ["checkm8-pongo"] # checkra1n then PongoOS and m1n1, tethered.
 entries = ["checkra1n"]
 
 [kernel]
@@ -39,8 +39,8 @@ accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "missing"
 touch_id = "missing"
-storage_read = "missing"
-storage_write = "missing"
+storage_read = "working" # ANS1 (asp) on RTKit 10.2: the user area asp0n1 and nine read-only auxiliary namespaces.
+storage_write = "working" # The user area only; asp refuses every other namespace's writes. An install next to iOS wrote asp0n1 only.
 wifi = "missing"
 bluetooth_input = "missing"
 bluetooth_audio = "missing"

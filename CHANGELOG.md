@@ -39,6 +39,8 @@ is missing or empty.
 - iPhone 6s Plus (Samsung): Linux and m1n1 read its internal storage. The
   Samsung A9's PCIe storage controller works like the TSMC A9's without its
   phy-ip block. Installing doesn't work yet.
+- iPod touch 6: internal storage works, so Omarchy installs with
+  `orchard install` next to iOS, from Berkay Kösebay's work.
 
 ### Install & launch
 

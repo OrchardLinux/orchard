@@ -404,6 +404,12 @@
       "usb_network",
       "usb_serial"
     ],
+    "n102": [
+      "backlight",
+      "buttons",
+      "usb_network",
+      "usb_serial"
+    ],
     "n51": [
       "backlight",
       "buttons",
