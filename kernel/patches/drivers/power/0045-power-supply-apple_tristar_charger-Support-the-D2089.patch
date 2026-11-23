@@ -3,7 +3,8 @@ From: Henrik Klee <henrik@goat-code.com>
 Date: Mon, 23 Nov 2026 19:45:00 +0800
 Subject: [PATCH] power: supply: apple_tristar_charger: Support the D2089
 
-The iPad Air's D2089 keeps its charger registers where the D2207 does.
+The A7's D2089 (iPad Air, iPad mini 2 and 3) keeps its charger
+registers where the D2207 does.
 iOS 12.5.7's AppleD2089PMUPowerSource and AppleD2089PMU, on the J72:
 
   function               D2089 (iOS 12)                       D2207
@@ -37,7 +38,7 @@ index f2c11557c..2364fe33b 100644
   * Lightning charging for Apple devices with a Tristar (CBTL1610) port
 - * controller and a D2365-family PMIC (D2365, or the iPad Air 2's D2207).
 + * controller and a D2365-family PMIC (D2365, the iPad Air 2's D2207 or the
-+ * iPad Air's D2089).
++ * A7 iPads' D2089).
   *
   * iBoot leaves the PMIC input-current limit at 100 mA. On every attachment
   * this driver identifies the source and grants what it advertises, up to the
@@ -46,7 +47,7 @@ index f2c11557c..2364fe33b 100644
  };
  
 +/*
-+ * D2089 (iPad Air), from iOS 12 AppleD2089PMU and AppleD2089PMUPowerSource:
++ * D2089 (A7 iPads), from iOS 12 AppleD2089PMU and AppleD2089PMUPowerSource:
 + * the D2207's layout. The power source reads the 13 status bytes at 0x60
 + * and takes bit 0 of 0x60 as connected, needing bit 3 as well for a new
 + * connection; it writes the input limit to 0x4c0 as (mA - 75) / 12.5. The

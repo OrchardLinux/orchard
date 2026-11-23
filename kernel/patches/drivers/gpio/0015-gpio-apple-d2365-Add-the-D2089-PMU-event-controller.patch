@@ -15,24 +15,44 @@ their lines and events as before.
 
 Assisted-by: LLM
 ---
+ drivers/gpio/Kconfig            |  5 +++--
  drivers/gpio/gpio-apple-d2365.c | 35 +++++++++++++++++++++++++++++++--
- 1 file changed, 33 insertions(+), 2 deletions(-)
+ 2 files changed, 36 insertions(+), 4 deletions(-)
 
+diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
+index 46c24969d..d16865195 100644
+--- a/drivers/gpio/Kconfig
++++ b/drivers/gpio/Kconfig
+@@ -1349,11 +1349,12 @@ config GPIO_ALTERA_A10SR
+ 	  as writes to LEDs.
+ 
+ config GPIO_APPLE_D2365
+-	tristate "Apple A8/A8X/A9/A10 PMIC GPIO support"
++	tristate "Apple A7/A8/A8X/A9/A10 PMIC GPIO support"
+ 	depends on MFD_SIMPLE_MFD_I2C
+ 	help
+ 	  Say yes here to enable support for the GPIOs provided by the Dialog
+-	  D2186, D2207, D2333 and D2365 PMICs used in Apple A8, A8X, A9 and A10 devices.
++	  D2186, D2207, D2333 and D2365 PMICs used in Apple A8, A8X, A9 and A10 devices,
++	  and for the PMU events of the D2089 used in Apple A7 devices.
+ 	  The GPIO controller is exposed as a child of the Apple I2C PMIC and
+ 	  can control board-level signals such as peripheral power enables.
+ 
 diff --git a/drivers/gpio/gpio-apple-d2365.c b/drivers/gpio/gpio-apple-d2365.c
-index 8ff38fcb7..57e2e2f11 100644
+index 3f4f09d9b..12784db89 100644
 --- a/drivers/gpio/gpio-apple-d2365.c
 +++ b/drivers/gpio/gpio-apple-d2365.c
 @@ -1,7 +1,8 @@
  // SPDX-License-Identifier: GPL-2.0-only
  /*
   * GPIO and PMU event interrupt driver for Apple/Dialog PMICs used with the
-- * A8X, A9 and A10 SoCs.
-+ * A7, A8X, A9 and A10 SoCs. On the A7's D2089 only the PMU events are
+- * A8, A8X, A9 and A10 SoCs.
++ * A7, A8, A8X, A9 and A10 SoCs. On the A7's D2089 only the PMU events are
 + * described, not its GPIO lines.
   *
   * The D2365 latches 240 PMU events and the D2207 112 in a read-to-clear
   * block. Any unmasked pending event pulls the PMU interrupt line to the AP
-@@ -70,6 +71,18 @@
+@@ -83,6 +84,18 @@
  #define D2207_EVENT_BYTES	14
  #define D2207_GPIO_EVENT	0x18
  
@@ -51,7 +71,7 @@ index 8ff38fcb7..57e2e2f11 100644
  #define D2365_GPIO_SPLIT		18
  #define D2365_GPIO_CFG_0_17	0x900
  #define D2365_GPIO_CFG_18_23	0x8bd
-@@ -962,6 +975,9 @@ static int apple_pmic_gpio_probe(struct platform_device *pdev)
+@@ -980,6 +993,9 @@ static int apple_pmic_gpio_probe(struct platform_device *pdev)
  	ret = apple_pmic_event_probe(pdev, gpio);
  	if (ret)
  		return ret;
@@ -61,7 +81,7 @@ index 8ff38fcb7..57e2e2f11 100644
  
  	gpio->chip.label = gpio->info->label;
  	gpio->chip.owner = THIS_MODULE;
-@@ -979,6 +995,17 @@ static int apple_pmic_gpio_probe(struct platform_device *pdev)
+@@ -997,6 +1013,17 @@ static int apple_pmic_gpio_probe(struct platform_device *pdev)
  	return devm_gpiochip_add_data(dev, &gpio->chip, gpio);
  }
  
@@ -76,10 +96,10 @@ index 8ff38fcb7..57e2e2f11 100644
 +	.events = &d2089_event_info,
 +};
 +
- static const struct apple_pmic_event_info d2207_event_info = {
- 	.status_base = D2207_EVENTS,
- 	.mask_base = D2207_EVENT_MASK,
-@@ -1030,6 +1057,10 @@ static const struct apple_pmic_gpio_info d2365_gpio_info = {
+ static const struct apple_pmic_gpio_info d2186_gpio_info = {
+ 	.label = "d2186-pmic-gpio",
+ 	.ngpio = 21,
+@@ -1059,6 +1086,10 @@ static const struct apple_pmic_gpio_info d2365_gpio_info = {
  };
  
  static const struct of_device_id d2365_gpio_of_match[] = {
@@ -88,12 +108,12 @@ index 8ff38fcb7..57e2e2f11 100644
 +		.data = &d2089_gpio_info,
 +	},
  	{
- 		.compatible = "apple,d2207-pmic-gpio",
- 		.data = &d2207_gpio_info,
-@@ -1056,5 +1087,5 @@ static struct platform_driver d2365_gpio_driver = {
+ 		.compatible = "apple,d2186-pmic-gpio",
+ 		.data = &d2186_gpio_info,
+@@ -1089,5 +1120,5 @@ static struct platform_driver d2365_gpio_driver = {
  };
  module_platform_driver(d2365_gpio_driver);
  
--MODULE_DESCRIPTION("Apple A8X/A9/A10 PMIC GPIO and event interrupt driver");
-+MODULE_DESCRIPTION("Apple A7/A8X/A9/A10 PMIC GPIO and event interrupt driver");
+-MODULE_DESCRIPTION("Apple A8/A8X/A9/A10 PMIC GPIO and event interrupt driver");
++MODULE_DESCRIPTION("Apple A7/A8/A8X/A9/A10 PMIC GPIO and event interrupt driver");
  MODULE_LICENSE("GPL");

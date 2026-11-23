@@ -20,7 +20,7 @@ Assisted-by: LLM
  1 file changed, 26 insertions(+), 5 deletions(-)
 
 diff --git a/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml b/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml
-index 978a5a25e..511acc8ed 100644
+index ed3f849fc..1a5a8c167 100644
 --- a/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml
 +++ b/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml
 @@ -4,7 +4,7 @@
@@ -53,10 +53,10 @@ index 978a5a25e..511acc8ed 100644
    compatible:
      enum:
 +      - apple,d2089-pmic-gpio
+       - apple,d2186-pmic-gpio
        - apple,d2207-pmic-gpio
        - apple,d2333-pmic-gpio
-       - apple,d2365-pmic-gpio
-@@ -73,14 +79,29 @@ properties:
+@@ -74,14 +80,29 @@ properties:
  
  required:
    - compatible

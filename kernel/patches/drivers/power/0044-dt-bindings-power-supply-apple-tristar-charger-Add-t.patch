@@ -4,14 +4,15 @@ Date: Mon, 23 Nov 2026 19:45:00 +0800
 Subject: [PATCH] dt-bindings: power: supply: apple,tristar-charger: Add the
  D2089
 
-The iPad Air (J72) charges through the same Tristar port controller,
-with the A7's D2089 PMIC: apple,d2089-tristar-charger, with
-apple,j72-tristar-charger for the board.
+The A7 iPads (iPad Air, iPad mini 2 and 3) charge through the same
+Tristar port controller, with the A7's D2089 PMIC:
+apple,d2089-tristar-charger. The charger's registers are the same on
+every board with that PMIC, so no board compatible comes before it.
 
 Assisted-by: LLM
 ---
- .../bindings/power/supply/apple,tristar-charger.yaml       | 7 +++++--
- 1 file changed, 5 insertions(+), 2 deletions(-)
+ .../bindings/power/supply/apple,tristar-charger.yaml       | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
 
 diff --git a/Documentation/devicetree/bindings/power/supply/apple,tristar-charger.yaml b/Documentation/devicetree/bindings/power/supply/apple,tristar-charger.yaml
 index 8e4acf9f7..d7260d3ec 100644
@@ -24,17 +25,15 @@ index 8e4acf9f7..d7260d3ec 100644
 -  port controller and a D2365-family PMIC, such as the iPad 5 and iPad 6 (D2365)
 -  and the iPad Air 2 (D2207). The PMICs have the same charger functions at
 +  port controller and a D2365-family PMIC, such as the iPad 5 and iPad 6 (D2365),
-+  the iPad Air 2 (D2207) and the iPad Air (D2089). The PMICs have the same charger functions at
++  the iPad Air 2 (D2207) and the iPad Air and iPad mini 2 and 3 (D2089). The PMICs have the same charger functions at
    different register addresses, so the compatible names the PMIC. The
    node is a child of the PMIC. It identifies the attached source through the
    Tristar and the PMIC ADC and sets the PMIC input-current limit, which iBoot
-@@ -38,6 +38,9 @@ properties:
+@@ -38,6 +38,7 @@ properties:
        - items:
            - const: apple,j81-tristar-charger
            - const: apple,d2207-tristar-charger
-+      - items:
-+          - const: apple,j72-tristar-charger
-+          - const: apple,d2089-tristar-charger
++      - const: apple,d2089-tristar-charger
  
    reg:
      items:
