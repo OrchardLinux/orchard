@@ -65,6 +65,19 @@
       },
       "device": "/usr/sbin/BlueTool",
       "sha256": "78115abe9705d30596768231d2f1587bf68670f6a7a2d1db7d88620aa54cca8d"
+    },
+    "aop.im4p": {
+      "ipsw": {
+        "zip": "Firmware/AOP/aopfw-t8010aop.im4p"
+      },
+      "sha256": "8066c760dab9a07d1795121df703d187e40cd5c95baea18437e987b89a8d68b6"
+    },
+    "D10.mtprops": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/multitouch/D10.mtprops"
+      },
+      "device": "/usr/share/firmware/multitouch/D10.mtprops",
+      "sha256": "830e2404693ac52bd9b96fa34b2deb5b4626e4b5f2fde1e74b9ad43d44bed1ad"
     }
   },
   "outputs": [
@@ -155,6 +168,66 @@
         {
           "step": "bluetool-hcd@1",
           "input": "BlueTool"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/gfx-t8010.bin",
+      "sha256": "03b8c05b6dbd4cd6fac437273a466a180b60c4103e4a505bcc272c19ed086371",
+      "steps": [
+        {
+          "step": "agx-g9p-firmware-from-kernelcache@1",
+          "input": "kernelcache"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/vxd-deva.bin",
+      "sha256": "bf5167652e81540471aaca141943fd33d71c3990c137f145471305f5f5ade83b",
+      "steps": [
+        {
+          "step": "vxd-firmware-from-kernelcache@1",
+          "input": "kernelcache"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/aop-t8010.bin",
+      "sha256": "5f52d5e4239bfb08330b3d0d970be46c67c52414a383cad10387b5f6b6c71cd6",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "aop.im4p"
+        },
+        {
+          "step": "aop-image@1",
+          "coprocessor": "AOP"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/aop-t8010-ext.bin",
+      "sha256": "d08277e468dad66ce29b148423f99317293c22a935f05816e1d2fd33672fcfff",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "aop.im4p"
+        },
+        {
+          "step": "aop-image@1",
+          "coprocessor": "AOP_ext"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/dfrmtfw-d101-c1f5d-2.bin",
+      "sha256": "97f8bbb23d0c3b745320360b0424d03e1ef7782a254b4d62a757f5c12585cb3f",
+      "steps": [
+        {
+          "step": "z2fw-from-mtprops@2",
+          "input": "D10.mtprops",
+          "profile": "C1F5D,2",
+          "packet": "Z2"
         }
       ]
     }

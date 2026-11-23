@@ -25,8 +25,8 @@ dtb = "t8010-d10"     # arch/arm64/boot/dts/apple/<dtb>.dtb
 [firmware]
 recipe = "firmware.json" # Relative to this device.toml; public recipe, not firmware bytes.
 # Wi-Fi files are for brcm,board-type "apple,kristoff": the wlan module-instance in
-# the IPSW's DeviceTree.d10ap. The DT doesn't describe Wi-Fi yet.
-# Touch, once the DT describes it: D10.mtprops profile "C1F5D,2", z2fw-from-mtprops@2.
+# the IPSW's DeviceTree.d10ap. Touch: D10.mtprops profile "C1F5D,2", z2fw-from-mtprops@2.
+# GPU, VXD and AOP firmware come from the same iOS 15.8.8 image as on the 7 Plus.
 
 [support]
 status = "experimental"
@@ -37,27 +37,27 @@ display = "untested"
 screen_off = "untested"
 backlight = "untested"
 gpu_desktop = "untested"
-touch = "missing"
+touch = "untested" # Shared iPhone 7 touchscreen node; D10.mtprops profile C1F5D,2
 buttons = "untested"
-accelerometer = "untested"
-gyroscope = "untested"
-light_sensor = "missing"
+accelerometer = "untested" # AOP with aopfw-t8010aop; mount-matrix not measured
+gyroscope = "untested" # Same AOP firmware as the accelerometer
+light_sensor = "untested"
 touch_id = "missing"
 storage_read = "untested"
 storage_write = "untested"
-wifi = "missing"
-bluetooth_input = "missing"
-bluetooth_audio = "missing"
+wifi = "untested"
+bluetooth_input = "untested" # Patchram follows the Wi-Fi module vendor (MUR/USI)
+bluetooth_audio = "untested"
 cellular = "missing"
-battery = "missing"
-charging = "missing"
-charging_control = "missing"
+battery = "untested"
+charging = "untested" # SN2400 charger
+charging_control = "missing" # The SN2400 driver has no writable limit yet
 suspend = "untested"
 resume = "untested"
 usb_serial = "untested"
 usb_network = "untested"
-usb_host = "missing"
-audio_output = "missing"
-audio_input = "missing"
+usb_host = "missing" # Needs the Tristar (cbtl1610) VBUS path on the D2333 PMU; only the iPad's D2365 one exists
+audio_output = "missing" # No Linux driver for the CS42L71 codec or the CS35L26 amplifier
+audio_input = "missing" # No Linux driver for the CS42L71 codec
 camera = "missing"
-video_decode_hevc = "missing"
+video_decode_hevc = "untested" # VXD on for every A10; vxd-deva.bin from the recipe

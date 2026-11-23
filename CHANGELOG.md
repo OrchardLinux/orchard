@@ -13,6 +13,14 @@ is missing or empty.
 
 ### Devices
 
+- iPhone 7 and iPhone 7 Plus (A10): the iPhone 7 gets the touchscreen,
+  Wi-Fi, battery gauge, charger and light sensor the 7 Plus had, and all four
+  models get Bluetooth, the accelerometer and gyroscope (AOP), hardware video
+  decoding and the SN2400 charger driver, which was not built before. Their
+  firmware recipes carry the GPU, video decoder and AOP firmware. Untested.
+- iPad 6 (Cellular) and iPad 7 (Cellular) (A10): Bluetooth, as on the Wi-Fi
+  models; the Patchram follows the module vendor. iPad 7 (A10): charging
+  control is offered as on the iPad 6. Untested.
 - iPad Air 2 (Wi-Fi): internal storage works, so Omarchy installs with
   `orchard install` and starts from the iPad with `orchard launch`, next to
   iPadOS. The A8X storage controller (ANS1) has a kernel driver now.
