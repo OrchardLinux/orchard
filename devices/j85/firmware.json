@@ -38,6 +38,14 @@
         "rootfs": "usr/share/firmware/wifi/4324b5/vidal-m-mt.txt"
       },
       "sha256": "1eec8270b7e1d241daa6ae3aab737fd766976a71427c898acb32d835e8a97f7b"
+    },
+    "kernelcache": {
+      "ipsw": {
+        "kernelcache": true
+      },
+      "device": {
+        "kernelcache": "active"
+      }
     }
   },
   "outputs": [
@@ -75,6 +83,17 @@
           "input": "vidal.trx",
           "nvram": "vidal-m-mt.txt",
           "placeholder_mac": "02:00:00:00:00:00"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/s5l8960x-smartio.bin",
+      "sha256": "af3d61851d4a2dd53d7301d945d7ff3f0d94eef2e15947f1de2c9a8982708e33",
+      "steps": [
+        {
+          "step": "smartio-from-kernelcache@2",
+          "input": "kernelcache",
+          "kext": "com.apple.driver.AppleS5L8960XSmartIO"
         }
       ]
     }

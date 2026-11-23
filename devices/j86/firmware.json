@@ -14,7 +14,69 @@
         "zip": "Firmware/all_flash/DeviceTree.j86ap.im4p"
       },
       "sha256": "2b4b227cd1230471160ccf53224c744494d3f096f53bc368c4f77ccbd3790644"
+    },
+    "seyval.trx": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/4324b5/seyval.trx"
+      },
+      "sha256": "75e6818842d0bd239029b9b954698c95c76e7aed4717a3376e980469dd89b64a"
+    },
+    "seyval-u-kk.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/4324b5/seyval-u-kk.txt"
+      },
+      "sha256": "d5d11800a0ecbf361aa1beeb59b03728e7f75ceb431ad12104b4a89c7a3fad0c"
+    },
+    "seyval-m-mt.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/4324b5/seyval-m-mt.txt"
+      },
+      "sha256": "a812a108b35c90f723dee449a7de4077016fe3c5bb57da6d62f57d2e5d5158f2"
+    },
+    "kernelcache": {
+      "ipsw": {
+        "kernelcache": true
+      },
+      "device": {
+        "kernelcache": "active"
+      }
     }
   },
-  "outputs": []
+  "outputs": [
+    {
+      "destination": "lib/firmware/brcm/brcmfmac43241-j86-usb.bin",
+      "sha256": "b04cd6e936a1cc59f5ef36292e837b7e44a71d86ff5c98321b7b453c558e27bf",
+      "steps": [
+        {
+          "step": "trx-add-nvram@1",
+          "input": "seyval.trx",
+          "nvram": "seyval-u-kk.txt",
+          "placeholder_mac": "02:00:00:00:00:00"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac43241-j86-usb.murata.bin",
+      "sha256": "03167aa551d66d73e39bd7dbc504ef7cc3574668dab68a2629cef350b2ae9505",
+      "steps": [
+        {
+          "step": "trx-add-nvram@1",
+          "input": "seyval.trx",
+          "nvram": "seyval-m-mt.txt",
+          "placeholder_mac": "02:00:00:00:00:00"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/s5l8960x-smartio.bin",
+      "sha256": "af3d61851d4a2dd53d7301d945d7ff3f0d94eef2e15947f1de2c9a8982708e33",
+      "steps": [
+        {
+          "step": "smartio-from-kernelcache@2",
+          "input": "kernelcache",
+          "kext": "com.apple.driver.AppleS5L8960XSmartIO"
+        }
+      ]
+    }
+  ]
 }

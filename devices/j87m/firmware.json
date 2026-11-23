@@ -14,7 +14,27 @@
         "zip": "Firmware/all_flash/DeviceTree.j87map.im4p"
       },
       "sha256": "f2abde9b646e922a09afeae7209a7fbe5c21240832118eb3b5d20f34de6358e5"
+    },
+    "kernelcache": {
+      "ipsw": {
+        "kernelcache": true
+      },
+      "device": {
+        "kernelcache": "active"
+      }
     }
   },
-  "outputs": []
+  "outputs": [
+    {
+      "destination": "lib/firmware/apple/s5l8960x-smartio.bin",
+      "sha256": "af3d61851d4a2dd53d7301d945d7ff3f0d94eef2e15947f1de2c9a8982708e33",
+      "steps": [
+        {
+          "step": "smartio-from-kernelcache@2",
+          "input": "kernelcache",
+          "kext": "com.apple.driver.AppleS5L8960XSmartIO"
+        }
+      ]
+    }
+  ]
 }
