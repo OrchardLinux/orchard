@@ -1,6 +1,7 @@
 #!/bin/sh
-# Enable orchard-a7-wifi.service on the boards it serves. The platform layer holds no symlinks,
-# so the generator adds the wants link at boot.
-grep -qzE '^apple,(j72|j85)$' /proc/device-tree/compatible 2>/dev/null || exit 0
+# Enable orchard-a7-wifi.service where the device tree describes an A7 HSIC Wi-Fi radio
+# (apple,s5l8960x-hsic-wlan: every iPad Air, iPad mini 2 and iPad mini 3). The platform layer
+# holds no symlinks, so the generator adds the wants link at boot.
+grep -qsz '^apple,s5l8960x-hsic-wlan$' /proc/device-tree/wifi@*/compatible || exit 0
 mkdir -p "$1/multi-user.target.wants"
 ln -sf /usr/lib/systemd/system/orchard-a7-wifi.service "$1/multi-user.target.wants/orchard-a7-wifi.service"

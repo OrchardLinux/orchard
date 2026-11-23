@@ -1,5 +1,5 @@
 #!/bin/sh
-# Start the HSIC Wi-Fi radio of an Apple A7 board (iPad Air, iPad mini 2): the apple_a7_wlan transport
+# Start the HSIC Wi-Fi radio of an Apple A7 board (iPad Air, iPad mini 2 and 3): the apple_a7_wlan transport
 # brings up EHCI and the radio, then brcmfmac binds to it. See orchard-a7-wifi.service.
 set -u
 P=/sys/module/apple_a7_wlan/parameters

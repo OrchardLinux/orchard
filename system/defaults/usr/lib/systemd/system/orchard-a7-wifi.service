@@ -5,8 +5,8 @@ DefaultDependencies=no
 After=systemd-udevd.service systemd-modules-load.service
 Before=network-pre.target NetworkManager.service
 Wants=network-pre.target
-ConditionFirmware=|device-tree-compatible(apple,j72)
-ConditionFirmware=|device-tree-compatible(apple,j85)
+# The device tree describes the radio (apple,s5l8960x-hsic-wlan).
+ConditionPathExistsGlob=/proc/device-tree/wifi@20c0000*
 
 [Service]
 Type=oneshot
