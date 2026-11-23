@@ -147,9 +147,16 @@ int main(void) {
     def test_existing_device_match_names_not_removed(self):
         for path in series_patches('j71b'):
             before, after = [], []
+            in_table = False
             for line in path.read_text().splitlines():
-                # Match table strings, not branches or comments mentioning compatibles.
-                if '.compatible = ' not in line:
+                # Match table strings (of_device_id tables), not branches, comments or
+                # other per-board data that a patch replaces with device tree data.
+                code = line[1:] if line[:1] in '+- ' else line
+                if 'of_device_id' in code and '[]' in code:
+                    in_table = True
+                elif in_table and code.startswith('};'):
+                    in_table = False
+                if not in_table or '.compatible = ' not in line:
                     continue
                 names = re.findall(r'\.compatible = "([^"]+)"', line)
                 if line.startswith('-'):
