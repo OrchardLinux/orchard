@@ -1,0 +1,106 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 15:43:06 +0100
+Subject: [PATCH] power: supply: apple_tristar_charger: Support the D2089
+
+The iPad mini 2's D2089 is the iPad Air's PMIC. thisiscamk's iPad Air
+(J72) measurements first established two of its charger registers: the
+input-current limit at 0x4c0, with the D2365's encoding (iBoot and a
+cable removal leave 0x02, 100 mA), and the charger state at 0x62 (0x42
+with a source attached, 0x00 without one).
+
+iOS 12.5.8 AppleD2089PMU (J85 kernelcache) drives the rest as
+AppleD2207PMU drives the D2207, at the same addresses:
+
+  connection state  0x60   bit 0 connected, bit 3 a new connection
+  ADC               0x500  start with 0x80 | channel; done on PMU event
+                           89; 12-bit result at 0x502 with the D2207's
+                           byte order; afterwards 0x501 &= 7 and the
+                           start bit cleared in 0x500 (_readADCGated)
+  plug event        0      (AppleD2089PMUPowerSource's event bitmap)
+
+Channel 6 is the Tristar's BrickID line, with the same millivolt scale.
+So the D2089 gets the D2207's match data, and identifies sources the same
+way: BC1.2, Apple BrickID, USB-C current advertisement, or the USB host's
+allowance.
+
+The board's ADT allows 2400 mA of input. On the iPad mini 2 a CDP and a
+USB-C source drew the 1500 mA they advertise; nothing higher has been
+measured on a D2089. Add a per-PMIC maximum, which the board maximum
+cannot exceed, and hold the D2089 to 1500 mA.
+
+Assisted-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/power/supply/apple_tristar_charger.c | 30 +++++++++++++++++++-
+ 1 file changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/power/supply/apple_tristar_charger.c b/drivers/power/supply/apple_tristar_charger.c
+index f2c11557c..8f9dc97b3 100644
+--- a/drivers/power/supply/apple_tristar_charger.c
++++ b/drivers/power/supply/apple_tristar_charger.c
+@@ -1,7 +1,8 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ /*
+  * Lightning charging for Apple devices with a Tristar (CBTL1610) port
+- * controller and a D2365-family PMIC (D2365, or the iPad Air 2's D2207).
++ * controller and a D2365-family PMIC (D2365, the iPad Air 2's D2207, or the
++ * iPad mini 2's D2089).
+  *
+  * iBoot leaves the PMIC input-current limit at 100 mA. On every attachment
+  * this driver identifies the source and grants what it advertises, up to the
+@@ -76,6 +77,8 @@ struct tristar_pmic {
+ 	u8 adc_result;		/* ADC bank: two result bytes */
+ 	bool adc_rearm;		/* clear the start bit and latch after a read */
+ 	unsigned int plug_event; /* the event that latches on plug and unplug */
++	/* The highest input limit qualified on this PMIC, in mA; 0: the board's */
++	unsigned int max_ma;
+ };
+ 
+ /* D2365 (iPad 5, iPad 6), from iOS 16 AppleD2365PMUPowerSource */
+@@ -107,6 +110,25 @@ static const struct tristar_pmic tristar_d2207 = {
+ 	.plug_event = 0,
+ };
+ 
++/*
++ * D2089 (iPad Air, iPad mini 2): iOS 12.5.8 AppleD2089PMU drives it as the
++ * D2207, at the same addresses, with ADC completion on event 89 and the
++ * same channel 6 scale. The iPad mini 2 drew 1500 mA from a CDP and a
++ * USB-C source; nothing above that has been measured on a D2089, so a grant
++ * stays within it whatever the board allows.
++ */
++static const struct tristar_pmic tristar_d2089 = {
++	.connected = 0x00,
++	.connected_new = BIT(3),
++	.status = 0x02,
++	.input_limit = 0x00,
++	.adc_start = TRISTAR_CHG_ADC_START | 6,
++	.adc_result = 0x02,
++	.adc_rearm = true,
++	.plug_event = 0,
++	.max_ma = 1500,
++};
++
+ /* Interrupts: the PMU line, ADC completion, then the source-change events. */
+ #define TRISTAR_IRQ_LINE		0
+ #define TRISTAR_IRQ_ADC			1
+@@ -1553,6 +1575,11 @@ static int tristar_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "missing board input-current maximum\n");
+ 	chg->max_ma = max_ua / 1000;
++	if (chg->pmic->max_ma && chg->max_ma > chg->pmic->max_ma) {
++		dev_info(dev, "board allows %u mA; this PMIC is qualified to %u mA\n",
++			 chg->max_ma, chg->pmic->max_ma);
++		chg->max_ma = chg->pmic->max_ma;
++	}
+ 
+ 	np = of_parse_phandle(dev->of_node, "apple,tristar", 0);
+ 	if (!np)
+@@ -1769,6 +1796,7 @@ static const struct dev_pm_ops tristar_pm_ops = {
+ };
+ 
+ static const struct of_device_id tristar_of_match[] = {
++	{ .compatible = "apple,d2089-tristar-charger", .data = &tristar_d2089 },
+ 	{ .compatible = "apple,d2207-tristar-charger", .data = &tristar_d2207 },
+ 	{ .compatible = "apple,tristar-charger", .data = &tristar_d2365 },
+ 	{ }

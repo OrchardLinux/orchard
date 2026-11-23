@@ -36,6 +36,11 @@ is missing or empty.
   yet). A kernel transport, from thisiscamk's iPad Air work, brings up the
   A7's HSIC link to the BCM43241 radio, and `orchard-a7-wifi.service` starts
   it at boot.
+- iPad mini 2 (Wi-Fi): the battery gauge works, and it charges at up to
+  1.5 A from a computer's charging port or a USB-C charger instead of iBoot's
+  100 mA. The Lightning charger driver and the PMIC event driver support its
+  D2089 PMIC, after iOS's driver for it and thisiscamk's iPad Air
+  measurements.
 - iPhone 6s Plus (Samsung): internal storage works, so Omarchy installs
   with `orchard install` next to iOS. The Samsung A9's PCIe storage
   controller works like the TSMC A9's without its phy-ip block. From

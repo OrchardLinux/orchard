@@ -339,7 +339,9 @@
     ],
     "j85": [
       "backlight",
+      "battery",
       "buttons",
+      "charging",
       "touch",
       "usb_network",
       "usb_serial"

@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 15:42:43 +0100
+Subject: [PATCH] dt-bindings: power: supply: apple,tristar-charger: Add the
+ D2089
+
+The iPad mini 2 (J85) charges through the same Tristar port controller,
+with a D2089 PMIC. iOS 12.5.8 AppleD2089PMU drives the D2089's charger
+as AppleD2207PMU drives the D2207's: connection and charger state at
+0x60 and 0x62, the input-current limit at 0x4c0, the ADC at 0x500, and
+ADC completion on PMU event 89. The node therefore has the same banks
+and interrupts as on the iPad Air 2.
+
+Add apple,d2089-tristar-charger, with apple,j85-tristar-charger for the
+board.
+
+Assisted-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../bindings/power/supply/apple,tristar-charger.yaml  | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/power/supply/apple,tristar-charger.yaml b/Documentation/devicetree/bindings/power/supply/apple,tristar-charger.yaml
+index 8e4acf9f7..4d9155868 100644
+--- a/Documentation/devicetree/bindings/power/supply/apple,tristar-charger.yaml
++++ b/Documentation/devicetree/bindings/power/supply/apple,tristar-charger.yaml
+@@ -11,10 +11,10 @@ maintainers:
+ 
+ description: |
+   Charging on Apple devices whose Lightning port uses a Tristar (NXP CBTL1610)
+-  port controller and a D2365-family PMIC, such as the iPad 5 and iPad 6 (D2365)
+-  and the iPad Air 2 (D2207). The PMICs have the same charger functions at
+-  different register addresses, so the compatible names the PMIC. The
+-  node is a child of the PMIC. It identifies the attached source through the
++  port controller and a D2365-family PMIC, such as the iPad 5 and iPad 6 (D2365),
++  the iPad Air 2 (D2207) and the iPad mini 2 (D2089, laid out as the D2207).
++  The PMICs have the same charger functions at different register addresses,
++  so the compatible names the PMIC. The node is a child of the PMIC. It identifies the attached source through the
+   Tristar and the PMIC ADC and sets the PMIC input-current limit, which iBoot
+   leaves at 100 mA. PMU events come from the PMIC's event interrupt
+   controller (the PMIC GPIO node).
+@@ -38,6 +38,9 @@ properties:
+       - items:
+           - const: apple,j81-tristar-charger
+           - const: apple,d2207-tristar-charger
++      - items:
++          - const: apple,j85-tristar-charger
++          - const: apple,d2089-tristar-charger
+ 
+   reg:
+     items:

@@ -1,0 +1,87 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 15:42:13 +0100
+Subject: [PATCH] dt-bindings: gpio: apple,d2365-pmic-gpio: Add the D2089
+
+The Dialog D2089 PMIC of the A7 iPads (iPad Air, iPad mini 2) has the
+D2207's PMU event block: iOS 12.5.8 AppleD2089PMU reads its 14 event
+bytes at 0x50 and masks events at 0x70 + n / 8 (set = masked), as
+AppleD2207PMU does. The Lightning charger needs it as an interrupt
+controller for the PMU line and ADC completion.
+
+Add its compatible, with the D2207's limits on apple,wake-events.
+
+Assisted-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../bindings/gpio/apple,d2365-pmic-gpio.yaml  | 34 +++++++++++--------
+ 1 file changed, 19 insertions(+), 15 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml b/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml
+index ed3f849fc..cfee44312 100644
+--- a/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml
++++ b/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml
+@@ -4,29 +4,30 @@
+ $id: http://devicetree.org/schemas/gpio/apple,d2365-pmic-gpio.yaml#
+ $schema: http://devicetree.org/meta-schemas/core.yaml#
+ 
+-title: Apple A8/A9/A10 PMIC GPIO and event interrupt controller
++title: Apple A7/A8/A9/A10 PMIC GPIO and event interrupt controller
+ 
+ maintainers:
+   - Paul Praschl <praschlpaul@g-p.at>
+ 
+ description: |
+-  The Dialog D2186 and D2207 PMICs used with the Apple A8 and A8X and the
+-  D2333 and D2365 PMICs used in Apple A9 and A10 devices provide 21, 21, 21
+-  and 24 GPIOs respectively. The controller is accessed through the regmap exported by the
+-  parent Apple I2C PMIC device.
++  The Dialog D2089 PMIC used with the Apple A7, the D2186 and D2207 PMICs
++  used with the Apple A8 and A8X and the D2333 and D2365 PMICs used in Apple
++  A9 and A10 devices provide 21, 21, 21, 21 and 24 GPIOs respectively. The
++  controller is accessed through the regmap exported by the parent Apple I2C
++  PMIC device.
+ 
+   The D2207 and D2365 also latch 112 and 240 PMU events respectively
+   (charger, ADC, GPIO edges and others) in one read-to-clear block and
+-  signal them on a single active-low line to the AP. As an interrupt
+-  controller the node owns that block: the interrupt specifier is the PMU
+-  event number and a flags cell. PMIC GPIO line N is event 0x18 + N on the
+-  D2207 and 0x30 + N on the D2365, so GPIO consumers get their interrupt
+-  through the GPIO specifier as well. Events are latched; what triggers a
+-  GPIO event is the line configuration left by the boot firmware, so only
+-  edge flags are accepted.
++  signal them on a single active-low line to the AP; the D2089 has the
++  D2207's event block. As an interrupt controller the node owns that block:
++  the interrupt specifier is the PMU event number and a flags cell. PMIC
++  GPIO line N is event 0x18 + N on the D2207 and 0x30 + N on the D2365, so
++  GPIO consumers get their interrupt through the GPIO specifier as well.
++  Events are latched; what triggers a GPIO event is the line configuration
++  left by the boot firmware, so only edge flags are accepted.
+ 
+-  Interrupt 112 (D2207) or 240 (D2365), one past the last event, is the
+-  event line itself. Its consumers run on every assertion of the line,
++  Interrupt 112 (D2089, D2207) or 240 (D2365), one past the last event, is
++  the event line itself. Its consumers run on every assertion of the line,
+   before the event block is read, so that a consumer can act before the I2C
+   read that tells which event it was (the Lightning charger withdraws its
+   input-current grant there).
+@@ -34,6 +35,7 @@ description: |
+ properties:
+   compatible:
+     enum:
++      - apple,d2089-pmic-gpio
+       - apple,d2186-pmic-gpio
+       - apple,d2207-pmic-gpio
+       - apple,d2333-pmic-gpio
+@@ -97,7 +99,9 @@ allOf:
+   - if:
+       properties:
+         compatible:
+-          const: apple,d2207-pmic-gpio
++          enum:
++            - apple,d2089-pmic-gpio
++            - apple,d2207-pmic-gpio
+     then:
+       properties:
+         apple,wake-events:

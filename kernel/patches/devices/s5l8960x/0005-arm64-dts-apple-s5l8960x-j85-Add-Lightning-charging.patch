@@ -1,0 +1,150 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 15:43:37 +0100
+Subject: [PATCH] arm64: dts: apple: s5l8960x-j85: Add Lightning charging
+
+iBoot leaves the D2089's input-current limit at 100 mA, so the iPad mini 2
+drains on a cable. Describe what charging needs, from the J85 ADT:
+
+- the D2089's PMU events: the ADT's pmu node, an interrupt controller on
+  AP GPIO 21 (active low). All 21 PMIC GPIO lines stay reserved; the A7
+  Wi-Fi transport drives line 3 itself;
+- the Tristar (CBTL1610) at i2c0 0x1a (i2c0/tristar);
+- the Lightning charger on the D2089, at the D2207's addresses as iOS
+  12.5.8 AppleD2089PMU uses them, with the PMU line (112) and ADC done
+  (89), and the ADT charger node's usb-input-limit-max of 0x960 =
+  2400 mA as the board maximum, which the driver holds to 1500 mA;
+- the USB role link and usb-psy-name, so the host's allowance reaches
+  the charger;
+- the battery gauge on UART5 over HDQ (uart5/gas-gauge, TX on GPIO 44).
+  The ADT says bq27540; the iPad Air's and the iPad Air 2's, listed the
+  same way, answer as a BQ27545. The charger ramps only inside the pack
+  limits the gauge reports.
+
+The Tristar's own interrupt (GPIO 116) has no consumer, and the
+Lightning accessory policy is not built for this platform. This board
+only: the J86 and J87 ADTs were not examined.
+
+On a J85 (installed system), the gauge reports capacity, voltage and
+current, and plug and unplug are seen every time. A Mac's USB-C port is
+identified as a CDP and a 30 W charger on a USB-C to Lightning cable as
+a USB-C source; both get 1500 mA, and the battery charges at +958 mA
+and +816 mA. The same charger on a USB-A cable is identified as a DCP.
+
+Assisted-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/apple/s5l8960x-j85.dts | 93 ++++++++++++++++++++++
+ 1 file changed, 93 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/s5l8960x-j85.dts b/arch/arm64/boot/dts/apple/s5l8960x-j85.dts
+index 4c12a01a8..c5561e88f 100644
+--- a/arch/arm64/boot/dts/apple/s5l8960x-j85.dts
++++ b/arch/arm64/boot/dts/apple/s5l8960x-j85.dts
+@@ -29,6 +29,11 @@ touch_sync_active: touch-sync-active-pins {
+ 	touch_sync_inactive: touch-sync-inactive-pins {
+ 		pinmux = <APPLE_PINMUX(119, 0)>;
+ 	};
++
++	/* The battery's HDQ line, from the ADT uart5 function-tx (GPIO 0x2c). */
++	uart5_pins: uart5-pins {
++		pinmux = <APPLE_PINMUX(44, 1)>;
++	};
+ };
+ 
+ &{/soc/i2c@20a110000/pmic@3c} {
+@@ -43,6 +48,94 @@ touch_core: regulator-touch-core {
+ 		regulator-name = "touch-core";
+ 		regulator-always-on;
+ 	};
++
++	/*
++	 * PMU events, as iOS 12.5.8 AppleD2089PMU reads them (the D2207's
++	 * layout): the ADT's pmu node is an interrupt controller on AP GPIO
++	 * 21. No PMIC GPIO line is used through it; the Wi-Fi transport drives
++	 * line 3 itself.
++	 */
++	pmu_gpio: gpio {
++		compatible = "apple,d2089-pmic-gpio";
++		gpio-controller;
++		#gpio-cells = <2>;
++		gpio-reserved-ranges = <0 21>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++		interrupts-extended = <&pinctrl 21 IRQ_TYPE_LEVEL_LOW>;
++	};
++
++	/*
++	 * Lightning charging, at the D2089's registers as iOS 12.5.8
++	 * AppleD2089PMU uses them: connection and charger state at 0x60,
++	 * the input-current limit at 0x4c0, the ADC at 0x500. The ADT's
++	 * charger node allows 0x960 = 2400 mA of input; the driver holds a
++	 * D2089 to the 1500 mA measured so far.
++	 */
++	tristar_charger: charger@60 {
++		compatible = "apple,j85-tristar-charger", "apple,d2089-tristar-charger";
++		reg = <0x60 0x0d>, <0x4c0 0x01>, <0x500 0x04>;
++		reg-names = "status", "control", "adc";
++		interrupt-parent = <&pmu_gpio>;
++		/*
++		 * The PMU line and ADC done. No source events, as on the iPad
++		 * Air 2: the charger's poll of 0x60 sees plug and unplug.
++		 */
++		interrupts = <112 IRQ_TYPE_EDGE_RISING>,
++			     <89 IRQ_TYPE_EDGE_RISING>;
++		apple,tristar = <&tristar>;
++		input-current-limit-microamp = <2400000>;
++
++		/* The charger decides when USB data may come on. */
++		port {
++			tristar_charger_usb: endpoint {
++				remote-endpoint = <&usbdev_role>;
++			};
++		};
++	};
++};
++
++/*
++ * The Lightning port controller, from the ADT i2c0/tristar node
++ * (tristar,cbtl1610 at 0x1a). Its interrupt (GPIO 116) has no consumer.
++ */
++&i2c0 {
++	tristar: port-controller@1a {
++		compatible = "nxp,cbtl1610";
++		reg = <0x1a>;
++	};
++};
++
++/* Tell the Lightning charger what the USB host allows. */
++&usbdev {
++	usb-psy-name = "lightning";
++	usb-role-switch;
++
++	port {
++		usbdev_role: endpoint {
++			remote-endpoint = <&tristar_charger_usb>;
++		};
++	};
++};
++
++/*
++ * The battery gauge, from the ADT uart5/gas-gauge node: HDQ over UART5.
++ * The ADT says bq27540, as on the iPad Air and the iPad Air 2, whose
++ * gauges answer as a BQ27545 (DEVICE_TYPE 0x0545). The charger ramps only
++ * inside the pack limits it reads here.
++ */
++&serial5 {
++	pinctrl-0 = <&uart5_pins>;
++	pinctrl-names = "default";
++	status = "okay";
++
++	onewire {
++		compatible = "ti,hdq-uart";
++
++		battery: fuel-gauge {
++			compatible = "ti,bq27545-hdq";
++		};
++	};
+ };
+ 
+ &touchclk {

@@ -1,0 +1,110 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 15:42:32 +0100
+Subject: [PATCH] gpio: apple-d2365: Add D2089 PMIC GPIO support
+
+The iPad mini 2 (J85) and the iPad Air (J72) use a Dialog D2089 PMIC.
+iOS 12.5.8 AppleD2089PMU handles its PMU events exactly as AppleD2207PMU
+does: it reads the 14 event bytes at 0x50 without writing them back,
+sets every mask byte at 0x70 at start, and masks or unmasks one event
+with a byte write to 0x70 + n / 8. Event 89 is the ADC completion and
+event 0 the plug event, as on the D2207. The ADT's pmu node signals the
+events on AP GPIO 21.
+
+Add the D2089 with the D2207's event block and GPIO line layout. Of the
+lines only line 3 (the Wi-Fi reset, configuration byte 0x403) has been
+driven, by the A7 Wi-Fi transport; the rest of the line layout is the
+D2207's, unverified.
+
+On a J85, the PMU line and the ADC completion interrupt reach the
+Lightning charger, and touch, Wi-Fi and system sleep keep working.
+
+Assisted-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/gpio/Kconfig            |  5 +++--
+ drivers/gpio/gpio-apple-d2365.c | 32 ++++++++++++++++++++++++++++----
+ 2 files changed, 31 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
+index 46c24969d..0195c2fdf 100644
+--- a/drivers/gpio/Kconfig
++++ b/drivers/gpio/Kconfig
+@@ -1349,11 +1349,12 @@ config GPIO_ALTERA_A10SR
+ 	  as writes to LEDs.
+ 
+ config GPIO_APPLE_D2365
+-	tristate "Apple A8/A8X/A9/A10 PMIC GPIO support"
++	tristate "Apple A7/A8/A8X/A9/A10 PMIC GPIO support"
+ 	depends on MFD_SIMPLE_MFD_I2C
+ 	help
+ 	  Say yes here to enable support for the GPIOs provided by the Dialog
+-	  D2186, D2207, D2333 and D2365 PMICs used in Apple A8, A8X, A9 and A10 devices.
++	  D2089, D2186, D2207, D2333 and D2365 PMICs used in Apple A7, A8, A8X,
++	  A9 and A10 devices.
+ 	  The GPIO controller is exposed as a child of the Apple I2C PMIC and
+ 	  can control board-level signals such as peripheral power enables.
+ 
+diff --git a/drivers/gpio/gpio-apple-d2365.c b/drivers/gpio/gpio-apple-d2365.c
+index 3f4f09d9b..42ed4dd9d 100644
+--- a/drivers/gpio/gpio-apple-d2365.c
++++ b/drivers/gpio/gpio-apple-d2365.c
+@@ -1,10 +1,10 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ /*
+  * GPIO and PMU event interrupt driver for Apple/Dialog PMICs used with the
+- * A8, A8X, A9 and A10 SoCs.
++ * A7, A8, A8X, A9 and A10 SoCs.
+  *
+- * The D2365 latches 240 PMU events and the D2207 112 in a read-to-clear
+- * block. Any unmasked pending event pulls the PMU interrupt line to the AP
++ * The D2365 latches 240 PMU events and the D2207 and D2089 112 in a
++ * read-to-clear block. Any unmasked pending event pulls the PMU interrupt line to the AP
+  * low; reading the block acknowledges everything and releases the line.
+  * Every PMU client shares that block, so this driver owns it and hands each
+  * event to its consumer as an ordinary interrupt. PMIC GPIO line N is event
+@@ -1027,6 +1027,26 @@ static const struct apple_pmic_gpio_info d2207_gpio_info = {
+ 	.events = &d2207_event_info,
+ };
+ 
++/*
++ * D2089 (iPad Air, iPad mini 2): iOS 12.5.8 AppleD2089PMU handles its PMU
++ * events as AppleD2207PMU does, reading the 14 bytes at 0x50 without
++ * writing them back and masking with 0x70 + n / 8 (set = masked). Of its
++ * GPIO lines only line 3 (Wi-Fi reset, 0x403) has been driven, which
++ * matches the D2207's configuration bytes; the rest of the D2207 line
++ * layout is assumed.
++ */
++static const struct apple_pmic_gpio_info d2089_gpio_info = {
++	.label = "d2089-pmic-gpio",
++	.ngpio = 21,
++	.input_base = 0x63,
++	.value_mask = D2207_GPIO_VALUE,
++	.direction_mask = D2207_GPIO_MODE_MASK,
++	.input_mode = D2207_GPIO_INPUT,
++	.output_mode = D2207_GPIO_OUTPUT,
++	.config_reg = d2207_gpio_config_reg,
++	.events = &d2207_event_info,
++};
++
+ static const struct apple_pmic_gpio_info d2333_gpio_info = {
+ 	.label = "d2333-pmic-gpio",
+ 	.ngpio = ARRAY_SIZE(d2333_gpio_config_regs),
+@@ -1059,6 +1079,10 @@ static const struct apple_pmic_gpio_info d2365_gpio_info = {
+ };
+ 
+ static const struct of_device_id d2365_gpio_of_match[] = {
++	{
++		.compatible = "apple,d2089-pmic-gpio",
++		.data = &d2089_gpio_info,
++	},
+ 	{
+ 		.compatible = "apple,d2186-pmic-gpio",
+ 		.data = &d2186_gpio_info,
+@@ -1089,5 +1113,5 @@ static struct platform_driver d2365_gpio_driver = {
+ };
+ module_platform_driver(d2365_gpio_driver);
+ 
+-MODULE_DESCRIPTION("Apple A8/A8X/A9/A10 PMIC GPIO and event interrupt driver");
++MODULE_DESCRIPTION("Apple A7/A8/A8X/A9/A10 PMIC GPIO and event interrupt driver");
+ MODULE_LICENSE("GPL");
