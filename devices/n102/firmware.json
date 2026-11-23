@@ -27,9 +27,29 @@
         }
       },
       "sha256": "1d996c85affa1f37a07c6454dd5d3a383d4855206d113c9599200d79b6467ff8"
+    },
+    "N102.mtprops": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/multitouch/N102.mtprops"
+      },
+      "device": "/usr/share/firmware/multitouch/N102.mtprops",
+      "sha256": "e599bb27ffd005ece0fbcdb6accab5aa23bc1a4765d81aa41ad2e4d1644f4e11"
     }
   },
   "outputs": [
+    {
+      "destination": "lib/firmware/apple/n102-fwstart.z2fw",
+      "sha256": "b9cdcca016e20a1562fdaab2da1f1d0fe9daab18b9ba96bce4b8bdc3ed0cc9b9",
+      "steps": [
+        {
+          "step": "z2fw-from-z2-packet@1",
+          "input": "N102.mtprops",
+          "profile": "C1F58,1",
+          "calibration_address": 268472320,
+          "calibration_size": 1024
+        }
+      ]
+    },
     {
       "destination": "lib/firmware/apple/gfx-t7000.bin",
       "sha256": "0b60def67290391b4c6aa913d9a78a8105d6d9b03738175b8e5732689db1e5ba",

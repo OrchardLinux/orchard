@@ -31,7 +31,7 @@ keeps SysCfg, which Linux never writes.
 - GPU: per-job firmware overhead, parameter-manager pool growth inside a
   scene, and submitting a fragment job behind its geometry job
   (`a8_joint`) by default.
-- Touch, Wi-Fi and the battery gauge are not described yet.
+- Wi-Fi and the battery gauge are not described yet.
 
 ## Unmerged code
 

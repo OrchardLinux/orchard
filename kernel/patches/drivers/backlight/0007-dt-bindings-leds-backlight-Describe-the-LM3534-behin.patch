@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 12:40:23 +0100
+Subject: [PATCH] dt-bindings: leds: backlight: Describe the LM3534 behind
+ Apple DWI
+
+Document the I2C LED driver whose enable is controlled separately
+from brightness on the DWI bus.
+
+Assisted-by: LLM
+---
+ .../devicetree/bindings/leds/backlight/apple,dwi-bl.yaml        | 2 +-
+ Documentation/devicetree/bindings/trivial-devices.yaml          | 2 ++
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/devicetree/bindings/leds/backlight/apple,dwi-bl.yaml b/Documentation/devicetree/bindings/leds/backlight/apple,dwi-bl.yaml
+index af1be17..7ee2f36 100644
+--- a/Documentation/devicetree/bindings/leds/backlight/apple,dwi-bl.yaml
++++ b/Documentation/devicetree/bindings/leds/backlight/apple,dwi-bl.yaml
+@@ -43,7 +43,7 @@ properties:
+       The LED driver that receives the DWI brightness commands, when it has
+       an enable of its own on another bus. A DWI brightness of 0 leaves its
+       LEDs lit at their lowest current; they are only off while it is
+-      disabled (iPad 5: TI LP8559 on I2C).
++      disabled (for example a TI LP8559 or LM3534 on I2C).
+ 
+ required:
+   - compatible
+diff --git a/Documentation/devicetree/bindings/trivial-devices.yaml b/Documentation/devicetree/bindings/trivial-devices.yaml
+index d6d9762..d20e5b4 100644
+--- a/Documentation/devicetree/bindings/trivial-devices.yaml
++++ b/Documentation/devicetree/bindings/trivial-devices.yaml
+@@ -497,6 +497,8 @@ properties:
+           - ti,hdc1050
+             # Temperature and humidity sensor with i2c interface
+           - ti,hdc1080
++            # LED driver with DWI brightness control
++          - ti,lm3534
+             # Thermometer with SPI interface
+           - ti,lm70
+           - ti,lm71

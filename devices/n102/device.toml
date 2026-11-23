@@ -22,29 +22,29 @@ platform = "apple-4k"
 dtb = "t7000-n102" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # Pins this board's public IPSW; the GPU firmware comes from iOS 12.4 (16G77), the tested one.
+recipe = "firmware.json" # Pins this board's public IPSW: the touchscreen firmware from it; the GPU firmware comes from iOS 12.4 (16G77), the tested one.
 
 [support]
 status = "experimental"
 
 # States: working, untested, missing, none (features.toml). "untested" means a driver
-# binds in its device tree (tools/catalog/drivers.json), plus the display's boot console.
+# binds in its device tree (tools/catalog/drivers.json).
 [features]
-display = "untested"
+display = "working" # The console and the desktop.
 screen_off = "missing"
-backlight = "untested"
-touch = "missing"
-buttons = "untested"
+backlight = "working" # DWI and the LM3534: brightness set and read back.
+touch = "working" # N1 on apple_z2: 640x1136, several contacts.
+buttons = "working" # Home, power and both volume buttons (gpio-keys).
 accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "missing"
-touch_id = "missing"
+touch_id = "none"
 storage_read = "working" # ANS1 (asp) on RTKit 10.2: the user area asp0n1 and nine read-only auxiliary namespaces.
 storage_write = "working" # The user area only; asp refuses every other namespace's writes. An install next to iOS wrote asp0n1 only.
 wifi = "missing"
 bluetooth_input = "missing"
 bluetooth_audio = "missing"
-cellular = "missing"
+cellular = "none"
 battery = "missing" # No fuel-gauge node in the ADT where the iPhone 6 has its HDQ gauge on uart5; how the iPod reads its battery is unknown.
 charging = "missing"
 charging_control = "missing"
