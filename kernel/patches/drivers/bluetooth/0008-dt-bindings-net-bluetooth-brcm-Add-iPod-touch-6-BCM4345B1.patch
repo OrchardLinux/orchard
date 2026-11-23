@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 12:00:00 +0100
+Subject: [PATCH] dt-bindings: net: bluetooth: brcm: Add iPod touch 6 BCM4345B1
+
+Add the Bluetooth part of the iPod touch 6's BCM4345B1 combo chip.
+
+Assisted-by: LLM
+---
+ .../devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml        | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml b/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml
+index b815e36..49c3a7d 100644
+--- a/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml
++++ b/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml
+@@ -32,6 +32,7 @@ properties:
+           - const: brcm,bcm4329-bt
+       - enum:
+           - apple,j81-bcm4350c2-bt
++          - apple,n102-bcm4345b1-bt
+           - brcm,bcm20702a1
+           - brcm,bcm4329-bt
+           - brcm,bcm4330-bt

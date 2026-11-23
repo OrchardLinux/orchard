@@ -15,6 +15,47 @@
       },
       "sha256": "f59b40ce4fa554f4bb24415201c61dd2e8a6767558ca6404a4afa74dd2ec2d35"
     },
+    "N102.mtprops": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/multitouch/N102.mtprops"
+      },
+      "device": "/usr/share/firmware/multitouch/N102.mtprops",
+      "sha256": "e599bb27ffd005ece0fbcdb6accab5aa23bc1a4765d81aa41ad2e4d1644f4e11"
+    },
+    "P-bacchus_M-CORO_V-u__m-3.7.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/P-bacchus_M-CORO_V-u__m-3.7.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/P-bacchus_M-CORO_V-u__m-3.7.txt",
+      "sha256": "aebb3fb4944ad98946c073e77ac9ad24cc78eb0c2056aa990364da0bddab4a19"
+    },
+    "bacchus.clmb": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/bacchus.clmb"
+      },
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/bacchus.clmb",
+      "sha256": "e371396eb6b88fbb90404b4cc9b4e882b361f6c42d2ba82b0207950d342b83be"
+    },
+    "bacchus.trx": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/bacchus.trx"
+      },
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/bacchus.trx",
+      "sha256": "bc607420e25e9ca6bbb84b5789126c72a6fd682cbceead3c404bc7cf99ba95fd"
+    },
+    "bacchus.txcb": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/bacchus.txcb"
+      },
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/bacchus.txcb",
+      "sha256": "1a208b58ad3c36ebcc669d50af1cbcbbff39bfc208d4e8f2da3255c492e80661"
+    },
+    "BlueTool": {
+      "ipsw": {
+        "rootfs": "usr/sbin/BlueTool"
+      },
+      "device": "/usr/sbin/BlueTool"
+    },
     "kernelcache-n102ap-16G77": {
       "ipsw": {
         "kernelcache": "n102ap",
@@ -27,13 +68,6 @@
         }
       },
       "sha256": "1d996c85affa1f37a07c6454dd5d3a383d4855206d113c9599200d79b6467ff8"
-    },
-    "N102.mtprops": {
-      "ipsw": {
-        "rootfs": "usr/share/firmware/multitouch/N102.mtprops"
-      },
-      "device": "/usr/share/firmware/multitouch/N102.mtprops",
-      "sha256": "e599bb27ffd005ece0fbcdb6accab5aa23bc1a4765d81aa41ad2e4d1644f4e11"
     }
   },
   "outputs": [
@@ -47,6 +81,96 @@
           "profile": "C1F58,1",
           "calibration_address": 268472320,
           "calibration_size": 1024
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,bacchus-CORO-u-3.7.txt",
+      "sha256": "aebb3fb4944ad98946c073e77ac9ad24cc78eb0c2056aa990364da0bddab4a19",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-bacchus_M-CORO_V-u__m-3.7.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,bacchus.txt",
+      "sha256": "aebb3fb4944ad98946c073e77ac9ad24cc78eb0c2056aa990364da0bddab4a19",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-bacchus_M-CORO_V-u__m-3.7.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,bacchus.clm_blob",
+      "sha256": "e371396eb6b88fbb90404b4cc9b4e882b361f6c42d2ba82b0207950d342b83be",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "bacchus.clmb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,bacchus.bin",
+      "sha256": "bc607420e25e9ca6bbb84b5789126c72a6fd682cbceead3c404bc7cf99ba95fd",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "bacchus.trx"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,bacchus.txcap_blob",
+      "sha256": "1a208b58ad3c36ebcc669d50af1cbcbbff39bfc208d4e8f2da3255c492e80661",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "bacchus.txcb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,n102-MUR.hcd",
+      "sha256": "b78b1fc9ed84e145769ad8f3f3202f505adab0c59d6b27d86477a36ec912e519",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,n102-TDK.hcd",
+      "sha256": "d818b2d1f97897290f0a59c900d87454fe7c6f844363ec81133118dc3b16d5a0",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,n102-USI.hcd",
+      "sha256": "32a76158582d7d24bd6f6d7d2fe31c2b4dad5ec16180c1b84fbe09d3a9101370",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,n102.hcd",
+      "sha256": "32a76158582d7d24bd6f6d7d2fe31c2b4dad5ec16180c1b84fbe09d3a9101370",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
         }
       ]
     },

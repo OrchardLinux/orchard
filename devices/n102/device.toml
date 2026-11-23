@@ -22,7 +22,7 @@ platform = "apple-4k"
 dtb = "t7000-n102" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # Pins this board's public IPSW: the touchscreen firmware from it; the GPU firmware comes from iOS 12.4 (16G77), the tested one.
+recipe = "firmware.json" # Pins this board's public IPSW: the touchscreen, Wi-Fi and Bluetooth firmware from it; the GPU firmware comes from iOS 12.4 (16G77), the tested one.
 
 [support]
 status = "experimental"
@@ -41,9 +41,9 @@ light_sensor = "missing"
 touch_id = "none"
 storage_read = "working" # ANS1 (asp) on RTKit 10.2: the user area asp0n1 and nine read-only auxiliary namespaces.
 storage_write = "working" # The user area only; asp refuses every other namespace's writes. An install next to iOS wrote asp0n1 only.
-wifi = "missing"
-bluetooth_input = "missing"
-bluetooth_audio = "missing"
+wifi = "working" # BCM4345B1 on PCIe: scans 2.4 and 5 GHz, joins a network.
+bluetooth_input = "untested" # The controller comes up with its patchram; nothing paired yet.
+bluetooth_audio = "untested"
 cellular = "none"
 battery = "missing" # No fuel-gauge node in the ADT where the iPhone 6 has its HDQ gauge on uart5; how the iPod reads its battery is unknown.
 charging = "missing"

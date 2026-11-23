@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 12:00:00 +0100
+Subject: [PATCH] dt-bindings: gpio: apple,d2365-pmic-gpio: Add the D2186
+
+The Dialog D2186 PMIC on A8 devices such as the iPod touch 6 (N102)
+provides 21 GPIOs through the parent Apple I2C PMIC's regmap, driving
+board signals such as Wi-Fi REG_ON and Bluetooth power enable.
+
+Add its compatible. Its PMU event block is not wired yet, so like the
+D2333 it is not an interrupt controller.
+
+Assisted-by: LLM
+---
+ .../bindings/gpio/apple,d2365-pmic-gpio.yaml          | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml b/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml
+index 978a5a2..f1a4b21 100644
+--- a/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml
++++ b/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml
+@@ -10,9 +10,9 @@ maintainers:
+   - Paul Praschl <praschlpaul@g-p.at>
+ 
+ description: |
+-  The Dialog D2207 PMIC used with the Apple A8X and the D2333 and D2365
+-  PMICs used in Apple A9 and A10 devices provide 21, 21 and 24 GPIOs
+-  respectively. The controller is accessed through the regmap exported by the
++  The Dialog D2186 and D2207 PMICs used with the Apple A8 and A8X and the
++  D2333 and D2365 PMICs used in Apple A9 and A10 devices provide 21, 21, 21
++  and 24 GPIOs respectively. The controller is accessed through the regmap exported by the
+   parent Apple I2C PMIC device.
+ 
+   The D2207 and D2365 also latch 112 and 240 PMU events respectively
+@@ -34,6 +34,7 @@ description: |
+ properties:
+   compatible:
+     enum:
++      - apple,d2186-pmic-gpio
+       - apple,d2207-pmic-gpio
+       - apple,d2333-pmic-gpio
+       - apple,d2365-pmic-gpio
+@@ -84,7 +85,9 @@ allOf:
+   - if:
+       properties:
+         compatible:
+-          const: apple,d2333-pmic-gpio
++          enum:
++            - apple,d2186-pmic-gpio
++            - apple,d2333-pmic-gpio
+     then:
+       properties:
+         interrupt-controller: false

@@ -31,7 +31,9 @@ keeps SysCfg, which Linux never writes.
 - GPU: per-job firmware overhead, parameter-manager pool growth inside a
   scene, and submitting a fragment job behind its geometry job
   (`a8_joint`) by default.
-- Wi-Fi and the battery gauge are not described yet.
+- Bluetooth: hci0 comes up with the module's patchram; no input or audio
+  device has been paired yet.
+- The battery gauge is not described yet.
 
 ## Unmerged code
 
