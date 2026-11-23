@@ -40,7 +40,8 @@ is missing or empty.
   Samsung A9's PCIe storage controller works like the TSMC A9's without its
   phy-ip block. Installing doesn't work yet.
 - iPod touch 6: internal storage works, so Omarchy installs with
-  `orchard install` next to iOS, from Berkay Kösebay's work.
+  `orchard install` next to iOS, and the touchscreen, backlight and
+  buttons work. From Berkay Kösebay's work.
 
 ### Install & launch
 
