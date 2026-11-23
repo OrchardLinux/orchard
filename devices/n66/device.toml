@@ -33,7 +33,7 @@ tested_by = ["ricktav"]
 # (tools/catalog/drivers.json), plus the display's boot console.
 [features]
 display = "working" # boot framebuffer, 1080x1920 (RAM boot and install 2026-11-23)
-screen_off = "untested" # Display pipe on for every A9 board; the DSI link stays powered
+screen_off = "working" # dark on Power, Home or Power lights it again in 1-15 ms (Omarchy A from storage, 2026-11-23)
 backlight = "working" # dark, bright and normal levels (RAM boot 2026-11-23)
 gpu_desktop = "untested"
 touch = "working" # N1 C1F5C, both firmware packets; multitouch, corners checked (RAM boot 2026-11-23)
@@ -51,7 +51,7 @@ cellular = "missing"
 battery = "untested" # bq27540 gauge on uart5 behind the SN2400's HDQ mux
 charging = "untested" # SN2400 charger
 charging_control = "missing" # The SN2400 driver has no writable limit yet
-suspend = "untested"
+suspend = "working" # s2idle from idle and from Power, 6 of 6 (3 s to 9 min), wakes on Home and Power; cable plugged in asleep (Omarchy A from storage, 2026-11-23)
 resume = "untested"
 usb_serial = "untested"
 usb_network = "untested"
