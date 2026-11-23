@@ -14,7 +14,27 @@
         "zip": "Firmware/all_flash/DeviceTree.d21ap.im4p"
       },
       "sha256": "5308236843c3ec72e4415f7d98ec8623ed8bfbf2d76cd102a2246c8fb88c5c99"
+    },
+    "D21.mtprops": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/multitouch/D21.mtprops"
+      },
+      "device": "/usr/share/firmware/multitouch/D21.mtprops",
+      "sha256": "22c5b41fe54ac113a44910586fe678eb6c8395e57bb44bb2a61710434d4c4d3a"
     }
   },
-  "outputs": []
+  "outputs": [
+    {
+      "destination": "lib/firmware/apple/dfrmtfw-d21-c1f5e-4.bin",
+      "sha256": "89d0874ef67842b34f0716f1f38bf4fb9822d6b0d50cf7cee8ac916d0e5ac917",
+      "steps": [
+        {
+          "step": "z2fw-from-mtprops@2",
+          "input": "D21.mtprops",
+          "profile": "C1F5E,4",
+          "packet": "Z2"
+        }
+      ]
+    }
+  ]
 }
