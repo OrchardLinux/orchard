@@ -28,8 +28,8 @@ is missing or empty.
   headphones no longer crackle and calls with the CVSD codec have sound.
 - iPad Air (Cellular): new, from thisiscamk's work. Touch, the display and
   backlight, the Home button, USB serial and networking and reading its
-  internal storage work. `orchard install` is offered; writing to the
-  storage is untested so far. Wi-Fi and audio come later.
+  internal storage work, and Omarchy installs next to iPadOS with
+  `orchard install`. Wi-Fi and audio come later.
 - iPad mini 2 (Wi-Fi): the touchscreen works, on the A7 SPI and touch clock
   support from thisiscamk's iPad Air work.
 - iPad mini 2 (Wi-Fi): Wi-Fi works when started from RAM (it cannot install
