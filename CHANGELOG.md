@@ -32,6 +32,8 @@ is missing or empty.
   storage is untested so far. Wi-Fi and audio come later.
 - iPad mini 2 (Wi-Fi): the touchscreen works, on the A7 SPI and touch clock
   support from thisiscamk's iPad Air work.
+- iPod touch 6: internal storage works, so Omarchy installs with
+  `orchard install` next to iOS, from Berkay Kösebay's work.
 
 ### Install & launch
 
