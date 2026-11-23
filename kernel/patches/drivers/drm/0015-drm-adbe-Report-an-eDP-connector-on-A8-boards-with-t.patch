@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 16:01:00 +0100
+Subject: [PATCH] drm/adbe: Report an eDP connector on A8 boards with the eDP
+ transmitter
+
+The A8's match data gives a MIPI DSI connector, the panel link of the
+iPod touch 6 and the iPhone 6. The iPad mini 4 has the same display pipe
+but drives an eDP panel through the DisplayPort transmitter. When the
+pipe's node has the transmitter's "dp" window, register the connector as
+eDP, so that it is named eDP-1 there and userspace sees the right panel
+type. Nothing else changes: the driver still adopts the link iBoot left
+running and never touches the transmitter unless a panel supply is given.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/adbe/adbe_drv.c | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/gpu/drm/adbe/adbe_drv.c b/drivers/gpu/drm/adbe/adbe_drv.c
+index 0e93f9e..d4e4a5b 100644
+--- a/drivers/gpu/drm/adbe/adbe_drv.c
++++ b/drivers/gpu/drm/adbe/adbe_drv.c
+@@ -252,7 +252,10 @@ MODULE_PARM_DESC(dart_scanout,
+ struct adbe_hw {
+ 	/* SPDS version at ADP_SPDS that iOS requires; 0: iOS never reads it */
+ 	u16 spds_version;
+-	/* The panel link iBoot left running */
++	/*
++	 * The panel link iBoot left running, unless the pipe has a "dp"
++	 * window: then the link is eDP.
++	 */
+ 	int connector_type;
+ };
+ 
+@@ -268,7 +271,8 @@ static const struct adbe_hw adbe_hw_s8000 = {
+  * masks the same errors at start, but has no SPDS check: it reads the
+  * display_spdsversion_mismatch_is_panic boot argument and never ADP_SPDS.
+  * Neither does this driver there. The iPod touch 6 and the iPhone 6 drive
+- * a MIPI DSI panel.
++ * a MIPI DSI panel; the iPad mini 4 drives eDP, and its pipe has the
++ * DisplayPort transmitter's "dp" window.
+  */
+ static const struct adbe_hw adbe_hw_t7000 = {
+ 	.spds_version = 0,
+@@ -1915,7 +1919,7 @@ static int adbe_adopt(struct adbe *adbe)
+ static int adbe_modeset_init(struct adbe *adbe)
+ {
+ 	struct drm_device *drm = &adbe->drm;
+-	int ret;
++	int connector_type, ret;
+ 
+ 	ret = drmm_mode_config_init(drm);
+ 	if (ret)
+@@ -1950,8 +1954,11 @@ static int adbe_modeset_init(struct adbe *adbe)
+ 		return ret;
+ 	adbe->encoder.possible_crtcs = drm_crtc_mask(&adbe->crtc);
+ 
++	connector_type = adbe->hw->connector_type;
++	if (of_property_match_string(drm->dev->of_node, "reg-names", "dp") >= 0)
++		connector_type = DRM_MODE_CONNECTOR_eDP;
+ 	ret = drmm_connector_init(drm, &adbe->connector, &adbe_connector_funcs,
+-				  adbe->hw->connector_type, NULL);
++				  connector_type, NULL);
+ 	if (ret)
+ 		return ret;
+ 	drm_connector_helper_add(&adbe->connector, &adbe_connector_helper_funcs);
+-- 
+2.49.0
+

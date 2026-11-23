@@ -17,16 +17,18 @@ unlock and the auxiliary reads. Anything else, the auxiliary writes and
 the format commands among them, is refused before it reaches the command
 buffer or the mailbox.
 
+[Orchard: rebased onto the storage driver fixes already in Orchard
+ (block 0003 and 0004), unchanged otherwise.]
 Assisted-by: LLM
 ---
-  drivers/block/asp.c |   50 ++++++++++++++++++++++++++++++++++++++++++++++++++
-  1 file changed, 50 insertions(+)
+ drivers/block/asp.c | 50 +++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 50 insertions(+)
 
 diff --git a/drivers/block/asp.c b/drivers/block/asp.c
-index d4f7a0a..d1de321 100644
+index 029d228..1939347 100644
 --- a/drivers/block/asp.c
 +++ b/drivers/block/asp.c
-@@ -338,6 +338,39 @@ static bool asp_is_write(struct asp_cmd_hdr *cmd)
+@@ -336,6 +336,39 @@ static bool asp_is_write(struct asp_cmd_hdr *cmd)
  	};
  }
  
@@ -66,7 +68,7 @@ index d4f7a0a..d1de321 100644
  static enum req_op asp_req_op(struct asp_cmd_hdr *cmd)
  {
  	return asp_is_write(cmd) ? REQ_OP_DRV_OUT : REQ_OP_DRV_IN;
-@@ -516,6 +549,10 @@ static blk_status_t apple_asp_submit_cmd(struct apple_asp *asp,
+@@ -526,6 +559,10 @@ static blk_status_t apple_asp_submit_cmd(struct apple_asp *asp,
  {
  	int ret;
  
@@ -77,7 +79,7 @@ index d4f7a0a..d1de321 100644
  	memcpy(asp_q_cmd_hdr(asp, cmd), cmd, ASP_CMD_HDR_SIZE);
  
  	dma_wmb();
-@@ -609,6 +646,19 @@ static blk_status_t apple_asp_queue_rq(struct blk_mq_hw_ctx *hctx,
+@@ -619,6 +656,19 @@ static blk_status_t apple_asp_queue_rq(struct blk_mq_hw_ctx *hctx,
  	if (ret)
  		return ret;
  

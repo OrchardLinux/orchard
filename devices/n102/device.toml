@@ -22,7 +22,7 @@ platform = "apple-4k"
 dtb = "t7000-n102" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # The touchscreen, Wi-Fi and Bluetooth firmware from this board's public IPSW.
+recipe = "firmware.json" # Pins this board's public IPSW: the touchscreen, Wi-Fi and Bluetooth firmware from it; the GPU firmware comes from iOS 12.4 (16G77), the tested one.
 
 [support]
 status = "experimental"

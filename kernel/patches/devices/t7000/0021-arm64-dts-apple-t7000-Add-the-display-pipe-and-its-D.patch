@@ -1,0 +1,101 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 13:03:00 +0100
+Subject: [PATCH] arm64: dts: apple: t7000: Add the display pipe and its DART
+
+Describe the A8's display pipe (ADT disp0, "adbe0,t7000") and its display
+DART (dart-disp0), so that the ADBE driver can take the panel over from
+simpledrm and, as on the A9, scan client buffers out through the DART.
+
+From the ADT: the ADP window at 0x206200000 (1 MiB) and the pipe's five
+interrupts (103, 108-111); the DART at 0x206304000 and its SMMU front end
+at 0x206300000 with their fault interrupts (106, 107), 4 KiB pages and
+four streams; and the error reflector (0x20ffff000), fetch-config
+(0xe0303) and diag-config (0x100), which the DART driver programs as iOS
+does. The A9's display block, side and eDP windows have no A8
+counterpart the driver needs, so the pipe gets the A10's window list. The
+DART's ADT power gate (36) is the one the A9's dart-disp0 has, which is
+described with disp0's domain; this one is too.
+
+Both nodes stay disabled. The pipe's second power domain is the panel
+link of the MIPI DSI boards; the iPad mini 4 would need ps_dp.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t7000.dtsi | 60 ++++++++++++++++++++++++++++
+ 1 file changed, 60 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t7000.dtsi b/arch/arm64/boot/dts/apple/t7000.dtsi
+index 1a165a7..7107724 100644
+--- a/arch/arm64/boot/dts/apple/t7000.dtsi
++++ b/arch/arm64/boot/dts/apple/t7000.dtsi
+@@ -146,6 +146,66 @@
+ 			status = "disabled";
+ 		};
+ 
++		/*
++		 * ADT disp0 ("adbe0,t7000"). iBoot leaves the pipe, the panel
++		 * link and the panel running, reading through dart-disp0 in
++		 * bypass. The second domain is the panel link: MIPI DSI on the
++		 * iPhone 6 and iPod touch 6; the iPad mini 4 (eDP) would use
++		 * ps_dp instead.
++		 */
++		disp0: display-controller@206200000 {
++			compatible = "apple,t7000-display-pipe";
++			reg = <0x2 0x06200000 0x0 0x100000>,
++			      <0x2 0x06304000 0x0 0x4000>,
++			      <0x2 0x06300000 0x0 0x4000>;
++			reg-names = "adp", "dart0", "dart1";
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 103 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 108 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 109 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 110 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 111 IRQ_TYPE_LEVEL_HIGH>;
++			power-domains = <&ps_disp0>, <&ps_mipi_dsi>;
++			status = "disabled";
++
++			/*
++			 * The pipe's reads as a DMA master behind dart-disp0,
++			 * every stream of it. The display driver enables the
++			 * DART below and creates this device itself, after it
++			 * has mapped the live boot framebuffer, and verifies
++			 * translated scanout before it uses it.
++			 */
++			scanout {
++				iommus = <&disp0_dart 0>, <&disp0_dart 1>,
++					 <&disp0_dart 2>, <&disp0_dart 3>;
++				apple,dart-deferred-attach;
++			};
++		};
++
++		/*
++		 * ADT dart-disp0: the DART and its SMMU front end, with their
++		 * error reflector, fetch and diag configuration. Its ADT power
++		 * gate (36) is the one the A9's dart-disp0 has, which is
++		 * described with disp0's domain; so is this one. Disabled
++		 * until the display driver has mapped the live scanout.
++		 */
++		disp0_dart: iommu@206304000 {
++			compatible = "apple,t7000-dart", "apple,s5l8960x-dart";
++			reg = <0x2 0x06304000 0x0 0x4000>,
++			      <0x2 0x06300000 0x0 0x4000>;
++			reg-names = "dart", "smmu";
++			#iommu-cells = <1>;
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 106 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 107 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "dart", "smmu";
++			power-domains = <&ps_disp0>;
++			apple,error-reflector = /bits/ 64 <0x20ffff000>;
++			apple,fetch-config = <0x000e0303>;
++			apple,diag-config = <0x00000100>;
++			status = "disabled";
++		};
++
+ 		cpufreq: performance-controller@202220000 {
+ 			compatible = "apple,t7000-cluster-cpufreq", "apple,s5l8960x-cluster-cpufreq";
+ 			reg = <0x2 0x02220000 0 0x1000>;
+-- 
+2.49.0
+

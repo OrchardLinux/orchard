@@ -6,16 +6,19 @@ Subject: [PATCH] dt-bindings: input: apple,z2-multitouch: Add the iPod touch 6
 Describe the N102 N1 touchscreen, whose core supply is an I2C PMIC
 regulator instead of a GPIO-controlled LDO.
 
+[Orchard: renumbered from 0030 and rebased onto the iPad Air (J72) and
+ iPad mini 2 (J85) bindings, which now list the boards that take
+ ana-supply and attn-gpios; the N102 joins both lists.]
 Assisted-by: LLM
 ---
- .../touchscreen/apple,z2-multitouch.yaml      | 30 +++++++++++++++----
- 1 file changed, 24 insertions(+), 6 deletions(-)
+ .../touchscreen/apple,z2-multitouch.yaml      | 20 +++++++++++++++++--
+ 1 file changed, 18 insertions(+), 2 deletions(-)
 
 diff --git a/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml b/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml
-index b9d5dce..aa4d8ef 100644
+index 8c469e6..09613d4 100644
 --- a/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml
 +++ b/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml
-@@ -25,6 +25,7 @@ properties:
+@@ -27,6 +27,7 @@ properties:
        - apple,d11-touchscreen
        - apple,d111-touchscreen
        - apple,n61-touchscreen
@@ -23,17 +26,7 @@ index b9d5dce..aa4d8ef 100644
  
    interrupts:
      maxItems: 1
-@@ -68,9 +69,6 @@ properties:
-   clocks:
-     maxItems: 1
- 
--  ana-supply:
--    description: N61 analog touchscreen supply from the Chestnut high-voltage switch
--
-   apple,z2-prox-cal-blob:
-     $ref: /schemas/types.yaml#/definitions/uint8-array
-     maxItems: 128
-@@ -185,6 +183,7 @@ allOf:
+@@ -185,6 +186,7 @@ allOf:
              - apple,j71t-touchscreen
              - apple,j81-touchscreen
              - apple,j96-touchscreen
@@ -41,7 +34,7 @@ index b9d5dce..aa4d8ef 100644
      then:
        properties:
          pinctrl-names:
-@@ -195,7 +194,6 @@ allOf:
+@@ -195,7 +197,6 @@ allOf:
          display-sync-gpios: false
          display-sync1-gpios: false
          hv-supply: false
@@ -49,7 +42,7 @@ index b9d5dce..aa4d8ef 100644
          spi-cpha: false
          spi-cpol: false
          apple,z2-bpw16-min-len: false
-@@ -203,11 +201,31 @@ allOf:
+@@ -203,7 +204,20 @@ allOf:
        required:
          - clocks
          - ana-supply
@@ -68,18 +61,22 @@ index b9d5dce..aa4d8ef 100644
 +          core-supply: false
 +        required:
 +          - power-ldo-gpios
-     else:
-       properties:
--        ana-supply: false
-         attn-gpios: false
-+      if:
-+        properties:
-+          compatible:
-+            not:
-+              const: apple,n61-touchscreen
-+      then:
-+        properties:
-+          ana-supply: false
    - if:
        properties:
          compatible:
+@@ -268,6 +282,7 @@ allOf:
+             - apple,j85-touchscreen
+             - apple,j96-touchscreen
+             - apple,n61-touchscreen
++            - apple,n102-touchscreen
+     then:
+       properties:
+         ana-supply: true
+@@ -283,6 +298,7 @@ allOf:
+             - apple,j81-touchscreen
+             - apple,j85-touchscreen
+             - apple,j96-touchscreen
++            - apple,n102-touchscreen
+     then:
+       properties:
+         attn-gpios: true

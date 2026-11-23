@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 09:14:04 +0100
+Subject: [PATCH] dt-bindings: clock: apple,nco: Add the T7001
+
+The A8X NCO is the T8010 block with its channels 0x1000 apart instead
+of 0x4000. Add apple,t7001-nco.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+---
+ Documentation/devicetree/bindings/clock/apple,nco.yaml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/clock/apple,nco.yaml b/Documentation/devicetree/bindings/clock/apple,nco.yaml
+index 9a1997e62..a23660034 100644
+--- a/Documentation/devicetree/bindings/clock/apple,nco.yaml
++++ b/Documentation/devicetree/bindings/clock/apple,nco.yaml
+@@ -20,6 +20,7 @@ description: |
+ properties:
+   compatible:
+     oneOf:
++      - const: apple,t7001-nco
+       - const: apple,t8010-nco
+       - items:
+           - const: apple,t6020-nco
+-- 
+2.56.0
+

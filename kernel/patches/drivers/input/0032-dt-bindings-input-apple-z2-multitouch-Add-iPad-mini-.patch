@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 22:42:49 +0100
+Subject: [PATCH] dt-bindings: input: apple,z2-multitouch: Add iPad mini 2
+
+The iPad mini 2 (J85) has an N1 touchscreen controller on SPI1, run like
+the iPad 5's: an attention line read back as a GPIO, a PMIC analog
+supply, the PWM0 touch reference clock and display-sync pin states. Its
+core LDO is a D2089 switch that iBoot leaves on and that stays on; it
+has no LDO enable GPIO.
+
+Assisted-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../touchscreen/apple,z2-multitouch.yaml      | 30 +++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml b/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml
+index 4a89d6bbe..8c469e60e 100644
+--- a/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml
++++ b/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml
+@@ -21,6 +21,7 @@ properties:
+       - apple,j71t-touchscreen
+       - apple,j72-touchscreen
+       - apple,j81-touchscreen
++      - apple,j85-touchscreen
+       - apple,j96-touchscreen
+       - apple,j172-touchscreen
+       - apple,d11-touchscreen
+@@ -230,6 +231,33 @@ allOf:
+         - pinctrl-0
+         - pinctrl-1
+         - pinctrl-names
++  - if:
++      properties:
++        compatible:
++          const: apple,j85-touchscreen
++    then:
++      properties:
++        pinctrl-names:
++          items:
++            - const: display-sync-active
++            - const: display-sync-inactive
++        power-ana-gpios: false
++        power-ldo-gpios: false
++        display-sync-gpios: false
++        display-sync1-gpios: false
++        hv-supply: false
++        core-supply: false
++        spi-cpha: false
++        spi-cpol: false
++        apple,z2-bpw16-min-len: false
++        apple,z2-no-init-ack: false
++      required:
++        - clocks
++        - ana-supply
++        - attn-gpios
++        - pinctrl-0
++        - pinctrl-1
++        - pinctrl-names
+   - if:
+       properties:
+         compatible:
+@@ -237,6 +265,7 @@ allOf:
+             - apple,j71t-touchscreen
+             - apple,j72-touchscreen
+             - apple,j81-touchscreen
++            - apple,j85-touchscreen
+             - apple,j96-touchscreen
+             - apple,n61-touchscreen
+     then:
+@@ -252,6 +281,7 @@ allOf:
+             - apple,j71t-touchscreen
+             - apple,j72-touchscreen
+             - apple,j81-touchscreen
++            - apple,j85-touchscreen
+             - apple,j96-touchscreen
+     then:
+       properties:
