@@ -433,7 +433,7 @@ def chip_label(chip):
     return f'{chip["name"]}, {chip["foundry"]}' if 'foundry' in chip else chip['name']
 
 
-SYMBOLS = {'working': '✅', 'untested': 'untested', 'missing': '❌', 'none': '–'}
+SYMBOLS = {'working': '✅', 'untested': '(✅)', 'missing': '❌', 'none': '–'}
 # The at-a-glance table: (column, the features.toml names it shows; several must all work).
 GLANCE = (('Touch', ('touch',)), ('Wi-Fi', ('wifi',)), ('Bluetooth', ('bluetooth_input',)),
           ('Sound', ('audio_output',)), ('Charges', ('charging',)), ('Sleep', ('suspend', 'resume')),
@@ -450,7 +450,7 @@ def combined(states):
 
 
 def desktop(state):
-    return {'working': 'GPU', 'untested': 'GPU (untested)'}.get(state, 'software')
+    return {'working': 'GPU', 'untested': '(GPU)'}.get(state, 'software')
 
 
 def in_a_sentence(label):
@@ -463,23 +463,27 @@ def in_a_sentence(label):
 def render_glance(rows, order, labels, known):
     """Does my device work? One row per board that installs, the chip beside the device."""
     lines = ['', '## Does my device work?', '',
-             'Every device Orchard installs on. ✅ works · untested = nobody has tried it yet · '
-             "❌ doesn't work yet · – no such hardware.",
+             'Every device Orchard installs on. ✅ works · (✅) should work, nobody has tried it yet · '
+             "❌ doesn't work yet · – no such hardware. Desktop: GPU, (GPU) should run on the GPU, "
+             'or software (on the CPU).',
              '', '| Device | Chip | Installs | Desktop | ' + ' | '.join(column for column, _ in GLANCE) + ' | Tested by |',
              '| --- | --- |' + ' --- |' * (len(GLANCE) + 3)]
     foundries = False
-    for soc in sorted(rows, key=order.get):
+    # One chip generation together (both A9 foundries), then each device's models side by side.
+    boards = []
+    for soc in rows:
         chip = next(chip for chip in known.values() if chip['soc'] == soc)
-        boards = [(device['device'].get('short_name', device['device']['name']), profile, device)
-                  for profile, device in rows[soc] if can_install(profile, device)]
-        for name, _, device in sorted(boards):
-            foundries |= 'foundry' in chip
-            features = device['features']
-            cells = [SYMBOLS[combined([features[key] for key in keys])] for _, keys in GLANCE]
-            installs = SYMBOLS[features['storage_write']]
-            tested = ', '.join(device.get('support', {}).get('tested_by', [])) or '–'
-            lines.append(f'| {name} | {chip_label(chip)} | {installs} | {desktop(features["gpu_desktop"])} | '
-                         + ' | '.join(cells) + f' | {tested} |')
+        boards += [((_chip_order(chip)[:2], device['device'].get('short_name', device['device']['name']),
+                     chip_label(chip)), chip, device)
+                   for profile, device in rows[soc] if can_install(profile, device)]
+    for (_, name, _), chip, device in sorted(boards, key=lambda board: board[0]):
+        foundries |= 'foundry' in chip
+        features = device['features']
+        cells = [SYMBOLS[combined([features[key] for key in keys])] for _, keys in GLANCE]
+        installs = SYMBOLS[features['storage_write']]
+        tested = ', '.join(device.get('support', {}).get('tested_by', [])) or '–'
+        lines.append(f'| {name} | {chip_label(chip)} | {installs} | {desktop(features["gpu_desktop"])} | '
+                     + ' | '.join(cells) + f' | {tested} |')
     boards = [device['features'] for _, device in sum(rows.values(), []) if 'features' in device]
     nowhere = [in_a_sentence(label) for name, label in labels.items()
                if not any(features.get(name) == 'working' for features in boards)]
