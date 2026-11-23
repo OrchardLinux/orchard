@@ -1,5 +1,5 @@
 # iPad mini 2 (Wi-Fi) (J85): identity from public sources
-# (tools/catalog/generate). In its platform's kernel, no bring-up yet; see docs/device-bring-up.md.
+# (tools/catalog/generate). Bring-up in progress; see docs/device-bring-up.md.
 schema = 1
 kind = "hardware.device"
 
@@ -14,7 +14,7 @@ chip = 0x8960
 board = 0x0a
 
 [boot]
-methods = ["checkm8-pongo"] # checkra1n's device list (checkra.in); not run on this board with Orchard yet.
+methods = ["checkm8-pongo"] # checkra1n's device list (checkra.in); Orchard RAM boots through checkra1n/Pongo on a J85 (2026-11-22)
 entries = ["checkra1n"]
 
 [kernel]
@@ -27,14 +27,14 @@ recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until
 [support]
 status = "experimental"
 
-# States: working, untested, missing, none (features.toml). Nothing here has run on
-# this board with Orchard: "untested" means a driver binds in its device tree
-# (tools/catalog/drivers.json), plus the display's boot console.
+# States: working, untested, missing, none (features.toml). "working" was seen on a
+# J85; "untested" means a driver binds in its device tree (tools/catalog/drivers.json),
+# plus the display's boot console.
 [features]
 display = "untested"
 screen_off = "missing"
 backlight = "untested"
-touch = "missing"
+touch = "working" # apple_z2 N1 (C1F14,3) on SPI1: boots at every boot and reports contacts, RAM boot and installed Omarchy; J85 2026-11-22
 buttons = "untested"
 accelerometer = "missing"
 gyroscope = "missing"
