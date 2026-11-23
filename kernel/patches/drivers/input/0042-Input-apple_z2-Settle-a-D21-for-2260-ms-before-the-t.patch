@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Mon, 23 Nov 2026 16:54:40 +0800
+Subject: [PATCH] Input: apple_z2: Settle a D21 for 2260 ms before the touch
+ arm by default
+
+A D21 started with the working configuration still delivered no frames
+until it rested 2260 ms (the gap iOS leaves) and got a second wake
+before the touch arm. On the contributor's iPhone 8 Plus, three
+start-ups without the wait stayed silent; the first with it reported
+touches. Make that the default instead of a module parameter to set.
+
+It is a fixed wait, not a readiness check: what the controller waits
+for is unknown, so it should become a check once that is found.
+
+Assisted-by: LLM
+---
+ drivers/input/touchscreen/apple_z2.c | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index 8fb33b202..1cf8a18cb 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -3918,10 +3918,17 @@ static int apple_z2_gen2_send_calibration(struct apple_z2 *z2,
+ }
+ 
+ /* Reads a report @times times if the controller has it; absent is fine. */
+-static unsigned int d21_settle_ms;
++/*
++ * A D21 only starts reporting when it rests this long after its configuration,
++ * then gets a second wake, before the touch arm: 2260 ms is the gap iOS (JADE)
++ * leaves there. Without it every start-up tested stayed silent. This is a fixed
++ * wait, not a readiness check: what the controller is waiting for is unknown,
++ * and the wait should become a check on that once it is found.
++ */
++static unsigned int d21_settle_ms = 2260;
+ module_param(d21_settle_ms, uint, 0444);
+ MODULE_PARM_DESC(d21_settle_ms,
+-		 "D21: settle this long, then wake, before the touch arm (JADE: 2260; 0: off)");
++		 "D21: settle this long, then wake, before the touch arm (default 2260 as on iOS; 0: off)");
+ 
+ static int apple_z2_gen2_read_optional(struct apple_z2 *z2, u8 report,
+ 				       unsigned int times, const char *tag)
+-- 
+2.54.0 (Apple Git-157)
+
