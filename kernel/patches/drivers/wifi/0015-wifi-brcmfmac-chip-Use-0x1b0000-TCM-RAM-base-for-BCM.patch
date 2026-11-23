@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 18:15:00 +0100
+Subject: [PATCH] wifi: brcmfmac: chip: Use 0x1b0000 TCM RAM base for BCM4345
+ rev < 6
+
+brcmf_chip_tcm_rambase() unconditionally returns 0x198000 for
+BRCM_CC_4345_CHIP_ID. That is correct for BCM4345C0/43455/43456
+(chiprev >= 6), which have 416 KiB of ATCM below the 0x200000 BTCM
+base (0x200000 - 0x68000 = 0x198000), but wrong for BCM4345 rev 5
+(BCM4345B1, used over PCIe on Apple A8 handhelds such as the iPod
+touch 6).
+
+BCM4345B1 has 320 KiB of ATCM (0x50000) and 256 KiB of BTCM
+(0x40000) for 576 KiB (0x90000) total RAM starting at 0x1b0000
+(0x1b0000..0x240000), confirmed by both iOS 12.4
+AppleBCMWLANChipManagerPCIe4345 and the linked entry/vector addresses
+of Apple's 43451b1-roml bacchus.trx firmware. Loading firmware at
+0x198000 shifts it 96 KiB below ATCM so the ARM CR4 never reaches its
+startup code and brcmf_pcie_download_fw_nvram() times out with
+"FW failed to initialize".
+
+Return 0x1b0000 for BRCM_CC_4345_CHIP_ID when chiprev < 6, keeping
+0x198000 for rev >= 6 (BCM43455/43456) and BRCM_CC_43454_CHIP_ID.
+
+Assisted-by: LLM
+---
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/chip.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/chip.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/chip.c
+index 1c6626a5a..94d8c0f24 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/chip.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/chip.c
+@@ -711,6 +711,7 @@ static u32 brcmf_chip_tcm_rambase(struct brcmf_chip_priv *ci)
+ {
+ 	switch (ci->pub.chip) {
+ 	case BRCM_CC_4345_CHIP_ID:
++		return (ci->pub.chiprev < 6) ? 0x1b0000 : 0x198000;
+ 	case BRCM_CC_43454_CHIP_ID:
+ 		return 0x198000;
+ 	case BRCM_CC_4335_CHIP_ID:

@@ -1,5 +1,5 @@
 # iPhone 6s+ (S8000) (N66): identity from public sources
-# (tools/catalog/generate). RAM boots with storage read; see docs/device-bring-up.md.
+# (tools/catalog/generate). Installs Omarchy A to internal storage; see docs/device-bring-up.md.
 schema = 1
 kind = "hardware.device"
 
@@ -21,7 +21,7 @@ platform = "apple-16k"
 dtb = "s8000-n66" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until bring-up needs it.
+recipe = "firmware.json" # Pins this board's public IPSW; makes the touchscreen firmware.
 
 [support]
 status = "experimental"
@@ -30,17 +30,17 @@ status = "experimental"
 # this board with Orchard: "untested" means a driver binds in its device tree
 # (tools/catalog/drivers.json), plus the display's boot console.
 [features]
-display = "untested"
+display = "working" # boot framebuffer, 1080x1920 (RAM boot and install 2026-11-23)
 screen_off = "missing"
-backlight = "untested"
-touch = "missing"
-buttons = "untested"
+backlight = "working" # dark, bright and normal levels (RAM boot 2026-11-23)
+touch = "working" # N1 C1F5C, both firmware packets; multitouch, corners checked (RAM boot 2026-11-23)
+buttons = "working" # home, power, volume up/down, mute switch (RAM boot 2026-11-23)
 accelerometer = "untested"
 gyroscope = "untested"
-light_sensor = "missing"
+light_sensor = "working" # CT821 with the unit's LSCI calibration (RAM boot 2026-11-23)
 touch_id = "missing"
 storage_read = "working" # NVMe 5 GT/s x2, 1 GiB read, no faults or timeouts (RAM boot 2026-11-22)
-storage_write = "missing"
+storage_write = "working" # 256 MiB to a Linux partition read back after drop_caches, APFS unchanged; Omarchy A installed and booted from storage (2026-11-23)
 wifi = "missing"
 bluetooth_input = "missing"
 bluetooth_audio = "missing"

@@ -1,5 +1,5 @@
 # iPod touch 6 (N102): identity from public sources (tools/catalog/generate's read_firmware);
-# A8/T7000 like the iPhone 6. RAM-boots to a USB serial shell; GPU notes in README.md.
+# A8/T7000 like the iPhone 6. Installs to its internal storage next to iOS; notes in README.md.
 schema = 1
 kind = "hardware.device"
 
@@ -14,7 +14,7 @@ chip = 0x7000
 board = 0x10
 
 [boot]
-methods = ["checkm8-pongo"] # checkra1n then PongoOS and m1n1, RAM only.
+methods = ["checkm8-pongo"] # checkra1n then PongoOS and m1n1, tethered.
 entries = ["checkra1n"]
 
 [kernel]
@@ -22,29 +22,29 @@ platform = "apple-4k"
 dtb = "t7000-n102" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # Pins this board's public IPSW; the GPU firmware comes from iOS 12.4 (16G77), the tested one.
+recipe = "firmware.json" # Pins this board's public IPSW: the touchscreen, Wi-Fi and Bluetooth firmware from it; the GPU firmware comes from iOS 12.4 (16G77), the tested one.
 
 [support]
 status = "experimental"
 
 # States: working, untested, missing, none (features.toml). "untested" means a driver
-# binds in its device tree (tools/catalog/drivers.json), plus the display's boot console.
+# binds in its device tree (tools/catalog/drivers.json).
 [features]
-display = "untested"
+display = "working" # The console and the desktop.
 screen_off = "missing"
-backlight = "untested"
-touch = "missing"
-buttons = "untested"
+backlight = "working" # DWI and the LM3534: brightness set and read back.
+touch = "working" # N1 on apple_z2: 640x1136, several contacts.
+buttons = "working" # Home, power and both volume buttons (gpio-keys).
 accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "missing"
-touch_id = "missing"
-storage_read = "missing"
-storage_write = "missing"
-wifi = "missing"
-bluetooth_input = "missing"
-bluetooth_audio = "missing"
-cellular = "missing"
+touch_id = "none"
+storage_read = "working" # ANS1 (asp) on RTKit 10.2: the user area asp0n1 and nine read-only auxiliary namespaces.
+storage_write = "working" # The user area only; asp refuses every other namespace's writes. An install next to iOS wrote asp0n1 only.
+wifi = "working" # BCM4345B1 on PCIe: scans 2.4 and 5 GHz, joins a network.
+bluetooth_input = "untested" # The controller comes up with its patchram; nothing paired yet.
+bluetooth_audio = "untested"
+cellular = "none"
 battery = "missing" # No fuel-gauge node in the ADT where the iPhone 6 has its HDQ gauge on uart5; how the iPod reads its battery is unknown.
 charging = "missing"
 charging_control = "missing"

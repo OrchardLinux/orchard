@@ -404,6 +404,16 @@
       "usb_network",
       "usb_serial"
     ],
+    "n102": [
+      "backlight",
+      "bluetooth_audio",
+      "bluetooth_input",
+      "buttons",
+      "touch",
+      "usb_network",
+      "usb_serial",
+      "wifi"
+    ],
     "n51": [
       "backlight",
       "buttons",
@@ -436,8 +446,10 @@
       "backlight",
       "buttons",
       "gyroscope",
+      "light_sensor",
       "storage_read",
       "storage_write",
+      "touch",
       "usb_network",
       "usb_serial"
     ],

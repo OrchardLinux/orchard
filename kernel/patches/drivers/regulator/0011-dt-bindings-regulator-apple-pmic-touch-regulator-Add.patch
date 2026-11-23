@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 14:36:23 +0100
+Subject: [PATCH] dt-bindings: regulator: apple,pmic-touch-regulator: Add
+ Antigua's touch core
+
+The iPhone 6s and 6s Plus power their touchscreen controller's core from
+LDO 25 of their Antigua (D2255) PMU.
+
+Assisted-by: LLM
+---
+ .../bindings/regulator/apple,pmic-touch-regulator.yaml           | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/regulator/apple,pmic-touch-regulator.yaml b/Documentation/devicetree/bindings/regulator/apple,pmic-touch-regulator.yaml
+index f02ee8ccb..5aaca4e57 100644
+--- a/Documentation/devicetree/bindings/regulator/apple,pmic-touch-regulator.yaml
++++ b/Documentation/devicetree/bindings/regulator/apple,pmic-touch-regulator.yaml
+@@ -23,6 +23,7 @@ properties:
+       - apple,acorn-touch-analog-regulator
+       - apple,adelyn-touch-core-regulator
+       - apple,angel-touch-analog-regulator
++      - apple,antigua-touch-core-regulator
+       - apple,chestnut-touch-hv-regulator
+       - apple,d2089-touch-analog-regulator
+       - apple,d2089-touch-core-regulator

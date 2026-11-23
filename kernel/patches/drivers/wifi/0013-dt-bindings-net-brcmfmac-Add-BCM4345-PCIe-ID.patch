@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 12:00:00 +0100
+Subject: [PATCH] dt-bindings: net: brcmfmac: Add BCM4345 PCIe ID
+
+The iPod touch 6 (N102) has a BCM4345 Wi-Fi module on PCIe, described by
+its PCI compatible pci14e4,43ab so the endpoint node can carry its
+vdd-supply, device-wake-gpios and board type. Add it to the list of PCIe
+IDs.
+
+Assisted-by: LLM
+---
+ .../devicetree/bindings/net/wireless/brcm,bcm4329-fmac.yaml      | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/net/wireless/brcm,bcm4329-fmac.yaml b/Documentation/devicetree/bindings/net/wireless/brcm,bcm4329-fmac.yaml
+index 000060f30..a1b9d4c21 100644
+--- a/Documentation/devicetree/bindings/net/wireless/brcm,bcm4329-fmac.yaml
++++ b/Documentation/devicetree/bindings/net/wireless/brcm,bcm4329-fmac.yaml
+@@ -50,6 +50,7 @@ properties:
+       - enum:
+           - brcm,bcm4329-fmac
+           - pci14e4,43a3  # BCM4350
++          - pci14e4,43ab  # BCM4345
+           - pci14e4,43dc  # BCM4355
+           - pci14e4,4464  # BCM4364
+           - pci14e4,4488  # BCM4377

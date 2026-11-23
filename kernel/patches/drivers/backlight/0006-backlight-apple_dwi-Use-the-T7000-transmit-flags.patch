@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 12:39:17 +0100
+Subject: [PATCH] backlight: apple_dwi: Use the T7000 transmit flags
+
+On T7000, AppleS5L8940XDWI starts a brightness transfer by writing
+0x71 to the channel control register. Skip the additional send bit
+on this SoC.
+
+Assisted-by: LLM
+---
+ drivers/video/backlight/apple_dwi_bl.c | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/video/backlight/apple_dwi_bl.c b/drivers/video/backlight/apple_dwi_bl.c
+index a919f31..aa37cf2 100644
+--- a/drivers/video/backlight/apple_dwi_bl.c
++++ b/drivers/video/backlight/apple_dwi_bl.c
+@@ -32,8 +32,7 @@
+ #define DWI_BL_CTL_SEND			(DWI_BL_CTL_SEND1 | \
+ 					 DWI_BL_CTL_SEND2 | \
+ 					 DWI_BL_CTL_SEND3 | \
+-					 DWI_BL_CTL_LE_DATA | \
+-					 DWI_BL_CTL_SEND4)
++					 DWI_BL_CTL_LE_DATA)
+ 
+ #define DWI_BL_MAX_BRIGHTNESS		2047
+ 
+@@ -53,6 +52,7 @@
+ 
+ struct apple_dwi_bl {
+ 	void __iomem *base;
++	u32 send_flags;
+ 	struct i2c_client *led;	/* the LED driver's own enable, if separate */
+ 	bool led_usable;
+ 	bool led_on;
+@@ -112,7 +112,7 @@ static int dwi_bl_update_status(struct backlight_device *bl)
+ 	}
+ 
+ 	writel(cmd, dwi_bl->base + DWI_BL_CMD);
+-	writel(DWI_BL_CTL_SEND, dwi_bl->base + DWI_BL_CTL);
++	writel(dwi_bl->send_flags, dwi_bl->base + DWI_BL_CTL);
+ 
+ 	if (!brightness)
+ 		return dwi_bl_led_enable(bl, false);
+@@ -208,6 +208,11 @@ static int dwi_bl_probe(struct platform_device *dev)
+ 	if (IS_ERR(dwi_bl->base))
+ 		return PTR_ERR(dwi_bl->base);
+ 
++	/* T7000's DWI transfers use only bits 0, 4, 5 and 6. */
++	dwi_bl->send_flags = DWI_BL_CTL_SEND;
++	if (!of_device_is_compatible(dev->dev.of_node, "apple,t7000-dwi-bl"))
++		dwi_bl->send_flags |= DWI_BL_CTL_SEND4;
++
+ 	ret = dwi_bl_get_led(dev, dwi_bl);
+ 	if (ret)
+ 		return ret;
