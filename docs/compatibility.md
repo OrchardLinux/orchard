@@ -143,7 +143,7 @@ Boards Orchard builds for. States: working, untested, missing, none (no such har
 | `j71` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `j72` | working | untested | working | working | working | missing | missing | missing | none | working | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | working | working | missing | missing | missing | missing | missing |
 | `j73` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `j85` | untested | missing | untested | working | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `j85` | untested | missing | untested | working | untested | missing | missing | missing | missing | missing | missing | working | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `j85m` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `j86` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `j86m` | untested | missing | untested | missing | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
@@ -251,6 +251,7 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 
 | Board | Feature | |
 | --- | --- | --- |
+| `j85` | Wi-Fi | working, but no driver binds |
 | `n102` | Internal storage read | working, but no driver binds |
 | `n102` | Internal storage write | working, but no driver binds |
 | `j81` | Internal storage read | working, but no driver binds |
