@@ -47,6 +47,29 @@ class RecipeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Unknown SmartIO kext'):
             recipe.run(document, lambda name: b'firmware')
 
+    def test_smartio_of_a_merged_kernelcache_is_the_kernels_firmware_section(self):
+        # iOS 12 on the A7: the kext has a ModuleIndex but no Mach-O of its own.
+        firmware = bytes(range(256)) * 16
+        info = (b'<dict><key>_PrelinkInfoDictionary</key><array><dict>'
+                b'<key>CFBundleIdentifier</key><string>com.apple.driver.AppleS5L8960XSmartIO</string>'
+                b'<key>ModuleIndex</key><integer>3</integer></dict></array></dict>')
+        base = 0xfffffff007000000
+
+        def segment(name, section, offset, size):
+            command = struct.pack('<II16s4Q4I', 0x19, 72 + 80, name, base + offset, size, offset, size,
+                                  1, 1, 1, 0)
+            return command + struct.pack('<16s16sQQ8I', section, name, base + offset, size, offset,
+                                         0, 0, 0, 0, 0, 0, 0)
+
+        commands = segment(b'__DATA', b'__firmware', 0x1000, len(firmware)) + \
+            segment(b'__PRELINK_INFO', b'__info', 0x2000, len(info))
+        header = struct.pack('<8I', 0xfeedfacf, 0x100000c, 0, 2, 2, len(commands), 0, 0)
+        blob = (header + commands).ljust(0x1000, b'\0') + firmware + info
+        document = sample([{'step': 'smartio-from-kernelcache@2', 'input': 'blob',
+                            'kext': 'com.apple.driver.AppleS5L8960XSmartIO'}], firmware)
+        document['inputs']['blob']['sha256'] = sha(blob)
+        self.assertEqual(recipe.run(document, lambda name: blob), {'lib/firmware/apple/blob': firmware})
+
     def test_z2_packet_is_validated_and_returned_unmodified(self):
         import plistlib
         from orchard.apple import z2packet
