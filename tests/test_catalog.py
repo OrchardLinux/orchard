@@ -229,7 +229,7 @@ class Glance(unittest.TestCase):
         self.assertEqual(generate.combined(['working', 'untested']), 'untested')
         self.assertEqual(generate.combined(['untested', 'missing']), 'missing')
         self.assertEqual([generate.desktop(state) for state in ('working', 'untested', 'missing', 'none')],
-                         ['GPU', '(GPU)', 'software', 'software'])
+                         ['GPU', 'GPU*', 'software', 'software'])
         self.assertEqual(generate.chip_label({'name': 'A10'}), 'A10')
         self.assertEqual(generate.chip_label({'name': 'A9', 'foundry': 'TSMC'}), 'A9, TSMC')
 
