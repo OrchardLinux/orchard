@@ -14,7 +14,7 @@ chip = 0x8000
 board = 0x06
 
 [boot]
-methods = ["checkm8-pongo"] # palera1n 2.0.2's own Pongo, DFU entered from Recovery, Pongo bootr (2026-11-22)
+methods = ["checkm8-pongo"] # orchard run with Orchard's Pongo, DFU entered from Recovery, not iOS (2026-11-23)
 
 [kernel]
 platform = "apple-16k"
