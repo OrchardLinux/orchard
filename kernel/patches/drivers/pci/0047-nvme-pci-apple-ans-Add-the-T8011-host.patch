@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Tue, 24 Nov 2026 03:01:41 +0800
+Subject: [PATCH] nvme: pci-apple-ans: Add the T8011 host
+
+The A10X (T8011) storage port carries the same ANS NVMe controller as the
+A10's, with the same L1 substate control and the same stop over system
+sleep: match it with the T8010's host data.
+
+[Orchard: from OrchardLinux/orchard#205 (tompta1, 09038adf),
+ kernel/patches/drivers/pci/0044; matched on "apple,t8011-pcie" with the
+ T8010 data instead of a J120 host; the bring-up write limits (read-only
+ namespaces except namespace 1, no discard, admin command allow-list, no
+ APST) and their nvme core quirks dropped, so the controller is handled as
+ on the A10 iPads.]
+
+Assisted-by: LLM
+---
+ drivers/nvme/host/pci-apple-ans.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/nvme/host/pci-apple-ans.c b/drivers/nvme/host/pci-apple-ans.c
+index 53efee55a..cc631b7dd 100644
+--- a/drivers/nvme/host/pci-apple-ans.c
++++ b/drivers/nvme/host/pci-apple-ans.c
+@@ -108,6 +108,8 @@ static const struct of_device_id nvme_pci_apple_ans_hosts[] = {
+ 	{ .compatible = "apple,s8000-pcie", .data = &apple_ans_host_s8003 },
+ 	{ .compatible = "apple,s8003-pcie", .data = &apple_ans_host_s8003 },
+ 	{ .compatible = "apple,t8010-pcie", .data = &apple_ans_host_t8010 },
++	/* The A10X storage port carries the A10's ANS controller. */
++	{ .compatible = "apple,t8011-pcie", .data = &apple_ans_host_t8010 },
+ 	{ }
+ };
+ 
