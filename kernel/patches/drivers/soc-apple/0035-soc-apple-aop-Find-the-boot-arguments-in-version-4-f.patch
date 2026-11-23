@@ -1,0 +1,92 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 15:42:23 +0100
+Subject: [PATCH] soc: apple: aop: Find the boot arguments in version 4
+ firmware headers
+
+The AOP firmware's main image starts with an RTKit header: the magic
+"uuid", a version and, among other fields, the offset and size of the
+boot argument block that the loader fills in. The driver reads them at
+0x48, where the iPadOS 16 and 17 images (header version 5) keep them.
+
+iOS 15's images, such as the A9 iPhones' aopfw-s8000aop (19H422 and
+15.8.8), use header version 4, which lacks two words before the boot
+argument fields and keeps them at 0x40; the iOS 15 kernel accepts only
+that version. In aop-s8000.bin the words at 0x48 and 0x4c are zero, so
+the driver finds an empty block, fails with "unexpected boot arguments in
+apple/aop-s8000.bin: -2" and never starts the AOP: without this change
+the iPhones' enabled AOP cannot come up at all. With it, the block at
+0x4f3a8 (0x19a bytes, STKG first) is patched and an iPhone 6s Plus
+reports AOP IS READY with its accelerometer, gyroscope and barometer.
+
+Pick the location by the header version and refuse images without the
+magic or with a version that isn't known.
+
+Assisted-by: LLM
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+---
+ drivers/soc/apple/aop.c | 35 ++++++++++++++++++++++++++++-------
+ 1 file changed, 28 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/soc/apple/aop.c b/drivers/soc/apple/aop.c
+index 5c23317d1..7990ddb9b 100644
+--- a/drivers/soc/apple/aop.c
++++ b/drivers/soc/apple/aop.c
+@@ -54,9 +54,17 @@
+ 
+ #define APPLE_AOP_CONTROL_AUTO_BOOT	0x0
+ 
+-/* Main image header: location of the boot argument key/value block */
+-#define APPLE_AOP_IMAGE_BOOTARGS_OFFSET	0x48
+-#define APPLE_AOP_IMAGE_BOOTARGS_SIZE	0x4c
++/*
++ * Main image: an RTKit header ("uuid", then its version) that gives the
++ * offset and size of the boot argument key/value block. Version 5 (iPadOS 16)
++ * has two more words before them than version 4 (iOS 15).
++ */
++#define APPLE_AOP_IMAGE_MAGIC		0x20
++#define APPLE_AOP_IMAGE_MAGIC_UUID	0x64697575	/* "uuid" */
++#define APPLE_AOP_IMAGE_VERSION		0x24
++#define APPLE_AOP_IMAGE_BOOTARGS_V4	0x40
++#define APPLE_AOP_IMAGE_BOOTARGS_V5	0x48
++#define APPLE_AOP_IMAGE_HEADER_SIZE	0x50
+ 
+ #define APPLE_AOP_FOURCC(a, b, c, d)                                     \
+ 	(((u32)(a) << 24) | ((u32)(b) << 16) | ((u32)(c) << 8) | (u32)(d))
+@@ -281,11 +289,24 @@ static void apple_aop_add_bootarg(struct apple_aop_bootarg *args, unsigned int *
+ static int apple_aop_patch_bootargs(struct apple_aop *aop, u8 *image, size_t size,
+ 				    struct apple_aop_bootarg *args, unsigned int count)
+ {
+-	size_t offset, end, pos;
++	size_t offset, end, pos, location;
+ 	unsigned int i;
+ 
+-	offset = get_unaligned_le32(image + APPLE_AOP_IMAGE_BOOTARGS_OFFSET);
+-	end = get_unaligned_le32(image + APPLE_AOP_IMAGE_BOOTARGS_SIZE);
++	if (get_unaligned_le32(image + APPLE_AOP_IMAGE_MAGIC) != APPLE_AOP_IMAGE_MAGIC_UUID)
++		return -EINVAL;
++	switch (get_unaligned_le32(image + APPLE_AOP_IMAGE_VERSION)) {
++	case 4:
++		location = APPLE_AOP_IMAGE_BOOTARGS_V4;
++		break;
++	case 5:
++		location = APPLE_AOP_IMAGE_BOOTARGS_V5;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	offset = get_unaligned_le32(image + location);
++	end = get_unaligned_le32(image + location + 4);
+ 	if (offset >= size || end > size - offset)
+ 		return -EINVAL;
+ 	end += offset;
+@@ -373,7 +394,7 @@ static int apple_aop_load(struct apple_aop *aop, u64 ecid)
+ 		goto out_main;
+ 
+ 	if (main_fw->size > aop->sram_size || main_fw->size % 4 ||
+-	    main_fw->size < APPLE_AOP_IMAGE_BOOTARGS_SIZE + 4 || !ext_fw->size) {
++	    main_fw->size < APPLE_AOP_IMAGE_HEADER_SIZE || !ext_fw->size) {
+ 		dev_err(aop->dev, "invalid firmware sizes %zu/%zu\n",
+ 			main_fw->size, ext_fw->size);
+ 		ret = -EINVAL;
