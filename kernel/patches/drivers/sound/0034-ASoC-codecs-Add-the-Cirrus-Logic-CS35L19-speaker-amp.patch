@@ -1,0 +1,816 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 16:44:35 +0100
+Subject: [PATCH] ASoC: codecs: Add the Cirrus Logic CS35L19 speaker amplifier
+
+The iPad mini 2 (J85) drives its speakers with two CS35L19 boosted
+class-D amplifiers on I2C2 (0x40 and 0x41, Apple's audio-control,cs35l19
+and its secondary), fed by MCA1 over TDM; the A7 codec (CS42L81) has no
+speaker output on this board. The CS35L19 (device ID 0x35a19) uses the
+CS35L33's register map (Linux cs35l33.h).
+
+The sequences follow iOS 12.5.8's AppleCS35L19Amp (AppleEmbeddedAudio
+432.70) for a link without speaker sense data:
+
+- identify (0x01-0x03 = 35 a1 9x, as iOS checks), one register at a
+  time: the part does not auto-increment, and a 3-byte read returns
+  0x35 three times;
+- after reset, the B0 silicon test-register settings iOS writes;
+- serial port: no sense channel transmitted (0x2d-0x31 = 0x80, masks
+  0x32-0x35 = 0), amplifier n reading 16-bit slot n (0x36), the primary
+  driving the frame (0x0d = 0x43, else 0x03), CLK_CTL by rate (0x49 at
+  48 kHz from the 12 MHz MCLK);
+- power: 0x06 = 0x80, configuration from the ADT speaker-config record
+  (0x09, 0x0b, 0x0c, 0x12, 0x3a-0x3d, then 0x18 behind key 0x17 and
+  0x23-0x2a), 10 ms, 0x06 = 0, 8 ms; down: volume to 0x19, amplifier
+  off, 0x07 = 0xfe, 0x06 = 0x87, reset.
+
+0x10 is the digital volume, 0.5 dB steps from 0x34 (-102 dB) up through
+0xff to 0x00 (0 dB), as cs35l33's "DAC Volume"; iOS writes 0x19, outside
+that range, as mute. "Amp Volume" (0..204, -102..0 dB with TLV) sets it
+at unmute and live while unmuted. It starts at 0 dB: Linux has no
+speaker protection, so full scale is bounded on the SoC side (the MCA's
+-12 dB), and with -20 dB on top the J85's speakers were too quiet.
+
+0x0a bits 3:2 and 0x0c bit 3 disable the alive watchdog. iOS enables it
+and feeds it by toggling the board's alive GPIO from a timer; unfed, it
+raised INT_STATUS_1 bit 5 (ALIVE_ERR, 0x15 = 0x20) on the J85. The
+driver keeps it disabled, as cs35l33 does at probe.
+
+The node describes the pair at the primary's address with both 20-byte
+speaker-config records, as the ADT does; the secondary is an ancillary
+I2C device. Only 48 kHz S16 is offered for now.
+
+Assisted-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ sound/soc/codecs/Kconfig   |  10 +
+ sound/soc/codecs/Makefile  |   2 +
+ sound/soc/codecs/cs35l19.c | 710 +++++++++++++++++++++++++++++++++++++
+ 3 files changed, 722 insertions(+)
+ create mode 100644 sound/soc/codecs/cs35l19.c
+
+diff --git a/sound/soc/codecs/Kconfig b/sound/soc/codecs/Kconfig
+index 2e909a86e..6b3807211 100644
+--- a/sound/soc/codecs/Kconfig
++++ b/sound/soc/codecs/Kconfig
+@@ -65,6 +65,7 @@ config SND_SOC_ALL_CODECS
+ 	imply SND_SOC_CHV3_CODEC
+ 	imply SND_SOC_CQ0093VC
+ 	imply SND_SOC_CROS_EC_CODEC
++	imply SND_SOC_CS35L19
+ 	imply SND_SOC_CS35L32
+ 	imply SND_SOC_CS35L33
+ 	imply SND_SOC_CS35L34
+@@ -800,6 +801,15 @@ config SND_SOC_CS_AMP_LIB_TEST
+ 	  Documentation/dev-tools/kunit/.
+ 	  If in doubt, say "N".
+ 
++config SND_SOC_CS35L19
++	tristate "Cirrus Logic CS35L19 speaker amplifier"
++	depends on I2C
++	select REGMAP_I2C
++	help
++	  Enable support for the Cirrus Logic CS35L19 boosted class-D
++	  speaker amplifiers of the A7 iPad minis (iPad mini 2), two parts
++	  on one I2C bus driven as one TDM codec.
++
+ config SND_SOC_CS35L32
+ 	tristate "Cirrus Logic CS35L32 CODEC"
+ 	depends on I2C
+diff --git a/sound/soc/codecs/Makefile b/sound/soc/codecs/Makefile
+index a90619a7e..76003bbdc 100644
+--- a/sound/soc/codecs/Makefile
++++ b/sound/soc/codecs/Makefile
+@@ -64,6 +64,7 @@ snd-soc-cq93vc-y := cq93vc.o
+ snd-soc-cros-ec-codec-y := cros_ec_codec.o
+ snd-soc-cs-amp-lib-y := cs-amp-lib.o
+ snd-soc-cs-amp-lib-test-y := cs-amp-lib-test.o
++snd-soc-cs35l19-y := cs35l19.o
+ snd-soc-cs35l32-y := cs35l32.o
+ snd-soc-cs35l33-y := cs35l33.o
+ snd-soc-cs35l34-y := cs35l34.o
+@@ -510,6 +511,7 @@ obj-$(CONFIG_SND_SOC_CPCAP)	+= snd-soc-cpcap.o
+ obj-$(CONFIG_SND_SOC_CROS_EC_CODEC)	+= snd-soc-cros-ec-codec.o
+ obj-$(CONFIG_SND_SOC_CS_AMP_LIB)	+= snd-soc-cs-amp-lib.o
+ obj-$(CONFIG_SND_SOC_CS_AMP_LIB_TEST)	+= snd-soc-cs-amp-lib-test.o
++obj-$(CONFIG_SND_SOC_CS35L19)	+= snd-soc-cs35l19.o
+ obj-$(CONFIG_SND_SOC_CS35L32)	+= snd-soc-cs35l32.o
+ obj-$(CONFIG_SND_SOC_CS35L33)	+= snd-soc-cs35l33.o
+ obj-$(CONFIG_SND_SOC_CS35L34)	+= snd-soc-cs35l34.o
+diff --git a/sound/soc/codecs/cs35l19.c b/sound/soc/codecs/cs35l19.c
+new file mode 100644
+index 000000000..b367f4532
+--- /dev/null
++++ b/sound/soc/codecs/cs35l19.c
+@@ -0,0 +1,710 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Cirrus Logic CS35L19 boosted class-D speaker amplifier
++ *
++ * The CS35L19 (device ID 0x35a19, a relative of the CS35L32: the same
++ * power, clock and battery registers and the 0x99 test key at register 0)
++ * drives the speakers of the A7 iPad minis. The iPad mini 2 (J85) has two,
++ * on one I2C bus at 0x40 and 0x41, sharing one reset line. They take a TDM
++ * stream from the SoC's MCA, one slot each; the primary one drives the
++ * frame, from the 12 MHz MCLK the MCA outputs.
++ *
++ * Apple's device tree describes both amplifiers under the primary one, with
++ * one 20-byte "speaker-config" record per amplifier, so this driver binds
++ * to the primary and reaches the secondary as an ancillary I2C device. The
++ * register sequences follow iOS 12.5.8's AppleCS35L19Amp (AppleEmbeddedAudio
++ * 432.70) for a link without speaker sense data: power up from reset, the
++ * TDM slots, the speaker-config registers, amplifier on; and the reverse.
++ *
++ * The register map is the CS35L33's (Linux cs35l33.h): PROTECT_CTL 0x0a and
++ * BST_CTL2 0x0c hold the alive-watchdog disables, 0x10 is the digital
++ * volume (0.5 dB steps, 0x34 = -102 dB up through 0xff to 0x00 = 0 dB),
++ * 0x12 the analog amplifier gain, 0x15 bit 5 the alive error. iOS feeds the
++ * watchdog by toggling the board's "alive" GPIO from a timer; Linux keeps
++ * it disabled, as cs35l33 does.
++ *
++ * Linux has no speaker protection, so the digital volume stops at 0 dB and
++ * starts there: full scale is bounded on the SoC side (MCA, -12 dB), and
++ * at -20 dB on top of that the J85 speakers were too quiet to use.
++ */
++
++#include <linux/bits.h>
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/i2c.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/regmap.h>
++#include <sound/pcm.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++#include <sound/tlv.h>
++
++#define CS35L19_TEST_KEY	0x00	/* 0x99 unlocks the test registers */
++#define  CS35L19_TEST_UNLOCK	0x99
++#define CS35L19_DEVID		0x01	/* 0x01-0x03: 0x35 0xa1 0x9x */
++#define CS35L19_REV_ID		0x05
++#define CS35L19_PWRCTL1		0x06
++#define  CS35L19_PDN_AMP	BIT(7)
++#define  CS35L19_PDN_BOOST	BIT(2)
++#define  CS35L19_PDN_ALL	BIT(0)
++#define CS35L19_PWRCTL2		0x07
++#define CS35L19_CLK_CTL		0x08
++#define  CS35L19_MCLK_DIS	BIT(7)
++#define  CS35L19_MCLK_DIV2	BIT(6)
++#define CS35L19_BATT_THRESHOLD	0x09
++#define CS35L19_PROTECT_CTL_A	0x0a
++#define  CS35L19_ALIVE_WD_DIS	GENMASK(3, 2)
++#define CS35L19_BST_CTL		0x0b
++#define  CS35L19_BST_VMON_TX	BIT(6)
++#define CS35L19_BST_CTL2	0x0c
++#define  CS35L19_IMON_TX	BIT(4)
++#define  CS35L19_ALIVE_WD_DIS2	BIT(3)
++#define CS35L19_SP_CTL		0x0d
++#define  CS35L19_SP_PROVIDER	BIT(6)
++#define CS35L19_REG_0E		0x0e
++#define CS35L19_REG_0F		0x0f
++#define CS35L19_DIG_VOL		0x10
++#define CS35L19_PROTECT_CTL	0x11
++#define CS35L19_INT_MASK_1	0x12
++#define CS35L19_INT_STATUS_1	0x15
++#define CS35L19_INT_STATUS_2	0x16
++#define CS35L19_CAL_KEY		0x17	/* 0x5a opens register 0x18 */
++#define CS35L19_CAL		0x18
++#define CS35L19_CFG_23		0x23	/* 0x23-0x2a: speaker-config[4..11] */
++#define CS35L19_TX_SLOT(n)	(0x2d + (n))	/* five sense channels */
++#define  CS35L19_TX_SLOT_OFF	0x80
++#define CS35L19_TX_MASK(n)	(0x32 + (n))	/* 32 slots, MSB first */
++#define CS35L19_RX_SLOT		0x36
++#define CS35L19_RX_SLOT_37	0x37
++#define CS35L19_RX_SLOT_38	0x38
++#define CS35L19_CFG_3A		0x3a	/* 0x3a-0x3d: speaker-config[12..15] */
++#define CS35L19_MAX_REGISTER	0x6b
++
++#define CS35L19_MAX_AMPS	2
++#define CS35L19_CONFIG_BYTES	20
++
++/*
++ * Digital volume: iOS writes CS35L19_VOL_MUTE (outside the volume range)
++ * while muted and around power changes, and (CS35L19_VOL_MIN + its volume)
++ * & 0xff while it plays (0x81f63bc). The control is in 0.5 dB steps above
++ * -102 dB and stops at 0 dB.
++ */
++#define CS35L19_VOL_MUTE	0x19
++#define CS35L19_VOL_MIN		0x34	/* -102 dB */
++#define CS35L19_VOL_STEPS	204	/* 0 dB */
++#define CS35L19_VOL_DEFAULT	204	/* 0 dB */
++
++struct cs35l19_amp {
++	struct i2c_client *client;
++	struct regmap *regmap;
++	u8 config[CS35L19_CONFIG_BYTES];
++	unsigned int rev;
++};
++
++struct cs35l19 {
++	struct device *dev;
++	struct cs35l19_amp amp[CS35L19_MAX_AMPS];
++	unsigned int num_amps;
++	unsigned int provider;		/* the amplifier driving the frame */
++	struct gpio_desc *reset;
++	struct clk *mclk;
++	unsigned int volume;		/* 0.5 dB steps above -102 dB */
++	unsigned int rate;
++	bool powered;
++	bool muted;
++};
++
++static const struct regmap_config cs35l19_regmap = {
++	.reg_bits = 8,
++	.val_bits = 8,
++	.max_register = CS35L19_MAX_REGISTER,
++	.cache_type = REGCACHE_NONE,
++};
++
++/* iOS: CLK_CTL by sample rate, MCLK 12 MHz */
++static const struct {
++	unsigned int rate;
++	u8 clk_ctl;
++} cs35l19_rates[] = {
++	{ 48000, 0x49 }, { 44100, 0x4b }, { 32000, 0x4d },
++	{ 24000, 0x51 }, { 22050, 0x53 }, { 16000, 0x55 },
++	{ 12000, 0x59 }, { 11025, 0x5b }, { 8000, 0x5d },
++};
++
++static int cs35l19_write(struct cs35l19_amp *amp, unsigned int reg,
++			 unsigned int val)
++{
++	return regmap_write(amp->regmap, reg, val);
++}
++
++static int cs35l19_update(struct cs35l19_amp *amp, unsigned int reg,
++			  unsigned int mask, unsigned int val)
++{
++	return regmap_update_bits(amp->regmap, reg, mask, val);
++}
++
++/* The same write to every amplifier, as iOS's broadcast writes */
++static int cs35l19_write_all(struct cs35l19 *cs, unsigned int reg,
++			     unsigned int val)
++{
++	unsigned int i;
++	int ret;
++
++	for (i = 0; i < cs->num_amps; i++) {
++		ret = cs35l19_write(&cs->amp[i], reg, val);
++		if (ret)
++			return ret;
++	}
++	return 0;
++}
++
++static int cs35l19_update_all(struct cs35l19 *cs, unsigned int reg,
++			      unsigned int mask, unsigned int val)
++{
++	unsigned int i;
++	int ret;
++
++	for (i = 0; i < cs->num_amps; i++) {
++		ret = cs35l19_update(&cs->amp[i], reg, mask, val);
++		if (ret)
++			return ret;
++	}
++	return 0;
++}
++
++static void cs35l19_reset(struct cs35l19 *cs, bool assert)
++{
++	if (!cs->reset)
++		return;
++	gpiod_set_value_cansleep(cs->reset, assert);
++	/* iOS shows no delay of its own; leave the part time to wake up */
++	if (!assert)
++		usleep_range(1000, 2000);
++}
++
++static int cs35l19_identify(struct cs35l19 *cs, struct cs35l19_amp *amp)
++{
++	u8 id[3];
++	int ret;
++
++	unsigned int val;
++
++	/* The part does not auto-increment: a burst returns 0x01 three times. */
++	for (int i = 0; i < ARRAY_SIZE(id); i++) {
++		ret = regmap_read(amp->regmap, CS35L19_DEVID + i, &val);
++		if (ret)
++			return dev_err_probe(cs->dev, ret, "%#x: no response\n",
++					     amp->client->addr);
++		id[i] = val;
++	}
++
++	if (id[0] != 0x35 || (id[1] & 0xf0) != 0xa0)
++		return dev_err_probe(cs->dev, -ENODEV,
++				     "%#x: unknown device %02x %02x %02x\n",
++				     amp->client->addr, id[0], id[1], id[2]);
++	/* iOS drives the CS35L21 (0x35a21) the same way */
++	if (!(((id[1] & 0xf) == 1 && (id[2] & 0xf0) == 0x90) ||
++	      ((id[1] & 0xf) == 2 && (id[2] & 0xf0) == 0x10)))
++		dev_warn(cs->dev, "%#x: CS35Lxx %02x %02x %02x\n",
++			 amp->client->addr, id[0], id[1], id[2]);
++
++	ret = regmap_read(amp->regmap, CS35L19_REV_ID, &amp->rev);
++	if (ret)
++		return ret;
++
++	dev_info(cs->dev, "%#x: CS35L%x%x revision %#x\n", amp->client->addr,
++		 id[1] & 0xf, id[2] >> 4, amp->rev);
++	return 0;
++}
++
++/* iOS, after a reset: the B0 silicon's test register settings */
++static int cs35l19_errata(struct cs35l19_amp *amp)
++{
++	const u8 *cfg = amp->config;
++	int ret = 0;
++
++	if (amp->rev >= 0xb0) {
++		ret |= cs35l19_write(amp, CS35L19_TEST_KEY, CS35L19_TEST_UNLOCK);
++		ret |= cs35l19_write(amp, 0x45, 0x3f);
++		/* the unit's speaker-calib byte if iBoot provides one */
++		ret |= cs35l19_write(amp, 0x46, cfg[16]);
++		ret |= cs35l19_write(amp, 0x51, 0xff);
++		ret |= cs35l19_write(amp, 0x59, 0x0a);
++		ret |= cs35l19_write(amp, 0x6b, 0x20);
++		if (cfg[18])
++			ret |= cs35l19_write(amp, 0x54, cfg[18]);
++		ret |= cs35l19_write(amp, CS35L19_TEST_KEY, 0);
++	}
++	if (cfg[17]) {
++		ret |= cs35l19_write(amp, CS35L19_TEST_KEY, CS35L19_TEST_UNLOCK);
++		ret |= cs35l19_write(amp, 0x66, cfg[17]);
++		ret |= cs35l19_write(amp, CS35L19_TEST_KEY, 0);
++	}
++	return ret ? -EIO : 0;
++}
++
++/*
++ * The alive watchdog off: what iOS writes (0x81f582c with 0) when it does
++ * not feed it. Enabled (0x0a = 5, 0x0c bit 3 clear) and unfed, it raised
++ * the alive error and kept the speakers silent on a J85.
++ */
++static int cs35l19_watchdog_off(struct cs35l19 *cs)
++{
++	int ret;
++
++	ret = cs35l19_update_all(cs, CS35L19_PROTECT_CTL_A, 0x0f, 0x8);
++	if (ret)
++		return ret;
++	return cs35l19_update_all(cs, CS35L19_BST_CTL2, CS35L19_ALIVE_WD_DIS2,
++				  CS35L19_ALIVE_WD_DIS2);
++}
++
++static unsigned int cs35l19_vol_reg(unsigned int volume)
++{
++	return (CS35L19_VOL_MIN + volume) & 0xff;
++}
++
++/*
++ * The serial port, as iOS sets it up for a link without sense data: no
++ * sense channel transmitted, amplifier n reading 16-bit slot n.
++ */
++static int cs35l19_serial_port(struct cs35l19 *cs, struct cs35l19_amp *amp,
++			       unsigned int slot, u8 clk_ctl)
++{
++	const unsigned int bytes = 2;
++	unsigned int i;
++	int ret = 0;
++
++	for (i = 0; i < 5; i++)
++		ret |= cs35l19_write(amp, CS35L19_TX_SLOT(i),
++				     CS35L19_TX_SLOT_OFF);
++	ret |= cs35l19_write(amp, CS35L19_SP_CTL,
++			     (amp == &cs->amp[cs->provider] ?
++			      CS35L19_SP_PROVIDER : 0) | 0x03);
++	ret |= cs35l19_write(amp, CS35L19_CLK_CTL, clk_ctl);
++	for (i = 0; i < 4; i++)
++		ret |= cs35l19_write(amp, CS35L19_TX_MASK(i), 0);
++	/* bits 7:5 the slot size in bytes minus one, 4:0 its byte offset */
++	ret |= cs35l19_write(amp, CS35L19_RX_SLOT,
++			     (((bytes + 7) << 5) | (slot * bytes)) & 0xff);
++	ret |= cs35l19_write(amp, CS35L19_RX_SLOT_38, CS35L19_TX_SLOT_OFF);
++	ret |= cs35l19_write(amp, CS35L19_RX_SLOT_37, CS35L19_TX_SLOT_OFF);
++	ret |= cs35l19_update(amp, CS35L19_BST_CTL, CS35L19_BST_VMON_TX, 0);
++	ret |= cs35l19_update(amp, CS35L19_BST_CTL2, CS35L19_IMON_TX, 0);
++	return ret ? -EIO : 0;
++}
++
++/* iOS's power-up configuration for the playing state */
++static int cs35l19_configure(struct cs35l19_amp *amp)
++{
++	const u8 *cfg = amp->config;
++	int ret = 0;
++
++	/* every monitor and the sense transmitter stay off */
++	ret |= cs35l19_write(amp, CS35L19_PWRCTL2, 0xf8);
++	ret |= cs35l19_update(amp, CS35L19_CLK_CTL,
++			      CS35L19_MCLK_DIS | CS35L19_MCLK_DIV2,
++			      CS35L19_MCLK_DIV2);
++	ret |= cs35l19_write(amp, CS35L19_BATT_THRESHOLD, cfg[0]);
++	ret |= cs35l19_write(amp, CS35L19_DIG_VOL, CS35L19_VOL_MUTE);
++	ret |= cs35l19_update(amp, CS35L19_REG_0F, 0x10, 0);
++	ret |= cs35l19_write(amp, CS35L19_PROTECT_CTL, 0x1c);
++	ret |= cs35l19_update(amp, CS35L19_REG_0E, 0xcf, 0xc4);
++	ret |= cs35l19_update(amp, CS35L19_INT_MASK_1, 0xf0, cfg[3]);
++	ret |= cs35l19_write(amp, CS35L19_CFG_3A + 0, cfg[12]);
++	ret |= cs35l19_write(amp, CS35L19_CFG_3A + 1, cfg[13]);
++	ret |= cs35l19_write(amp, CS35L19_CFG_3A + 2, cfg[14]);
++	ret |= cs35l19_write(amp, CS35L19_CFG_3A + 3, cfg[15]);
++	return ret ? -EIO : 0;
++}
++
++/* iOS, once the amplifier runs: clear the status, the speaker registers */
++static int cs35l19_init_running(struct cs35l19_amp *amp)
++{
++	static const u8 masks[8] = {
++		0x7f, 0xff, 0x1c, 0xff, 0x3f, 0xff, 0x7f, 0x9f,
++	};
++	const u8 *cfg = amp->config;
++	unsigned int i, val;
++	int ret = 0;
++
++	for (i = 0; i < 2; i++) {
++		ret |= regmap_read(amp->regmap, CS35L19_INT_STATUS_1, &val);
++		ret |= regmap_read(amp->regmap, CS35L19_INT_STATUS_2, &val);
++	}
++	ret |= cs35l19_write(amp, CS35L19_CAL_KEY, 0x5a);
++	ret |= cs35l19_write(amp, CS35L19_CAL, cfg[19]);
++	ret |= cs35l19_write(amp, CS35L19_CAL_KEY, 0);
++	for (i = 0; i < ARRAY_SIZE(masks); i++)
++		ret |= cs35l19_update(amp, CS35L19_CFG_23 + i, masks[i],
++				      cfg[4 + i]);
++	ret |= cs35l19_write(amp, CS35L19_PROTECT_CTL, 0x14);
++	return ret ? -EIO : 0;
++}
++
++static int cs35l19_power_down(struct cs35l19 *cs)
++{
++	int ret = 0;
++
++	if (!cs->powered)
++		return 0;
++
++	ret |= cs35l19_write_all(cs, CS35L19_DIG_VOL, CS35L19_VOL_MUTE);
++	ret |= cs35l19_update_all(cs, CS35L19_PWRCTL1, CS35L19_PDN_AMP,
++				  CS35L19_PDN_AMP);
++	ret |= cs35l19_write_all(cs, CS35L19_PWRCTL2, 0xfe);
++	usleep_range(1000, 1500);
++	ret |= cs35l19_write_all(cs, CS35L19_PWRCTL1, 0x87);
++	usleep_range(4000, 5000);
++	cs35l19_reset(cs, true);
++	clk_disable_unprepare(cs->mclk);
++	cs->powered = false;
++	cs->muted = true;
++	return ret ? -EIO : 0;
++}
++
++static int cs35l19_power_up(struct cs35l19 *cs, u8 clk_ctl)
++{
++	unsigned int i;
++	int ret;
++
++	ret = clk_prepare_enable(cs->mclk);
++	if (ret)
++		return ret;
++	cs35l19_reset(cs, false);
++	cs->powered = true;
++
++	for (i = 0; i < cs->num_amps && !ret; i++)
++		ret = cs35l19_errata(&cs->amp[i]);
++	if (!ret)
++		ret = cs35l19_watchdog_off(cs);
++	for (i = 0; i < cs->num_amps && !ret; i++) {
++		struct cs35l19_amp *amp = &cs->amp[i];
++
++		ret = cs35l19_serial_port(cs, amp, i, clk_ctl);
++		ret = ret ?: cs35l19_write(amp, CS35L19_BST_CTL,
++					   amp->config[1] & 0x3f);
++		ret = ret ?: cs35l19_update(amp, CS35L19_BST_CTL2, 0x03,
++					    amp->config[2]);
++	}
++	/* everything but the amplifier, then the amplifier */
++	ret = ret ?: cs35l19_write_all(cs, CS35L19_PWRCTL1, CS35L19_PDN_AMP);
++	for (i = 0; i < cs->num_amps && !ret; i++)
++		ret = cs35l19_configure(&cs->amp[i]);
++	if (!ret)
++		msleep(10);
++	ret = ret ?: cs35l19_write_all(cs, CS35L19_PWRCTL1, 0);
++	if (!ret)
++		msleep(8);
++	for (i = 0; i < cs->num_amps && !ret; i++)
++		ret = cs35l19_init_running(&cs->amp[i]);
++
++	if (ret) {
++		dev_err(cs->dev, "power-up failed: %d\n", ret);
++		cs35l19_power_down(cs);
++	}
++	return ret;
++}
++
++static int cs35l19_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
++{
++	/* the primary amplifier drives the frame; the MCA is a consumer */
++	if ((fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) != SND_SOC_DAIFMT_BP_FP)
++		return -EINVAL;
++	if ((fmt & SND_SOC_DAIFMT_FORMAT_MASK) != SND_SOC_DAIFMT_DSP_A)
++		return -EINVAL;
++	if ((fmt & SND_SOC_DAIFMT_INV_MASK) != SND_SOC_DAIFMT_NB_NF)
++		return -EINVAL;
++	return 0;
++}
++
++static int cs35l19_set_tdm_slot(struct snd_soc_dai *dai, unsigned int tx_mask,
++				unsigned int rx_mask, int slots, int width)
++{
++	/* the iOS frame: 8 slots of 16 bits, amplifier n in slot n */
++	if (slots && slots != 8)
++		return -EINVAL;
++	if (width && width != 16)
++		return -EINVAL;
++	return 0;
++}
++
++static int cs35l19_hw_params(struct snd_pcm_substream *substream,
++			     struct snd_pcm_hw_params *params,
++			     struct snd_soc_dai *dai)
++{
++	struct cs35l19 *cs = snd_soc_component_get_drvdata(dai->component);
++	unsigned int i;
++
++	if (params_width(params) != 16 ||
++	    params_channels(params) > cs->num_amps)
++		return -EINVAL;
++
++	for (i = 0; i < ARRAY_SIZE(cs35l19_rates); i++)
++		if (cs35l19_rates[i].rate == params_rate(params))
++			break;
++	if (i == ARRAY_SIZE(cs35l19_rates))
++		return -EINVAL;
++
++	cs->rate = params_rate(params);
++	return 0;
++}
++
++static int cs35l19_prepare(struct snd_pcm_substream *substream,
++			   struct snd_soc_dai *dai)
++{
++	struct cs35l19 *cs = snd_soc_component_get_drvdata(dai->component);
++	unsigned int i;
++
++	if (cs->powered)
++		return 0;
++
++	for (i = 0; i < ARRAY_SIZE(cs35l19_rates); i++)
++		if (cs35l19_rates[i].rate == cs->rate)
++			return cs35l19_power_up(cs, cs35l19_rates[i].clk_ctl);
++	return -EINVAL;
++}
++
++static int cs35l19_hw_free(struct snd_pcm_substream *substream,
++			   struct snd_soc_dai *dai)
++{
++	struct cs35l19 *cs = snd_soc_component_get_drvdata(dai->component);
++
++	return cs35l19_power_down(cs);
++}
++
++static int cs35l19_mute_stream(struct snd_soc_dai *dai, int mute, int stream)
++{
++	struct cs35l19 *cs = snd_soc_component_get_drvdata(dai->component);
++	int ret;
++
++	cs->muted = mute;
++	if (!cs->powered)
++		return 0;
++
++	ret = cs35l19_watchdog_off(cs);
++	return ret ?: cs35l19_write_all(cs, CS35L19_DIG_VOL, mute ?
++					CS35L19_VOL_MUTE :
++					cs35l19_vol_reg(cs->volume));
++}
++
++static const struct snd_soc_dai_ops cs35l19_dai_ops = {
++	.set_fmt = cs35l19_set_fmt,
++	.set_tdm_slot = cs35l19_set_tdm_slot,
++	.hw_params = cs35l19_hw_params,
++	.prepare = cs35l19_prepare,
++	.hw_free = cs35l19_hw_free,
++	.mute_stream = cs35l19_mute_stream,
++	.no_capture_mute = 1,
++};
++
++static struct snd_soc_dai_driver cs35l19_dai = {
++	.name = "cs35l19",
++	.playback = {
++		.stream_name = "Playback",
++		.channels_min = 1,
++		.channels_max = CS35L19_MAX_AMPS,
++		/* the rate iOS uses for the speakers; the others are untested */
++		.rates = SNDRV_PCM_RATE_48000,
++		.formats = SNDRV_PCM_FMTBIT_S16_LE,
++	},
++	.ops = &cs35l19_dai_ops,
++};
++
++static int cs35l19_gain_info(struct snd_kcontrol *kcontrol,
++			     struct snd_ctl_elem_info *uinfo)
++{
++	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
++	uinfo->count = 1;
++	uinfo->value.integer.min = 0;
++	uinfo->value.integer.max = CS35L19_VOL_STEPS;
++	return 0;
++}
++
++static int cs35l19_gain_get(struct snd_kcontrol *kcontrol,
++			    struct snd_ctl_elem_value *ucontrol)
++{
++	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
++	struct cs35l19 *cs = snd_soc_component_get_drvdata(component);
++
++	ucontrol->value.integer.value[0] = cs->volume;
++	return 0;
++}
++
++static int cs35l19_gain_put(struct snd_kcontrol *kcontrol,
++			    struct snd_ctl_elem_value *ucontrol)
++{
++	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
++	struct cs35l19 *cs = snd_soc_component_get_drvdata(component);
++	long val = ucontrol->value.integer.value[0];
++
++	if (val < 0 || val > CS35L19_VOL_STEPS)
++		return -EINVAL;
++	if (cs->volume == val)
++		return 0;
++	cs->volume = val;
++	/* the amplifiers are readable only while a stream holds them */
++	if (cs->powered && !cs->muted)
++		cs35l19_write_all(cs, CS35L19_DIG_VOL, cs35l19_vol_reg(val));
++	return 1;
++}
++
++static const DECLARE_TLV_DB_SCALE(cs35l19_vol_tlv, -10200, 50, 0);
++
++static const struct snd_kcontrol_new cs35l19_controls[] = {
++	{
++		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
++		.name = "Amp Volume",
++		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE |
++			  SNDRV_CTL_ELEM_ACCESS_TLV_READ,
++		.tlv.p = cs35l19_vol_tlv,
++		.info = cs35l19_gain_info,
++		.get = cs35l19_gain_get,
++		.put = cs35l19_gain_put,
++	},
++};
++
++static const struct snd_soc_dapm_widget cs35l19_widgets[] = {
++	SND_SOC_DAPM_OUTPUT("SPK"),
++};
++
++static const struct snd_soc_dapm_route cs35l19_routes[] = {
++	{ "SPK", NULL, "Playback" },
++};
++
++static const struct snd_soc_component_driver cs35l19_component = {
++	.controls = cs35l19_controls,
++	.num_controls = ARRAY_SIZE(cs35l19_controls),
++	.dapm_widgets = cs35l19_widgets,
++	.num_dapm_widgets = ARRAY_SIZE(cs35l19_widgets),
++	.dapm_routes = cs35l19_routes,
++	.num_dapm_routes = ARRAY_SIZE(cs35l19_routes),
++	.endianness = 1,
++};
++
++static void cs35l19_unregister(void *data)
++{
++	i2c_unregister_device(data);
++}
++
++static int cs35l19_add_amp(struct cs35l19 *cs, struct i2c_client *client)
++{
++	struct cs35l19_amp *amp = &cs->amp[cs->num_amps];
++
++	amp->client = client;
++	amp->regmap = devm_regmap_init_i2c(client, &cs35l19_regmap);
++	if (IS_ERR(amp->regmap))
++		return dev_err_probe(cs->dev, PTR_ERR(amp->regmap),
++				     "%#x: no regmap\n", client->addr);
++	cs->num_amps++;
++	return 0;
++}
++
++static int cs35l19_i2c_probe(struct i2c_client *client)
++{
++	struct device *dev = &client->dev;
++	u8 config[CS35L19_MAX_AMPS * CS35L19_CONFIG_BYTES];
++	struct i2c_client *secondary;
++	struct cs35l19 *cs;
++	unsigned int i;
++	int n, ret;
++
++	cs = devm_kzalloc(dev, sizeof(*cs), GFP_KERNEL);
++	if (!cs)
++		return -ENOMEM;
++	cs->dev = dev;
++	cs->volume = CS35L19_VOL_DEFAULT;
++	cs->muted = true;
++	i2c_set_clientdata(client, cs);
++
++	ret = cs35l19_add_amp(cs, client);
++	if (ret)
++		return ret;
++
++	if (of_property_match_string(dev->of_node, "reg-names",
++				     "secondary") >= 0) {
++		secondary = i2c_new_ancillary_device(client, "secondary", 0);
++		if (IS_ERR(secondary))
++			return dev_err_probe(dev, PTR_ERR(secondary),
++					     "no secondary amplifier\n");
++		ret = devm_add_action_or_reset(dev, cs35l19_unregister,
++					       secondary);
++		if (ret)
++			return ret;
++		ret = cs35l19_add_amp(cs, secondary);
++		if (ret)
++			return ret;
++	}
++
++	/* Apple's speaker-config: one 20-byte record per amplifier */
++	n = of_property_count_u8_elems(dev->of_node, "cirrus,speaker-config");
++	if (n != cs->num_amps * CS35L19_CONFIG_BYTES)
++		return dev_err_probe(dev, -EINVAL,
++				     "need %u bytes of cirrus,speaker-config\n",
++				     cs->num_amps * CS35L19_CONFIG_BYTES);
++	ret = of_property_read_u8_array(dev->of_node, "cirrus,speaker-config",
++					config, n);
++	if (ret)
++		return ret;
++	for (i = 0; i < cs->num_amps; i++)
++		memcpy(cs->amp[i].config, &config[i * CS35L19_CONFIG_BYTES],
++		       CS35L19_CONFIG_BYTES);
++
++	of_property_read_u32(dev->of_node, "cirrus,frame-provider",
++			     &cs->provider);
++	if (cs->provider >= cs->num_amps)
++		return dev_err_probe(dev, -EINVAL, "invalid frame provider\n");
++
++	cs->mclk = devm_clk_get(dev, "mclk");
++	if (IS_ERR(cs->mclk))
++		return dev_err_probe(dev, PTR_ERR(cs->mclk), "no MCLK\n");
++
++	/* held in reset while idle, as iOS does */
++	cs->reset = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
++	if (IS_ERR(cs->reset))
++		return dev_err_probe(dev, PTR_ERR(cs->reset), "no reset GPIO\n");
++
++	/* iOS identifies the parts out of reset, without MCLK */
++	cs35l19_reset(cs, false);
++	for (i = 0; i < cs->num_amps && !ret; i++)
++		ret = cs35l19_identify(cs, &cs->amp[i]);
++	cs35l19_reset(cs, true);
++	if (ret)
++		return ret;
++
++	return devm_snd_soc_register_component(dev, &cs35l19_component,
++					       &cs35l19_dai, 1);
++}
++
++static void cs35l19_i2c_remove(struct i2c_client *client)
++{
++	cs35l19_power_down(i2c_get_clientdata(client));
++}
++
++static const struct of_device_id cs35l19_of_match[] = {
++	{ .compatible = "cirrus,cs35l19" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, cs35l19_of_match);
++
++static const struct i2c_device_id cs35l19_id[] = {
++	{ "cs35l19" },
++	{ }
++};
++MODULE_DEVICE_TABLE(i2c, cs35l19_id);
++
++static struct i2c_driver cs35l19_i2c_driver = {
++	.driver = {
++		.name = "cs35l19",
++		.of_match_table = cs35l19_of_match,
++	},
++	.id_table = cs35l19_id,
++	.probe = cs35l19_i2c_probe,
++	.remove = cs35l19_i2c_remove,
++};
++module_i2c_driver(cs35l19_i2c_driver);
++
++MODULE_DESCRIPTION("Cirrus Logic CS35L19 speaker amplifier driver");
++MODULE_LICENSE("GPL");
