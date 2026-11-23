@@ -1,0 +1,14 @@
+[Unit]
+Description=Start the Wi-Fi radio of Apple A7 boards
+Documentation=https://github.com/OrchardLinux/orchard
+DefaultDependencies=no
+After=systemd-udevd.service systemd-modules-load.service
+Before=network-pre.target NetworkManager.service
+Wants=network-pre.target
+ConditionFirmware=|device-tree-compatible(apple,j85)
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/orchard/a7-wifi-start
+TimeoutStartSec=90
