@@ -160,7 +160,7 @@ Boards Orchard builds for. States: working, untested, missing, none (no such har
 | `j82` | untested | untested | untested | untested | untested | missing | missing | missing | missing | missing | missing | untested | untested | untested | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `j71s` | untested | untested | untested | untested | untested | untested | untested | untested | missing | missing | missing | missing | untested | untested | none | untested | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested |
 | `j72s` | untested | untested | untested | untested | untested | untested | untested | untested | missing | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested |
-| `n66` | untested | missing | untested | missing | untested | untested | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `n66` | untested | missing | untested | missing | untested | untested | untested | missing | missing | working | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `n69u` | untested | missing | untested | missing | untested | untested | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `n71` | untested | missing | untested | missing | untested | untested | untested | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `j71t` | working | working | working | working | working | working | working | working | missing | working | working | working | working | untested | none | working | working | working | working | working | working | working | working | working | working | missing | working |
@@ -215,7 +215,7 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `j82` | experimental | yes | yes | yes | – | – | – | – | – | yes | yes | yes | yes | – | yes | yes | – | – | – | – |
 | `j71s` | experimental | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | yes | yes | yes | yes | – | yes |
 | `j72s` | experimental | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | yes | yes | yes | yes | – | yes |
-| `n66` | experimental | yes | – | yes | yes | yes | – | – | – | – | – | – | – | – | yes | yes | – | – | – | – |
+| `n66` | experimental | yes | – | yes | yes | yes | – | yes | yes | – | – | – | – | – | yes | yes | – | – | – | – |
 | `n69u` | experimental | yes | – | yes | yes | yes | – | – | – | – | – | – | – | – | yes | yes | – | – | – | – |
 | `n71` | experimental | yes | – | yes | yes | yes | – | – | – | – | – | – | – | – | yes | yes | – | – | – | – |
 | `j71t` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes |
@@ -255,6 +255,7 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `j81` | Internal storage write | working, but no driver binds |
 | `j71s` | Microphone | untested, but no driver binds |
 | `j72s` | Microphone | untested, but no driver binds |
+| `n66` | Internal storage write | missing, but a driver binds |
 | `j71t` | Microphone | working, but no driver binds |
 | `j72t` | Microphone | untested, but no driver binds |
 | `d10` | Bluetooth input devices | missing, but a driver binds |

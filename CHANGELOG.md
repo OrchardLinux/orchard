@@ -36,6 +36,9 @@ is missing or empty.
   yet). A kernel transport, from thisiscamk's iPad Air work, brings up the
   A7's HSIC link to the BCM43241 radio, and `orchard-a7-wifi.service` starts
   it at boot.
+- iPhone 6s Plus (Samsung): Linux and m1n1 read its internal storage. The
+  Samsung A9's PCIe storage controller works like the TSMC A9's without its
+  phy-ip block. Installing doesn't work yet.
 
 ### Install & launch
 
