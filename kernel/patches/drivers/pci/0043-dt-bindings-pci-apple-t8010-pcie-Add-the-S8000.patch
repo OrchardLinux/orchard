@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Rick <ricktav@gmail.com>
+From: ricktav <82380971+ricktav@users.noreply.github.com>
 Date: Sun, 22 Nov 2026 21:27:24 +0100
 Subject: [PATCH] dt-bindings: pci: apple,t8010-pcie: Add the S8000
 
