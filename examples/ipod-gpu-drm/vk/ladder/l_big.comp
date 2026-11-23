@@ -1,0 +1,5 @@
+#version 450
+// out[gid] = gid, 2048 workgroups of 32 (65536 invocations)
+layout(local_size_x = 32) in;
+layout(set = 0, binding = 0, std430) buffer Out { uint d[]; } o;
+void main() { o.d[gl_GlobalInvocationID.x] = gl_GlobalInvocationID.x; }

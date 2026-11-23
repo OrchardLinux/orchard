@@ -1,0 +1,68 @@
+# P105 internal disk in the hardware-check RAM session.
+is_p105() {
+    [ -r /proc/device-tree/compatible ] &&
+        tr '\000' '\n' < /proc/device-tree/compatible | grep -Fxq apple,p105ap
+}
+
+# BLKROGET checks the live block device. In fence mode also set BLKROSET
+# and check again. Attempt every registered partition even if one fails.
+sftl_readonly() (
+    [ -e /sys/class/block/applesftl0 ] || return 1
+    status=0
+    for disk in /sys/class/block/applesftl0 /sys/class/block/applesftl0p*; do
+        [ -e "$disk" ] || continue
+        node=/dev/${disk##*/}
+        if [ "$(blockdev --getro "$node" 2>/dev/null)" = 1 ]; then continue; fi
+        if [ "$1" = fence ] && blockdev --setro "$node" 2>/dev/null &&
+            [ "$(blockdev --getro "$node" 2>/dev/null)" = 1 ]; then continue; fi
+        status=1
+    done
+    [ -e /sys/class/block/applesftl0 ] && return "$status"
+)
+
+# List each registered device number. Only an unmatched partition glob is
+# optional. A missing disk or a partition that disappears during the scan fails.
+sftl_device_numbers() (
+    for disk in /sys/class/block/applesftl0 /sys/class/block/applesftl0p*; do
+        case "$disk" in *'*') continue ;; esac
+        IFS= read -r number < "$disk/dev" && [ -n "$number" ] || return 1
+        case "$number" in *[!0-9:]*) return 1 ;; esac
+        printf '%s ' "$number"
+    done
+)
+
+# A source path in mountinfo can be an alias. Its third field identifies the
+# underlying device even for a read-only mount. Check the same device set on
+# either side of the mount table read and return it for comparison after I/O.
+sftl_probe_state() (
+    before=$(sftl_device_numbers) && sftl_readonly check || return 1
+    awk -v numbers="$before" '
+        BEGIN {
+            count = split(numbers, devices, " ")
+            for (i = 1; i <= count; i++) {
+                if (devices[i] !~ /^[0-9]+:[0-9]+$/) invalid = 1
+                internal[devices[i]] = 1
+            }
+        }
+        NF < 10 || $3 !~ /^[0-9]+:[0-9]+$/ || $3 in internal { invalid = 1 }
+        END { if (!NR || invalid) exit 1 }
+    ' /proc/self/mountinfo || return 1
+    after=$(sftl_device_numbers) && [ "$after" = "$before" ] || return 1
+    printf '%s\n' "$before"
+)
+
+# The ARMv7 kernel has no uevent helper. Partitions can appear after the disk,
+# including after coldplug has finished. Keep the serial shell independent.
+watch_sftl() {
+    i=0
+    while :; do
+        if sftl_readonly fence; then
+            [ -e /run/storage-fence ] || echo "$i" > /run/storage-fence
+        else
+            rm -f /run/storage-fence
+            if [ "$i" -lt 60 ]; then coldplug; fi
+        fi
+        sleep 1
+        i=$((i + 1))
+    done
+}

@@ -30,6 +30,8 @@ is missing or empty.
   backlight, the Home button, USB serial and networking and reading its
   internal storage work. `orchard install` is offered; writing to the
   storage is untested so far. Wi-Fi and audio come later.
+- iPad mini 2 (Wi-Fi): the touchscreen works, on the A7 SPI and touch clock
+  support from thisiscamk's iPad Air work.
 - iPhone 6s Plus (Samsung): Linux and m1n1 read its internal storage. The
   Samsung A9's PCIe storage controller works like the TSMC A9's without its
   phy-ip block. Installing doesn't work yet.

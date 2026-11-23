@@ -1,0 +1,150 @@
+#!/bin/sh
+# a8-gpu-drm-test STEP [--again]: the A8 GPU through powervr, one step at a time.
+#   probe     modprobe powervr exp_hw_support=1: the probe powers the GPU, reads its ID and boots
+#             the firmware to its alive event; then the render node's GPU ID and heaps
+#   compute   Mesa's k_store_lid recording through the DRM ioctls; 32 stores of 0x12345678
+#   triangle  Mesa's tri-twiddled recording (TA + 3D); the 64x64 target checked pixel by pixel
+#   vk        Mesa live on the real driver: /opt/a8vk/a8-vk-smoke all (Vulkan probe, compute,
+#             triangle); PASS = its three RESULT lines PASS
+#   all       probe, compute, triangle, vk; stops at the first step that does not pass and skips
+#             a step whose files this payload does not carry (no recordings, no /opt/a8vk)
+# Each step prints one RESULT line and runs once per boot (/run/a8-gpu-drm/STEP.done); --again repeats
+# a step that passed. After a step that failed, or with the GPU left alone ("left as it is" in the
+# kernel log: Fender stuck, Apple panics there), nothing more runs on this boot.
+# Every step runs under a 30 s hardware watchdog, disarmed when the step ends: a frozen SoC resets.
+# The kernel's lines of each step are saved to /run/a8-gpu-drm/STEP.txt, and every kernel line is
+# streamed here ("kmsg: ...") while the step runs, so the last one survives a frozen SoC.
+D=/run/a8-gpu-drm
+SHARE=/usr/share/a8-gpu-drm
+mkdir -p "$D"
+step=${1:-}
+[ $# -gt 0 ] && shift
+again=
+params=
+for a in "$@"; do
+    case $a in
+    --again) again=--again ;;
+    *) echo "unknown argument $a"; exit 2 ;;
+    esac
+done
+
+refuse() {
+    echo "RESULT $step REFUSED $*"
+    exit 1
+}
+
+case $step in
+probe|compute|triangle|vk) ;;
+all)
+    for s in probe compute triangle vk; do
+        if [ -e "$D/$s.done" ]; then echo "RESULT $s PASS (earlier on this boot)"; continue; fi
+        case $s in
+        compute|triangle) [ -f "$SHARE/$s.rpl" ] || { echo "RESULT $s SKIPPED (no $SHARE/$s.rpl)"; continue; } ;;
+        vk) [ -x /opt/a8vk/a8-vk-smoke ] || { echo "RESULT vk SKIPPED (no /opt/a8vk/a8-vk-smoke)"; continue; } ;;
+        esac
+        "$0" "$s" || exit 1
+    done
+    exit 0 ;;
+*) echo "usage: a8-gpu-drm-test probe|compute|triangle|vk|all [--again]"; exit 2 ;;
+esac
+
+[ -e "$D/FAILED" ] && refuse "a step failed on this boot ($(cat "$D/FAILED")): reboot first"
+dmesg | grep -q 'left as it is' && refuse "the kernel left the GPU alone (Fender stuck): reboot (DFU)"
+[ -e "$D/$step.done" ] && [ "$again" != --again ] && refuse "already passed on this boot (--again repeats it)"
+if [ "$step" != probe ] && ! grep -q '^powervr ' /proc/modules; then
+    refuse "powervr is not loaded: run a8-gpu-drm-test probe first"
+fi
+if [ "$step" = vk ]; then
+    [ -x /opt/a8vk/a8-vk-smoke ] || refuse "no /opt/a8vk/a8-vk-smoke in this initramfs"
+    [ -c /dev/dri/renderD128 ] || refuse "no /dev/dri/renderD128 (devtmpfs)"
+    [ -d /sys/class/drm ] || refuse "/sys is not mounted"
+fi
+case $step in
+compute|triangle) [ -f "$SHARE/$step.rpl" ] || refuse "no $SHARE/$step.rpl in this initramfs" ;;
+esac
+
+wd=
+for d in /dev/watchdog0 /dev/watchdog; do [ -c "$d" ] && { wd=$d; break; }; done
+[ -z "$wd" ] && [ "$NO_WATCHDOG" != 1 ] && refuse "no /dev/watchdog: a hang would leave no reset (NO_WATCHDOG=1 runs anyway)"
+
+marker="A8-GPU-DRM $step $$ begin"
+# live: every kernel line from here on, before anything touches the GPU
+(seen=0; while read -r l; do
+    case $l in *"$marker"*) seen=1 ;; esac
+    [ $seen = 1 ] && echo "kmsg: ${l#*;}"
+done < /dev/kmsg) &
+fwd=$!
+sleep 1
+echo "$marker" > /dev/kmsg
+wdpid=
+if [ -n "$wd" ]; then
+    watchdog -F -T 30 -t 3600 "$wd" </dev/null >/dev/null 2>&1 &
+    wdpid=$!
+    sleep 1
+    kill -0 $wdpid 2>/dev/null || { wdpid=; echo "watchdog failed to arm"; }
+fi
+
+out=$D/$step.out
+case $step in
+probe)
+    if grep -q '^powervr ' /proc/modules; then
+        echo "powervr already loaded"
+    else
+        echo "modprobe powervr exp_hw_support=1$params"
+        if ! modprobe powervr exp_hw_support=1 $params && ! grep -q '^powervr ' /proc/modules; then
+            # without a working modprobe: the dependencies modules.dep names, then powervr
+            m=/lib/modules/$(uname -r)
+            deps=$(sed -n 's|^\(.*/powervr.ko\):\(.*\)|\2|p' "$m/modules.dep")
+            for k in $deps $deps; do insmod "$m/$k" 2>/dev/null; done
+            insmod "$m/kernel/drivers/gpu/drm/imagination/powervr.ko" exp_hw_support=1 $params
+        fi
+        echo "powervr loaded: $(grep -c '^powervr ' /proc/modules)"
+    fi
+    sleep 1
+    a8-gpu-drm info > "$out" 2>&1 ;;
+compute)
+    a8-gpu-drm compute "$SHARE/compute.rpl" > "$out" 2>&1 ;;
+triangle)
+    a8-gpu-drm triangle "$SHARE/triangle.rpl" > "$out" 2>&1 ;;
+vk)
+    /opt/a8vk/a8-vk-smoke all > "$out" 2>&1 ;;
+esac
+rc=$?
+[ -n "$wdpid" ] && { kill -TERM $wdpid; wait $wdpid 2>/dev/null; }
+# the runtime suspend's stop comes about 1 s after the probe
+[ "$step" = probe ] && sleep 3
+kill $fwd 2>/dev/null
+
+dmesg | sed -n "/$marker/,\$p" | grep -i -e powervr -e 'A8-GPU-DRM' > "$D/$step.txt"
+grep -v '^RESULT' "$out"
+echo "---- kernel ($D/$step.txt):"
+cat "$D/$step.txt"
+result=$(grep '^RESULT' "$out" | tail -1)
+[ -z "$result" ] && result="RESULT $step FAIL no result (exit $rc)"
+if [ "$step" = vk ]; then
+    grep '^RESULT' "$out"
+    if [ $rc = 0 ] && [ "$(grep -c '^RESULT .* PASS' "$out")" -ge 3 ] && ! grep -q '^RESULT .* FAIL' "$out"; then
+        result="RESULT vk PASS (Mesa probe, compute, triangle)"
+    else
+        result="RESULT vk FAIL (exit $rc; see $out)"
+        rc=1
+    fi
+fi
+if [ "$step" = probe ]; then
+    if [ $rc = 0 ] && grep -q '^RESULT info PASS' "$out"; then
+        result="RESULT probe PASS $(grep '^gpu id' "$out")"
+    else
+        result="RESULT probe FAIL (no powervr render node; see $D/probe.txt)"
+        rc=1
+    fi
+fi
+echo "$result"
+if [ $rc = 0 ]; then
+    : > "$D/$step.done"
+elif echo "$result" | grep -q 'FAIL submit '; then
+    # Refused by SUBMIT_JOBS: no job reached the GPU, so the step may run again on this boot
+    echo "(a submit-time rejection: no GPU work ran; $step can be retried on this boot)"
+else
+    echo "$step" > "$D/FAILED"
+fi
+exit $rc
