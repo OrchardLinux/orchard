@@ -13,6 +13,9 @@ is missing or empty.
 
 ### Devices
 
+- iPad 6, iPad 5, iPad Air 2, iPad mini 2 and 4, iPod touch 6, iPhone 6s,
+  6s Plus and SE: a touchscreen that stops responding without an error is
+  restarted by itself within seconds, instead of staying dead until reboot.
 - iPhone 6, iPhone 6 Plus and iPad mini 4 (A8): internal storage on every
   model, as on the iPod touch 6, so they can install. The iPhone 6 and
   6 Plus also get the iPod touch 6's Wi-Fi and Bluetooth, with their own
