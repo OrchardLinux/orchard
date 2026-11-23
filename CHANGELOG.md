@@ -9,6 +9,37 @@ releasing, rename that section to the version (`## [0.3.0] - YYYY-MM-DD`). The
 release workflow uses that section as the GitHub release notes and fails if it
 is missing or empty.
 
+## Unreleased
+
+### Devices
+
+- iPhone 6s Plus (A9): the phone sleeps when idle or on Power, turns its
+  screen off, and wakes on Home or Power.
+- iPad mini 2 (Wi-Fi, A7): tested on the board. The display, backlight,
+  buttons, internal storage reads, battery, charging, suspend and resume,
+  USB serial and networking work, along with touch and Wi-Fi.
+- iPhone 6s Plus (A9): the accelerometer and gyroscope work, so the screen
+  follows the phone's orientation. The motion processor (AOP) now starts
+  with the iOS 15 firmware on every A9 iPhone (6s, 6s Plus, SE), with the
+  same sensor orientation; untested on the 6s and SE.
+
+## [0.3.6] - 2026-11-24
+
+### Devices
+
+- iPad 6, iPad 5, iPad Air 2 and the other A8, A9 and A10 boards: the boot
+  splash stays still until the PIN screen again. When the display driver took
+  over, about four seconds into boot, it flashed a test pattern and then
+  went black for a moment. Scanning out GPU buffers directly through the
+  display DART is now off by default (adbe.dart_scanout=1 turns it on).
+
+## [0.3.5] - 2026-11-24
+
+### Devices
+
+- The touchscreen restart from 0.3.3 is gone again: on a healthy iPad 6 that
+  nobody touched, it restarted the touch controller every 30 seconds.
+
 ## [0.3.4] - 2026-11-24
 
 ### Install & launch
