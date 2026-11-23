@@ -9,6 +9,13 @@ releasing, rename that section to the version (`## [0.3.0] - YYYY-MM-DD`). The
 release workflow uses that section as the GitHub release notes and fails if it
 is missing or empty.
 
+## Unreleased
+
+### Install & launch
+
+- iPad 6 and iPad 7: starting an installed system works again. In 0.3.3 m1n1
+  crashed while starting the internal storage, and the iPad fell back to iOS.
+
 ## [0.3.3] - 2026-11-24
 
 ### Devices
