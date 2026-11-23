@@ -48,6 +48,243 @@
         "zip": "Firmware/AOP/aopfw-s8000aop.im4p"
       },
       "sha256": "8b13cd96c292683bde0716199fb1821394cedfdbbbf27867e9bb49914287b44d"
+    },
+    "s-C2_P-pinotnoir_M-BLMA_V-m__m-1.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-BLMA_V-m__m-1.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-BLMA_V-m__m-1.1.txt",
+      "sha256": "be9d5658dd45b764c48984363fa7b26a145030193324ba8e97715a780a07fa00"
+    },
+    "s-C2_P-pinotnoir_M-BLMA_V-m__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-BLMA_V-m__m-2.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-BLMA_V-m__m-2.1.txt",
+      "sha256": "ba157a34ad0a23b7b11c25c5e38657cd29170142b9d0ba2ee28ee72cdd8c09e0"
+    },
+    "s-C2_P-pinotnoir_M-BLMA_V-m__m-2.5.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-BLMA_V-m__m-2.5.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-BLMA_V-m__m-2.5.txt",
+      "sha256": "2d03a6dcf9386094b76b00b7ca0b14734a946fe10cbb9de3218e7b1614a79a4a"
+    },
+    "s-C2_P-pinotnoir_M-BLMA_V-t__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-BLMA_V-t__m-2.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-BLMA_V-t__m-2.1.txt",
+      "sha256": "294974433a0e04013c4c8badb216f83cd0d04513f3e1c303dfb06884cb624069"
+    },
+    "s-C2_P-pinotnoir_M-BLMA_V-t__m-2.5.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-BLMA_V-t__m-2.5.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-BLMA_V-t__m-2.5.txt",
+      "sha256": "81d24ed4469121cdf687bcdb65cc899b8499da03c3b3e22575be5ff2dab5b8af"
+    },
+    "s-C2_P-pinotnoir_M-BLMA_V-u__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-BLMA_V-u__m-2.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-BLMA_V-u__m-2.1.txt",
+      "sha256": "0bfd1e1ce6ab3a25c9a6f1308f2e6f3607c8562e2c7e4f5dfe14b2b7eeef9d53"
+    },
+    "s-C2_P-pinotnoir_M-BLMA_V-u__m-2.5.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-BLMA_V-u__m-2.5.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-BLMA_V-u__m-2.5.txt",
+      "sha256": "f638500c23aef603fcdfdb831cf35eaaedd73a02c4dc133f6cfb271dff8fee74"
+    },
+    "s-C2_P-pinotnoir_M-STBL_V-m__m-2.3.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-STBL_V-m__m-2.3.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-STBL_V-m__m-2.3.txt",
+      "sha256": "eb202f1369fe6ffa77ca1fc2d41310b8503025b4831cd9bf725f248a3bebe0f1"
+    },
+    "s-C2_P-pinotnoir_M-STBL_V-m__m-2.5.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-STBL_V-m__m-2.5.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-STBL_V-m__m-2.5.txt",
+      "sha256": "ad348983a5adfb77787ff21680e4258f14a92bc766d54e7fbfb9c1343db8a326"
+    },
+    "s-C2_P-pinotnoir_M-STBL_V-t__m-2.5.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-STBL_V-t__m-2.5.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-STBL_V-t__m-2.5.txt",
+      "sha256": "85ee47e12a7d4e57ee53dd8ba7156abfd300c8e17924a47938d240d62bf06e5f"
+    },
+    "s-C2_P-pinotnoir_M-STBL_V-u__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-STBL_V-u__m-2.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-STBL_V-u__m-2.1.txt",
+      "sha256": "0fb2dc137f3a706e7343a929a75df051046ffb46e7f24aa8b3ca3473eb65f033"
+    },
+    "s-C2_P-pinotnoir_M-STBL_V-u__m-2.5.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-STBL_V-u__m-2.5.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-pinotnoir_M-STBL_V-u__m-2.5.txt",
+      "sha256": "0fb2dc137f3a706e7343a929a75df051046ffb46e7f24aa8b3ca3473eb65f033"
+    },
+    "s-C2_pinotnoir.clmb": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/pinotnoir.clmb"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/pinotnoir.clmb",
+      "sha256": "bee49067505a012b3a1130e33d692051bdf6b01e366ef950dc02c6001c27a4c0"
+    },
+    "s-C2_pinotnoir.trx": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/pinotnoir.trx"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/pinotnoir.trx",
+      "sha256": "fb1c8d1d73c6742226bd12a19d09630190f4cac053792a6bae96aab6bc1e59f8"
+    },
+    "s-C2_pinotnoir.txcb": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/pinotnoir.txcb"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/pinotnoir.txcb",
+      "sha256": "b6901a7b2ae326b5f18e291dcf9c96fa1ca32a9b3aa33ca7e20a9401467dba5d"
+    },
+    "s-C5_P-pinotnoir_M-BLMA_V-m__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-m__m-2.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-m__m-2.1.txt",
+      "sha256": "ba157a34ad0a23b7b11c25c5e38657cd29170142b9d0ba2ee28ee72cdd8c09e0"
+    },
+    "s-C5_P-pinotnoir_M-BLMA_V-m__m-2.5.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-m__m-2.5.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-m__m-2.5.txt",
+      "sha256": "2d03a6dcf9386094b76b00b7ca0b14734a946fe10cbb9de3218e7b1614a79a4a"
+    },
+    "s-C5_P-pinotnoir_M-BLMA_V-m__m-2.9.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-m__m-2.9.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-m__m-2.9.txt",
+      "sha256": "4305c42bc2b90d1041c602a41cd8ffa2b262b8c55910d83420105479fd61b367"
+    },
+    "s-C5_P-pinotnoir_M-BLMA_V-m__m-5.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-m__m-5.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-m__m-5.1.txt",
+      "sha256": "4305c42bc2b90d1041c602a41cd8ffa2b262b8c55910d83420105479fd61b367"
+    },
+    "s-C5_P-pinotnoir_M-BLMA_V-m__m-5.3.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-m__m-5.3.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-m__m-5.3.txt",
+      "sha256": "309fb686d8df4e01832e1d7e90dc9d83a587b6e388560e9d5b04a65ea40d1101"
+    },
+    "s-C5_P-pinotnoir_M-BLMA_V-m__m-5.5.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-m__m-5.5.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-m__m-5.5.txt",
+      "sha256": "4305c42bc2b90d1041c602a41cd8ffa2b262b8c55910d83420105479fd61b367"
+    },
+    "s-C5_P-pinotnoir_M-BLMA_V-m__m-6.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-m__m-6.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-m__m-6.1.txt",
+      "sha256": "4305c42bc2b90d1041c602a41cd8ffa2b262b8c55910d83420105479fd61b367"
+    },
+    "s-C5_P-pinotnoir_M-BLMA_V-t__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-t__m-2.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-t__m-2.1.txt",
+      "sha256": "294974433a0e04013c4c8badb216f83cd0d04513f3e1c303dfb06884cb624069"
+    },
+    "s-C5_P-pinotnoir_M-BLMA_V-t__m-2.5.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-t__m-2.5.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-t__m-2.5.txt",
+      "sha256": "81d24ed4469121cdf687bcdb65cc899b8499da03c3b3e22575be5ff2dab5b8af"
+    },
+    "s-C5_P-pinotnoir_M-BLMA_V-t__m-2.7.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-t__m-2.7.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-t__m-2.7.txt",
+      "sha256": "7799a83d1d7c89460575db25710df6d1e3d37207a17bc1016ece67795f358991"
+    },
+    "s-C5_P-pinotnoir_M-BLMA_V-u__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-u__m-2.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-u__m-2.1.txt",
+      "sha256": "0bfd1e1ce6ab3a25c9a6f1308f2e6f3607c8562e2c7e4f5dfe14b2b7eeef9d53"
+    },
+    "s-C5_P-pinotnoir_M-BLMA_V-u__m-2.5.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-u__m-2.5.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-u__m-2.5.txt",
+      "sha256": "f638500c23aef603fcdfdb831cf35eaaedd73a02c4dc133f6cfb271dff8fee74"
+    },
+    "s-C5_P-pinotnoir_M-BLMA_V-u__m-2.7.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-u__m-2.7.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-u__m-2.7.txt",
+      "sha256": "5921cc177ada1c745025e0397cd556c1cd9b1e92ae36e52f6a3ca7b888d1c253"
+    },
+    "s-C5_P-pinotnoir_M-BLMA_V-u__m-5.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-u__m-5.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-u__m-5.1.txt",
+      "sha256": "f638500c23aef603fcdfdb831cf35eaaedd73a02c4dc133f6cfb271dff8fee74"
+    },
+    "s-C5_P-pinotnoir_M-BLMA_V-u__m-5.3.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-u__m-5.3.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-pinotnoir_M-BLMA_V-u__m-5.3.txt",
+      "sha256": "5921cc177ada1c745025e0397cd556c1cd9b1e92ae36e52f6a3ca7b888d1c253"
+    },
+    "s-C5_pinotnoir.clmb": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/pinotnoir.clmb"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/pinotnoir.clmb",
+      "sha256": "3a6d473fe9cdc14fc2667c67b72e894f47d67a841c9bbb56039b70e45bef2b92"
+    },
+    "s-C5_pinotnoir.trx": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/pinotnoir.trx"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/pinotnoir.trx",
+      "sha256": "85b4339fb00f4cb501e678cd79f268cbcbae6736e0fa19d76d99e9da5ba08254"
+    },
+    "s-C5_pinotnoir.txcb": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/pinotnoir.txcb"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/pinotnoir.txcb",
+      "sha256": "a225551360dcaef3640e67e0d4496c807caf25263c33e19f65d0c9e619293013"
+    },
+    "BlueTool": {
+      "ipsw": {
+        "rootfs": "usr/sbin/BlueTool"
+      },
+      "device": "/usr/sbin/BlueTool"
     }
   },
   "outputs": [
@@ -111,6 +348,356 @@
         {
           "step": "aop-image@1",
           "coprocessor": "AOP_ext"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,pinotnoir-BLMA-m-1.1.txt",
+      "sha256": "be9d5658dd45b764c48984363fa7b26a145030193324ba8e97715a780a07fa00",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-pinotnoir_M-BLMA_V-m__m-1.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,pinotnoir-BLMA-m-2.1.txt",
+      "sha256": "ba157a34ad0a23b7b11c25c5e38657cd29170142b9d0ba2ee28ee72cdd8c09e0",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-pinotnoir_M-BLMA_V-m__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,pinotnoir-BLMA-m-2.5.txt",
+      "sha256": "2d03a6dcf9386094b76b00b7ca0b14734a946fe10cbb9de3218e7b1614a79a4a",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-pinotnoir_M-BLMA_V-m__m-2.5.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,pinotnoir-BLMA-t-2.1.txt",
+      "sha256": "294974433a0e04013c4c8badb216f83cd0d04513f3e1c303dfb06884cb624069",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-pinotnoir_M-BLMA_V-t__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,pinotnoir-BLMA-t-2.5.txt",
+      "sha256": "81d24ed4469121cdf687bcdb65cc899b8499da03c3b3e22575be5ff2dab5b8af",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-pinotnoir_M-BLMA_V-t__m-2.5.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,pinotnoir-BLMA-u-2.1.txt",
+      "sha256": "0bfd1e1ce6ab3a25c9a6f1308f2e6f3607c8562e2c7e4f5dfe14b2b7eeef9d53",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-pinotnoir_M-BLMA_V-u__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,pinotnoir-BLMA-u-2.5.txt",
+      "sha256": "f638500c23aef603fcdfdb831cf35eaaedd73a02c4dc133f6cfb271dff8fee74",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-pinotnoir_M-BLMA_V-u__m-2.5.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,pinotnoir-STBL-m-2.3.txt",
+      "sha256": "eb202f1369fe6ffa77ca1fc2d41310b8503025b4831cd9bf725f248a3bebe0f1",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-pinotnoir_M-STBL_V-m__m-2.3.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,pinotnoir-STBL-m-2.5.txt",
+      "sha256": "ad348983a5adfb77787ff21680e4258f14a92bc766d54e7fbfb9c1343db8a326",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-pinotnoir_M-STBL_V-m__m-2.5.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,pinotnoir-STBL-t-2.5.txt",
+      "sha256": "85ee47e12a7d4e57ee53dd8ba7156abfd300c8e17924a47938d240d62bf06e5f",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-pinotnoir_M-STBL_V-t__m-2.5.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,pinotnoir-STBL-u-2.1.txt",
+      "sha256": "0fb2dc137f3a706e7343a929a75df051046ffb46e7f24aa8b3ca3473eb65f033",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-pinotnoir_M-STBL_V-u__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,pinotnoir-STBL-u-2.5.txt",
+      "sha256": "0fb2dc137f3a706e7343a929a75df051046ffb46e7f24aa8b3ca3473eb65f033",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-pinotnoir_M-STBL_V-u__m-2.5.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,pinotnoir.clm_blob",
+      "sha256": "bee49067505a012b3a1130e33d692051bdf6b01e366ef950dc02c6001c27a4c0",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_pinotnoir.clmb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,pinotnoir.bin",
+      "sha256": "fb1c8d1d73c6742226bd12a19d09630190f4cac053792a6bae96aab6bc1e59f8",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_pinotnoir.trx"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,pinotnoir.txcap_blob",
+      "sha256": "b6901a7b2ae326b5f18e291dcf9c96fa1ca32a9b3aa33ca7e20a9401467dba5d",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_pinotnoir.txcb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,pinotnoir-BLMA-m-2.1.txt",
+      "sha256": "ba157a34ad0a23b7b11c25c5e38657cd29170142b9d0ba2ee28ee72cdd8c09e0",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-pinotnoir_M-BLMA_V-m__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,pinotnoir-BLMA-m-2.5.txt",
+      "sha256": "2d03a6dcf9386094b76b00b7ca0b14734a946fe10cbb9de3218e7b1614a79a4a",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-pinotnoir_M-BLMA_V-m__m-2.5.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,pinotnoir-BLMA-m-2.9.txt",
+      "sha256": "4305c42bc2b90d1041c602a41cd8ffa2b262b8c55910d83420105479fd61b367",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-pinotnoir_M-BLMA_V-m__m-2.9.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,pinotnoir-BLMA-m-5.1.txt",
+      "sha256": "4305c42bc2b90d1041c602a41cd8ffa2b262b8c55910d83420105479fd61b367",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-pinotnoir_M-BLMA_V-m__m-5.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,pinotnoir-BLMA-m-5.3.txt",
+      "sha256": "309fb686d8df4e01832e1d7e90dc9d83a587b6e388560e9d5b04a65ea40d1101",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-pinotnoir_M-BLMA_V-m__m-5.3.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,pinotnoir-BLMA-m-5.5.txt",
+      "sha256": "4305c42bc2b90d1041c602a41cd8ffa2b262b8c55910d83420105479fd61b367",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-pinotnoir_M-BLMA_V-m__m-5.5.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,pinotnoir-BLMA-m-6.1.txt",
+      "sha256": "4305c42bc2b90d1041c602a41cd8ffa2b262b8c55910d83420105479fd61b367",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-pinotnoir_M-BLMA_V-m__m-6.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,pinotnoir-BLMA-t-2.1.txt",
+      "sha256": "294974433a0e04013c4c8badb216f83cd0d04513f3e1c303dfb06884cb624069",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-pinotnoir_M-BLMA_V-t__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,pinotnoir-BLMA-t-2.5.txt",
+      "sha256": "81d24ed4469121cdf687bcdb65cc899b8499da03c3b3e22575be5ff2dab5b8af",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-pinotnoir_M-BLMA_V-t__m-2.5.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,pinotnoir-BLMA-t-2.7.txt",
+      "sha256": "7799a83d1d7c89460575db25710df6d1e3d37207a17bc1016ece67795f358991",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-pinotnoir_M-BLMA_V-t__m-2.7.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,pinotnoir-BLMA-u-2.1.txt",
+      "sha256": "0bfd1e1ce6ab3a25c9a6f1308f2e6f3607c8562e2c7e4f5dfe14b2b7eeef9d53",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-pinotnoir_M-BLMA_V-u__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,pinotnoir-BLMA-u-2.5.txt",
+      "sha256": "f638500c23aef603fcdfdb831cf35eaaedd73a02c4dc133f6cfb271dff8fee74",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-pinotnoir_M-BLMA_V-u__m-2.5.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,pinotnoir-BLMA-u-2.7.txt",
+      "sha256": "5921cc177ada1c745025e0397cd556c1cd9b1e92ae36e52f6a3ca7b888d1c253",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-pinotnoir_M-BLMA_V-u__m-2.7.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,pinotnoir-BLMA-u-5.1.txt",
+      "sha256": "f638500c23aef603fcdfdb831cf35eaaedd73a02c4dc133f6cfb271dff8fee74",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-pinotnoir_M-BLMA_V-u__m-5.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,pinotnoir-BLMA-u-5.3.txt",
+      "sha256": "5921cc177ada1c745025e0397cd556c1cd9b1e92ae36e52f6a3ca7b888d1c253",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-pinotnoir_M-BLMA_V-u__m-5.3.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,pinotnoir.clm_blob",
+      "sha256": "3a6d473fe9cdc14fc2667c67b72e894f47d67a841c9bbb56039b70e45bef2b92",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_pinotnoir.clmb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,pinotnoir.bin",
+      "sha256": "85b4339fb00f4cb501e678cd79f268cbcbae6736e0fa19d76d99e9da5ba08254",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_pinotnoir.trx"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,pinotnoir.txcap_blob",
+      "sha256": "a225551360dcaef3640e67e0d4496c807caf25263c33e19f65d0c9e619293013",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_pinotnoir.txcb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,n66-USI.hcd",
+      "sha256": "50065cbf3d8eee5ed4a09d4a8b3ef3a44e350fe47fdaff0596721ab80046dac0",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,n66-MUR.hcd",
+      "sha256": "8428aa1ddaef75c1aa313893a66cdfafde85acd785d68597902a4c7cbe4ea12c",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
         }
       ]
     },

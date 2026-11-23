@@ -22,7 +22,7 @@ platform = "apple-16k"
 dtb = "s8000-n66" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # Pins this board's public IPSW; makes the touchscreen, VXD and AOP firmware, and the GPU firmware from the iPad 5's iPadOS 16.7.10.
+recipe = "firmware.json" # Pins this board's public IPSW; makes the touchscreen, VXD, AOP, Wi-Fi and Bluetooth firmware, and the GPU firmware from the iPad 5's iPadOS 16.7.10.
 
 [support]
 status = "experimental"
@@ -33,26 +33,26 @@ tested_by = ["ricktav"]
 # (tools/catalog/drivers.json), plus the display's boot console.
 [features]
 display = "working" # boot framebuffer, 1080x1920 (RAM boot and install 2026-11-23)
-screen_off = "untested" # Display pipe on for every A9 board; the DSI link stays powered
+screen_off = "working" # dark on Power, Home or Power lights it again in 1-15 ms (Omarchy A from storage, 2026-11-23)
 backlight = "working" # dark, bright and normal levels (RAM boot 2026-11-23)
 gpu_desktop = "untested"
 touch = "working" # N1 C1F5C, both firmware packets; multitouch, corners checked (RAM boot 2026-11-23)
 buttons = "working" # home, power, volume up/down, mute switch (RAM boot 2026-11-23)
-accelerometer = "untested" # AOP with aopfw-s8000aop; mount-matrix not measured
-gyroscope = "untested"
+accelerometer = "working" # AOP with aopfw-s8000aop, measured mount matrix diag(1,1,-1); six poses give the right iio-sensor-proxy orientations (RAM boot 2026-11-23)
+gyroscope = "working" # AOP MPU6800, identity matrix; rates follow the accelerometer's rotation; x sign weakly fixed, rate scale unchecked (RAM boot 2026-11-23)
 light_sensor = "working" # CT821 with the unit's LSCI calibration (RAM boot 2026-11-23)
 touch_id = "missing"
 storage_read = "working" # NVMe 5 GT/s x2, 1 GiB read, no faults or timeouts (RAM boot 2026-11-22)
 storage_write = "working" # 256 MiB to a Linux partition read back after drop_caches, APFS unchanged; Omarchy A installed and booted from storage (2026-11-23)
-wifi = "missing" # Not described yet: BCM4350/4345 on PCIe port 1, its control function on uart4, neither in s800-0-3.dtsi
-bluetooth_input = "missing" # Not described yet: the controller is on uart1, not in s800-0-3.dtsi
-bluetooth_audio = "missing" # Same as Bluetooth input
+wifi = "working" # BCM4350/8 (C5) on PCIe port 1: firmware loads, a scan finds 31 networks; association not tested yet (RAM boot 2026-11-23)
+bluetooth_input = "untested" # BCM4350C5 on UART1: USI Patchram loads, inquiry and LE scan work; nothing paired yet (RAM boot 2026-11-23)
+bluetooth_audio = "untested"
 cellular = "missing"
 battery = "untested" # bq27540 gauge on uart5 behind the SN2400's HDQ mux
 charging = "untested" # SN2400 charger
 charging_control = "missing" # The SN2400 driver has no writable limit yet
-suspend = "untested"
-resume = "untested"
+suspend = "working" # s2idle from idle and from Power, 6 of 6 (3 s to 9 min), wakes on Home and Power; cable plugged in asleep (Omarchy A from storage, 2026-11-23)
+resume = "working" # every one of the 6 sleeps woke on Home or Power with the screen back in 1-15 ms and the USB network back (Omarchy A from storage, 2026-11-23)
 usb_serial = "untested"
 usb_network = "untested"
 usb_host = "missing" # Needs the Tristar VBUS path on the iPhone's Antigua PMU; only the iPad 5's D2365 one exists
