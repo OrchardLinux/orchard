@@ -17,10 +17,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 4 insertions(+), 1 deletion(-)
 
 diff --git a/Documentation/devicetree/bindings/sound/apple,s8000-mca.yaml b/Documentation/devicetree/bindings/sound/apple,s8000-mca.yaml
-index 917689968..b1ee5b8a5 100644
+index c2e15fcc5..853055f02 100644
 --- a/Documentation/devicetree/bindings/sound/apple,s8000-mca.yaml
 +++ b/Documentation/devicetree/bindings/sound/apple,s8000-mca.yaml
-@@ -24,7 +24,9 @@ description: |
+@@ -26,7 +26,9 @@ description: |
    NCO channel running at twice the bit clock. The S5L8960X (A7) MCA is
    version 1 as well: apple,s5l8960x-mca is the playback-only I2S link of the
    iPad Air to its codec, which provides the bit and frame clocks as on the
@@ -31,11 +31,13 @@ index 917689968..b1ee5b8a5 100644
  
  allOf:
    - $ref: dai-common.yaml#
-@@ -53,6 +55,7 @@ properties:
+@@ -56,6 +58,7 @@ properties:
    compatible:
      enum:
        - apple,s5l8960x-mca
 +      - apple,s5l8960x-mca-tdm
        - apple,s8000-mca
+       - apple,s8000-mca-tdm
        - apple,t7001-mca
-       - apple,t8010-mca
+-- 
+2.50.1

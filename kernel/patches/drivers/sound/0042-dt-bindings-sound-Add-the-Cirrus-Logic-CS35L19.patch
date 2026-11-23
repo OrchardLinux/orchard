@@ -5,24 +5,30 @@ Subject: [PATCH] dt-bindings: sound: Add the Cirrus Logic CS35L19
 
 The CS35L19 is a boosted class-D speaker amplifier with a TDM serial
 port. The A7 iPad minis use them in pairs on one I2C bus, with one reset
-line and one TDM link. Apple's device tree describes the pair at the
-primary's address with one 20-byte "speaker-config" record per
-amplifier; the binding does the same, with the secondary as a second reg
-entry.
+line and one TDM link, and the iPhone 6s and 6s Plus one (a CS35L21,
+driven the same way) for the loudspeaker. Describe one node per
+amplifier with the 20-byte "speaker-config" record of Apple's device
+tree; the amplifier whose graph endpoint is the clock provider drives
+the frame.
 
+[Orchard: from orchard PR #223, commit 401d1166; one node per
+ amplifier, as the driver from Project Cascadia that the iPhone 6s Plus
+ uses binds, with the shared reset, the keep-alive line and the graph
+ port; apple,speaker-config of 20 bytes instead of the pair's
+ cirrus,speaker-config, and the endpoint's clock provider flags instead
+ of cirrus,frame-provider]
 Assisted-by: LLM
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- .../bindings/sound/cirrus,cs35l19.yaml        | 97 +++++++++++++++++++
- 1 file changed, 97 insertions(+)
- create mode 100644 Documentation/devicetree/bindings/sound/cirrus,cs35l19.yaml
+ .../bindings/sound/cirrus,cs35l19.yaml        | 91 +++++++++++++++++++
+ 1 file changed, 91 insertions(+)
 
 diff --git a/Documentation/devicetree/bindings/sound/cirrus,cs35l19.yaml b/Documentation/devicetree/bindings/sound/cirrus,cs35l19.yaml
 new file mode 100644
-index 000000000..bbe8487b7
+index 000000000..035babac3
 --- /dev/null
 +++ b/Documentation/devicetree/bindings/sound/cirrus,cs35l19.yaml
-@@ -0,0 +1,97 @@
+@@ -0,0 +1,91 @@
 +# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
 +%YAML 1.2
 +---
@@ -35,12 +41,13 @@ index 000000000..bbe8487b7
 +  - ricktav <82380971+ricktav@users.noreply.github.com>
 +
 +description: |
-+  Boosted class-D speaker amplifier with a TDM serial port, found in pairs
-+  in the A7 iPad minis. Both parts of a pair share one I2C bus, one reset
-+  line and one TDM link; the node describes the pair at the primary's
-+  address, as Apple's device tree does, and the secondary is reached as an
-+  ancillary device. Amplifier n plays slot n of an 8 x 16-bit frame, which
-+  one of them drives from the MCLK it is given.
++  Boosted class-D speaker amplifier with a TDM serial port, a relative of
++  the CS35L33 with Apple's power-on sequence. The CS35L21 is driven the
++  same way. Apple's iPad minis use two on one I2C bus, sharing one reset
++  line and one TDM link; the iPhone 6s and 6s Plus use one for the
++  loudspeaker. Each amplifier is one node and reads the slot its graph
++  endpoint gives it. An amplifier whose endpoint is the bit and frame
++  clock provider drives the frame, from the MCLK it is given.
 +
 +allOf:
 +  - $ref: dai-common.yaml#
@@ -50,19 +57,18 @@ index 000000000..bbe8487b7
 +    const: cirrus,cs35l19
 +
 +  reg:
-+    minItems: 1
-+    items:
-+      - description: primary amplifier
-+      - description: secondary amplifier
-+
-+  reg-names:
-+    minItems: 1
-+    items:
-+      - const: primary
-+      - const: secondary
++    maxItems: 1
 +
 +  reset-gpios:
 +    maxItems: 1
++    description:
++      Shared by the amplifiers of one board, so each of them names it.
++
++  cirrus,keepalive-gpios:
++    maxItems: 1
++    description:
++      Input of the amplifier's alive watchdog. Toggled while the amplifier
++      plays; without it, the watchdog is turned off.
 +
 +  clocks:
 +    maxItems: 1
@@ -70,29 +76,25 @@ index 000000000..bbe8487b7
 +  clock-names:
 +    const: mclk
 +
-+  cirrus,speaker-config:
++  apple,speaker-config:
 +    $ref: /schemas/types.yaml#/definitions/uint8-array
 +    minItems: 20
-+    maxItems: 40
++    maxItems: 20
 +    description:
-+      The "speaker-config" property of the amplifier node in Apple's device
-+      tree, 20 bytes per amplifier in reg order.
-+
-+  cirrus,frame-provider:
-+    $ref: /schemas/types.yaml#/definitions/uint32
-+    maximum: 1
-+    default: 0
-+    description: Index (in reg) of the amplifier that drives the frame.
++      The "speaker-config" record of the amplifier in Apple's device tree.
 +
 +  '#sound-dai-cells':
 +    const: 0
++
++  port:
++    $ref: audio-graph-port.yaml#
++    unevaluatedProperties: false
 +
 +required:
 +  - compatible
 +  - reg
 +  - clocks
 +  - clock-names
-+  - cirrus,speaker-config
 +  - '#sound-dai-cells'
 +
 +unevaluatedProperties: false
@@ -105,18 +107,18 @@ index 000000000..bbe8487b7
 +        #address-cells = <1>;
 +        #size-cells = <0>;
 +
-+        audio-amplifier@40 {
++        amplifier@40 {
 +            compatible = "cirrus,cs35l19";
-+            reg = <0x40>, <0x41>;
-+            reg-names = "primary", "secondary";
++            reg = <0x40>;
 +            reset-gpios = <&pinctrl 114 GPIO_ACTIVE_LOW>;
 +            clocks = <&mca1>;
 +            clock-names = "mclk";
-+            cirrus,speaker-config = /bits/ 8 <
-+                0x49 0x30 0x02 0x70 0x6a 0x80 0x30 0x1e 0x02 0x04
-+                0x14 0x89 0x8a 0x10 0x74 0x03 0x05 0x00 0x00 0x40
++            apple,speaker-config = /bits/ 8 <
 +                0x49 0x30 0x02 0x70 0x6a 0x80 0x30 0x1e 0x02 0x04
 +                0x14 0x89 0x8a 0x10 0x74 0x03 0x05 0x00 0x00 0x40>;
 +            #sound-dai-cells = <0>;
++            sound-name-prefix = "Left";
 +        };
 +    };
+-- 
+2.50.1

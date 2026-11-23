@@ -23,10 +23,10 @@ Take the version 4 location when the header says so, and keep the
 version 5 location for every other image, as before: the iPads' AOP
 images keep working whatever their header version.
 
-[Orchard: Henrik Klee: version 4 only selects the old location; images
- without the magic or with another version keep the version 5 location
- instead of being refused, so no board that boots its AOP today can lose
- it]
+[Orchard: from orchard PR #219, commit 390e338c; only version 4 selects
+ the new location, and images without the magic or with another version
+ keep the version 5 location instead of being refused, so no board whose
+ AOP starts today can lose it]
 Assisted-by: LLM
 Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
 ---

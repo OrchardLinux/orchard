@@ -28,7 +28,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 68 insertions(+), 10 deletions(-)
 
 diff --git a/sound/soc/apple/s8000-mca.c b/sound/soc/apple/s8000-mca.c
-index 3e8095148..793a645f4 100644
+index 4cb23eb88..f3a2082a8 100644
 --- a/sound/soc/apple/s8000-mca.c
 +++ b/sound/soc/apple/s8000-mca.c
 @@ -264,6 +264,14 @@ struct s8000_mca_hw {
@@ -92,7 +92,7 @@ index 3e8095148..793a645f4 100644
  
  	ret = devm_pm_runtime_enable(dev);
  	if (ret)
-@@ -1425,8 +1438,53 @@ static const struct s8000_mca_hw s5l8960x_mca_hw = {
+@@ -1470,8 +1483,53 @@ static const struct s8000_mca_hw s5l8960x_mca_hw = {
  	.sio_trigger = 0xac,
  };
  
@@ -144,5 +144,7 @@ index 3e8095148..793a645f4 100644
  	{ .compatible = "apple,s5l8960x-mca", .data = &s5l8960x_mca_hw },
 +	{ .compatible = "apple,s5l8960x-mca-tdm", .data = &s5l8960x_tdm_mca_hw },
  	{ .compatible = "apple,s8000-mca", .data = &s8000_mca_hw },
+ 	{ .compatible = "apple,s8000-mca-tdm", .data = &s8000_tdm_mca_hw },
  	{ .compatible = "apple,t7001-mca", .data = &t7001_mca_hw },
- 	{ .compatible = "apple,t8010-mca", .data = &t8010_mca_hw },
+-- 
+2.50.1

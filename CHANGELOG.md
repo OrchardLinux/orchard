@@ -44,8 +44,9 @@ is missing or empty.
 - iPad mini 2 and 3 (A7): the speakers play, in stereo, through the same
   CS35L19 amplifier driver as the iPhone 6s Plus's loudspeaker, with the
   output capped at -12 dB because there is no speaker protection yet.
-  Tested on the iPad mini 2 (Wi-Fi); the other models have the same
-  speaker path. The headphone jack and the microphones do not work yet.
+  An iPad mini 2 (Wi-Fi) played both speakers with an earlier version of
+  the driver; this one is untested on every model. The headphone jack and
+  the microphones do not work yet.
 
 ## [0.3.6] - 2026-11-24
 
