@@ -4943,6 +4943,7 @@ CONFIG_USB_OHCI_HCD_PLATFORM=y
 # CONFIG_USB_SL811_HCD is not set
 # CONFIG_USB_R8A66597_HCD is not set
 # CONFIG_USB_HCD_TEST_MODE is not set
+# CONFIG_APPLE_A7_WLAN is not set
 
 #
 # USB Device Class drivers

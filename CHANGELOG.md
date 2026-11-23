@@ -32,6 +32,10 @@ is missing or empty.
   storage is untested so far. Wi-Fi and audio come later.
 - iPad mini 2 (Wi-Fi): the touchscreen works, on the A7 SPI and touch clock
   support from thisiscamk's iPad Air work.
+- iPad mini 2 (Wi-Fi): Wi-Fi works when started from RAM (it cannot install
+  yet). A kernel transport, from thisiscamk's iPad Air work, brings up the
+  A7's HSIC link to the BCM43241 radio, and `orchard-a7-wifi.service` starts
+  it at boot.
 - iPhone 6s Plus (Samsung): Linux and m1n1 read its internal storage. The
   Samsung A9's PCIe storage controller works like the TSMC A9's without its
   phy-ip block. Installing doesn't work yet.
