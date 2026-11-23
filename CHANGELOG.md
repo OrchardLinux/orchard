@@ -36,8 +36,9 @@ is missing or empty.
   yet). A kernel transport, from thisiscamk's iPad Air work, brings up the
   A7's HSIC link to the BCM43241 radio, and `orchard-a7-wifi.service` starts
   it at boot.
-- iPhone 6s Plus (Samsung): internal storage works, so Omarchy installs
-  with `orchard install` next to iOS. The Samsung A9's PCIe storage
+- iPhone 6s Plus (Samsung): Linux and m1n1 read and write its internal
+  storage, so Omarchy installs with `orchard install` next to iOS. The
+  display, backlight and buttons work. The Samsung A9's PCIe storage
   controller works like the TSMC A9's without its phy-ip block. From
   ricktav's work.
 - iPod touch 6: internal storage works, so Omarchy installs with
