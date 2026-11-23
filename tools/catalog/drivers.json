@@ -186,8 +186,11 @@
       "usb_serial"
     ],
     "j71": [
+      "audio_output",
       "backlight",
+      "battery",
       "buttons",
+      "charging",
       "usb_network",
       "usb_serial"
     ],
@@ -249,6 +252,16 @@
       "video_decode_hevc",
       "wifi"
     ],
+    "j72": [
+      "audio_output",
+      "backlight",
+      "battery",
+      "buttons",
+      "charging",
+      "touch",
+      "usb_network",
+      "usb_serial"
+    ],
     "j72b": [
       "accelerometer",
       "audio_input",
@@ -308,8 +321,11 @@
       "wifi"
     ],
     "j73": [
+      "audio_output",
       "backlight",
+      "battery",
       "buttons",
+      "charging",
       "usb_network",
       "usb_serial"
     ],
@@ -327,50 +343,70 @@
       "wifi"
     ],
     "j82": [
+      "audio_output",
       "backlight",
       "battery",
       "bluetooth_audio",
       "bluetooth_input",
       "buttons",
+      "charging",
       "touch",
       "usb_network",
       "usb_serial",
       "wifi"
     ],
     "j85": [
+      "audio_output",
       "backlight",
+      "battery",
       "buttons",
+      "charging",
       "touch",
       "usb_network",
       "usb_serial"
     ],
     "j85m": [
+      "audio_output",
       "backlight",
+      "battery",
       "buttons",
+      "charging",
       "usb_network",
       "usb_serial"
     ],
     "j86": [
+      "audio_output",
       "backlight",
+      "battery",
       "buttons",
+      "charging",
       "usb_network",
       "usb_serial"
     ],
     "j86m": [
+      "audio_output",
       "backlight",
+      "battery",
       "buttons",
+      "charging",
       "usb_network",
       "usb_serial"
     ],
     "j87": [
+      "audio_output",
       "backlight",
+      "battery",
       "buttons",
+      "charging",
       "usb_network",
       "usb_serial"
     ],
     "j87m": [
+      "audio_output",
       "backlight",
+      "battery",
       "buttons",
+      "charging",
       "usb_network",
       "usb_serial"
     ],
@@ -415,12 +451,14 @@
       "wifi"
     ],
     "n51": [
+      "audio_output",
       "backlight",
       "buttons",
       "usb_network",
       "usb_serial"
     ],
     "n53": [
+      "audio_output",
       "backlight",
       "buttons",
       "usb_network",

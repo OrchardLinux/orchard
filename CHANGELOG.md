@@ -29,13 +29,19 @@ is missing or empty.
 - iPad Air (Cellular): new, from thisiscamk's work. Touch, the display and
   backlight, the Home button, USB serial and networking and reading its
   internal storage work, and Omarchy installs next to iPadOS with
-  `orchard install`. Wi-Fi and audio come later.
+  `orchard install`.
 - iPad mini 2 (Wi-Fi): the touchscreen works, on the A7 SPI and touch clock
   support from thisiscamk's iPad Air work.
 - iPad mini 2 (Wi-Fi): Wi-Fi works when started from RAM (it cannot install
   yet). A kernel transport, from thisiscamk's iPad Air work, brings up the
   A7's HSIC link to the BCM43241 radio, and `orchard-a7-wifi.service` starts
   it at boot.
+- iPad Air and iPad mini 2 (A7): Wi-Fi on every model, not only the J72 and
+  J85 (the iPad mini 3 lacks firmware: iOS 12.5.8 does not ship its files).
+- iPad Air (A7): the speakers play in stereo on every model.
+- iPad Air and iPad mini 2/3 (A7): Lightning charging at up to 1.05 A
+  instead of iBoot's 100 mA.
+- iPad Air and iPad mini 2/3 (A7): the battery level shows on every model.
 - iPhone 6s Plus (Samsung): Linux and m1n1 read and write its internal
   storage, so Omarchy installs with `orchard install` next to iOS. The
   display, backlight and buttons work. The Samsung A9's PCIe storage
