@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Rick <ricktav@gmail.com>
+Date: Sun, 22 Nov 2026 21:28:01 +0100
+Subject: [PATCH] arm64: dts: apple: n66: Enable the PCIe storage port
+
+Enable the root complex and its DARTs for the internal NVMe storage on
+port 0 (ADT pci-bridge0). The Wi-Fi port isn't described yet.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/s8000-n66.dts | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/s8000-n66.dts b/arch/arm64/boot/dts/apple/s8000-n66.dts
+index 30b4b6630..e38b682ae 100644
+--- a/arch/arm64/boot/dts/apple/s8000-n66.dts
++++ b/arch/arm64/boot/dts/apple/s8000-n66.dts
+@@ -13,3 +13,16 @@ / {
+ 	compatible = "apple,n66", "apple,s8000", "apple,arm-platform";
+ 	model = "Apple iPhone 6s Plus (Samsung)";
+ };
++
++&pcie0_dart0 {
++	status = "okay";
++};
++
++&pcie0_dart1 {
++	status = "okay";
++};
++
++/* Storage only: the Wi-Fi port (pci-bridge1) isn't described yet. */
++&pcie0 {
++	status = "okay";
++};
