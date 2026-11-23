@@ -22,10 +22,10 @@ Assisted-by: LLM
  2 files changed, 83 insertions(+)
 
 diff --git a/drivers/bluetooth/btbcm.c b/drivers/bluetooth/btbcm.c
-index baba42563..cb1a56b2e 100644
+index e9af5a4f2..6bbee7d2b 100644
 --- a/drivers/bluetooth/btbcm.c
 +++ b/drivers/bluetooth/btbcm.c
-@@ -172,6 +172,75 @@ int btbcm_set_bdaddr(struct hci_dev *hdev, const bdaddr_t *bdaddr)
+@@ -177,6 +177,75 @@ int btbcm_set_bdaddr(struct hci_dev *hdev, const bdaddr_t *bdaddr)
  }
  EXPORT_SYMBOL_GPL(btbcm_set_bdaddr);
  

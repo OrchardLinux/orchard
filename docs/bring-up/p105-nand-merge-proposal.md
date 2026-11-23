@@ -2,7 +2,9 @@
 
 State: ports 1, 5, 3, 4 and 6 written on branch `p105-nand-fusion` as
 `kernel/patches/armv7/mtd` 0017-0023 on top of #93 (now at 59bdee56); port 2
-compared offline only (below). None of it has run on a P105.
+compared offline only (below). The measured 64 GB P105 has since qualified
+#93's write, checkpoint, erase and reuse path. The Cascadia ports remain
+without P105 device runs.
 
 The iPad mini 1 (P105) stores iOS's disk on PPN NAND behind two H2FMI buses,
 through Apple's VFL and SwissPPNFTL, with LwVM partitions on top. Two
@@ -52,15 +54,15 @@ rzxvx's authorship.** Details below.
 | Partitions | generic `block/partitions/lwvm.c` (contiguous partitions, PARTUUID/PARTNAME) | unchanged | LwVM parsed inside the driver; Cascadia's `nand-volume` tool resizes HFS and writes a new header, checked by iOS's own validator in Unicorn |
 | Append | blank VFL blocks, native record metadata and summary pages, page blank-checked before use and read back after; mappings published only after verification; flush/FUA wait for verified writes | unchanged | one frontier superblock, BTOC at close, partial pages and siblings |
 | In-place overwrite (rewriting an LBA) | yes, out of place by appending; read-modify-write for partial sectors, up to four 4 KiB pages per program | unchanged | yes, remap to the frontier |
-| Reclamation / GC | none: freed space is never reused, `ENOSPC` once blank blocks run out (`devices/p105/device.toml` `reclaims = false`) | yes: victim selection by native rules (clean/dirty pools, wear), live-page copy with readback, donor erase only after checkpoint readback and a full fresh reload; **disabled on the P105** until erase and accounting are qualified | yes: up to `SFTL_MAX_VICTIMS` closed superblocks, fewest valid first; live LBAs moved, commit, then erase; tree compaction when the map fragments |
-| Checkpoint / context write-back in iOS's format | none: Apple's map, contexts and VFL bootstrap left in place; recovery replays the appended records | native context and range records, 24-page checkpoint, VFL bank rotation (4 replicas), statistics pages sampled in native order; byte-compared against 13G36's storage code run in emulation; disabled on the P105 | context written to a fresh superblock and verified page by page, older contexts and victims erased afterwards; "Linux writes the normal form" of the tree; the spec-gaps doc lists where iOS's own output differs (e.g. a BTOC `user` field) |
-| iOS boots after Linux wrote | untested | emulation only (13G36 foreground GC replay, provider bytes) | yes, "checked many times" on 8.4.1 (Cascadia's `p105-nand-other-ios.md`), incl. the full volume cycle below |
+| Reclamation / GC | none: freed space is never reused, `ENOSPC` once blank blocks run out | yes: victim selection by native rules, live-page copy with readback, donor erase after checkpoint readback and a fresh reload; H2FMI offers erase for every package whose discovered geometry validates; qualified on the measured 64 GB P105 | yes: up to `SFTL_MAX_VICTIMS` closed superblocks, fewest valid first; live LBAs moved, commit, then erase; tree compaction when the map fragments |
+| Checkpoint / context write-back in iOS's format | none: Apple's map, contexts and VFL bootstrap left in place; recovery replays the appended records | native context and range records, 24-page checkpoint, statistics records sampled in native order; context publication and accounting are qualified on the measured 64 GB P105; VFL SLC-bank erase still lacks a physical callback | context written to a fresh superblock and verified page by page, older contexts and victims erased afterwards; "Linux writes the normal form" of the tree; the spec-gaps doc lists where iOS's own output differs (e.g. a BTOC `user` field) |
+| iOS boots after Linux wrote | untested | yes: iOS 9.3.5 booted twice after a 64 MiB Linux write; System and Data passed `fsck_hfs`, and the witness retained its SHA-256 | yes, "checked many times" on 8.4.1 (Cascadia's `p105-nand-other-ios.md`), incl. the full volume cycle below |
 | Failure handling | a failed program, uncertain completion or readback mismatch stops all I/O on that bus; disk read-only if the replayed journal does not end at the allocation floor | ambiguous erase or failed verification stops the writer instance; recovery of interrupted saves and partial lane retirement, read-only when the newer mapping is not provable | program/erase failure: the superblock is given up for the session (type 1, nothing valid, VFL untouched) and its live data moved to a new frontier; failed spare erases try the next spare; torn page found at mount: superblock given up (`give_up_torn`); a stopped writer refuses writes and the checkpoint |
 | Power-loss recovery | fresh recovery replays appended records, including a data prefix whose summary was cut off | KUnit power cuts at all 25 save boundaries, between the old context's lane erases, after each of 76 rotation steps; 95 incomplete save prefixes and 15 partial retirements on a RAM overlay of captured pages | replay of an unclosed frontier; offline crash-replay tests on an overlay of the `w0c` dump; the 2026-11-16 incident (below) recovered on the device |
 | Fault injection | KUnit mock provider | KUnit synthetic media with readback faults, ambiguous erase, reservation failure, sequence exhaustion | `CONFIG_APPLE_PPN_FAULT_INJECT`: program/erase failures injected on the device under ext4 writes (`tools/nand-faults/faults.sh`) |
 | Write gating | none in the kernel; the installer decides (`runtime/recovery/storage-fence`) | raw MTD programs refused while SFTL owns the disk | `apple_ppn.allow_write`, `apple_ftl.enable_write`, `write_volume=Linux`; System, Data and effaceable volumes always refuse |
 | Tests | KUnit: H2FMI parameter parsing and row encoding, SFTL recovery, journal/trim ordering, replica disagreement, torn summaries, append writer (26 tests in a v6.12 KUnit kernel) | 72 sanitizer cases, 209 map round trips, 66 relocation differentials; firmware differential on 600 block tables, 341 captured donors, 552 provider bytes | offline `nandtest` on the `w0c` dump (spec section 8.1 read checks; writer on an overlay that enforces erase-before-program and page order: close, commit, crash replay, reclaim, tree compaction, remount); device ladder rungs 1-5 |
-| Device evidence | device captures gave the geometry and logical-page cross-checks; earlier bounded programming gave protocol evidence; this exact kernel revision has not run on a P105 (`storage_read`/`storage_write` untested) | read-only capture procedure and `compare_erase.py`; no physical erase or checkpoint write yet | one 16 GB iPad mini on 8.4.1: whole-device read with 0 errors; on 2026-11-16 backup, LwVM remove, HFS grow, shrink, create, ext4 fill through the FTL and a daily PC-less boot from the NAND volume, iOS and `fsck_hfs` clean after each step |
+| Device evidence | whole-disk reads and earlier bounded programming established the 64 GB geometry; this merged base remains append-only | on 2026-11-23, a 64 MiB SFTL write survived Linux recovery and two clean iOS boots; all 16 lanes of an obsolete block erased, native accounting reused it, iOS reclaimed it again, and a cold Linux scan recovered wear 9 with both views blank | one 16 GB iPad mini on 8.4.1: whole-device read with 0 errors; on 2026-11-16 backup, LwVM remove, HFS grow, shrink, create, ext4 fill through the FTL and a daily PC-less boot from the NAND volume, iOS and `fsck_hfs` clean after each step |
 
 The 2026-11-16 incident in Cascadia's record: an old userspace tool reset the
 controller through `/dev/mem` while `apple_ppn` was programming; a page tore,
@@ -89,8 +91,9 @@ the map); `/dev/mem` access stays open in Orchard's config
 - Two controller drivers for one block cannot share the hardware; keeping one
   avoids a second register-level implementation to maintain.
 
-The cost: Orchard's writer has no device evidence yet, and Cascadia's does.
-The ports below are chosen to carry that evidence over.
+Orchard's measured 64 GB writer now has device evidence. Cascadia still
+supplies the 16 GB write-path and failure-handling record that guides the
+ports below.
 
 ## What to port from Cascadia (authored by rzxvx, one commit each)
 
@@ -147,10 +150,9 @@ change behaviour of Shayne's code are ours and say why.
 | 0023 | 6 | rzxvx | `CONFIG_MTD_APPLE_H2FMI_FAULT_INJECT` (default n): debugfs `apple-h2fmi/fail_program`, `fail_program_landed`, `fail_erase` |
 
 Not ported: Cascadia's "try the next spare" after a failed spare erase (#93's
-verified erase stops on failure, and erase is off on the P105), and marking a
+verified erase stops on failure), and marking a
 given-up or torn block as awaiting erase in the next context (the append
-writer writes no checkpoint on the P105; the block stays an open block whose
-records are all superseded).
+writer leaves the block open until its records are superseded).
 
 Where the ports change what #93's tests asserted: a failed program no longer
 stops the writer (four cases rewritten to assert the give-up), a torn data page
@@ -191,7 +193,8 @@ stays read-only.
 
 ## Order and evidence before anything is enabled
 
-1. Land #93 as it stands (its own review); P105 erase stays off.
+1. Land #93 through its own review, followed by the geometry-derived H2FMI
+   erase enable whose 64 GB device qualification is now complete.
 2. Ports 1 and 5 (0017-0019), then read-only device runs on both a 16 GB and
    a 64 GB P105: the whole disk read and compared with a raw dump.
    **Needs hardware:** a 16 GB P105 for the 16 GB reader at all (VFL in
@@ -207,9 +210,9 @@ stays read-only.
    (0022 only recognises malformed metadata); the debugfs injection (0023)
    on a tablet; iOS meeting a given-up or torn open block (never observed,
    Cascadia's spec section 9).
-4. Port 2, then writes with reclamation on the 16 GB P105 (8.4.1), a cold
-   iOS boot and `fsck_hfs` after each step, as in Cascadia's 2026-11-16
-   cycle; then the 64 GB P105 (9.3.5) once #93's erase qualification is done.
+4. Port 2, then write with reclamation on the 16 GB P105 (8.4.1). Follow each
+   step with a cold iOS boot and `fsck_hfs`, using Cascadia's 2026-11-16 cycle.
+   The measured 64 GB P105 (9.3.5) qualification is complete.
    **Needs the `w0c` dump or hardware:** every row of the port 2 table; the
    16 GB writer is not enabled until they are settled.
 

@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 20:40:47 +0100
+Subject: [PATCH] soc: apple: sio: Expose the S5L8960X MCA1 transmit endpoint
+
+The iPad mini 2 (J85) plays its speakers through MCA1 of its A7, whose
+transmit endpoint is SmartIO 0x2a in its ADT (/arm-io/mca1
+dma-channels, iOS 12.5.8 16H88). Add it next to MCA0's 0x28/0x29. The
+firmware and the shared DMA implementation are unchanged; the shim words
+come from the MCA, per channel.
+
+Assisted-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/soc/apple/apple-sio-core.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/soc/apple/apple-sio-core.c b/drivers/soc/apple/apple-sio-core.c
+index 2aa667208..0fc5b5928 100644
+--- a/drivers/soc/apple/apple-sio-core.c
++++ b/drivers/soc/apple/apple-sio-core.c
+@@ -1224,9 +1224,13 @@ static const struct apple_sio_hw apple_sio_t7000_hw = {
+ 	.num_dma_ranges = ARRAY_SIZE(apple_sio_t7000_dma_ranges),
+ };
+ 
+-/* MCA0, the codec's link, as described by the J72 ADT */
++/*
++ * MCA0, the codec's link, as described by the J72 ADT, and MCA1 TX, the
++ * iPad mini 2's (J85) speaker link, as its ADT describes it
++ */
+ static const struct apple_sio_dma_range apple_sio_s5l8960x_dma_ranges[] = {
+ 	{ 0x28, 0x29 },
++	{ 0x2a, 0x2a },
+ };
+ 
+ /*

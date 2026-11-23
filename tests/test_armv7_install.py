@@ -390,13 +390,12 @@ class Launcher(unittest.TestCase):
 
 
 class BoardData(unittest.TestCase):
-    def test_p105_starts_through_the_launcher_and_warns_about_its_storage(self):
+    def test_p105_starts_through_the_launcher_with_reclamation(self):
         from orchard import devices, hardware
         adapter = devices.load('p105')
         self.assertEqual(adapter.LAUNCHER_CHAIN, 'recovery-autogo')
         self.assertEqual(adapter.boot_inputs(), [])
-        caveats = '\n'.join(service.caveats(adapter))
-        self.assertIn('freed space is not reused yet', caveats)
+        self.assertFalse(any('freed space' in line for line in service.caveats(adapter)))
         with mock.patch.dict('os.environ', {'ORCHARD_LAUNCHER': str(Path(tempfile.gettempdir()) / 'absent-launcher')}):
             self.assertIn('it starts through orchard-launcher, which is not installed', hardware.install_blockers('p105'))
         with tempfile.NamedTemporaryFile() as binary:

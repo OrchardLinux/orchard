@@ -27,10 +27,10 @@ Assisted-by: LLM
  1 file changed, 33 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/soc/apple/aop.c b/drivers/soc/apple/aop.c
-index 5c23317d1..d54ff59b2 100644
+index bc518ccea..4728840df 100644
 --- a/drivers/soc/apple/aop.c
 +++ b/drivers/soc/apple/aop.c
-@@ -214,6 +214,8 @@ struct apple_aop_hw {
+@@ -222,6 +222,8 @@ struct apple_aop_hw {
  	bool nonce;
  	/* AOPt, SOC_, SOCR, WrAd, STKG and nCal boot arguments */
  	bool soc_bootargs;
@@ -39,7 +39,7 @@ index 5c23317d1..d54ff59b2 100644
  };
  
  struct apple_aop {
-@@ -354,11 +356,21 @@ static int apple_aop_load(struct apple_aop *aop, u64 ecid)
+@@ -368,11 +370,21 @@ static int apple_aop_load(struct apple_aop *aop, u64 ecid)
  	struct device_node *np = aop->dev->of_node;
  	u8 prng[32], nonce[8], guard[4], ncal = 0;
  	__le64 ecid_le = cpu_to_le64(ecid), ext_le, wrapper_le;
@@ -62,7 +62,7 @@ index 5c23317d1..d54ff59b2 100644
  	ret = of_property_read_string_index(np, "firmware-name", 0, &main_name);
  	if (!ret)
  		ret = of_property_read_string_index(np, "firmware-name", 1, &ext_name);
-@@ -423,6 +435,10 @@ static int apple_aop_load(struct apple_aop *aop, u64 ecid)
+@@ -437,6 +449,10 @@ static int apple_aop_load(struct apple_aop *aop, u64 ecid)
  		apple_aop_add_bootarg(args, &count, APPLE_AOP_BOOTARG_STKG, guard, sizeof(guard));
  	}
  
@@ -73,7 +73,7 @@ index 5c23317d1..d54ff59b2 100644
  	ret = apple_aop_patch_bootargs(aop, image, main_fw->size, args, count);
  	if (ret)
  		dev_err(aop->dev, "unexpected boot arguments in %s: %d\n", main_name, ret);
-@@ -507,6 +523,12 @@ static void apple_aop_register_service(struct work_struct *work)
+@@ -521,6 +537,12 @@ static void apple_aop_register_service(struct work_struct *work)
  	char name[32];
  
  	np = of_get_child_by_name(aop->dev->of_node, rw->service.name);
@@ -86,7 +86,7 @@ index 5c23317d1..d54ff59b2 100644
  	if (!np || !of_device_is_available(np))
  		goto out;
  
-@@ -1122,9 +1144,19 @@ static const struct apple_aop_hw apple_aop_t8010_hw = {
+@@ -1136,9 +1158,19 @@ static const struct apple_aop_hw apple_aop_t8010_hw = {
  	.nonce = true,
  };
  

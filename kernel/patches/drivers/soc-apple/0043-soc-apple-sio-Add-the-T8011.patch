@@ -18,10 +18,10 @@ Assisted-by: LLM
  1 file changed, 19 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/soc/apple/apple-sio-core.c b/drivers/soc/apple/apple-sio-core.c
-index 160a41839..76f15bcc3 100644
+index 919fbc59e..60b194ba6 100644
 --- a/drivers/soc/apple/apple-sio-core.c
 +++ b/drivers/soc/apple/apple-sio-core.c
-@@ -1250,11 +1250,28 @@ static const struct apple_sio_hw apple_sio_s5l8960x_hw = {
+@@ -1254,11 +1254,28 @@ static const struct apple_sio_hw apple_sio_s5l8960x_hw = {
  	.num_dma_ranges = ARRAY_SIZE(apple_sio_s5l8960x_dma_ranges),
  };
  
@@ -50,7 +50,7 @@ index 160a41839..76f15bcc3 100644
  	{}
  };
  MODULE_DEVICE_TABLE(of, apple_sio_of_match);
-@@ -1275,5 +1292,6 @@ MODULE_FIRMWARE("apple/s5l8960x-smartio.bin");
+@@ -1279,5 +1296,6 @@ MODULE_FIRMWARE("apple/s5l8960x-smartio.bin");
  MODULE_FIRMWARE("apple/t7000-smartio.bin");
  MODULE_FIRMWARE("apple/s8000-smartio.bin");
  MODULE_FIRMWARE("apple/t8010-smartio.bin");

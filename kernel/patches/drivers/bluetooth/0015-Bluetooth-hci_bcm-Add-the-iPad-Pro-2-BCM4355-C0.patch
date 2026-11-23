@@ -28,7 +28,7 @@ Assisted-by: LLM
  1 file changed, 254 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/bluetooth/hci_bcm.c b/drivers/bluetooth/hci_bcm.c
-index 1918caf00..1f4963fc6 100644
+index 672ddf1da..408051954 100644
 --- a/drivers/bluetooth/hci_bcm.c
 +++ b/drivers/bluetooth/hci_bcm.c
 @@ -57,9 +57,13 @@
@@ -390,8 +390,8 @@ index 1918caf00..1f4963fc6 100644
  static struct bcm_device_data bcm4355_j172_device_data = {
  	.no_early_set_baudrate = true,
  	.wake_before_power_cycle = true,
-@@ -1756,6 +2001,14 @@ static const struct of_device_id bcm_bluetooth_of_match[] = {
- 	{ .compatible = "apple,j81-bcm4350c2-bt" },
+@@ -1758,6 +2003,14 @@ static const struct of_device_id bcm_bluetooth_of_match[] = {
+ 	{ .compatible = "apple,n66-bcm4350c5-bt" },
  	/* The iPod touch 6 BCM4345B1 uses the plain sequence at 115,200 baud. */
  	{ .compatible = "apple,n102-bcm4345b1-bt" },
 +	{ .compatible = "apple,j120-bcm4355c0-bt",

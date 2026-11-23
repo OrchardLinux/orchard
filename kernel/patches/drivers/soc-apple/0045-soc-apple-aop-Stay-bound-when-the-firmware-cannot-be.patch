@@ -20,10 +20,10 @@ Assisted-by: LLM
  1 file changed, 5 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/soc/apple/aop.c b/drivers/soc/apple/aop.c
-index d54ff59b2..72a7dc112 100644
+index 4728840df..bd917d2c6 100644
 --- a/drivers/soc/apple/aop.c
 +++ b/drivers/soc/apple/aop.c
-@@ -1104,7 +1104,11 @@ static int apple_aop_probe(struct platform_device *pdev)
+@@ -1118,7 +1118,11 @@ static int apple_aop_probe(struct platform_device *pdev)
  		apple_rtkit_free(aop->rtk);
  		apple_aop_free_buffers(aop);
  	} else {

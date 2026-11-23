@@ -131,6 +131,44 @@ The iPad and the independent decoder found 13,474 map runs, up from
 found 32 native context records. The same 29 live 4 KiB pages on
 block 896 matched their earlier iOS Data hashes.
 
+## Write, erase and native reuse on 23 November 2026
+
+Linux wrote a 64 MiB file through the mounted ext4 partition. The write passed
+through SFTL, and full readback matched SHA-256
+`d41b5b52b5a8b4f5329a413c2edcd6de1f575bac32e70fd76fafcf1dfa6c6421`.
+The filesystem passed `e2fsck`. After restart, iOS 9.3.5 booted and reported
+clean System and Data HFS filesystems. Both LwVM headers remained valid.
+
+Recovered state identified block 122 as role 9 with wear 7 and no saved or
+current mappings. The erase test covered every lane across both buses and all
+CAUs. All 2,048 normal pages and 1,024 SLC aliases read blank after the
+operation. iOS then booted with clean filesystems, and its read of the Linux
+witness matched the original hash.
+
+Linux next published native accounting in context blocks 399 and 335 at
+checkpoint 190469389. Its allocator reused block 122 once, issuing one data
+program at bus 0, CAU 0, page 0. The saved wear advanced from 7 to 8, with
+provider offset 999427. An independent fresh load recovered that mapping and
+its data.
+
+During the following iOS session, the native FTL moved the witness page to
+provider offset 3309568 in block 404. It reclaimed block 122 and saved wear 9.
+A cold read-only Linux boot recovered the same provider mapping. Its complete
+scan found block 122 blank in both physical views, with role 1, flags 0 and
+wear 9. That audit issued no program or erase command.
+
+The final iOS boot passed both HFS checks. Its 64 MiB witness still matched the
+original SHA-256. These results qualify normal-block erase and reclamation on
+`apple,p105ap` with the measured 64 GB geometry. The H2FMI driver offers the
+erase for every package whose discovered geometry validates and derives the
+erase extent from it. The 16 GB package's disk remains read-only because
+SFTL does not model its writer, accounting or checkpoints yet. An uncertain
+erase stops the writer without an automatic retry.
+
+The host receipts are `reuse-result.json`, `ios-return-result.json`,
+`cold-audit-result.json`, `final-ios-result.json` and
+`native-file-after-cold-audit.json` in the private qualification archive.
+
 ## Repeating the checks
 
 Verify the running kernel notes against the measurement artifact and check

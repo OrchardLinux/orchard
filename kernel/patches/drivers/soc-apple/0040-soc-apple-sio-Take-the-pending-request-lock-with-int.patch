@@ -21,7 +21,7 @@ Assisted-by: LLM
  1 file changed, 9 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/soc/apple/apple-sio-core.c b/drivers/soc/apple/apple-sio-core.c
-index 2aa667208..160a41839 100644
+index 0fc5b5928..919fbc59e 100644
 --- a/drivers/soc/apple/apple-sio-core.c
 +++ b/drivers/soc/apple/apple-sio-core.c
 @@ -593,7 +593,14 @@ apple_sio_request_async_common(struct apple_sio *sio, u8 endpoint, u8 opcode,

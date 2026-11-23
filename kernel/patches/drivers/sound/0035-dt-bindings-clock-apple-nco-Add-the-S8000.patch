@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 15:38:55 +0100
+Subject: [PATCH] dt-bindings: clock: apple,nco: Add the S8000
+
+The A9's NCO is the T8010's block at the same address with the same
+channel stride (the ADT's pmgr-nco-page-size is 0x4000 on both), so it
+falls back to apple,t8010-nco.
+
+Assisted-by: LLM
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+---
+ Documentation/devicetree/bindings/clock/apple,nco.yaml | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/clock/apple,nco.yaml b/Documentation/devicetree/bindings/clock/apple,nco.yaml
+index a23660034..d8915d404 100644
+--- a/Documentation/devicetree/bindings/clock/apple,nco.yaml
++++ b/Documentation/devicetree/bindings/clock/apple,nco.yaml
+@@ -22,6 +22,9 @@ properties:
+     oneOf:
+       - const: apple,t7001-nco
+       - const: apple,t8010-nco
++      - items:
++          - const: apple,s8000-nco
++          - const: apple,t8010-nco
+       - items:
+           - const: apple,t6020-nco
+           - const: apple,t8103-nco

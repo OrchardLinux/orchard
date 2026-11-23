@@ -612,8 +612,11 @@
     ],
     "n66": [
       "accelerometer",
+      "audio_output",
       "backlight",
       "battery",
+      "bluetooth_audio",
+      "bluetooth_input",
       "buttons",
       "charging",
       "gyroscope",
@@ -623,12 +626,16 @@
       "touch",
       "usb_network",
       "usb_serial",
-      "video_decode_hevc"
+      "video_decode_hevc",
+      "wifi"
     ],
     "n66m": [
       "accelerometer",
+      "audio_output",
       "backlight",
       "battery",
+      "bluetooth_audio",
+      "bluetooth_input",
       "buttons",
       "charging",
       "gyroscope",
@@ -638,7 +645,8 @@
       "touch",
       "usb_network",
       "usb_serial",
-      "video_decode_hevc"
+      "video_decode_hevc",
+      "wifi"
     ],
     "n69": [
       "accelerometer",
@@ -672,8 +680,11 @@
     ],
     "n71": [
       "accelerometer",
+      "audio_output",
       "backlight",
       "battery",
+      "bluetooth_audio",
+      "bluetooth_input",
       "buttons",
       "charging",
       "gyroscope",
@@ -683,12 +694,16 @@
       "touch",
       "usb_network",
       "usb_serial",
-      "video_decode_hevc"
+      "video_decode_hevc",
+      "wifi"
     ],
     "n71m": [
       "accelerometer",
+      "audio_output",
       "backlight",
       "battery",
+      "bluetooth_audio",
+      "bluetooth_input",
       "buttons",
       "charging",
       "gyroscope",
@@ -698,7 +713,8 @@
       "touch",
       "usb_network",
       "usb_serial",
-      "video_decode_hevc"
+      "video_decode_hevc",
+      "wifi"
     ]
   },
   "kernels": {

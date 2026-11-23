@@ -31,10 +31,10 @@ Assisted-by: LLM
  1 file changed, 57 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/gpio/gpio-apple-d2365.c b/drivers/gpio/gpio-apple-d2365.c
-index 86be00f1a..bdbc7ce66 100644
+index 17d5415a2..21f95fe5a 100644
 --- a/drivers/gpio/gpio-apple-d2365.c
 +++ b/drivers/gpio/gpio-apple-d2365.c
-@@ -120,7 +120,7 @@
+@@ -132,7 +132,7 @@
  #define D2365_EVENT_BYTES	30
  #define D2365_GPIO_EVENT	0x30
  
@@ -43,7 +43,7 @@ index 86be00f1a..bdbc7ce66 100644
  #define APPLE_PMIC_EVENTS_MAX		(APPLE_PMIC_EVENT_BYTES_MAX * 8)
  /* The events plus the line interrupt, hwirq nevents. */
  #define APPLE_PMIC_IRQS_MAX		(APPLE_PMIC_EVENTS_MAX + 1)
-@@ -147,6 +147,8 @@ struct apple_pmic_gpio_info {
+@@ -159,6 +159,8 @@ struct apple_pmic_gpio_info {
  	unsigned int function_mask;
  	/* Some PMICs only have a verified, boot-configured output mode. */
  	bool preserve_boot_direction;
@@ -52,7 +52,7 @@ index 86be00f1a..bdbc7ce66 100644
  	unsigned int output_update_mask;
  	unsigned int (*config_reg)(unsigned int offset);
  	const struct apple_pmic_event_info *events;
-@@ -923,6 +925,9 @@ static int apple_pmic_gpio_get_direction(struct gpio_chip *chip,
+@@ -943,6 +945,9 @@ static int apple_pmic_gpio_get_direction(struct gpio_chip *chip,
  	unsigned int value;
  	int ret;
  
@@ -62,7 +62,7 @@ index 86be00f1a..bdbc7ce66 100644
  	ret = regmap_read(gpio->regmap, info->config_reg(offset), &value);
  	if (ret)
  		return ret;
-@@ -946,6 +951,8 @@ static int apple_pmic_gpio_direction_input(struct gpio_chip *chip,
+@@ -966,6 +971,8 @@ static int apple_pmic_gpio_direction_input(struct gpio_chip *chip,
  	struct apple_pmic_gpio *gpio = gpiochip_get_data(chip);
  	const struct apple_pmic_gpio_info *info = gpio->info;
  
@@ -71,7 +71,7 @@ index 86be00f1a..bdbc7ce66 100644
  	if (info->preserve_boot_direction)
  		return -EOPNOTSUPP;
  
-@@ -961,6 +968,8 @@ static int apple_pmic_gpio_direction_output(struct gpio_chip *chip,
+@@ -981,6 +988,8 @@ static int apple_pmic_gpio_direction_output(struct gpio_chip *chip,
  	struct apple_pmic_gpio *gpio = gpiochip_get_data(chip);
  	const struct apple_pmic_gpio_info *info = gpio->info;
  
@@ -80,7 +80,7 @@ index 86be00f1a..bdbc7ce66 100644
  	if (info->preserve_boot_direction)
  		return apple_pmic_gpio_set_boot_output(gpio, offset, value);
  
-@@ -978,6 +987,8 @@ static int apple_pmic_gpio_get(struct gpio_chip *chip, unsigned int offset)
+@@ -998,6 +1007,8 @@ static int apple_pmic_gpio_get(struct gpio_chip *chip, unsigned int offset)
  	unsigned int value;
  	int ret;
  
@@ -89,7 +89,7 @@ index 86be00f1a..bdbc7ce66 100644
  	ret = regmap_read(gpio->regmap, info->config_reg(offset), &value);
  	if (ret)
  		return ret;
-@@ -988,6 +999,7 @@ static int apple_pmic_gpio_get(struct gpio_chip *chip, unsigned int offset)
+@@ -1008,6 +1019,7 @@ static int apple_pmic_gpio_get(struct gpio_chip *chip, unsigned int offset)
  	if ((value & info->direction_mask) != info->input_mode)
  		return -EINVAL;
  
@@ -97,7 +97,7 @@ index 86be00f1a..bdbc7ce66 100644
  	ret = regmap_read(gpio->regmap, info->input_base + offset / 8,
  			  &value);
  	if (ret)
-@@ -1002,6 +1014,8 @@ static int apple_pmic_gpio_set(struct gpio_chip *chip, unsigned int offset,
+@@ -1022,6 +1034,8 @@ static int apple_pmic_gpio_set(struct gpio_chip *chip, unsigned int offset,
  	struct apple_pmic_gpio *gpio = gpiochip_get_data(chip);
  	const struct apple_pmic_gpio_info *info = gpio->info;
  
@@ -106,7 +106,7 @@ index 86be00f1a..bdbc7ce66 100644
  	if (info->preserve_boot_direction)
  		return apple_pmic_gpio_set_boot_output(gpio, offset, value);
  
-@@ -1113,6 +1127,40 @@ static const struct apple_pmic_event_info d2365_event_info = {
+@@ -1144,6 +1158,40 @@ static const struct apple_pmic_event_info d2365_event_info = {
  	.gpio_event = D2365_GPIO_EVENT,
  };
  
@@ -147,7 +147,7 @@ index 86be00f1a..bdbc7ce66 100644
  static const struct apple_pmic_gpio_info d2365_gpio_info = {
  	.label = "d2365-pmic-gpio",
  	.ngpio = 24,
-@@ -1156,6 +1204,14 @@ static const struct of_device_id d2365_gpio_of_match[] = {
+@@ -1187,6 +1235,14 @@ static const struct of_device_id d2365_gpio_of_match[] = {
  		.compatible = "apple,d2186-pmic-gpio",
  		.data = &d2186_gpio_info,
  	},

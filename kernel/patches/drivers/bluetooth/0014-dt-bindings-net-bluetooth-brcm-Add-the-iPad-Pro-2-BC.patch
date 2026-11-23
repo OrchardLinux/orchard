@@ -20,7 +20,7 @@ Assisted-by: LLM
  1 file changed, 33 insertions(+), 1 deletion(-)
 
 diff --git a/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml b/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml
-index aecd8e794..409cc7db6 100644
+index 88ba22135..389fd5b3f 100644
 --- a/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml
 +++ b/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml
 @@ -19,7 +19,12 @@ properties:
@@ -37,7 +37,7 @@ index aecd8e794..409cc7db6 100644
            - const: brcm,bcm4355c0-bt
        - items:
            - enum:
-@@ -104,6 +109,21 @@ properties:
+@@ -105,6 +110,21 @@ properties:
    vddio-supply:
      description: phandle to regulator supply for VDDIO
  
@@ -59,7 +59,7 @@ index aecd8e794..409cc7db6 100644
    brcm,bt-pcm-int-params:
      $ref: /schemas/types.yaml#/definitions/uint8-array
      minItems: 5
-@@ -149,6 +169,18 @@ dependencies:
+@@ -150,6 +170,18 @@ dependencies:
  
  allOf:
    - $ref: /schemas/serial/serial-peripheral-props.yaml#

@@ -15,7 +15,7 @@ Assisted-by: LLM
  1 file changed, 8 insertions(+), 1 deletion(-)
 
 diff --git a/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml b/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml
-index 1a5a8c167..d8273ae9f 100644
+index 83b7a00c3..82741b9bb 100644
 --- a/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml
 +++ b/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml
 @@ -4,7 +4,7 @@
@@ -28,7 +28,7 @@ index 1a5a8c167..d8273ae9f 100644
  maintainers:
    - Paul Praschl <praschlpaul@g-p.at>
 @@ -15,6 +15,10 @@ description: |
-   and 24 GPIOs respectively. The controller is accessed through the regmap exported by the
+   21, 21, 21 and 24 GPIOs respectively. The controller is accessed through the regmap exported by the
    parent Apple I2C PMIC device.
  
 +  The Autumn D2401 provides 20 GPIOs. Only boot-configured outputs are
@@ -38,15 +38,15 @@ index 1a5a8c167..d8273ae9f 100644
    The D2207 and D2365 also latch 112 and 240 PMU events respectively
    (charger, ADC, GPIO edges and others) in one read-to-clear block and
    signal them on a single active-low line to the AP. As an interrupt
-@@ -44,6 +48,7 @@ properties:
-       - apple,d2207-pmic-gpio
+@@ -45,6 +49,7 @@ properties:
+       - apple,d2255-pmic-gpio
        - apple,d2333-pmic-gpio
        - apple,d2365-pmic-gpio
 +      - apple,d2401-pmic-gpio
  
    gpio-controller: true
  
-@@ -51,6 +56,7 @@ properties:
+@@ -52,6 +57,7 @@ properties:
      const: 2
  
    gpio-reserved-ranges:
@@ -54,9 +54,9 @@ index 1a5a8c167..d8273ae9f 100644
      maxItems: 3
  
    interrupt-controller: true
-@@ -109,6 +115,7 @@ allOf:
-           enum:
+@@ -111,6 +117,7 @@ allOf:
              - apple,d2186-pmic-gpio
+             - apple,d2255-pmic-gpio
              - apple,d2333-pmic-gpio
 +            - apple,d2401-pmic-gpio
      then:

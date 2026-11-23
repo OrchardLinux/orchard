@@ -42,6 +42,11 @@ class ChangedKernels(unittest.TestCase):
         patch.write_text(patch.read_text() + '\n')
         self.assertEqual(self.changed(), ['apple-16k', 'apple-4k'])
 
+    def test_an_armv7_patch_layer_changes_only_armv7(self):
+        patch = sorted((self.base / 'kernel/patches/armv7/mtd').glob('*.patch'))[0]
+        patch.write_text(patch.read_text() + '\n')
+        self.assertEqual(self.changed(), ['apple-armv7'])
+
     def test_documentation_changes_no_kernel(self):
         (self.base / 'kernel/README.md').write_text('older notes\n')
         self.assertEqual(self.changed(), [])

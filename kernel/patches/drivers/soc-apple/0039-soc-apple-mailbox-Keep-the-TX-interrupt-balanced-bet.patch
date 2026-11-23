@@ -26,7 +26,7 @@ Assisted-by: LLM
  2 files changed, 45 insertions(+), 10 deletions(-)
 
 diff --git a/drivers/soc/apple/mailbox.c b/drivers/soc/apple/mailbox.c
-index 16be0dbf5..bca33ed57 100644
+index 390ecedf5..d49f13a4f 100644
 --- a/drivers/soc/apple/mailbox.c
 +++ b/drivers/soc/apple/mailbox.c
 @@ -139,8 +139,18 @@ struct apple_mbox_hw {

@@ -24,6 +24,70 @@ is missing or empty.
 - iPad 6, iPad 7 and the other A9 and A10 devices: fixes found during that
   work for the coprocessor mailbox, SmartIO audio and the Lightning
   charger's interrupt-storm fallback, shared by all of them.
+- iPad mini 1 (Wi-Fi, A5, 64 GB): Linux writes to internal storage and reuses
+  freed flash, so the disk no longer runs full once its blank flash is used.
+  Writes, block erase and iOS's own bookkeeping survived restarts into iOS
+  with both filesystems clean. The flash driver erases on any storage chip
+  whose layout it can read and check, not one fixed model; the 16 GB iPad mini 1
+  stays read-only until its storage format is modelled.
+- iPhone 6s Plus (A9): the phone sleeps when idle or on Power, turns its
+  screen off, and wakes on Home or Power.
+- iPad mini 2 (Wi-Fi, A7): tested on the board. The display, backlight,
+  buttons, internal storage reads, battery, charging, suspend and resume,
+  USB serial and networking work, along with touch and Wi-Fi.
+- iPhone 6s Plus (A9): the accelerometer and gyroscope work, so the screen
+  follows the phone's orientation. The motion processor (AOP) now starts
+  with the iOS 15 firmware on every A9 iPhone (6s, 6s Plus, SE), with the
+  same sensor orientation; untested on the 6s and SE.
+- iPhone 6s Plus (A9): Wi-Fi works, and Bluetooth comes up and scans. The
+  iPhone 6s has the same module family and gets both too, with its own
+  firmware; untested there. The iPhone SE has a different chip and has
+  neither yet.
+- iPhone 6s Plus (A9): the loudspeaker plays, through a new driver for its
+  CS35L21 amplifier, with the output capped at -12 dB because there is no
+  speaker protection yet. The iPhone 6s has the same speaker path and gets
+  it too, untested. The earpiece, headphones and microphones need the
+  CS42L71 codec, which has no driver yet.
+- iPad Air and iPad mini 2 and 3 (A7): internal storage keeps working across
+  sleep, also with writes in flight. The storage controller finishes its
+  commands before sleep and is restarted after it, and its NAND clock stays
+  powered: without it every disk command took seconds after wake, and an
+  installed system on an iPad Air could hang at the logo. The A8 and A8X
+  devices (iPad Air 2, iPad mini 4, iPhone 6 and 6 Plus, iPod touch 6)
+  share the storage driver and get the same sleep handling.
+- iPad Air and iPad mini 2 and 3 (A7): Lightning charging draws up to
+  1.5 A instead of 1.05 A from a charger that offers it, as measured on an
+  iPad mini 2; untested on the iPad Air and iPad mini 3.
+- iPad mini 2 and 3 (A7): the speakers play, in stereo, through the same
+  CS35L19 amplifier driver as the iPhone 6s Plus's loudspeaker, with the
+  output capped at -12 dB because there is no speaker protection yet.
+  An iPad mini 2 (Wi-Fi) played both speakers with an earlier version of
+  the driver; this one is untested on every model. The headphone jack and
+  the microphones do not work yet.
+
+## [0.3.6] - 2026-11-24
+
+### Devices
+
+- iPad 6, iPad 5, iPad Air 2 and the other A8, A9 and A10 boards: the boot
+  splash stays still until the PIN screen again. When the display driver took
+  over, about four seconds into boot, it flashed a test pattern and then
+  went black for a moment. Scanning out GPU buffers directly through the
+  display DART is now off by default (adbe.dart_scanout=1 turns it on).
+
+## [0.3.5] - 2026-11-24
+
+### Devices
+
+- The touchscreen restart from 0.3.3 is gone again: on a healthy iPad 6 that
+  nobody touched, it restarted the touch controller every 30 seconds.
+
+## [0.3.4] - 2026-11-24
+
+### Install & launch
+
+- iPad 6 and iPad 7: starting an installed system works again. In 0.3.3 m1n1
+  crashed while starting the internal storage, and the iPad fell back to iOS.
 
 ## [0.3.3] - 2026-11-24
 

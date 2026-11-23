@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 15:37:56 +0100
+Subject: [PATCH] ASoC: cs35l19: Accept 16-bit TDM slots
+
+The iPhone 6s Plus runs its speaker amplifier on an 8 x 16-bit TDM link.
+Take the slot width from set_tdm_slot and program RX_AUD the way iOS
+15's AppleCS35L19Amp does: the slot's byte offset in bits 4:0 and the
+slot width in bytes minus one in bits 6:5 (0x60 for the 32-bit slots
+used so far, 0x20 for 16-bit slots).
+
+Assisted-by: LLM
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+---
+ sound/soc/codecs/cs35l19.c | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/sound/soc/codecs/cs35l19.c b/sound/soc/codecs/cs35l19.c
+index af83a78bc..3f05be281 100644
+--- a/sound/soc/codecs/cs35l19.c
++++ b/sound/soc/codecs/cs35l19.c
+@@ -74,7 +74,8 @@ struct cs35l19 {
+ 	u8 cfg[CS35L19_CFG_LEN];
+ 	unsigned int rev;
+ 	unsigned int rate_code;
+-	unsigned int slot;		/* TDM slot index (slots are 32 bits) */
++	unsigned int slot;		/* TDM slot index */
++	unsigned int slot_bytes;	/* TDM slot width in bytes, 2 or 4 */
+ };
+ 
+ static void cs35l19_alive(struct work_struct *work)
+@@ -165,7 +166,9 @@ static int cs35l19_power_on(struct cs35l19 *cs)
+ 		regmap_write(map, CS35L19_TX_EN1 + i, 0);
+ 	regmap_write(map, CS35L19_ADSP_CTL, 3);
+ 	regmap_write(map, CS35L19_CLK_CTL, cs->rate_code);
+-	regmap_write(map, CS35L19_RX_AUD, (cs->slot * 4) | (3 << 5));
++	/* RX_AUD: [4:0] byte offset of the slot, [6:5] its width in bytes - 1 */
++	regmap_write(map, CS35L19_RX_AUD, (cs->slot * cs->slot_bytes) |
++		     ((cs->slot_bytes - 1) << 5));
+ 	regmap_write(map, CS35L19_RX_SPLY, 0x80);
+ 	regmap_write(map, CS35L19_RX_ALIVE, 0x80);
+ 
+@@ -276,9 +279,12 @@ static int cs35l19_set_tdm_slot(struct snd_soc_dai *dai, unsigned int tx_mask,
+ {
+ 	struct cs35l19 *cs = snd_soc_component_get_drvdata(dai->component);
+ 
+-	if (slot_width != 32 || !rx_mask)
++	if ((slot_width != 16 && slot_width != 32) || !rx_mask)
+ 		return -EINVAL;
+ 	cs->slot = __ffs(rx_mask);
++	cs->slot_bytes = slot_width / 8;
++	if (cs->slot * cs->slot_bytes > 0x1f)
++		return -EINVAL;
+ 	return 0;
+ }
+ 
+@@ -334,6 +340,7 @@ static int cs35l19_i2c_probe(struct i2c_client *client)
+ 	cs->dev = dev;
+ 	cs->rate_code = 0x49;
+ 	cs->slot = client->addr & 1;
++	cs->slot_bytes = 4;
+ 	INIT_DELAYED_WORK(&cs->alive_work, cs35l19_alive);
+ 	i2c_set_clientdata(client, cs);
+ 

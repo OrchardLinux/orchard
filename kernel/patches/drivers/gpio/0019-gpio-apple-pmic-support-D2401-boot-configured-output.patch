@@ -14,10 +14,10 @@ Assisted-by: LLM
  1 file changed, 61 insertions(+)
 
 diff --git a/drivers/gpio/gpio-apple-d2365.c b/drivers/gpio/gpio-apple-d2365.c
-index 12784db89..c6250414e 100644
+index 280183439..78898f540 100644
 --- a/drivers/gpio/gpio-apple-d2365.c
 +++ b/drivers/gpio/gpio-apple-d2365.c
-@@ -145,6 +145,9 @@ struct apple_pmic_gpio_info {
+@@ -157,6 +157,9 @@ struct apple_pmic_gpio_info {
  	unsigned int input_mode;
  	unsigned int output_mode;
  	unsigned int function_mask;
@@ -27,7 +27,7 @@ index 12784db89..c6250414e 100644
  	unsigned int (*config_reg)(unsigned int offset);
  	const struct apple_pmic_event_info *events;
  };
-@@ -888,6 +891,25 @@ static DEFINE_SIMPLE_DEV_PM_OPS(apple_pmic_gpio_pm_ops, apple_pmic_gpio_suspend,
+@@ -908,6 +911,25 @@ static DEFINE_SIMPLE_DEV_PM_OPS(apple_pmic_gpio_pm_ops, apple_pmic_gpio_suspend,
  
  /* ---- GPIO ---- */
  
@@ -53,7 +53,7 @@ index 12784db89..c6250414e 100644
  static int apple_pmic_gpio_get_direction(struct gpio_chip *chip,
  					 unsigned int offset)
  {
-@@ -901,6 +923,9 @@ static int apple_pmic_gpio_get_direction(struct gpio_chip *chip,
+@@ -921,6 +943,9 @@ static int apple_pmic_gpio_get_direction(struct gpio_chip *chip,
  		return ret;
  	if (value & info->function_mask)
  		return -EINVAL;
@@ -63,7 +63,7 @@ index 12784db89..c6250414e 100644
  
  	if ((value & info->direction_mask) == info->input_mode)
  		return GPIO_LINE_DIRECTION_IN;
-@@ -916,6 +941,9 @@ static int apple_pmic_gpio_direction_input(struct gpio_chip *chip,
+@@ -936,6 +961,9 @@ static int apple_pmic_gpio_direction_input(struct gpio_chip *chip,
  	struct apple_pmic_gpio *gpio = gpiochip_get_data(chip);
  	const struct apple_pmic_gpio_info *info = gpio->info;
  
@@ -73,7 +73,7 @@ index 12784db89..c6250414e 100644
  	return regmap_update_bits(gpio->regmap,
  				  info->config_reg(offset),
  				  info->direction_mask | info->value_mask,
-@@ -928,6 +956,9 @@ static int apple_pmic_gpio_direction_output(struct gpio_chip *chip,
+@@ -948,6 +976,9 @@ static int apple_pmic_gpio_direction_output(struct gpio_chip *chip,
  	struct apple_pmic_gpio *gpio = gpiochip_get_data(chip);
  	const struct apple_pmic_gpio_info *info = gpio->info;
  
@@ -83,7 +83,7 @@ index 12784db89..c6250414e 100644
  	return regmap_update_bits(gpio->regmap,
  				  info->config_reg(offset),
  				  info->direction_mask | info->value_mask,
-@@ -947,6 +978,8 @@ static int apple_pmic_gpio_get(struct gpio_chip *chip, unsigned int offset)
+@@ -967,6 +998,8 @@ static int apple_pmic_gpio_get(struct gpio_chip *chip, unsigned int offset)
  		return ret;
  	if ((value & info->direction_mask) == info->output_mode)
  		return !!(value & info->value_mask);
@@ -92,7 +92,7 @@ index 12784db89..c6250414e 100644
  	if ((value & info->direction_mask) != info->input_mode)
  		return -EINVAL;
  
-@@ -964,6 +997,9 @@ static int apple_pmic_gpio_set(struct gpio_chip *chip, unsigned int offset,
+@@ -984,6 +1017,9 @@ static int apple_pmic_gpio_set(struct gpio_chip *chip, unsigned int offset,
  	struct apple_pmic_gpio *gpio = gpiochip_get_data(chip);
  	const struct apple_pmic_gpio_info *info = gpio->info;
  
@@ -102,7 +102,7 @@ index 12784db89..c6250414e 100644
  	return regmap_update_bits(gpio->regmap,
  				  info->config_reg(offset),
  				  info->value_mask,
-@@ -1085,6 +1121,27 @@ static const struct apple_pmic_gpio_info d2365_gpio_info = {
+@@ -1116,6 +1152,27 @@ static const struct apple_pmic_gpio_info d2365_gpio_info = {
  	.events = &d2365_event_info,
  };
  
@@ -130,7 +130,7 @@ index 12784db89..c6250414e 100644
  static const struct of_device_id d2365_gpio_of_match[] = {
  	{
  		.compatible = "apple,d2089-pmic-gpio",
-@@ -1094,6 +1151,10 @@ static const struct of_device_id d2365_gpio_of_match[] = {
+@@ -1125,6 +1182,10 @@ static const struct of_device_id d2365_gpio_of_match[] = {
  		.compatible = "apple,d2186-pmic-gpio",
  		.data = &d2186_gpio_info,
  	},
