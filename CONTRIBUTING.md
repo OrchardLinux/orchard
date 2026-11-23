@@ -4,6 +4,19 @@ Thanks for helping. This repository is shared by every device Orchard supports,
 so a change here can affect devices you don't have. The rules below exist so
 that a reviewer can tell, for every line, why it is there and what it touches.
 
+## Everything benefits every device
+
+**Every change benefits every device it can.** A driver, device tree node,
+firmware recipe or desktop change is on by default for every board that has
+the hardware: describe it in the shared chip or model `.dtsi` with
+`status = "okay"`, not in one board's `.dts`. A per-board file holds only what
+really differs on that board, such as its wiring.
+
+**Every opt-in or opt-out needs a very good reason, written next to it:** the
+hardware is absent, or there is evidence that it breaks that board.
+**"Untested" is never a reason.** Neither is "I only have one device". The
+catalog marks the other boards `untested`, and their owners find out.
+
 ## What belongs here
 
 This repository holds device descriptions, kernel patches and configuration,
