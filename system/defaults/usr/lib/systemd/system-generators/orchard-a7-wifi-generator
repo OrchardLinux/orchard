@@ -1,6 +1,6 @@
 #!/bin/sh
 # Enable orchard-a7-wifi.service on the boards it serves. The platform layer holds no symlinks,
 # so the generator adds the wants link at boot.
-grep -qz '^apple,j85$' /proc/device-tree/compatible 2>/dev/null || exit 0
+grep -qzE '^apple,(j72|j85)$' /proc/device-tree/compatible 2>/dev/null || exit 0
 mkdir -p "$1/multi-user.target.wants"
 ln -sf /usr/lib/systemd/system/orchard-a7-wifi.service "$1/multi-user.target.wants/orchard-a7-wifi.service"

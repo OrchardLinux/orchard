@@ -5,6 +5,7 @@ DefaultDependencies=no
 After=systemd-udevd.service systemd-modules-load.service
 Before=network-pre.target NetworkManager.service
 Wants=network-pre.target
+ConditionFirmware=|device-tree-compatible(apple,j72)
 ConditionFirmware=|device-tree-compatible(apple,j85)
 
 [Service]
