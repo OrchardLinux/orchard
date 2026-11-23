@@ -14,7 +14,30 @@
         "zip": "Firmware/all_flash/DeviceTree.n69ap.im4p"
       },
       "sha256": "6b0720782015ca0539e3434ca051a7552ec5719baaa6b2d6ca1e12c96360a18d"
+    },
+    "N69.mtprops": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/multitouch/N69.mtprops"
+      },
+      "device": "/usr/share/firmware/multitouch/N69.mtprops",
+      "sha256": "52646009d96ff1be1135b942eda5a148660f9387629acb8bc0462cfd93bacf94"
     }
   },
-  "outputs": []
+  "outputs": [
+    {
+      "destination": "lib/firmware/apple/n69-fwstart.z2fw",
+      "sha256": "c09be8c134a0ae76c1146ca9971ade5ceb777b27de3b4e85b149aed4bd2e40b8",
+      "steps": [
+        {
+          "step": "z2fw-from-z2-packet@2",
+          "input": "N69.mtprops",
+          "profile": "C1F57,5",
+          "calibration_address": 268472320,
+          "calibration_size": 1024,
+          "prox_address": 268473856,
+          "prox_size": 128
+        }
+      ]
+    }
+  ]
 }

@@ -7,10 +7,13 @@ import subprocess
 import sys
 
 HERE = Path(__file__).resolve().parent
-URL = 'https://github.com/checkra1n/PongoOS.git'
-# Must include ad8b2d1 ("Fix for Xcode 16.3: don't depend on section order"): with
+# palera1n's fork at the revision palera1n 3.0.0-beta.4 builds (its .github/workflows/build.yml):
+# palera1n uploads its own kernel patcher, ramdisk and overlay into Pongo to boot iPadOS, and
+# they fit only its fork. One Pongo then serves both that boot and Linux's (bootm).
+# It includes ad8b2d1 ("Fix for Xcode 16.3: don't depend on section order"): with
 # Xcode 16.3+ older revisions copy only part of the image to SRAM and never reach USB.
-COMMIT = 'ad8b2d158588e929ae1ce7d9fd8d453720e1a8b6'
+URL = 'https://github.com/palera1n/PongoOS.git'
+COMMIT = 'e98323f8a09abd80fc4cbcd74dee023b91a1ec22'
 NEWLIB = 'f9ea5054de8fb51dff6f6d3c2e7cdd4aa89744b8'
 
 
