@@ -1,0 +1,54 @@
+#!/bin/sh
+# a8-gpu-soak [VK [TRI]]: VK cycles of "a8-gpu-drm-test vk --again", then TRI cycles of
+# "a8-gpu-drm-test triangle --again" (defaults 100 and 50). Each cycle is a full client:
+# open, firmware start, jobs, close.
+# Before each step one line "ITER n STEP s T" (T = uptime in seconds, as in dmesg); the
+# last such line names the step that hung. At the first failure: the step's output
+# tail, the last 40 kernel lines, "SOAK FAIL ..." and exit 1. At the end "SOAK PASS n".
+# Each step's output goes to a file and is read after the step has exited (no live pipe:
+# an early reader exit would kill the step before it disarms its watchdog); stdin is
+# /dev/null, so nothing typed on the serial line reaches a step. Output only on stdout;
+# the full log is also in /run/a8-gpu-drm/soak.log.
+D=/run/a8-gpu-drm
+mkdir -p "$D"
+LOG=$D/soak.log
+OUT=$D/soak-step.out
+vk=${1:-100}
+tri=${2:-50}
+case $vk$tri in *[!0-9]*|'') echo "usage: a8-gpu-soak [VK_CYCLES [TRIANGLE_CYCLES]]"; exit 2 ;; esac
+
+say() {
+    echo "$*"
+    echo "$*" >> "$LOG"
+}
+
+now() {
+    read -r up _ < /proc/uptime
+    echo "$up"
+}
+
+: > "$LOG"
+say "SOAK START vk $vk triangle $tri at $(now)"
+n=0
+for step in vk triangle; do
+    if [ "$step" = vk ]; then count=$vk; else count=$tri; fi
+    i=0
+    while [ "$i" -lt "$count" ]; do
+        i=$((i + 1))
+        n=$((n + 1))
+        say "ITER $i STEP $step $(now)"
+        a8-gpu-drm-test "$step" --again > "$OUT" 2>&1 < /dev/null
+        rc=$?
+        if [ $rc = 0 ] && grep -q "^RESULT $step PASS" "$OUT"; then
+            continue
+        fi
+        say "---- step output (last 20 lines):"
+        tail -20 "$OUT" | while IFS= read -r l; do say "$l"; done
+        say "---- kernel (last 40 lines):"
+        dmesg | tail -40 | while IFS= read -r l; do say "$l"; done
+        say "SOAK FAIL at ITER $i STEP $step (exit $rc) after $((n - 1)) passed, $(now)"
+        exit 1
+    done
+done
+say "SOAK PASS $n ($vk vk, $tri triangle) at $(now)"
+exit 0

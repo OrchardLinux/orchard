@@ -1,0 +1,9 @@
+#version 450
+// one invocation writes the smoke triangle's three vec4 vertices for a following draw (compute -> vertex input)
+layout(local_size_x = 1) in;
+layout(set = 0, binding = 0, std430) buffer Out { vec4 v[3]; } o;
+void main() {
+   o.v[0] = vec4(-0.5, -0.5, 0.0, 1.0);
+   o.v[1] = vec4(0.5, -0.5, 0.0, 1.0);
+   o.v[2] = vec4(0.0, 0.5, 0.0, 1.0);
+}
