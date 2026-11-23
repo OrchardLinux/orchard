@@ -40,7 +40,7 @@ Every device Orchard installs on. ✅ works · untested = nobody has tried it ye
 | iPhone 8 (Global) | A11 | untested | software | ❌ | ❌ | ❌ | ❌ | ❌ | untested | ❌ | – |
 | iPhone 8 Plus (GSM) | A11 | untested | software | ❌ | ❌ | ❌ | ❌ | ❌ | untested | ❌ | – |
 | iPhone 8 Plus (Global) | A11 | untested | software | ❌ | ❌ | ❌ | ❌ | ❌ | untested | ❌ | Dugs |
-| iPhone X (GSM) | A11 | ✅ | software | ✅ | untested | ❌ | ❌ | ❌ | untested | ❌ | – |
+| iPhone X (GSM) | A11 | ✅ | software | ✅ | untested | ❌ | ❌ | ❌ | untested | ❌ | edulmartins |
 | iPhone X (Global) | A11 | untested | software | ❌ | ❌ | ❌ | ❌ | ❌ | untested | ❌ | – |
 
 Not working on any device yet: Touch ID, cellular, cameras.
