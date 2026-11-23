@@ -22,7 +22,7 @@ platform = "apple-16k"
 dtb = "s8003-n66m" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # Pins this board's public IPSW; makes the touchscreen, VXD, AOP, Wi-Fi and Bluetooth firmware, and the GPU firmware from the iPad 5's iPadOS 16.7.10.
+recipe = "firmware.json" # Pins this board's public IPSW; makes the touchscreen, VXD, AOP, SmartIO, Wi-Fi and Bluetooth firmware, and the GPU firmware from the iPad 5's iPadOS 16.7.10.
 
 [support]
 status = "experimental"
@@ -55,7 +55,7 @@ resume = "untested"
 usb_serial = "untested"
 usb_network = "untested"
 usb_host = "missing" # Needs the Tristar VBUS path on the iPhone's Antigua PMU; only the iPad 5's D2365 one exists
-audio_output = "untested" # the N66 speaker description (shared s800x-n66.dtsi); speaker only, no speaker protection yet, capped at -12 dB
+audio_output = "untested" # the 6s Plus's loudspeaker, described for both models in s800x-6s.dtsi (same ADT amplifier, link and route); speaker only, no speaker protection yet, output capped at -12 dB
 audio_input = "missing" # No Linux driver for the CS42L71 codec
 camera = "missing"
 video_decode_hevc = "untested" # VXD on for every A9; vxd-deva.bin from the recipe

@@ -26,6 +26,11 @@ is missing or empty.
   iPhone 6s has the same module family and gets both too, with its own
   firmware; untested there. The iPhone SE has a different chip and has
   neither yet.
+- iPhone 6s Plus (A9): the loudspeaker plays, through a new driver for its
+  CS35L21 amplifier, with the output capped at -12 dB because there is no
+  speaker protection yet. The iPhone 6s has the same speaker path and gets
+  it too, untested. The earpiece, headphones and microphones need the
+  CS42L71 codec, which has no driver yet.
 
 ## [0.3.6] - 2026-11-24
 

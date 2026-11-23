@@ -700,6 +700,17 @@
           "input": "BlueTool"
         }
       ]
+    },
+    {
+      "destination": "lib/firmware/apple/s8000-smartio.bin",
+      "sha256": "98242f13a7a201121f1b5029b3ba848505e1d6ca26d019fc818a77e344becc03",
+      "steps": [
+        {
+          "step": "smartio-from-kernelcache@2",
+          "input": "kernelcache",
+          "kext": "com.apple.driver.AppleS8000SmartIO"
+        }
+      ]
     }
   ]
 }

@@ -602,7 +602,6 @@
     ],
     "n69": [
       "accelerometer",
-      "audio_output",
       "backlight",
       "battery",
       "buttons",
@@ -618,7 +617,6 @@
     ],
     "n69u": [
       "accelerometer",
-      "audio_output",
       "backlight",
       "battery",
       "buttons",
