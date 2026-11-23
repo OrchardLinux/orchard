@@ -1,0 +1,219 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Mon, 23 Nov 2026 18:08:57 +0800
+Subject: [PATCH 43/44] Input: apple_z2: Start a D21 in the order of the
+ working driver
+
+The D21 start-up had drifted from the order of the driver that starts
+the controller reliably (iPhOmarchy JADE, j71b_order, the default there).
+It woke the controller a second time instead of pulling interrupt data
+after the device information, skipped the drain, wrote the mode reports
+and the report enables before the 2260 ms settle, and read report 0x28
+forty times, 100 ms apart, between those writes and the touch arm. Each
+report read takes data off the controller's queue, and the working
+driver does none of them there.
+
+Follow the working order: device information (which wakes the
+controller), one interrupt-data pull, the surface, database and 0x73
+reads, a drain of up to four pulls, the level interrupt, the settle and
+a second wake, then 0x9d/0xbf, the report enables, high-level state
+Active and its read-back, the touch arm, 0x70 and the forty pulls.
+
+From iPhOmarchy b1135f1f4ccf (patches/0007) as carried in the JADE
+driver (iPhOmarchy 7952dce, GPU-WIP/jade/kernel/0021).
+
+Assisted-by: LLM
+---
+ drivers/input/touchscreen/apple_z2.c | 114 +++++++++++++--------------
+ 1 file changed, 55 insertions(+), 59 deletions(-)
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index 1cf8a18cb..27beba6ae 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -43,6 +43,7 @@
+ #define APPLE_Z2_D11_STATUS_REPORT       0x50
+ #define APPLE_Z2_REPORT_ENABLE           0xaf
+ #define APPLE_Z2_D11_REPORT_ENABLE       0xe2
++#define APPLE_Z2_REPORT_HIGH_LEVEL       0x72
+ #define APPLE_Z2_D21_SLOTS               10
+ #define APPLE_Z2_D21_REG_SETTLE_MS       50
+ #define APPLE_Z2_J172_HEADER_SIZE         32
+@@ -3917,19 +3918,20 @@ static int apple_z2_gen2_send_calibration(struct apple_z2 *z2,
+ 	return 0;
+ }
+ 
+-/* Reads a report @times times if the controller has it; absent is fine. */
+ /*
+- * A D21 only starts reporting when it rests this long after its configuration,
+- * then gets a second wake, before the touch arm: 2260 ms is the gap iOS (JADE)
+- * leaves there. Without it every start-up tested stayed silent. This is a fixed
+- * wait, not a readiness check: what the controller is waiting for is unknown,
+- * and the wait should become a check on that once it is found.
++ * A D21 only starts reporting when it rests this long after its report reads,
++ * then gets a second wake, before its mode reports and the touch arm: 2260 ms
++ * is the gap iOS (JADE) leaves there. Without it every start-up tested stayed
++ * silent. This is a fixed wait, not a readiness check: what the controller is
++ * waiting for is unknown, and the wait should become a check on that once it
++ * is found.
+  */
+ static unsigned int d21_settle_ms = 2260;
+ module_param(d21_settle_ms, uint, 0444);
+ MODULE_PARM_DESC(d21_settle_ms,
+-		 "D21: settle this long, then wake, before the touch arm (default 2260 as on iOS; 0: off)");
++		 "D21: settle this long, then wake, before the mode reports and the touch arm (default 2260 as on iOS; 0: off)");
+ 
++/* Reads a report @times times if the controller has it; absent is fine. */
+ static int apple_z2_gen2_read_optional(struct apple_z2 *z2, u8 report,
+ 				       unsigned int times, const char *tag)
+ {
+@@ -3967,7 +3969,6 @@ static int apple_z2_gen2_init_locked(struct apple_z2 *z2)
+ 	unsigned int i;
+ 	u16 len;
+ 	u8 status;
+-	bool armed_once = false;
+ 	int error;
+ 
+ 	error = apple_z2_read_device_info_locked(z2);
+@@ -3976,17 +3977,13 @@ static int apple_z2_gen2_init_locked(struct apple_z2 *z2)
+ 		dev_warn(&z2->spidev->dev, "device information failed: %d\n",
+ 			 error);
+ 
+-	/*
+-	 * Wake the controller before any interrupt-data pull.  A pull issued
+-	 * while it is still asleep answers with a zero-length header and
+-	 * leaves the queue wedged: the first later kick sees that stale header
+-	 * and every one after it gets a zero MISO reply.
+-	 */
+-	error = apple_z2_z2_cmd_locked(z2, APPLE_Z2_CMD_WAKE, 0, "gen2-wake");
+-	D21_STAGE(z2, "wake err=%d", error);
++	/* The device information exchange has woken the controller. */
++	error = apple_z2_read_packet(z2);
++	D21_STAGE(z2, "pull err=%d empty=%d valid=%d control=%d", error,
++		  z2->runtime_queue_empty, z2->runtime_frame_valid,
++		  z2->runtime_control_reply);
+ 	if (error)
+ 		return error;
+-	usleep_range(2000, 2100);
+ 
+ 	error = apple_z2_read_report_info_locked(z2, APPLE_Z2_REPORT_SURFACE,
+ 						 &status, &len, "gen2-d9");
+@@ -4007,6 +4004,35 @@ static int apple_z2_gen2_init_locked(struct apple_z2 *z2)
+ 	if (error)
+ 		return error;
+ 
++	for (i = 0; i < 4; i++) {
++		error = apple_z2_read_packet(z2);
++		D21_STAGE(z2, "drain %u err=%d empty=%d valid=%d control=%d",
++			  i + 1, error, z2->runtime_queue_empty,
++			  z2->runtime_frame_valid, z2->runtime_control_reply);
++		if (error)
++			return error;
++		if (z2->runtime_queue_empty ||
++		    (!z2->runtime_frame_valid && !z2->runtime_control_reply))
++			break;
++	}
++
++	/* Masked until booted: the level line stays asserted meanwhile. */
++	apple_z2_irq_off(z2);
++	error = apple_z2_gen1_set_level_irq(z2);
++	D21_STAGE(z2, "level irq err=%d", error);
++	if (error)
++		return error;
++	if (d21_settle_ms) {
++		msleep(d21_settle_ms);
++		error = apple_z2_z2_cmd_locked(z2, APPLE_Z2_CMD_WAKE, 0,
++					       "gen2-late-wake");
++		D21_STAGE(z2, "settle %u ms, late wake err=%d", d21_settle_ms,
++			  error);
++		if (error)
++			return error;
++		usleep_range(2200, 2300);
++	}
++
+ 	error = apple_z2_read_report_info_locked(z2, 0x9d, &status, &len, "gen2-9d");
+ 	D21_STAGE(z2, "9d info err=%d status=%u len=%u", error, status, len);
+ 	if (!error && !(status == 2 && !len)) {
+@@ -4025,52 +4051,21 @@ static int apple_z2_gen2_init_locked(struct apple_z2 *z2)
+ 		if (error)
+ 			return error;
+ 	}
+-	error = 0;
+ 
+ 	for (i = 0; i < boot->num_arm; i++) {
+ 		arm = &boot->arm[i];
+-		if (!armed_once && arm->report == 0xc8) {
+-			unsigned int p;
+-
+-			armed_once = true;
+-			/*
+-			 * Declare the interrupt level-low, masked until booted,
+-			 * and sample the scan counter before the touch arm.
+-			 */
+-			apple_z2_irq_off(z2);
+-			error = apple_z2_gen1_set_level_irq(z2);
+-			D21_STAGE(z2, "level irq err=%d", error);
+-			if (error)
+-				return error;
+-			for (p = 0; p < boot->kick_reads; p++) {
+-				int info, read = -1;
+-
+-				status = 0;
+-				len = 0;
+-				info = apple_z2_read_report_info_locked(z2, 0x28, &status,
+-									&len, "gen2-28");
+-				if (!info && len >= 1 && len <= APPLE_Z2_RX_BUF_SIZE - 5)
+-					read = apple_z2_read_report_locked(z2, 0x28, len,
+-									   "gen2-28-read");
+-				D21_STAGE(z2, "28 sample %u info=%d status=%u len=%u read=%d first=%02x",
+-					  p + 1, info, status, len, read, z2->rx_buf[5]);
+-				msleep(100);
+-			}
+-			if (d21_settle_ms) {
+-				msleep(d21_settle_ms);
+-				error = apple_z2_z2_cmd_locked(z2, APPLE_Z2_CMD_WAKE, 0,
+-							       "gen2-late-wake");
+-				D21_STAGE(z2, "settle %u ms, late wake err=%d", d21_settle_ms, error);
+-				if (error)
+-					return error;
+-				usleep_range(2200, 2300);
+-			}
+-		}
+ 		error = apple_z2_write_report_locked(z2, arm->report, arm->data,
+ 						     arm->len, "gen2-arm");
+ 		D21_STAGE(z2, "arm %02x len=%u err=%d", arm->report, arm->len, error);
+ 		if (error)
+ 			return error;
++		/* The working configuration reads the high-level state back. */
++		if (arm->report == APPLE_Z2_REPORT_HIGH_LEVEL) {
++			error = apple_z2_gen2_read_optional(z2, arm->report, 1,
++							    "gen2-72");
++			if (error)
++				return error;
++		}
+ 	}
+ 
+ 	/* Without these the controller sends a frame or two and stops. */
+@@ -4885,14 +4880,15 @@ static const struct apple_z2_hbpp_reg apple_z2_d21_post_cal_regs[] = {
+ };
+ 
+ /*
+- * After the reads: report enable, the iPhone report set, high-level state
+- * Active (0x72, offset 1), detection options with bit 0 set (0xc8), touch
+- * mode 1 in its 8-byte form (0xbf), then 0x70.
++ * After the settle and the mode reports: report enable, the iPhone report
++ * set, high-level state Active (0x72, offset 1, read back once written),
++ * detection options with bit 0 set (0xc8), touch mode 1 in its 8-byte form
++ * (0xbf), then 0x70.
+  */
+ static const struct apple_z2_report_write apple_z2_d21_arm[] = {
+ 	{ APPLE_Z2_REPORT_ENABLE, 1, { 0 } },
+ 	{ APPLE_Z2_D11_REPORT_ENABLE, 1, { 1 } },
+-	{ 0x72, 8, { 0, 1 } },
++	{ APPLE_Z2_REPORT_HIGH_LEVEL, 8, { 0, 1 } },
+ 	{ 0xc8, 1, { 0x09 } },
+ 	{ 0xbf, 8, { 0x9f, 0x83, 0x0b, 0x02, 0x00, 0x10, 0x00, 0x00 } },
+ 	{ 0x70, 1, { 0x08 } },
+-- 
+2.54.0 (Apple Git-157)
+

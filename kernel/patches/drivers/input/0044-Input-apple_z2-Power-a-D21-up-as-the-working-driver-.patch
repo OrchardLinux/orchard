@@ -1,0 +1,103 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Mon, 23 Nov 2026 18:09:48 +0800
+Subject: [PATCH 44/44] Input: apple_z2: Power a D21 up as the working driver
+ does
+
+The D21 power-up cut the core rail for 200 ms and then let the
+high-voltage supply settle for 500 ms before the core. The driver that
+starts this controller reliably (iPhOmarchy JADE, from b2533c59a2a0)
+does neither: its 500 ms settle sits behind a "power-ldo" supply that
+its device tree never describes, so it enables the high-voltage supply,
+waits 1-2 ms and writes the core rail on. The first start after boot
+therefore finds the core as the bootloader left it, and only a reload
+follows a real power-off. That configuration landed live starts on
+reload five times in five, with the short gap.
+
+Power the D21 like the iPhone 7 Plus: high voltage, 2-5 ms, core. Its
+power-off still cuts the core, so a reload stays a real power cycle.
+
+Assisted-by: LLM
+---
+ drivers/input/touchscreen/apple_z2.c | 38 +++-------------------------
+ 1 file changed, 3 insertions(+), 35 deletions(-)
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index 27beba6ae..c8a94b6e4 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -281,11 +281,6 @@ struct apple_z2_gen2_boot {
+  * @gen2_boot:		boot completion of iPhone 8 Plus style controllers
+  * @boot_timeout_ms:	boot interrupt timeout, if not the variant's
+  * @reset_hold_ms:	reset pulse before the boot preamble, if over 1 ms
+- * @hv_settle_us:	time the high-voltage supply settles before the core
+- * @core_cut_ms:	time the core supply is held off before every power-up,
+- *			for a core rail the bootloader leaves on and whose
+- *			regulator cannot read its state
+- *			supply, if over the default 2 ms
+  * @fixed_timing:	the firmware's configuration sets only the SPI mode;
+  *			the SPI timing stays the match data's
+  * @blob_count_minus_one: HBPP blobs the driver builds count one word less
+@@ -312,8 +307,6 @@ struct apple_z2_chip_info {
+ 	const struct apple_z2_gen2_boot *gen2_boot;
+ 	unsigned int boot_timeout_ms;
+ 	unsigned int reset_hold_ms;
+-	unsigned int hv_settle_us;
+-	unsigned int core_cut_ms;
+ 	bool fixed_timing;
+ 	bool blob_count_minus_one;
+ 	u8 pull_filler;
+@@ -2879,38 +2872,15 @@ static int apple_z2_iphone7_plus_power_on(struct apple_z2 *z2)
+ 
+ 	gpiod_set_value_cansleep(z2->reset_gpio, 1);
+ 
+-	/*
+-	 * The D21's core rail is an SMC function the bootloader leaves on, and
+-	 * its regulator only knows what it wrote last: enabling it again keeps
+-	 * the controller powered from before, and the high-voltage settle
+-	 * below never happens. Cut it first, so every power-up, a reload
+-	 * included, starts from off as on iOS.
+-	 */
+-	if (z2->info->core_cut_ms && !z2->core_enabled) {
+-		error = regulator_enable(z2->core_supply);
+-		if (!error)
+-			error = regulator_disable(z2->core_supply);
+-		D21_STAGE(z2, "core rail cut err=%d, off %u ms", error, z2->info->core_cut_ms);
+-		if (error)
+-			return error;
+-		msleep(z2->info->core_cut_ms);
+-	}
+-
+ 	error = regulator_enable(z2->hv_supply);
+ 	if (error)
+ 		return error;
+ 	z2->hv_enabled = true;
+-	/*
+-	 * The D21 controller boots, sends a frame or two and falls silent
+-	 * when its core supply follows the high-voltage one within 2 ms;
+-	 * 50 ms still failed one boot in three, 500 ms none.
+-	 */
+-	if (z2->info->hv_settle_us)
+-		fsleep(z2->info->hv_settle_us);
+-	else
+-		usleep_range(2000, 5000);
++	usleep_range(2000, 5000);
+ 
+ 	error = regulator_enable(z2->core_supply);
++	if (apple_z2_is_d21(z2))
++		D21_STAGE(z2, "high-voltage then core supply on, err=%d", error);
+ 	if (error)
+ 		goto err_power_off;
+ 	z2->core_enabled = true;
+@@ -4924,8 +4894,6 @@ static const struct apple_z2_chip_info apple_z2_d21_info = {
+ 	.gen2_boot = &apple_z2_d21_boot,
+ 	.boot_timeout_ms = 5000,	/* the personality's first boot */
+ 	.reset_hold_ms = 25,
+-	.hv_settle_us = 500000,
+-	.core_cut_ms = 200,
+ 	.fixed_timing = true,
+ 	.blob_count_minus_one = true,
+ 	.pull_filler = 0xaa,
+-- 
+2.54.0 (Apple Git-157)
+
