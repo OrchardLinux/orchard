@@ -13,6 +13,9 @@ is missing or empty.
 
 ### Devices
 
+- iPhone 6s, iPhone 6s Plus and iPhone SE (A9): battery status and charging
+  through the SN2400 charger, the accelerometer, gyroscope and pressure
+  sensor (AOP) and hardware video decoding, as on the iPhone 7. Untested.
 - iPhone 7 and iPhone 7 Plus (A10): the iPhone 7 gets the touchscreen,
   Wi-Fi, battery gauge, charger and light sensor the 7 Plus had, and all four
   models get Bluetooth, the accelerometer and gyroscope (AOP), hardware video

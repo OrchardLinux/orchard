@@ -34,6 +34,20 @@
         }
       },
       "sha256": "c6b95fcf0efe52ee9258454d01d14adc9b0cb922d94c54a04a4ce11d1ae81e0a"
+    },
+    "kernelcache": {
+      "ipsw": {
+        "kernelcache": true
+      },
+      "device": {
+        "kernelcache": "active"
+      }
+    },
+    "aop.im4p": {
+      "ipsw": {
+        "zip": "Firmware/AOP/aopfw-s8000aop.im4p"
+      },
+      "sha256": "8b13cd96c292683bde0716199fb1821394cedfdbbbf27867e9bb49914287b44d"
     }
   },
   "outputs": [
@@ -59,6 +73,44 @@
         {
           "step": "agx-g5p-ldr-from-kernelcache@1",
           "input": "kernelcache-j71tap-20H350"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/vxd-deva.bin",
+      "sha256": "bf5167652e81540471aaca141943fd33d71c3990c137f145471305f5f5ade83b",
+      "steps": [
+        {
+          "step": "vxd-firmware-from-kernelcache@1",
+          "input": "kernelcache"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/aop-s8000.bin",
+      "sha256": "b3f75072d287664c98a4a14b295a30c5e9d66bdfa9c04616e4946671755662f9",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "aop.im4p"
+        },
+        {
+          "step": "aop-image@1",
+          "coprocessor": "AOP"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/aop-s8000-ext.bin",
+      "sha256": "209f7d3014774331ea4b7d2229b931765e0ef58100ff95362f5eb24d3dbed61b",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "aop.im4p"
+        },
+        {
+          "step": "aop-image@1",
+          "coprocessor": "AOP_ext"
         }
       ]
     }
