@@ -28,7 +28,9 @@ recipe = "firmware.json"
 # The measured 64 GB P105 qualified native SFTL reclamation on 23 November
 # 2026. Linux erased every lane of an obsolete block, published the updated
 # accounting, reused it, and recovered the result on a fresh load. Paired iOS
-# boots left both HFS filesystems clean. The 16 GB package remains read-only.
+# boots left both HFS filesystems clean. The flash driver offers erase for
+# every package whose geometry it discovers and validates, the 16 GB one too,
+# but the 16 GB disk stays read-only: SFTL does not model its writer yet.
 # See docs/bring-up/p105-sftl-device-qualification.md.
 [storage]
 reclaims = true
@@ -52,8 +54,9 @@ touch_id = "missing"
 # On the 64 GB P105, the whole logical disk matched an independent
 # reconstruction from raw flash captured during the same boot.
 # A 64 MiB file written through SFTL survived fresh Linux recovery and two
-# iOS boots with an unchanged SHA-256. The 16 GB package's read-only layout
-# (Cascadia's, mtd 0018) has not run on a tablet.
+# iOS boots with an unchanged SHA-256. The 16 GB package's layout
+# (Cascadia's, mtd 0018) is read-only (no writer modelled) and has not run on
+# a tablet.
 storage_read = "working"
 storage_write = "working"
 wifi = "untested"

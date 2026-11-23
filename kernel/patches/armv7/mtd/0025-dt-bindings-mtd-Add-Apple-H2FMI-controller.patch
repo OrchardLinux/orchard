@@ -1,25 +1,27 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
 Date: Mon, 23 Nov 2026 16:20:01 -0600
-Subject: [PATCH] dt-bindings: mtd: Add Apple H2FMI controller
+Subject: [PATCH 25/27] dt-bindings: mtd: Add Apple H2FMI controller
 
 Document the six register windows and two interrupts used by the
-S5L8940X controller. Add the P105-specific compatible ahead of the
-shared fallback so match data can select its qualified package behavior.
+S5L8940X controller.
+
+[Henrik: drop the board-specific apple,p105ap-fmi compatible; the driver
+ selects its behaviour from the package geometry it reads from the chip]
 
 Assisted-by: LLM
 ---
- .../devicetree/bindings/mtd/apple,h2fmi.yaml  | 51 +++++++++++++++++++
+ .../devicetree/bindings/mtd/apple,h2fmi.yaml  | 47 +++++++++++++++++++
  MAINTAINERS                                   |  9 ++++
- 2 files changed, 60 insertions(+)
+ 2 files changed, 56 insertions(+)
  create mode 100644 Documentation/devicetree/bindings/mtd/apple,h2fmi.yaml
 
 diff --git a/Documentation/devicetree/bindings/mtd/apple,h2fmi.yaml b/Documentation/devicetree/bindings/mtd/apple,h2fmi.yaml
 new file mode 100644
-index 000000000..aeb0dbbdf
+index 0000000..a60445d
 --- /dev/null
 +++ b/Documentation/devicetree/bindings/mtd/apple,h2fmi.yaml
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,47 @@
 +# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
 +%YAML 1.2
 +---
@@ -38,11 +40,7 @@ index 000000000..aeb0dbbdf
 +
 +properties:
 +  compatible:
-+    oneOf:
-+      - items:
-+          - const: apple,p105ap-fmi
-+          - const: apple,s5l8940x-fmi
-+      - const: apple,s5l8940x-fmi
++    const: apple,s5l8940x-fmi
 +
 +  reg:
 +    minItems: 6
@@ -62,7 +60,7 @@ index 000000000..aeb0dbbdf
 +examples:
 +  - |
 +    flash-controller@1200000 {
-+        compatible = "apple,p105ap-fmi", "apple,s5l8940x-fmi";
++        compatible = "apple,s5l8940x-fmi";
 +        reg = <0x1200000 0x1000>,
 +              <0x1240000 0x1000>,
 +              <0x1280000 0x1000>,
@@ -72,7 +70,7 @@ index 000000000..aeb0dbbdf
 +        interrupts = <33>, <34>;
 +    };
 diff --git a/MAINTAINERS b/MAINTAINERS
-index b878ddc99..fff40600e 100644
+index b878ddc..fff4060 100644
 --- a/MAINTAINERS
 +++ b/MAINTAINERS
 @@ -1626,6 +1626,15 @@ L:	linux-input@vger.kernel.org

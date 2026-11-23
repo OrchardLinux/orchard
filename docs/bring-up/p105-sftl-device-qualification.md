@@ -159,12 +159,11 @@ wear 9. That audit issued no program or erase command.
 
 The final iOS boot passed both HFS checks. Its 64 MiB witness still matched the
 original SHA-256. These results qualify normal-block erase and reclamation on
-`apple,p105ap` with the measured 64 GB geometry. P105-compatible match data
-and the geometry gate scope the provider callback. The P105 device tree puts
-that compatible ahead of the shared fallback. The 16 GB package remains
-read-only until its own accounting, erase extent and recovery behavior have
-device evidence. An uncertain erase stops the writer without an automatic
-retry.
+`apple,p105ap` with the measured 64 GB geometry. The H2FMI driver offers the
+erase for every package whose discovered geometry validates and derives the
+erase extent from it. The 16 GB package's disk remains read-only because
+SFTL does not model its writer, accounting or checkpoints yet. An uncertain
+erase stops the writer without an automatic retry.
 
 The host receipts are `reuse-result.json`, `ios-return-result.json`,
 `cold-audit-result.json`, `final-ios-result.json` and

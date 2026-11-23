@@ -13,9 +13,12 @@ is missing or empty.
 
 ### Devices
 
-- iPad mini 1 (Wi-Fi, 64 GB): internal storage can reuse freed flash. Linux
-  writes, verified block erase and native accounting survived restarts into
-  iOS with both filesystems clean.
+- iPad mini 1 (Wi-Fi, A5, 64 GB): Linux writes to internal storage and reuses
+  freed flash, so the disk no longer runs full once its blank flash is used.
+  Writes, block erase and iOS's own bookkeeping survived restarts into iOS
+  with both filesystems clean. The flash driver erases on any storage chip
+  whose layout it can read and check, not one fixed model; the 16 GB iPad mini 1
+  stays read-only until its storage format is modelled.
 - iPhone 6s Plus (A9): the phone sleeps when idle or on Power, turns its
   screen off, and wakes on Home or Power.
 - iPad mini 2 (Wi-Fi, A7): tested on the board. The display, backlight,
