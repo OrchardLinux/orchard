@@ -9,6 +9,13 @@ releasing, rename that section to the version (`## [0.3.0] - YYYY-MM-DD`). The
 release workflow uses that section as the GitHub release notes and fails if it
 is missing or empty.
 
+## Unreleased
+
+### Devices
+
+- The touchscreen restart from 0.3.3 is gone again: on a healthy iPad 6 that
+  nobody touched, it restarted the touch controller every 30 seconds.
+
 ## [0.3.4] - 2026-11-24
 
 ### Install & launch
