@@ -5,7 +5,7 @@ No hardcoded offsets; select the exact kext via its prelink metadata, then map
 its section virtual address through the outer kernel's file-backed segments.
 For MH_FILESET kernels use the upstream ipsw kext extractor instead. The kext
 bundle identifier is the caller's board policy (T8010 by default; S8000 for A9;
-T7000 for A8 and A8X; S5L8960X for A7).
+T8011 for A10X; T7000 for A8 and A8X; S5L8960X for A7).
 
 The A7's iOS 12 kernelcache merges its kexts' segments into the kernel's own,
 so the kext has no Mach-O of its own: its firmware is then the kernel's one
@@ -20,9 +20,10 @@ from orchard.apple.prelink import Kernelcache, MergedKext
 
 T8010 = 'com.apple.driver.AppleT8010SmartIO'
 S8000 = 'com.apple.driver.AppleS8000SmartIO'
+T8011 = 'com.apple.driver.AppleT8011SmartIO'
 T7000 = 'com.apple.driver.AppleT7000SmartIO'
 S5L8960X = 'com.apple.driver.AppleS5L8960XSmartIO'
-BUNDLES = (T8010, S8000, T7000, S5L8960X)
+BUNDLES = (T8010, S8000, T7000, S5L8960X, T8011)
 
 
 def extract(blob, bundle=T8010):
