@@ -13,13 +13,16 @@ completion or mismatched readback stops further I/O on the bus.
 
 The request must align to a physical page and include a full data/OOB pair.
 Block zero and the two reserved package-tail blocks are excluded. This
-primitive exposes no erase callback and owns no free-space map. A dependent
-VFL/SFTL writer must decide which blank pages it can allocate while preserving
-Apple's native mapping records.
+raw MTD interface exposes no erase operation and owns no free-space map. On
+`apple,p105ap` with the measured 64 GB geometry, the aggregate PPN provider
+exposes verified normal-block erase to SFTL. That layer owns the complete
+16-lane extent and preserves Apple's native mapping records.
 
-The driver binds the shared `apple,s5l8940x-fmi` compatible, which P105 uses
-in this source tree. Its imported two-CAU parameter profile also needs a
-regression check before merge; the measured 64 GB profile does not qualify
+The P105 controller node advertises `apple,p105ap-fmi` ahead of the shared
+`apple,s5l8940x-fmi` fallback. Driver match data enables verified normal-block
+erase only for that compatible and the measured 64 GB geometry. The shared
+fallback remains read-only. Its imported two-CAU parameter profile also needs
+a regression check before merge; the measured 64 GB profile does not qualify
 that hardware.
 
 ## Source and evidence
@@ -39,8 +42,17 @@ ARMv7 generated headers. Their source hashes match this candidate, but they
 were object checks rather than a complete current-base kernel build or a
 kernel KUnit run.
 
-Earlier bounded device programming supplied protocol evidence. This exact
-revision still needs an approved physical test, including the failure and
-recovery paths. It has no new physical-programming result. Raw page readback
-does not establish logical-map persistence after restart or recovery after
-interrupted writes. P105 `storage_write` is `untested` until a device test.
+On 23 November 2026, Linux wrote a 64 MiB file through SFTL. Full readback and
+`e2fsck` passed before restart. A fresh Linux load recovered the mapping and
+the file. Two later iOS boots reported clean System and Data filesystems, while
+the file retained SHA-256
+`d41b5b52b5a8b4f5329a413c2edcd6de1f575bac32e70fd76fafcf1dfa6c6421`.
+
+The same trial erased all 16 lanes of one obsolete block. Native accounting
+was saved before Linux reused it, and a fresh load recovered the incremented
+wear plus the written page. iOS later relocated that page and reclaimed the
+block. A cold Linux boot recovered iOS's state and found every normal and SLC
+page in the block blank. The compatible-selected H2FMI and P105 device-tree
+patches passed strict checkpatch and a full ARMv7 kernel, module and
+device-tree build. P105 `storage_write` is `working` for the measured 64 GB
+package. The 16 GB package stays read-only.

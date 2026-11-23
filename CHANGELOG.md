@@ -13,6 +13,9 @@ is missing or empty.
 
 ### Devices
 
+- iPad mini 1 (Wi-Fi, 64 GB): internal storage can reuse freed flash. Linux
+  writes, verified block erase and native accounting survived restarts into
+  iOS with both filesystems clean.
 - iPhone 6s Plus (A9): the phone sleeps when idle or on Power, turns its
   screen off, and wakes on Home or Power.
 - iPad mini 2 (Wi-Fi, A7): tested on the board. The display, backlight,

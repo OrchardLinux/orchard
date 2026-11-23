@@ -4,5 +4,7 @@
 # patches only these 32-bit SoCs take.
 patches/import/cascadia
 patches/armv7/mtd
+patches/drivers/mtd
+patches/devices/s5l8942x
 patches/armv7/block
 patches/armv7/usb

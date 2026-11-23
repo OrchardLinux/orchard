@@ -1,7 +1,46 @@
 # Ordered patch layers for the apple-16k platform (A9 and later: 16 KiB pages),
 # relative to kernel/. Every *.patch below each directory is applied in
-# path order.
+# path order. H2FMI and s5l8942x are 32-bit hardware; apple-armv7 carries
+# those layers.
 patches/hoolock
 patches/import/pauli1go
-patches/drivers
-patches/devices
+patches/drivers/arm64
+patches/drivers/backlight
+patches/drivers/block
+patches/drivers/bluetooth
+patches/drivers/clk
+patches/drivers/cpuidle
+patches/drivers/dma
+patches/drivers/dma-buf
+patches/drivers/drm
+patches/drivers/gpio
+patches/drivers/gpu
+patches/drivers/i2c
+patches/drivers/iio
+patches/drivers/input
+patches/drivers/iommu
+patches/drivers/media
+patches/drivers/mfd
+patches/drivers/nvme
+patches/drivers/pci
+patches/drivers/phy
+patches/drivers/pinctrl
+patches/drivers/pmdomain
+patches/drivers/power
+patches/drivers/regulator
+patches/drivers/rtc
+patches/drivers/serial
+patches/drivers/soc-apple
+patches/drivers/sound
+patches/drivers/spi
+patches/drivers/thermal
+patches/drivers/usb
+patches/drivers/w1
+patches/drivers/wifi
+patches/devices/s5l8960x
+patches/devices/s8000
+patches/devices/s800x
+patches/devices/t7000
+patches/devices/t7001
+patches/devices/t8010
+patches/devices/t8015
