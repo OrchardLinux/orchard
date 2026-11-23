@@ -58,7 +58,10 @@ builds and can hang the VM. Treat space as scarce and time as scarce too:
 - **Check before large work:** `df -h ~` before a kernel, root or image build
   or a large download; below about 10 GB free, clean up first or ask.
   `orchard build` and `orchard run` refuse to start below 10 GB
-  (`ORCHARD_MIN_FREE_GB` changes the limit).
+  (`ORCHARD_MIN_FREE_GB` changes the limit). They also keep Orchard's own
+  directories (the shared cache and the store) under 20 GiB by deleting the
+  least recently used entries Orchard can make again
+  (`ORCHARD_CACHE_BUDGET_GB`; 0 turns it off).
 - **Prefer reuse to copies:** a published nightly component over a local
   build, one worktree over several, a pointer over a duplicate.
 - Inside `~/.cache/orchard`, delete through `orchard cache` (or ask), never

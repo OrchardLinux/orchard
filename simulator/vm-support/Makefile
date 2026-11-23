@@ -1,1 +1,1 @@
-obj-m += orchard-vm-backlight.o
+obj-m += orchard-vm-backlight.o orchard-vm-accel.o

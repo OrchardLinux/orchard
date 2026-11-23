@@ -62,6 +62,17 @@ class ReleasedPongo(unittest.TestCase):
         with patch.object(http, 'open_url', side_effect=self.open_url):
             self.assertEqual(build.released_pongo(self.hardware), ('v1.0.0', hashlib.sha256(PONGO).hexdigest()))
 
+    def test_a_later_non_release_tag_is_skipped(self):
+        # The moving `nightly` tag publishes no SHA256SUMS; describe must still find the release.
+        (self.hardware / 'other.txt').write_text('after the release\n')
+        self.git('add', '.')
+        self.git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false',
+                 'commit', '-qm', 'later')
+        self.git('tag', 'nightly')
+        with patch.object(http, 'open_url', side_effect=self.open_url):
+            self.assertEqual(build.released_pongo(self.hardware), ('v1.0.0', hashlib.sha256(PONGO).hexdigest()))
+        self.assertTrue(all('/v1.0.0/' in url for url in self.fetched))
+
     def test_a_tampered_download_is_refused(self):
         def tampered(url):
             return io.BytesIO(b'other bytes') if url.endswith('/pongo.bin') else self.open_url(url)

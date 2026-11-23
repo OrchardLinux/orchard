@@ -57,6 +57,7 @@ class PlatformLayer(unittest.TestCase):
                               'usr/lib/firmware/regulatory.db.p7s',
                               'usr/lib/NetworkManager/conf.d/30-orchard-usb.conf',
                               'usr/lib/udev/rules.d/70-orchard-wifi-address.rules',
+                              'usr/lib/udev/rules.d/59-orchard-asp-storage.rules',
                               'usr/lib/orchard/wifi-address',
                               'usr/lib/orchard/boot-entries',
                               'usr/lib/orchard/platform.SHA256SUMS'}, names)

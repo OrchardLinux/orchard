@@ -100,7 +100,7 @@ watch_sftl
         self.compatible.write_bytes(b'apple,j71b\0')
         result = self.report()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('[SKIP] no NVMe storage', result.stdout)
+        self.assertIn('[SKIP] no NVMe or ANS1 storage', result.stdout)
 
     def test_mount_aliases_block_the_read_but_unrelated_mounts_do_not(self):
         self.disk('applesftl0', ro=1, data=bytes(4096))

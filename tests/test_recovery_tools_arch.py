@@ -78,7 +78,7 @@ class RecoveryArchitecture(unittest.TestCase):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes((ROOT / name).read_bytes())
             previous = build.recipe_key(hardware, build.TOOL_INPUTS)
-            for name in ('orchard-write.c', 'check-tools.py'):
+            for name in ('orchard-write.c', 'orchard-install-usb.c', 'check-tools.py'):
                 path = hardware / 'boot/initramfs/recovery' / name
                 self.assertTrue(path.is_file(), name)
                 path.write_bytes(path.read_bytes() + b'\n/* cache input changed */\n')
@@ -109,7 +109,7 @@ class RecoveryArchitecture(unittest.TestCase):
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         for arch in ('arm', 'arm64'):
-            for missing in ('orchard-write', 'resize2fs', 'tune2fs'):
+            for missing in ('orchard-write', 'orchard-install-usb', 'resize2fs', 'tune2fs'):
                 with self.subTest(arch=arch, missing=missing), tempfile.TemporaryDirectory() as temporary, \
                         mock.patch.object(build, 'command', side_effect=actual_checker):
                     with self.assertRaises(subprocess.CalledProcessError):

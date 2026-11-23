@@ -15,3 +15,8 @@ config = "kernel/configs/apple-4k/config"
 defconfig = "orchard_apple4k_defconfig"   # the same config in OrchardLinux/linux
 branch = "main"                    # its branch in OrchardLinux/linux
 loader = "m1n1"                    # the payload format that boots this kernel
+
+[root]
+# A7, A8 and A8X keep their internal storage behind ANS1 (drivers/block/asp.c),
+# not NVMe: the initrd loads asp to find the installed root.
+storage_modules = ["asp"]

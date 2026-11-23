@@ -211,7 +211,7 @@ echo 'Compiling kernel image, modules and device trees...'
       # records stay the same with and without it and switching rebuilds nothing.
       mkdir -p "$ORCHARD_TMP/compiler-cache-bin"
       ln -sf "$(command -v ccache)" "$ORCHARD_TMP/compiler-cache-bin/clang-19"
-      export PATH="$ORCHARD_TMP/compiler-cache-bin:$PATH" CCACHE_DIR=$ORCHARD_COMPILER_CACHE
+      export PATH="$ORCHARD_TMP/compiler-cache-bin:$PATH" CCACHE_DIR=$ORCHARD_COMPILER_CACHE CCACHE_MAXSIZE=2G
     fi
     if [[ -n $defconfig ]]; then
       make -C "$ORCHARD_SRC" O="$ORCHARD_OUT" LLVM=-19 ARCH="$arch" "$defconfig"

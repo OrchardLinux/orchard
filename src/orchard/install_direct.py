@@ -34,10 +34,11 @@ from .transports.ssh import KEY, one_connection, ssh_argv, wait_authenticated
 
 ADD_ON = ROOT / 'boot/initramfs/install'
 HOST = '172.16.42.1'
-# The one internal disk: NVMe on 64-bit boards, the iOS flash translation layer on 32-bit ones.
-# Apple's NVMe has several namespaces; the storage iOS and Linux live on is the first,
-# the others hold the controller's own data (nvme0n2 and up on an iPad 6).
-INTERNAL_DISK = re.compile(r'nvme[0-9]+n1|applesftl[0-9]+')
+# The one internal disk: NVMe on A9 and later, ANS1 (asp) on A7-A8X, the iOS flash
+# translation layer on 32-bit boards. Apple's NVMe and ANS1 have several namespaces; the
+# storage iOS and Linux live on is the first, the others hold the controller's own data
+# (nvme0n2 and up on an iPad 6, asp0n2 and up on an iPad Air 2).
+INTERNAL_DISK = re.compile(r'nvme[0-9]+n1|applesftl[0-9]+|asp[0-9]+n1')
 BOOT_ARGS = 'fbcon=map:9 vt.global_cursor_default=0'
 INITRAMFS_MAGIC = b'm1n1_initramfs'
 XBOOTLDR, ROOT_ARM64 = D.XBOOTLDR, D.ROOT_ARM64
@@ -99,30 +100,50 @@ def newc(files):
     return bytes(out)
 
 
+PROGRAMS = ('orchard-write', 'dropbear', 'resize2fs', 'tune2fs')
+# Newer than the oldest releases: the USB receiver, and what it runs to finish an install.
+RECEIVER = 'orchard-install-usb'
+FINISHING = {'install_device.py': D.__file__, 'boot-entries': remote.BOOT_ENTRIES}
+
+
 def install_tools(archive):
-    """{name: program} out of the release's install-tools.tar.gz."""
+    """{name: bytes} out of the release's install-tools.tar.gz: the programs, and the start
+    script and DHCP setup, which releases before they were packed lack (then this checkout's).
+    With the USB receiver, which older releases lack, also its finishing program and boot-entries
+    script (this checkout's where the release has the receiver but not them)."""
     with tarfile.open(archive) as opened:
-        return {name: opened.extractfile(name).read() for name in ('orchard-write', 'dropbear', 'resize2fs', 'tune2fs')}
+        names = set(opened.getnames())
+        found = {name: opened.extractfile(name).read() for name in PROGRAMS}
+        for name in ('run', 'udhcpd.conf'):
+            found[name] = opened.extractfile(name).read() if name in names else (ADD_ON / name).read_bytes()
+        if RECEIVER in names:
+            found[RECEIVER] = opened.extractfile(RECEIVER).read()
+            for name, fallback in FINISHING.items():
+                found[name] = opened.extractfile(name).read() if name in names else Path(fallback).read_bytes()
+    return found
 
 
-def add_on(tools, ecid, authorized_keys, host_key):
+def add_on(tools, ecid, authorized_keys=None, host_key=None):
+    """The archive appended to the initrd. AUTHORIZED_KEYS and HOST_KEY are the SSH install's;
+    an install over the USB receiver needs neither."""
     tools = install_tools(tools)
     directory, program, data = stat.S_IFDIR | 0o755, stat.S_IFREG | 0o755, stat.S_IFREG | 0o644
     private = stat.S_IFREG | 0o600
-    return newc({'install': (directory, b''),
-                 'install/run': (data, (ADD_ON / 'run').read_bytes()),
-                 'install/udhcpd.conf': (data, (ADD_ON / 'udhcpd.conf').read_bytes()),
-                 'install/orchard-write': (program, tools['orchard-write']),
-                 'install/dropbear': (program, tools['dropbear']),
-                 'install/resize2fs': (program, tools['resize2fs']),
-                 'install/tune2fs': (program, tools['tune2fs']),
-                 'install/ecid': (data, f'{ecid:x}\n'.encode()),
-                 'install/authorized_keys': (data, authorized_keys.encode()),
-                 'install/host_key': (private, host_key),
-                 'root': (stat.S_IFDIR | 0o700, b''),
-                 # Dropbear looks its user up.
-                 'etc': (directory, b''),
-                 'etc/passwd': (data, b'root:x:0:0:root:/root:/bin/sh\n')})
+    files = {'install': (directory, b''),
+             'install/run': (data, tools['run']),
+             'install/udhcpd.conf': (data, tools['udhcpd.conf'])}
+    files.update({f'install/{name}': (program, tools[name]) for name in (*PROGRAMS, RECEIVER) if name in tools})
+    files.update({f'install/{name}': (data, tools[name]) for name in FINISHING if name in tools})
+    files['install/ecid'] = (data, f'{ecid:x}\n'.encode())
+    if authorized_keys is not None:
+        files['install/authorized_keys'] = (data, authorized_keys.encode())
+    if host_key is not None:
+        files['install/host_key'] = (private, host_key)
+    files.update({'root': (stat.S_IFDIR | 0o700, b''),
+                  # Dropbear looks its user up.
+                  'etc': (directory, b''),
+                  'etc/passwd': (data, b'root:x:0:0:root:/root:/bin/sh\n')})
+    return newc(files)
 
 
 def layer_boot_files(layer, devicetree):
@@ -596,15 +617,17 @@ def mount_new_root(connection, node, boot_node):
           timeout=60)
 
 
-def kernel_package(connection, layer, directory):
+def kernel_package(connection, layer, directory, base=None):
     """The root's kernel package, pacstrap's way: the published linux-orchard-PLATFORM that wraps this layer.
 
     Downloaded here (kernel_packages.py), uploaded to /run/orchard, and installed by the root's own
     pacman or apk (install_device.py). None when the root has neither or no published package wraps
     exactly this layer (a nightly or local layer): the layer's files are installed then.
+    BASE is the release's install.base; releases without it are asked about their root.
+    A repository that can't be reached is an error, not a missing package.
     """
     from . import kernel_packages
-    base = shell(connection, kernel_packages.DETECT).decode().strip()
+    base = base or shell(connection, kernel_packages.DETECT).decode().strip()
     if base not in kernel_packages.ARCH:
         return None
     layer_sha256 = hashlib.sha256(Path(layer).read_bytes()).hexdigest()

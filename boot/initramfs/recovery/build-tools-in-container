@@ -86,6 +86,7 @@ tar -xzf "$work/zstd.tar.gz" -C "$build"
 make -C "$build/zstd-1.5.7/lib" -j2 libzstd.a CC="$CC" ZSTD_LEGACY_SUPPORT=0
 $CC $CFLAGS -static -Wall -Wextra -pthread -I"$build/zstd-1.5.7/lib" -o "$build/bin/orchard-write" \
   "$recipe/orchard-write.c" "$build/zstd-1.5.7/lib/libzstd.a"
+$CC $CFLAGS -static -Wall -Wextra -pthread -o "$build/bin/orchard-install-usb" "$recipe/orchard-install-usb.c"
 tar -xzf "$work/e2fsprogs.tar.gz" -C "$build"
 (
   cd "$build/e2fsprogs-1.47.4"

@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nick Chan <towinchenmi@gmail.com>
+Date: Thu, 19 Nov 2026 13:15:01 +0100
+Subject: [PATCH] arm64: dts: apple: t7001: Add the ANS nodes
+
+Describe the A8X storage coprocessor and its mailbox, disabled until a
+board enables them. m1n1 fills the coprocessor's firmware region through
+the asp alias.
+
+[Orchard: from HoolockLinux/linux ans1 ed8528f 32c5dac3841f.]
+Signed-off-by: Nick Chan <towinchenmi@gmail.com>
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/apple/t7001.dtsi | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t7001.dtsi b/arch/arm64/boot/dts/apple/t7001.dtsi
+index 1a666e7be..892ff78bd 100644
+--- a/arch/arm64/boot/dts/apple/t7001.dtsi
++++ b/arch/arm64/boot/dts/apple/t7001.dtsi
+@@ -20,6 +20,7 @@ / {
+ 	aliases {
+ 		ausbphy0 = &ausbphy0; /* Used by loader */
+ 		serial0 = &serial0;
++		asp = &ans;
+ 	};
+ 
+ 	clkref: clock-ref {
+@@ -141,6 +142,29 @@ cpufreq: performance-controller@202220000 {
+ 			#performance-domain-cells = <0>;
+ 		};
+ 
++		ans: block@208040000 {
++			compatible = "apple,t7001-ans", "apple,s5l8960x-ans";
++			reg = <0x2 0x08040000 0x0 0x1000>;
++			mboxes = <&ans_mbox>;
++			power-domains = <&ps_ans>;
++			resets = <&ps_ans>;
++			status = "disabled";
++		};
++
++		ans_mbox: mbox@208041000 {
++			compatible = "apple,t7000-akf-mailbox-v1", "apple,akf-mailbox-v1";
++			reg = <0x2 0x08041000 0x0 0x1000>;
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 36 IRQ_TYPE_LEVEL_HIGH>,
++				<AIC_IRQ 37 IRQ_TYPE_LEVEL_HIGH>,
++				<AIC_IRQ 38 IRQ_TYPE_LEVEL_HIGH>,
++				<AIC_IRQ 39 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "send-empty", "send-not-empty",
++				"recv-empty", "recv-not-empty";
++			#mbox-cells = <0>;
++			power-domains = <&ps_ans>;
++		};
++
+ 		serial0: serial@20a0c0000 {
+ 			compatible = "apple,s5l-uart";
+ 			reg = <0x2 0x0a0c0000 0x0 0x4000>;

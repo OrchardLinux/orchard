@@ -314,11 +314,13 @@
       "usb_serial"
     ],
     "j81": [
+      "audio_output",
       "backlight",
       "battery",
       "bluetooth_audio",
       "bluetooth_input",
       "buttons",
+      "charging",
       "touch",
       "usb_network",
       "usb_serial",

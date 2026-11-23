@@ -1,13 +1,68 @@
 import AppKit
 
-// iPad (6th generation), Wi-Fi: 169.5 × 240 mm, 9.7-inch 4:3 display.
-// Coordinates are expressed in device-relative units, with a 240-unit body height.
-enum Device {
-    static let width: CGFloat = 169.5
-    static let height: CGFloat = 240
-    static let scale: CGFloat = 3.0
+// A simulated device, upright, in millimetres from its top left corner: the
+// body, the display, the buttons. Its panel (the VM's screen) is fixed when
+// the VM starts; the frame is drawn from these numbers.
+struct DeviceProfile {
+    let name: String            // the VM script's name for it
+    let title: String
+    let width: CGFloat
+    let height: CGFloat
+    let cornerRadius: CGFloat
+    let display: NSRect
+    let displayRadius: CGFloat
+    let home: NSRect
+    // Drawn button, and the larger area a click finds it in.
+    let buttons: [(button: HardwareButton, drawn: NSRect, hit: NSRect)]
+    let muteSwitch: NSRect?
+    let camera: NSPoint
+    let earpiece: NSRect?
+    let darkFront: Bool
+    // Window pixels per millimetre: both devices open about as tall.
+    var scale: CGFloat { 720 / height }
+    // The panel's short side in pixels, until the guest's own picture says.
+    var panelPixelsWide: CGFloat { name == "iphone7" ? 750 : 1536 }
     static let margin: CGFloat = 24
-    static let canvas = NSSize(width: width * scale + margin * 2, height: height * scale + margin * 2)
+
+    // iPad (6th generation), Wi-Fi: 169.5 × 240 mm, 9.7-inch 4:3 display.
+    static let ipad6 = DeviceProfile(
+        name: "ipad6", title: "iPad (6th generation)", width: 169.5, height: 240, cornerRadius: 10,
+        display: NSRect(x: 10.835, y: 21.45, width: 147.83, height: 197.10), displayRadius: 0.12,
+        home: NSRect(x: 79.2, y: 223.15, width: 11.1, height: 11.1),
+        buttons: [(.power, NSRect(x: 128.5, y: -1.1, width: 19, height: 2.3), NSRect(x: 125, y: -5, width: 28, height: 10)),
+                  (.volumeUp, NSRect(x: 168.4, y: 34.5, width: 2.3, height: 12), NSRect(x: 164, y: 31, width: 11, height: 19)),
+                  (.volumeDown, NSRect(x: 168.4, y: 53, width: 2.3, height: 12), NSRect(x: 164, y: 50, width: 11, height: 19))],
+        muteSwitch: nil, camera: NSPoint(x: 84.75, y: 10.65), earpiece: nil, darkFront: false)
+
+    // iPhone 7: 67.1 × 138.3 mm, 4.7-inch 16:9 display (750 × 1334 pixels),
+    // black front; the side button on the right, volume and the ring/silent
+    // switch on the left, the camera beside the earpiece.
+    static let iphone7 = DeviceProfile(
+        name: "iphone7", title: "iPhone 7", width: 67.1, height: 138.3, cornerRadius: 9.4,
+        display: NSRect(x: 4.3, y: 17.15, width: 58.5, height: 104.0), displayRadius: 0.2,
+        home: NSRect(x: 28.1, y: 124.3, width: 10.9, height: 10.9),
+        buttons: [(.power, NSRect(x: 66.75, y: 33, width: 1.6, height: 10.5), NSRect(x: 63, y: 30, width: 9, height: 16)),
+                  (.volumeUp, NSRect(x: -1.25, y: 33.5, width: 1.6, height: 8.5), NSRect(x: -5, y: 31, width: 9, height: 12)),
+                  (.volumeDown, NSRect(x: -1.25, y: 45, width: 1.6, height: 8.5), NSRect(x: -5, y: 43, width: 9, height: 12))],
+        muteSwitch: NSRect(x: -1.1, y: 22, width: 1.4, height: 5), camera: NSPoint(x: 23.2, y: 8.7),
+        earpiece: NSRect(x: 28.6, y: 8.05, width: 9.9, height: 1.3), darkFront: true)
+
+    static let all = [ipad6, iphone7]
+    static func named(_ name: String) -> DeviceProfile { all.first { $0.name == name } ?? ipad6 }
+}
+
+// How the window holds the device: the edge that is up, named as the
+// accelerometer (iio-sensor-proxy) names it, and the clockwise turn that
+// draws the device so.
+enum Orientation: String, CaseIterable {
+    case normal, leftUp = "left-up", bottomUp = "bottom-up", rightUp = "right-up"
+    var degrees: CGFloat { CGFloat(Orientation.allCases.firstIndex(of: self)!) * 90 }
+    var quarterTurned: Bool { self == .leftUp || self == .rightUp }
+    // A clockwise quarter turn brings the left edge up.
+    func turned(clockwise: Bool) -> Orientation {
+        let all = Orientation.allCases
+        return all[(all.firstIndex(of: self)! + (clockwise ? 1 : 3)) % 4]
+    }
 }
 
 enum HardwareButton: String, CaseIterable {
@@ -36,6 +91,9 @@ final class SimulatorView: NSView {
     private var hardware: VMHardware?
     private var brightness: CGFloat = 1 { didSet { screen.brightness = brightness } }
     private var guestConnected = false
+    // The guest's screen appeared (again): the VM may have restarted as
+    // another device.
+    var onConnect: (() -> Void)?
     private var guestPointerDown = false
     private var touchPosition = NSPoint.zero
     private(set) var touchMode = true
@@ -44,7 +102,69 @@ final class SimulatorView: NSView {
     private var resignObserver: NSObjectProtocol?
     private var appResignObserver: NSObjectProtocol?
     private var commandKeyUpMonitor: Any?
-    private let displayRect = NSRect(x: 10.835, y: 21.45, width: 147.83, height: 197.10)
+    private(set) var profile = DeviceProfile.ipad6
+    private(set) var orientation = Orientation.normal
+    private var displayRect: NSRect { profile.display }
+    private var margin: CGFloat { DeviceProfile.margin }
+
+    // The device as the window holds it, in millimetres, and the window's
+    // canvas around it.
+    private var heldSize: NSSize {
+        orientation.quarterTurned ? NSSize(width: profile.height, height: profile.width)
+                                  : NSSize(width: profile.width, height: profile.height)
+    }
+    var canvas: NSSize {
+        NSSize(width: heldSize.width * profile.scale + margin * 2, height: heldSize.height * profile.scale + margin * 2)
+    }
+
+    // The window zoom (window points per canvas point) at which one guest
+    // pixel takes SHARE of a pixel of this Mac's screen: 1 is 100 %, the
+    // guest's picture pixel for pixel. The panel's width in pixels is the
+    // profile's: the VM runs with the profile's panel (a device switch
+    // restarts it), and the guest's last picture may still be the old one's.
+    func zoom(pixelShare share: CGFloat, backingScale: CGFloat) -> CGFloat {
+        profile.panelPixelsWide * share / backingScale / (profile.display.width * profile.scale)
+    }
+
+    // Device millimetres (upright) to the held device's millimetres, and back.
+    private func held(_ p: NSPoint) -> NSPoint {
+        let w = profile.width, h = profile.height
+        switch orientation {
+        case .normal: return p
+        case .leftUp: return NSPoint(x: h - p.y, y: p.x)
+        case .bottomUp: return NSPoint(x: w - p.x, y: h - p.y)
+        case .rightUp: return NSPoint(x: p.y, y: w - p.x)
+        }
+    }
+    private func upright(_ p: NSPoint) -> NSPoint {
+        let w = profile.width, h = profile.height
+        switch orientation {
+        case .normal: return p
+        case .leftUp: return NSPoint(x: p.y, y: h - p.x)
+        case .bottomUp: return NSPoint(x: w - p.x, y: h - p.y)
+        case .rightUp: return NSPoint(x: w - p.y, y: p.x)
+        }
+    }
+    // A device point to view coordinates.
+    private func viewPoint(_ p: NSPoint) -> NSPoint {
+        let q = held(p)
+        return NSPoint(x: (margin + q.x * profile.scale) * viewScale, y: (margin + q.y * profile.scale) * viewScale)
+    }
+
+    func setDevice(_ next: DeviceProfile) {
+        releaseGuestInput()
+        profile = next
+        orientation = .normal
+        needsLayout = true
+        needsDisplay = true
+    }
+
+    func setOrientation(_ next: Orientation) {
+        releaseGuestInput()
+        orientation = next
+        needsLayout = true
+        needsDisplay = true
+    }
     // The inner half of the bezel is the screen's edge: a drag that starts
     // there is a finger sliding onto the screen (the keyboard from the
     // bottom, panels from the sides and the top). The outer half moves the
@@ -54,6 +174,10 @@ final class SimulatorView: NSView {
         return displayRect.insetBy(dx: -side, dy: -end)
     }
     private var edgeTouch = false
+    // A press on the bezel's edge zone is a touch only once it moves: an edge
+    // swipe slides onto the screen, a tap on the frame is no touch at all.
+    // Until then the press waits here, and begins where it was pressed.
+    private var edgePress: NSEvent?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -66,6 +190,7 @@ final class SimulatorView: NSView {
             display.onFrame = { [weak self, weak display] in self?.screen.show(display?.image()) }
             display.onConnection = { [weak self] connected in
                 guard let self else { return }
+                if connected && !self.guestConnected { self.onConnect?() }
                 self.guestConnected = connected
                 if !connected {
                     self.releaseGuestInput()
@@ -141,8 +266,12 @@ final class SimulatorView: NSView {
             needsDisplay = true
         }
         if guestPointerDown {
-            if touchMode || edgeTouch { hardware?.touch("end", x: touchPosition.x, y: touchPosition.y) }
-            else { hardware?.pointer(x: touchPosition.x, y: touchPosition.y, buttons: 0) }
+            // A bezel press that never moved never began.
+            if edgePress == nil {
+                if touchMode || edgeTouch { hardware?.touch("end", x: touchPosition.x, y: touchPosition.y) }
+                else { let p = screenPoint(touchPosition); hardware?.pointer(x: p.x, y: p.y, buttons: 0) }
+            }
+            edgePress = nil
             guestPointerDown = false
             edgeTouch = false
         }
@@ -165,16 +294,31 @@ final class SimulatorView: NSView {
         let point = devicePoint(event)
         touchPosition = NSPoint(x: (point.x - displayRect.minX) / displayRect.width,
                                 y: (point.y - displayRect.minY) / displayRect.height)
-        hardware?.pointer(x: touchPosition.x, y: touchPosition.y, buttons: buttons)
+        let p = screenPoint(touchPosition)
+        hardware?.pointer(x: p.x, y: p.y, buttons: buttons)
     }
 
-    private var viewScale: CGFloat { bounds.width / Device.canvas.width }
+    // The USB tablet's position is the guest's screen as it shows, turned with
+    // the device: unlike touch (mapped to the panel, which turns it), labwc
+    // spreads an absolute pointer over the layout as it is. A panel point
+    // (0...1, upright) to that screen, as the window holds the device; the
+    // guest turns its screen the same way unless its rotation lock holds it.
+    private func screenPoint(_ p: NSPoint) -> NSPoint {
+        switch orientation {
+        case .normal: return p
+        case .leftUp: return NSPoint(x: 1 - p.y, y: p.x)
+        case .bottomUp: return NSPoint(x: 1 - p.x, y: 1 - p.y)
+        case .rightUp: return NSPoint(x: p.y, y: 1 - p.x)
+        }
+    }
+
+    private var viewScale: CGFloat { bounds.width / canvas.width }
     private func corner(at point: NSPoint) -> (right: Bool, top: Bool)? {
         let s = viewScale
-        let left = Device.margin * s
-        let right = (Device.margin + Device.width * Device.scale) * s
-        let top = Device.margin * s
-        let bottom = (Device.margin + Device.height * Device.scale) * s
+        let left = margin * s
+        let right = (margin + heldSize.width * profile.scale) * s
+        let top = margin * s
+        let bottom = (margin + heldSize.height * profile.scale) * s
         let reach: CGFloat = 17 * s
         if abs(point.x - left) < reach && abs(point.y - top) < reach { return (false, true) }
         if abs(point.x - right) < reach && abs(point.y - top) < reach { return (true, true) }
@@ -198,14 +342,12 @@ final class SimulatorView: NSView {
     private func devicePoint(_ event: NSEvent) -> NSPoint {
         let p = convert(event.locationInWindow, from: nil)
         let s = viewScale
-        return NSPoint(x: (p.x / s - Device.margin) / Device.scale, y: (p.y / s - Device.margin) / Device.scale)
+        return upright(NSPoint(x: (p.x / s - margin) / profile.scale, y: (p.y / s - margin) / profile.scale))
     }
 
     private func button(at p: NSPoint) -> HardwareButton? {
-        if NSRect(x: 125, y: -5, width: 28, height: 10).contains(p) { return .power }
-        if NSRect(x: 164, y: 31, width: 11, height: 19).contains(p) { return .volumeUp }
-        if NSRect(x: 164, y: 50, width: 11, height: 19).contains(p) { return .volumeDown }
-        if NSPoint(x: p.x - 84.75, y: p.y - 228.7).length < 7.3 { return .home }
+        for entry in profile.buttons where entry.hit.contains(p) { return entry.button }
+        if NSPoint(x: p.x - profile.home.midX, y: p.y - profile.home.midY).length < profile.home.width * 0.66 { return .home }
         return nil
     }
 
@@ -246,14 +388,22 @@ final class SimulatorView: NSView {
             guestFocused = true
             guestPointerDown = true
             edgeTouch = true
+            edgePress = event
             window?.makeFirstResponder(self)
-            sendTouch(event, phase: "begin")
             return
         }
-        releaseGuestKeys()
-        guestFocused = false
         resizeCorner = corner(at: convert(event.locationInWindow, from: nil))
         pressed = resizeCorner == nil ? button(at: devicePoint(event)) : nil
+        // A hardware button is part of the tablet: the Mac keyboard keeps
+        // typing into the guest after it (Home, then type to search). Only
+        // moving or resizing the frame hands the keyboard back to macOS.
+        if pressed == nil {
+            releaseGuestKeys()
+            guestFocused = false
+        } else if guestConnected {
+            guestFocused = true
+            window?.makeFirstResponder(self)
+        }
         if let pressed { hardware?.key(hardwareKey(pressed), down: true) }
         if pressed == nil {
             mouseDownScreen = NSEvent.mouseLocation
@@ -264,13 +414,19 @@ final class SimulatorView: NSView {
     }
     override func mouseDragged(with event: NSEvent) {
         if guestPointerDown {
+            if let press = edgePress {
+                let from = convert(press.locationInWindow, from: nil), to = convert(event.locationInWindow, from: nil)
+                guard hypot(to.x - from.x, to.y - from.y) >= 3 else { return }
+                edgePress = nil
+                sendTouch(press, phase: "begin")
+            }
             if touchMode || edgeTouch { sendTouch(event, phase: "update") } else { sendPointer(event, buttons: 1) }
             return
         }
         if let start = mouseDownScreen, let origin = windowOrigin {
             let now = NSEvent.mouseLocation
             if let corner = resizeCorner, let frame = resizeFrame {
-                let aspect = Device.canvas.width / Device.canvas.height
+                let aspect = canvas.width / canvas.height
                 let dx = (now.x - start.x) * (corner.right ? 1 : -1)
                 let dy = (now.y - start.y) * (corner.top ? 1 : -1) * aspect
                 let delta = abs(dx) >= abs(dy) ? dx : dy
@@ -286,7 +442,11 @@ final class SimulatorView: NSView {
     }
     override func mouseUp(with event: NSEvent) {
         if guestPointerDown {
-            if touchMode || edgeTouch { sendTouch(event, phase: "end") } else { sendPointer(event, buttons: 0) }
+            // A bezel press that never moved never began.
+            if edgePress == nil {
+                if touchMode || edgeTouch { sendTouch(event, phase: "end") } else { sendPointer(event, buttons: 0) }
+            }
+            edgePress = nil
             guestPointerDown = false
             edgeTouch = false
             return
@@ -305,8 +465,7 @@ final class SimulatorView: NSView {
         guard let window else { completion(); return }
         let device = NSPoint(x: displayRect.minX + displayRect.width * x / 768,
                              y: displayRect.minY + displayRect.height * y / 1024)
-        let location = convert(NSPoint(x: (Device.margin + device.x * Device.scale) * viewScale,
-                                       y: (Device.margin + device.y * Device.scale) * viewScale), to: nil)
+        let location = convert(viewPoint(device), to: nil)
         func event(_ type: NSEvent.EventType) -> NSEvent? {
             NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: 0,
                                windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)
@@ -323,8 +482,7 @@ final class SimulatorView: NSView {
         func event(_ type: NSEvent.EventType, _ y: CGFloat) -> NSEvent? {
             let device = NSPoint(x: displayRect.minX + displayRect.width * 620 / 768,
                                  y: displayRect.minY + displayRect.height * y / 1024)
-            let location = convert(NSPoint(x: (Device.margin + device.x * Device.scale) * viewScale,
-                                           y: (Device.margin + device.y * Device.scale) * viewScale), to: nil)
+            let location = convert(viewPoint(device), to: nil)
             return NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: 0,
                                       windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)
         }
@@ -343,8 +501,8 @@ final class SimulatorView: NSView {
     func testPowerButton(completion: @escaping (String) -> Void) {
         guard let window else { completion("FAIL: no window"); return }
         let initial = brightness
-        let p = convert(NSPoint(x: (Device.margin + 138 * Device.scale) * viewScale,
-                                y: (Device.margin - 0.2 * Device.scale) * viewScale), to: nil)
+        let power = profile.buttons.first { $0.button == .power }!.drawn
+        let p = convert(viewPoint(NSPoint(x: power.midX, y: power.midY)), to: nil)
         func click() {
             for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
                 guard let event = NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1) else { continue }
@@ -466,76 +624,99 @@ final class SimulatorView: NSView {
     }
 
     // The guest screen is its own layer above the drawn frame, so a guest
-    // frame never redraws the device around it.
+    // frame never redraws the device around it. It keeps the panel's own
+    // upright shape and turns with the device, as the real panel does; the
+    // guest turns its picture inside it.
     override func layout() {
         super.layout()
-        let s = viewScale * Device.scale
+        let a = viewPoint(NSPoint(x: displayRect.minX, y: displayRect.minY))
+        let b = viewPoint(NSPoint(x: displayRect.maxX, y: displayRect.maxY))
         // On whole device pixels, so drawing the frame adds no half-pixel blur.
-        screen.frame = backingAlignedRect(NSRect(x: (Device.margin + displayRect.minX * Device.scale) * viewScale,
-                                                 y: (Device.margin + displayRect.minY * Device.scale) * viewScale,
-                                                 width: displayRect.width * s, height: displayRect.height * s),
+        let heldRect = backingAlignedRect(NSRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y)),
                                           options: .alignAllEdgesNearest)
+        let size = orientation.quarterTurned ? NSSize(width: heldRect.height, height: heldRect.width) : heldRect.size
+        screen.frameCenterRotation = 0
+        screen.frame = NSRect(x: heldRect.midX - size.width / 2, y: heldRect.midY - size.height / 2, width: size.width, height: size.height)
+        screen.frameCenterRotation = orientation.degrees
     }
     override func setFrameSize(_ newSize: NSSize) { super.setFrameSize(newSize); needsLayout = true }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
+        let device = profile
         NSGraphicsContext.saveGraphicsState()
         let transform = NSAffineTransform()
         transform.scale(by: viewScale)
-        transform.translateX(by: Device.margin, yBy: Device.margin)
-        transform.scale(by: Device.scale)
+        transform.translateX(by: margin, yBy: margin)
+        transform.scale(by: device.scale)
+        // Held as the window holds it: turned clockwise about its corner.
+        switch orientation {
+        case .normal: break
+        case .leftUp: transform.translateX(by: device.height, yBy: 0)
+        case .bottomUp: transform.translateX(by: device.width, yBy: device.height)
+        case .rightUp: transform.translateX(by: 0, yBy: device.width)
+        }
+        transform.rotate(byDegrees: orientation.degrees)
         transform.concat()
 
+        let body = NSRect(x: 0, y: 0, width: device.width, height: device.height)
+        let r = device.cornerRadius
+        let dark = device.darkFront
+
         // Hardware controls sit behind the aluminium edge.
-        let power = NSRect(x: 128.5, y: -1.1, width: 19, height: 2.3)
-        let up = NSRect(x: 168.4, y: 34.5, width: 2.3, height: 12)
-        let down = NSRect(x: 168.4, y: 53, width: 2.3, height: 12)
-        for (button, rect) in [(HardwareButton.power, power), (.volumeUp, up), (.volumeDown, down)] {
-            gradient(rect, radius: 0.8, colors: [c(0.55), c(0.9), c(0.65)], angle: 0)
-            if hovered == button || pressed == button { glow(rect.insetBy(dx: -0.5, dy: -0.5), radius: 1.2) }
+        for entry in device.buttons {
+            let shades = dark ? [c(0.18), c(0.42), c(0.22)] : [c(0.55), c(0.9), c(0.65)]
+            gradient(entry.drawn, radius: 0.8, colors: shades, angle: entry.drawn.width > entry.drawn.height ? 90 : 0)
+            if hovered == entry.button || pressed == entry.button { glow(entry.drawn.insetBy(dx: -0.5, dy: -0.5), radius: 1.2) }
+        }
+        if let mute = device.muteSwitch {
+            gradient(mute, radius: 0.5, colors: dark ? [c(0.18), c(0.4), c(0.22)] : [c(0.55), c(0.9), c(0.65)], angle: 0)
         }
 
         // A shadow follows the silhouette, rather than adding a rectangular window border.
         NSGraphicsContext.saveGraphicsState()
         let shadow = NSShadow(); shadow.shadowColor = c(0, 0.40); shadow.shadowBlurRadius = 8
         shadow.shadowOffset = NSSize(width: 0, height: -2); shadow.set()
-        rounded(NSRect(x: 0, y: 0, width: 169.5, height: 240), 10, fill: c(0.75))
+        rounded(body, r, fill: c(dark ? 0.2 : 0.75))
         NSGraphicsContext.restoreGraphicsState()
 
-        // Silver chamfer, softly rounded white front glass, and the thin dark display gasket.
-        gradient(NSRect(x: 0, y: 0, width: 169.5, height: 240), radius: 10,
-                 colors: [c(0.65), c(0.96), c(0.72)], angle: 0)
-        rounded(NSRect(x: 0.85, y: 0.85, width: 167.8, height: 238.3), 9.1,
-                fill: c(0.96), stroke: c(1, 0.9), lineWidth: 0.35)
-        gradient(NSRect(x: 1.25, y: 1.25, width: 167, height: 237.5), radius: 8.8,
-                 colors: [c(0.94), c(0.992), c(0.96)], angle: 0)
+        // The metal edge, the softly rounded front glass, and the thin dark display gasket.
+        gradient(body, radius: r, colors: dark ? [c(0.12), c(0.34), c(0.16)] : [c(0.65), c(0.96), c(0.72)], angle: 0)
+        let glass = body.insetBy(dx: 0.85, dy: 0.85)
+        rounded(glass, r - 0.9, fill: c(dark ? 0.05 : 0.96), stroke: c(dark ? 0.32 : 1, 0.9), lineWidth: 0.35)
+        gradient(body.insetBy(dx: 1.25, dy: 1.25), radius: r - 1.2,
+                 colors: dark ? [c(0.035), c(0.075), c(0.045)] : [c(0.94), c(0.992), c(0.96)], angle: 0)
 
-        // 9.7-inch display is 147.83 × 197.10 mm (4:3), centered horizontally.
         let display = displayRect
-        rounded(display.insetBy(dx: -0.35, dy: -0.35), 0.45, fill: c(0.14))
-        rounded(display, 0.12, fill: NSColor(calibratedRed: 0.025, green: 0.029, blue: 0.035, alpha: 1))
+        rounded(display.insetBy(dx: -0.35, dy: -0.35), device.displayRadius + 0.33, fill: c(dark ? 0.02 : 0.14))
+        rounded(display, device.displayRadius, fill: NSColor(calibratedRed: 0.025, green: 0.029, blue: 0.035, alpha: 1))
         // A restrained glass reflection; no fake desktop or fabricated device state.
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: display).addClip()
         let reflection = NSBezierPath()
         reflection.move(to: NSPoint(x: display.minX, y: display.minY))
         reflection.line(to: NSPoint(x: display.maxX, y: display.minY))
-        reflection.line(to: NSPoint(x: display.minX, y: display.minY + 88))
+        reflection.line(to: NSPoint(x: display.minX, y: display.minY + display.height * 0.45))
         reflection.close()
         c(1, 0.012).setFill(); reflection.fill()
         NSGraphicsContext.restoreGraphicsState()
 
-        // Front camera and home button ring.
-        rounded(NSRect(x: 83.1, y: 9.0, width: 3.3, height: 3.3), 1.65, fill: c(0.71))
-        rounded(NSRect(x: 83.55, y: 9.45, width: 2.4, height: 2.4), 1.2,
+        // Front camera, earpiece and the Home button ring.
+        let cam = device.camera
+        rounded(NSRect(x: cam.x - 1.65, y: cam.y - 1.65, width: 3.3, height: 3.3), 1.65, fill: c(dark ? 0.16 : 0.71))
+        rounded(NSRect(x: cam.x - 1.2, y: cam.y - 1.2, width: 2.4, height: 2.4), 1.2,
                 fill: NSColor(calibratedRed: 0.10, green: 0.14, blue: 0.18, alpha: 1))
-        rounded(NSRect(x: 84.25, y: 9.95, width: 0.65, height: 0.65), 0.32, fill: c(0.49))
-        let home = NSRect(x: 79.2, y: 223.15, width: 11.1, height: 11.1)
-        gradient(home, radius: 5.55, colors: [c(0.62), c(0.94), c(0.69)], angle: 45)
-        rounded(home.insetBy(dx: 0.65, dy: 0.65), 4.9, fill: c(0.97), stroke: c(1, 0.8), lineWidth: 0.15)
-        if hovered == .home || pressed == .home { glow(home.insetBy(dx: -0.6, dy: -0.6), radius: 6.2) }
-        if pressed == .home { rounded(home.insetBy(dx: 0.8, dy: 0.8), 4.7, fill: c(0.86, 0.35)) }
+        rounded(NSRect(x: cam.x - 0.5, y: cam.y - 0.7, width: 0.65, height: 0.65), 0.32, fill: c(0.49))
+        if let earpiece = device.earpiece {
+            rounded(earpiece, earpiece.height / 2, fill: c(dark ? 0.13 : 0.62), stroke: c(dark ? 0.24 : 0.5, 0.8), lineWidth: 0.15)
+        }
+        let home = device.home
+        let ring = dark ? [c(0.28), c(0.55), c(0.32)] : [c(0.62), c(0.94), c(0.69)]
+        gradient(home, radius: home.width / 2, colors: ring, angle: 45)
+        rounded(home.insetBy(dx: 0.65, dy: 0.65), home.width / 2 - 0.65, fill: c(dark ? 0.06 : 0.97),
+                stroke: c(dark ? 0.3 : 1, 0.8), lineWidth: 0.15)
+        if hovered == .home || pressed == .home { glow(home.insetBy(dx: -0.6, dy: -0.6), radius: home.width / 2 + 0.6) }
+        if pressed == .home { rounded(home.insetBy(dx: 0.8, dy: 0.8), home.width / 2 - 0.8, fill: c(dark ? 0.35 : 0.86, 0.35)) }
 
         NSGraphicsContext.restoreGraphicsState()
     }
@@ -578,7 +759,7 @@ final class SimulatorWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var window: NSWindow!
     func applicationDidFinishLaunching(_ notification: Notification) {
         let app = NSApplication.shared
@@ -607,6 +788,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             appMenu.addItem(.separator())
         }
+        let view = SimulatorView(frame: .zero)
+        if let directory = ProcessInfo.processInfo.environment["ORCHARD_VM_DIR"] {
+            // The device the VM's panel was started for.
+            let name = (try? String(contentsOfFile: directory + "/device", encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? "ipad6"
+            view.setDevice(DeviceProfile.named(name))
+            if ProcessInfo.processInfo.environment["ORCHARD_VM_SCRIPT"] != nil {
+                for device in DeviceProfile.all {
+                    let item = NSMenuItem(title: device.title, action: #selector(selectDevice(_:)), keyEquivalent: "")
+                    item.target = self
+                    item.representedObject = device.name
+                    item.state = device.name == view.profile.name ? .on : .off
+                    appMenu.addItem(item)
+                }
+                appMenu.addItem(.separator())
+            }
+            // A VM restarted as another device from a terminal
+            // (`simulator/vm device iphone7`): the window takes its frame.
+            view.onConnect = { [weak self, weak view] in
+                guard let self, let view else { return }
+                let name = (try? String(contentsOfFile: directory + "/device", encoding: .utf8))?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? "ipad6"
+                guard name != view.profile.name else { return }
+                self.refit(view) { view.setDevice(DeviceProfile.named(name)) }
+                self.markDevice(name)
+            }
+            // Upright to begin with, whatever the VM last felt.
+            sendControl("orientation normal")
+        }
+        // For the render check: draw another device, or the device turned.
+        if let name = ProcessInfo.processInfo.environment["ORCHARD_SIMULATOR_DEVICE"] { view.setDevice(DeviceProfile.named(name)) }
+        if let held = ProcessInfo.processInfo.environment["ORCHARD_SIMULATOR_ORIENTATION"].flatMap(Orientation.init(rawValue:)) {
+            view.setOrientation(held)
+        }
+        for (title, clockwise, key) in [("Rotate Left", false, NSLeftArrowFunctionKey), ("Rotate Right", true, NSRightArrowFunctionKey)] {
+            let item = NSMenuItem(title: title, action: #selector(rotate(_:)), keyEquivalent: String(Character(UnicodeScalar(key)!)))
+            item.keyEquivalentModifierMask = [.command, .control]
+            item.target = self
+            item.tag = clockwise ? 1 : 0
+            appMenu.addItem(item)
+        }
+        appMenu.addItem(.separator())
         let touch = NSMenuItem(title: "Touch Input", action: #selector(selectTouchInput(_:)), keyEquivalent: "")
         touch.target = self
         touch.tag = 1
@@ -617,6 +840,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mouse.tag = 0
         appMenu.addItem(mouse)
         appMenu.addItem(.separator())
+        // The Mac's own: a menu key equivalent is the Mac's before the guest
+        // sees Command as Super.
+        appMenu.addItem(withTitle: "Hide Orchard Simulator", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthers = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(hideOthers)
+        appMenu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Orchard Simulator", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         if ProcessInfo.processInfo.environment["ORCHARD_VM_SCRIPT"] != nil {
             let detach = NSMenuItem(title: "Quit and Keep VM Running", action: #selector(quitKeepingVM), keyEquivalent: "q")
@@ -626,18 +857,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appMenu.addItem(detach)
         }
         appItem.submenu = appMenu
+        // Scale: the guest's picture at a share of the Mac's own pixels
+        // (100 % is pixel for pixel), or as large as the screen allows.
+        let scaleItem = NSMenuItem()
+        menu.addItem(scaleItem)
+        let scaleMenu = NSMenu(title: "Scale")
+        for (title, share) in [("50%", 0.5), ("75%", 0.75), ("100%", 1.0)] {
+            let item = NSMenuItem(title: title, action: #selector(selectScale(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = share
+            scaleMenu.addItem(item)
+        }
+        scaleMenu.addItem(.separator())
+        let fit = NSMenuItem(title: "Fit to Screen", action: #selector(selectScale(_:)), keyEquivalent: "")
+        fit.target = self
+        scaleMenu.addItem(fit)
+        scaleMenu.delegate = self
+        scaleItem.submenu = scaleMenu
         app.mainMenu = menu
-        window = SimulatorWindow(contentRect: NSRect(origin: .zero, size: Device.canvas), styleMask: [.borderless], backing: .buffered, defer: false)
+        window = SimulatorWindow(contentRect: NSRect(origin: .zero, size: view.canvas), styleMask: [.borderless], backing: .buffered, defer: false)
         window.title = "Orchard Simulator"
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = false
         window.acceptsMouseMovedEvents = true
         window.isReleasedWhenClosed = false
-        window.contentView = SimulatorView(frame: NSRect(origin: .zero, size: Device.canvas))
+        view.frame = NSRect(origin: .zero, size: view.canvas)
+        window.contentView = view
         window.center()
-        window.makeKeyAndOrderFront(nil)
-        app.activate(ignoringOtherApps: true)
+        // Started in the background (a rebuild while the person works
+        // elsewhere): shown, but not brought to the front.
+        if ProcessInfo.processInfo.environment["ORCHARD_SIMULATOR_BACKGROUND"] == "1" {
+            window.orderFront(nil)
+        } else {
+            window.makeKeyAndOrderFront(nil)
+            app.activate(ignoringOtherApps: true)
+        }
         if let path = ProcessInfo.processInfo.environment["ORCHARD_SIMULATOR_TOUCH_CHECK"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                 guard let view = self?.window.contentView as? SimulatorView else { app.terminate(nil); return }
@@ -690,6 +945,137 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.runModal()
         }
     }
+    // The Scale menu's choice: a share of the Mac's pixels, or nil for Fit
+    // to Screen; none until one is picked.
+    private var scaleChoice: Double??
+
+    // The window zoom a Scale choice means for the device as it is now.
+    private func zoom(for choice: Double?, _ view: SimulatorView) -> CGFloat {
+        if let share = choice { return view.zoom(pixelShare: CGFloat(share), backingScale: window.backingScaleFactor) }
+        let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? window.frame
+        return min(visible.width / view.canvas.width, visible.height / view.canvas.height)
+    }
+    // Whether the window is at that choice now (not resized off it since).
+    private func isAt(_ choice: Double?, _ view: SimulatorView) -> Bool {
+        let target = zoom(for: choice, view)
+        return abs(window.frame.width / view.canvas.width - target) <= target * 0.01
+    }
+
+    // The tick goes on whichever scale the window is at as the menu opens:
+    // none after the window was resized to something else.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard let view = window.contentView as? SimulatorView else { return }
+        for entry in menu.items where entry.action == #selector(selectScale(_:)) {
+            entry.state = isAt(entry.representedObject as? Double, view) ? .on : .off
+        }
+    }
+
+    @objc private func selectScale(_ item: NSMenuItem) {
+        guard let view = window.contentView as? SimulatorView else { return }
+        scaleChoice = .some(item.representedObject as? Double)
+        applyScale(view)
+    }
+
+    // The window at a share of the Mac's pixels, or fitted to the screen,
+    // about its own centre and kept on the screen.
+    private func applyScale(_ view: SimulatorView) {
+        guard let choice = scaleChoice else { return }
+        let screen = window.screen ?? NSScreen.main
+        let visible = screen?.visibleFrame ?? window.frame
+        let zoom = zoom(for: choice, view)
+        let size = NSSize(width: view.canvas.width * zoom, height: view.canvas.height * zoom)
+        var frame = NSRect(x: window.frame.midX - size.width / 2, y: window.frame.midY - size.height / 2,
+                           width: size.width, height: size.height)
+        // Keep the top on the screen (where the menu bar is); larger than the
+        // screen, it runs off the bottom.
+        frame.origin.y = min(frame.origin.y, visible.maxY - frame.height)
+        frame.origin.x = max(visible.minX, min(frame.origin.x, visible.maxX - frame.width))
+        window.setFrame(frame, display: true)
+    }
+
+    // Turns the device in the window, frame and screen together, and tells the
+    // VM's accelerometer; the guest turns its picture as a tablet does.
+    @objc private func rotate(_ item: NSMenuItem) {
+        guard let view = window.contentView as? SimulatorView else { return }
+        let next = view.orientation.turned(clockwise: item.tag == 1)
+        refit(view) { view.setOrientation(next) }
+        sendControl("orientation \(next.rawValue)")
+    }
+
+    // Another device means another panel: the VM restarts with it, on the
+    // same disk; the session starts again at the PIN screen.
+    @objc private func selectDevice(_ item: NSMenuItem) {
+        guard let view = window.contentView as? SimulatorView, let name = item.representedObject as? String,
+              name != view.profile.name else { return }
+        let device = DeviceProfile.named(name)
+        let confirm = NSAlert()
+        confirm.messageText = "Switch to \(device.title)?"
+        confirm.informativeText = "The VM restarts with the \(device.title)'s screen. Open apps close; the disk stays as it is."
+        confirm.addButton(withTitle: "Restart as \(device.title)")
+        confirm.addButton(withTitle: "Cancel")
+        guard confirm.runModal() == .alertFirstButtonReturn else { return }
+        window.alphaValue = 0.5
+        runVM(["device", name]) { ok, message in
+            self.window.alphaValue = 1
+            guard ok else {
+                let alert = NSAlert()
+                alert.messageText = "Could not switch the device"
+                alert.informativeText = message
+                alert.runModal()
+                return
+            }
+            self.refit(view) { view.setDevice(device) }
+            self.markDevice(name)
+        }
+    }
+
+    // The Device menu's tick on NAME.
+    private func markDevice(_ name: String) {
+        func walk(_ menu: NSMenu?) {
+            for entry in menu?.items ?? [] {
+                if entry.action == #selector(selectDevice(_:)) { entry.state = (entry.representedObject as? String) == name ? .on : .off }
+                walk(entry.submenu)
+            }
+        }
+        walk(NSApp.mainMenu)
+    }
+
+    // Resizes the window to the view's new canvas at the same zoom, about the
+    // same centre; at a Scale choice still, the choice is applied to the new
+    // device or orientation instead (100 % stays pixel for pixel).
+    private func refit(_ view: SimulatorView, _ change: () -> Void) {
+        let zoom = window.frame.width / view.canvas.width
+        let center = NSPoint(x: window.frame.midX, y: window.frame.midY)
+        let keepChoice = scaleChoice.map { isAt($0, view) } ?? false
+        change()
+        if keepChoice { applyScale(view); return }
+        let size = NSSize(width: view.canvas.width * zoom, height: view.canvas.height * zoom)
+        window.setFrame(NSRect(x: center.x - size.width / 2, y: center.y - size.height / 2, width: size.width, height: size.height), display: true)
+    }
+
+    // One line to the VM bridge (org.orchard.control), as the VM script sends it.
+    private func sendControl(_ line: String) {
+        guard let directory = ProcessInfo.processInfo.environment["ORCHARD_VM_DIR"] else { return }
+        DispatchQueue.global().async {
+            let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+            guard fd >= 0 else { return }
+            defer { close(fd) }
+            var address = sockaddr_un()
+            address.sun_family = sa_family_t(AF_UNIX)
+            let path = directory + "/control.sock"
+            guard path.utf8.count < MemoryLayout.size(ofValue: address.sun_path) else { return }
+            withUnsafeMutableBytes(of: &address.sun_path) { buffer in
+                path.utf8CString.withUnsafeBytes { buffer.copyMemory(from: $0) }
+            }
+            let connected = withUnsafePointer(to: &address) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+            }
+            guard connected == 0 else { return }
+            let data = Array((line + "\n").utf8)
+            _ = data.withUnsafeBytes { Darwin.send(fd, $0.baseAddress, $0.count, 0) }
+        }
+    }
+
     @objc private func selectTouchInput(_ item: NSMenuItem) {
         guard let view = window.contentView as? SimulatorView else { return }
         view.setTouchMode(item.tag == 1)

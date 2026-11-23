@@ -470,7 +470,7 @@ index 00000000..9f771d22
 +    rtkit_free(ans1_rtkit);
 +    free(cmd);
 +    free(ans1_akf);
-+    free(cmd);
++    cmd = NULL;
 +
 +    pmgr_adt_power_disable("/arm-io/ans");
 +

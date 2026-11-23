@@ -73,9 +73,15 @@ PY
 # session's own probe finds no GPU and picks the software desktop, as on a
 # board without one; this flag, which the simulator's menu switches, sends it
 # to the GPU desktop instead. GPU is the default.
-session=$MOUNT/usr/local/libexec/arch-ipad-login-session
-grep -q '^exec /usr/bin/labwc -m$' "$session" || { echo "$session: no Labwc start to hook" >&2; exit 1; }
-sed -i 's|^exec /usr/bin/labwc -m$|# Orchard Simulator: the GPU desktop on Mesa software OpenGL (/etc/omarchy-a/simulator-gpu).\nif [[ -e /etc/omarchy-a/simulator-gpu ]]; then export WLR_RENDERER=gles2 WLR_RENDERER_ALLOW_SOFTWARE=1; unset QT_QUICK_BACKEND; fi\nexec /usr/bin/labwc -m|' "$session"
+# Packaged releases (0.3.2 on) install it in /usr/libexec, earlier ones in /usr/local/libexec.
+session=$MOUNT/usr/libexec/arch-ipad-login-session
+[[ -e $session ]] || session=$MOUNT/usr/local/libexec/arch-ipad-login-session
+# The hook goes before Labwc starts: its `exec` in releases up to 0.3.x, the
+# start-locked export (followed by the restart loop) since the session
+# starts locked.
+hook='^\(exec /usr/bin/labwc -m\|export OMARCHY_START_LOCKED=1\)$'
+grep -q "$hook" "$session" || { echo "$session: no Labwc start to hook" >&2; exit 1; }
+sed -i "\\%$hook%i # Orchard Simulator: the GPU desktop on Mesa software OpenGL (/etc/omarchy-a/simulator-gpu).\\nif [[ -e /etc/omarchy-a/simulator-gpu ]]; then export WLR_RENDERER=gles2 WLR_RENDERER_ALLOW_SOFTWARE=1; unset QT_QUICK_BACKEND; fi" "$session"
 mkdir -p "$MOUNT/etc/omarchy-a"
 touch "$MOUNT/etc/omarchy-a/simulator-gpu"
 
