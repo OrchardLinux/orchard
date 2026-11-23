@@ -1,0 +1,135 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tompta1 <546706+tompta1@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 03:08:10 +0800
+Subject: [PATCH] Bluetooth: btbcm: Add the Apple radio calibration and
+ regulatory commands
+
+Apple's Broadcom modules take their per-unit RF calibration (the ADT's
+Taurus calibration, which the boot loader puts in "brcm,taurus-cal-blob")
+through vendor command 0xfd97, in zero-padded 230-byte blocks that count
+down the blocks left, and their regulatory table in one 0xfd98 command.
+Add both senders for the UART drivers; nothing calls them yet.
+
+[Orchard: from OrchardLinux/orchard#205 (tompta1, 09038adf),
+ kernel/patches/drivers/bluetooth/0009; only the two senders kept, the
+ exact-name firmware loader dropped: the module's Patchram is found by
+ the existing vendor variant names.]
+
+Assisted-by: LLM
+---
+ drivers/bluetooth/btbcm.c | 69 +++++++++++++++++++++++++++++++++++++++
+ drivers/bluetooth/btbcm.h | 14 ++++++++
+ 2 files changed, 83 insertions(+)
+
+diff --git a/drivers/bluetooth/btbcm.c b/drivers/bluetooth/btbcm.c
+index baba42563..cb1a56b2e 100644
+--- a/drivers/bluetooth/btbcm.c
++++ b/drivers/bluetooth/btbcm.c
+@@ -172,6 +172,75 @@ int btbcm_set_bdaddr(struct hci_dev *hdev, const bdaddr_t *bdaddr)
+ }
+ EXPORT_SYMBOL_GPL(btbcm_set_bdaddr);
+ 
++/* Taurus calibration uses fixed-size, zero-padded vendor command packets. */
++int btbcm_send_calibration(struct hci_dev *hdev, const void *data, size_t size)
++{
++	struct {
++		u8 type;
++		__le16 blocks_left;
++		u8 data[230];
++	} __packed cmd;
++	const u8 *cursor = data;
++	size_t blocks, len;
++	struct sk_buff *skb;
++	int err;
++
++	if (!data || !size)
++		return -EINVAL;
++
++	/* The remaining-block count on the wire has only 16 bits. */
++	if (size > sizeof(cmd.data) * ((size_t)U16_MAX + 1))
++		return -E2BIG;
++
++	blocks = DIV_ROUND_UP(size, sizeof(cmd.data));
++	while (blocks) {
++		len = min(size, sizeof(cmd.data));
++		memset(&cmd, 0, sizeof(cmd));
++		cmd.type = 3;
++		cmd.blocks_left = cpu_to_le16(--blocks);
++		memcpy(cmd.data, cursor, len);
++
++		skb = __hci_cmd_sync(hdev, 0xfd97, sizeof(cmd), &cmd,
++				     HCI_INIT_TIMEOUT);
++		if (IS_ERR(skb))
++			return PTR_ERR(skb);
++
++		/* Some firmware returns a zero-extended status reply. */
++		if ((skb->len != 1 && skb->len != 2) ||
++		    skb->data[0] || (skb->len == 2 && skb->data[1])) {
++			err = (skb->len == 1 || skb->len == 2) && skb->data[0] ?
++				-bt_to_errno(skb->data[0]) : -EIO;
++			kfree_skb(skb);
++			return err;
++		}
++		kfree_skb(skb);
++		cursor += len;
++		size -= len;
++	}
++
++	return 0;
++}
++EXPORT_SYMBOL_GPL(btbcm_send_calibration);
++
++/* Legacy controllers accept the regulatory table in one vendor command. */
++int btbcm_send_regulatory(struct hci_dev *hdev, const void *data, size_t size)
++{
++	struct sk_buff *skb;
++	int err = 0;
++
++	if (!data || !size || size > U8_MAX)
++		return -EINVAL;
++
++	skb = __hci_cmd_sync(hdev, 0xfd98, size, data, HCI_INIT_TIMEOUT);
++	if (IS_ERR(skb))
++		return PTR_ERR(skb);
++	if (skb->len != 1 || skb->data[0])
++		err = skb->len == 1 ? -bt_to_errno(skb->data[0]) : -EIO;
++	kfree_skb(skb);
++	return err;
++}
++EXPORT_SYMBOL_GPL(btbcm_send_regulatory);
++
+ int btbcm_read_pcm_int_params(struct hci_dev *hdev,
+ 			      struct bcm_set_pcm_int_params *params)
+ {
+diff --git a/drivers/bluetooth/btbcm.h b/drivers/bluetooth/btbcm.h
+index b902c2c32..f92f8498e 100644
+--- a/drivers/bluetooth/btbcm.h
++++ b/drivers/bluetooth/btbcm.h
+@@ -55,6 +55,8 @@ int btbcm_check_bdaddr(struct hci_dev *hdev);
+ int btbcm_reset(struct hci_dev *hdev);
+ int btbcm_set_bdaddr(struct hci_dev *hdev, const bdaddr_t *bdaddr);
+ int btbcm_patchram(struct hci_dev *hdev, const struct firmware *fw);
++int btbcm_send_calibration(struct hci_dev *hdev, const void *data, size_t size);
++int btbcm_send_regulatory(struct hci_dev *hdev, const void *data, size_t size);
+ int btbcm_read_pcm_int_params(struct hci_dev *hdev,
+ 			      struct bcm_set_pcm_int_params *params);
+ int btbcm_write_pcm_int_params(struct hci_dev *hdev,
+@@ -85,6 +87,18 @@ static inline int btbcm_set_bdaddr(struct hci_dev *hdev, const bdaddr_t *bdaddr)
+ 	return -EOPNOTSUPP;
+ }
+ 
++static inline int btbcm_send_regulatory(struct hci_dev *hdev,
++					const void *data, size_t size)
++{
++	return -EOPNOTSUPP;
++}
++
++static inline int btbcm_send_calibration(struct hci_dev *hdev,
++					 const void *data, size_t size)
++{
++	return -EOPNOTSUPP;
++}
++
+ static inline int btbcm_read_pcm_int_params(struct hci_dev *hdev,
+ 			      struct bcm_set_pcm_int_params *params)
+ {
