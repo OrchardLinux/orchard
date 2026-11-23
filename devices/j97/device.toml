@@ -31,7 +31,7 @@ status = "experimental"
 # (tools/catalog/drivers.json), plus the display's boot console.
 [features]
 display = "untested"
-screen_off = "missing"
+screen_off = "untested" # Display pipe enabled on every A8 board, as on the N61
 backlight = "untested"
 gpu_desktop = "untested"
 touch = "untested" # apple_z2 with the J96 data (C1F14,4): the ADT and mtprops match the J96's.
@@ -40,11 +40,11 @@ accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "missing"
 touch_id = "missing"
-storage_read = "missing"
-storage_write = "missing"
+storage_read = "untested" # ANS1 on every A8 board (t7000-common.dtsi), as on the N102
+storage_write = "untested" # Same ANS1 and asp driver as the N102
 wifi = "untested" # BCM4350 over PCIe (brcmfmac), module zinfandelb; wired as on the J96.
-bluetooth_input = "missing"
-bluetooth_audio = "missing"
+bluetooth_input = "missing" # BlueTool has two Zinfandel patchrams per vendor (by controller revision); hci_bcm chooses by vendor only, so a unit's one isn't decidable yet
+bluetooth_audio = "missing" # Same as Bluetooth input
 cellular = "missing"
 battery = "untested" # bq27xxx over HDQ (W1_MASTER_UART), as on the J96.
 charging = "missing"

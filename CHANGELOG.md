@@ -13,6 +13,10 @@ is missing or empty.
 
 ### Devices
 
+- iPhone 6, iPhone 6 Plus and iPad mini 4 (A8): internal storage on every
+  model, as on the iPod touch 6, so they can install. The iPhone 6 and
+  6 Plus also get the iPod touch 6's Wi-Fi and Bluetooth, with their own
+  firmware in their recipes. Untested.
 - iPad Air 2 (Cellular) (A8X): the speakers and Lightning charging of the
   Wi-Fi model; its recipe now carries the SmartIO firmware the speakers
   need. Untested.

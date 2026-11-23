@@ -38,7 +38,7 @@ tested_by = ["tcballard"] # omarchy-a issue #69
 # bring-up driver, not on apple_z2.
 [features]
 display = "working"
-screen_off = "missing"
+screen_off = "untested" # Display pipe enabled on every A8 board, as on the N61
 backlight = "working"
 gpu_desktop = "untested"
 touch = "untested" # apple_z2 (C1F14,4) never run here; multitouch worked on a local bring-up driver.
@@ -47,11 +47,11 @@ accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "missing"
 touch_id = "missing"
-storage_read = "missing"
-storage_write = "missing"
+storage_read = "untested" # ANS1 on every A8 board (t7000-common.dtsi), as on the N102
+storage_write = "untested" # Same ANS1 and asp driver as the N102
 wifi = "working" # BCM4350 over PCIe (brcmfmac); C2 and C5 modules exist, C5 seen working.
-bluetooth_input = "missing"
-bluetooth_audio = "missing"
+bluetooth_input = "missing" # BlueTool has two Zinfandel patchrams per vendor (by controller revision); hci_bcm chooses by vendor only, so a unit's one isn't decidable yet
+bluetooth_audio = "missing" # Same as Bluetooth input
 cellular = "none"
 battery = "working" # bq27xxx over HDQ (W1_MASTER_UART).
 charging = "missing"

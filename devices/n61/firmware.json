@@ -28,6 +28,111 @@
         }
       },
       "sha256": "1d996c85affa1f37a07c6454dd5d3a383d4855206d113c9599200d79b6467ff8"
+    },
+    "P-tempranillo_M-CORO_V-m__m-3.10.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-m__m-3.10.txt"
+      },
+      "sha256": "3298a2430e685943e601cd1e70abe2a80dbd09d7a003f0f5daa741a6d1a3dd2e",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-m__m-3.10.txt"
+    },
+    "P-tempranillo_M-CORO_V-m__m-3.11.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-m__m-3.11.txt"
+      },
+      "sha256": "3298a2430e685943e601cd1e70abe2a80dbd09d7a003f0f5daa741a6d1a3dd2e",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-m__m-3.11.txt"
+    },
+    "P-tempranillo_M-CORO_V-m__m-3.7.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-m__m-3.7.txt"
+      },
+      "sha256": "2a7868df61d5cb61fc4aceb3c75336b08f3ba0da573219f2c713b1c6b7c14d94",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-m__m-3.7.txt"
+    },
+    "P-tempranillo_M-CORO_V-m__m-3.8.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-m__m-3.8.txt"
+      },
+      "sha256": "2a7868df61d5cb61fc4aceb3c75336b08f3ba0da573219f2c713b1c6b7c14d94",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-m__m-3.8.txt"
+    },
+    "P-tempranillo_M-CORO_V-m__m-3.9.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-m__m-3.9.txt"
+      },
+      "sha256": "2a7868df61d5cb61fc4aceb3c75336b08f3ba0da573219f2c713b1c6b7c14d94",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-m__m-3.9.txt"
+    },
+    "P-tempranillo_M-CORO_V-m__m-4.0.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-m__m-4.0.txt"
+      },
+      "sha256": "2a7868df61d5cb61fc4aceb3c75336b08f3ba0da573219f2c713b1c6b7c14d94",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-m__m-4.0.txt"
+    },
+    "P-tempranillo_M-CORO_V-m__m-4.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-m__m-4.1.txt"
+      },
+      "sha256": "2a7868df61d5cb61fc4aceb3c75336b08f3ba0da573219f2c713b1c6b7c14d94",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-m__m-4.1.txt"
+    },
+    "P-tempranillo_M-CORO_V-m__m-5.0.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-m__m-5.0.txt"
+      },
+      "sha256": "2a7868df61d5cb61fc4aceb3c75336b08f3ba0da573219f2c713b1c6b7c14d94",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-m__m-5.0.txt"
+    },
+    "P-tempranillo_M-CORO_V-m__m-5.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-m__m-5.1.txt"
+      },
+      "sha256": "2a7868df61d5cb61fc4aceb3c75336b08f3ba0da573219f2c713b1c6b7c14d94",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-m__m-5.1.txt"
+    },
+    "P-tempranillo_M-CORO_V-u__m-3.7.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-u__m-3.7.txt"
+      },
+      "sha256": "44a79ee200562952efd212e937b419d45b423731522db01b81d3d5e8ce141eba",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-u__m-3.7.txt"
+    },
+    "tempranillo.clmb": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/tempranillo.clmb"
+      },
+      "sha256": "d5ce5a595884104c2cd9e10ce2bdeee64032947ad77ff501bea181d974b2b4a4",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/tempranillo.clmb"
+    },
+    "tempranillo.trx": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/tempranillo.trx"
+      },
+      "sha256": "bc607420e25e9ca6bbb84b5789126c72a6fd682cbceead3c404bc7cf99ba95fd",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/tempranillo.trx"
+    },
+    "tempranillo.txcb": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/tempranillo.txcb"
+      },
+      "sha256": "f52fa3d2df6e8b7f5f09b939e83d96a152a4bf6a395dfb872f94c2b23949c7fd",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/tempranillo.txcb"
+    },
+    "P-tempranillo_M-CORO_V-t__m-3.7.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-t__m-3.7.txt"
+      },
+      "sha256": "c552dd57785aaac1d40130f4af3fe51449de5bc779ce3d067165ecdcde78dc64",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/P-tempranillo_M-CORO_V-t__m-3.7.txt"
+    },
+    "BlueTool": {
+      "ipsw": {
+        "rootfs": "usr/sbin/BlueTool"
+      },
+      "device": "/usr/sbin/BlueTool",
+      "sha256": "0a51f90b476cff613e5ea8ce9be841b152241cab661eaf20aeb6d26912ebf918"
     }
   },
   "outputs": [
@@ -65,6 +170,176 @@
         {
           "step": "agx-g4p-border-from-kernelcache@1",
           "input": "kernelcache-n102ap-16G77"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,tempranillo-CORO-m-3.10.txt",
+      "sha256": "3298a2430e685943e601cd1e70abe2a80dbd09d7a003f0f5daa741a6d1a3dd2e",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-tempranillo_M-CORO_V-m__m-3.10.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,tempranillo-CORO-m-3.11.txt",
+      "sha256": "3298a2430e685943e601cd1e70abe2a80dbd09d7a003f0f5daa741a6d1a3dd2e",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-tempranillo_M-CORO_V-m__m-3.11.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,tempranillo-CORO-m-3.7.txt",
+      "sha256": "2a7868df61d5cb61fc4aceb3c75336b08f3ba0da573219f2c713b1c6b7c14d94",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-tempranillo_M-CORO_V-m__m-3.7.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,tempranillo-CORO-m-3.8.txt",
+      "sha256": "2a7868df61d5cb61fc4aceb3c75336b08f3ba0da573219f2c713b1c6b7c14d94",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-tempranillo_M-CORO_V-m__m-3.8.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,tempranillo-CORO-m-3.9.txt",
+      "sha256": "2a7868df61d5cb61fc4aceb3c75336b08f3ba0da573219f2c713b1c6b7c14d94",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-tempranillo_M-CORO_V-m__m-3.9.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,tempranillo-CORO-m-4.0.txt",
+      "sha256": "2a7868df61d5cb61fc4aceb3c75336b08f3ba0da573219f2c713b1c6b7c14d94",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-tempranillo_M-CORO_V-m__m-4.0.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,tempranillo-CORO-m-4.1.txt",
+      "sha256": "2a7868df61d5cb61fc4aceb3c75336b08f3ba0da573219f2c713b1c6b7c14d94",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-tempranillo_M-CORO_V-m__m-4.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,tempranillo-CORO-m-5.0.txt",
+      "sha256": "2a7868df61d5cb61fc4aceb3c75336b08f3ba0da573219f2c713b1c6b7c14d94",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-tempranillo_M-CORO_V-m__m-5.0.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,tempranillo-CORO-m-5.1.txt",
+      "sha256": "2a7868df61d5cb61fc4aceb3c75336b08f3ba0da573219f2c713b1c6b7c14d94",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-tempranillo_M-CORO_V-m__m-5.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,tempranillo-CORO-u-3.7.txt",
+      "sha256": "44a79ee200562952efd212e937b419d45b423731522db01b81d3d5e8ce141eba",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-tempranillo_M-CORO_V-u__m-3.7.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,tempranillo.clm_blob",
+      "sha256": "d5ce5a595884104c2cd9e10ce2bdeee64032947ad77ff501bea181d974b2b4a4",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "tempranillo.clmb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,tempranillo.bin",
+      "sha256": "bc607420e25e9ca6bbb84b5789126c72a6fd682cbceead3c404bc7cf99ba95fd",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "tempranillo.trx"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,tempranillo.txcap_blob",
+      "sha256": "f52fa3d2df6e8b7f5f09b939e83d96a152a4bf6a395dfb872f94c2b23949c7fd",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "tempranillo.txcb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,tempranillo-CORO-t-3.7.txt",
+      "sha256": "c552dd57785aaac1d40130f4af3fe51449de5bc779ce3d067165ecdcde78dc64",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-tempranillo_M-CORO_V-t__m-3.7.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,n61-MUR.hcd",
+      "sha256": "78b098eeaba9c1641a1331fa20513f68e6991d7b26843461dcd58a3f6acd363a",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,n61-TDK.hcd",
+      "sha256": "349ecb60428ad04a7de77f32bb27d3bb394f7b1ce59e6f2238e5be2f2ff168e8",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,n61-USI.hcd",
+      "sha256": "ed18ae64cfacd63a0a8effa6a046f5d7bb047e23ae4ae081bb1417dc47875ff8",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
         }
       ]
     }

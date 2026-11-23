@@ -32,20 +32,20 @@ status = "experimental"
 # (tools/catalog/drivers.json), plus the display's boot console.
 [features]
 display = "untested"
-screen_off = "missing"
+screen_off = "untested" # Display pipe enabled on every A8 board, as on the N61
 backlight = "untested"
 gpu_desktop = "untested"
-touch = "missing"
+touch = "missing" # Needs N56's Gen1 clock policy (its AppleMultitouchSPI personality) in a z2fw-from-mtprops@3 recipe, as N61 has; not extracted yet
 buttons = "untested"
 accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "missing"
 touch_id = "missing"
-storage_read = "missing"
-storage_write = "missing"
-wifi = "missing"
-bluetooth_input = "missing"
-bluetooth_audio = "missing"
+storage_read = "untested" # ANS1 on every A8 board (t7000-common.dtsi), as on the N102
+storage_write = "untested" # Same ANS1 and asp driver as the N102
+wifi = "untested" # BCM4345 module shared with the N102 (t7000-bcm4345.dtsi), module barbera
+bluetooth_input = "untested" # Patchram follows the Wi-Fi module vendor (MUR/TDK/USI)
+bluetooth_audio = "untested"
 cellular = "missing"
 battery = "untested" # bq27xxx over HDQ (W1_MASTER_UART); the ADT gauge matches the iPad mini 4's.
 charging = "missing"
