@@ -14,7 +14,297 @@
         "zip": "Firmware/all_flash/DeviceTree.j121ap.im4p"
       },
       "sha256": "2d743411c2e4fe7ba52b7fb88c3cb34324e03fa591689014fcbf32563104614f"
+    },
+    "aop.im4p": {
+      "ipsw": {
+        "zip": "Firmware/AOP/aopfw-ipad7aop.RELEASE.im4p"
+      },
+      "sha256": "853be8f95f14740231c605cec954af5dd6d1994a66cfeb9513eb6dfcf706d90b"
+    },
+    "kernelcache": {
+      "ipsw": {
+        "kernelcache": true
+      },
+      "device": {
+        "kernelcache": "active"
+      },
+      "sha256": "f18b4df865405f2a287b84977d7aca745e056d656d9fc9df1662970ce2969de7"
+    },
+    "J121.mtprops": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/multitouch/J121.mtprops"
+      },
+      "device": "/usr/share/firmware/multitouch/J121.mtprops",
+      "sha256": "c70b61fe6b93d52f09bb1a61cc5ccb0f03960d1ab8a377831437ac985a7ba3b4"
+    },
+    "joyb.trx": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/joyb.trx"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/joyb.trx",
+      "sha256": "662293214b4d056b2b149c3d67c59d0721005c8dd15d9324ad282b53ae1d3a18"
+    },
+    "joyb.clmb": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/joyb.clmb"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/joyb.clmb",
+      "sha256": "88c7bbe3a86f4a0cd35d9e0d8888917698d0a8da5f00589be7bfb7ff3eaaebf1"
+    },
+    "joyb.txcb": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/joyb.txcb"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/joyb.txcb",
+      "sha256": "90863f45fcb5fac5dd1bda973bd6ddd7c901d10f495cd9d160e2f911accd5df7"
+    },
+    "P-joyb_M-YSBU_V-m__m-1.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-joyb_M-YSBU_V-m__m-1.1.txt"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-joyb_M-YSBU_V-m__m-1.1.txt",
+      "sha256": "caff89ffb316c26f5fc6e8623efd3db67f6e83a2cc80a1b03725ba63fc8b0fb5"
+    },
+    "P-joyb_M-YSBU_V-m__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-joyb_M-YSBU_V-m__m-2.1.txt"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-joyb_M-YSBU_V-m__m-2.1.txt",
+      "sha256": "caff89ffb316c26f5fc6e8623efd3db67f6e83a2cc80a1b03725ba63fc8b0fb5"
+    },
+    "P-joyb_M-YSBU_V-m__m-2.3.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-joyb_M-YSBU_V-m__m-2.3.txt"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-joyb_M-YSBU_V-m__m-2.3.txt",
+      "sha256": "caff89ffb316c26f5fc6e8623efd3db67f6e83a2cc80a1b03725ba63fc8b0fb5"
+    },
+    "P-joyb_M-YSBU_V-m__m-3.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-joyb_M-YSBU_V-m__m-3.1.txt"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-joyb_M-YSBU_V-m__m-3.1.txt",
+      "sha256": "caff89ffb316c26f5fc6e8623efd3db67f6e83a2cc80a1b03725ba63fc8b0fb5"
+    },
+    "P-joyb_M-YSBU_V-u__m-1.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-joyb_M-YSBU_V-u__m-1.1.txt"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-joyb_M-YSBU_V-u__m-1.1.txt",
+      "sha256": "9e822c3c1f5ba4d62f949309106637a27f212cb8383d84b26c3abca501ad7a65"
+    },
+    "P-joyb_M-YSBU_V-u__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-joyb_M-YSBU_V-u__m-2.1.txt"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-joyb_M-YSBU_V-u__m-2.1.txt",
+      "sha256": "9e822c3c1f5ba4d62f949309106637a27f212cb8383d84b26c3abca501ad7a65"
+    },
+    "P-joyb_M-YSBU_V-u__m-3.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-joyb_M-YSBU_V-u__m-3.1.txt"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-joyb_M-YSBU_V-u__m-3.1.txt",
+      "sha256": "9e822c3c1f5ba4d62f949309106637a27f212cb8383d84b26c3abca501ad7a65"
+    },
+    "P-joyb_M-YSBU_V-u__m-3.3.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-joyb_M-YSBU_V-u__m-3.3.txt"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-joyb_M-YSBU_V-u__m-3.3.txt",
+      "sha256": "9e822c3c1f5ba4d62f949309106637a27f212cb8383d84b26c3abca501ad7a65"
+    },
+    "P-joyb_M-YSBU_V-u__m-4.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-joyb_M-YSBU_V-u__m-4.1.txt"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-joyb_M-YSBU_V-u__m-4.1.txt",
+      "sha256": "9e822c3c1f5ba4d62f949309106637a27f212cb8383d84b26c3abca501ad7a65"
     }
   },
-  "outputs": []
+  "outputs": [
+    {
+      "destination": "lib/firmware/apple/t8011-smartio.bin",
+      "sha256": "8a6e5a1bcdd2768db4515d714c7ee311d7089656e83b5073efa70b625b762b9e",
+      "steps": [
+        {
+          "step": "smartio-from-kernelcache@2",
+          "input": "kernelcache",
+          "kext": "com.apple.driver.AppleT8011SmartIO"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/aop-ipad7.bin",
+      "sha256": "a2bac8975ab0658295ecb5824187962d3606cc569e38a673770f7d1d4d1f8f54",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "aop.im4p"
+        },
+        {
+          "step": "aop-image@1",
+          "coprocessor": "AOP"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/aop-ipad7-ext.bin",
+      "sha256": "28bfaad8cbfdaa9fceb55d02e68a323a16f107f40840fb2fdabaafcd5f2c6eb1",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "aop.im4p"
+        },
+        {
+          "step": "aop-image@1",
+          "coprocessor": "AOP_ext"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/vxd-deva.bin",
+      "sha256": "bf5167652e81540471aaca141943fd33d71c3990c137f145471305f5f5ade83b",
+      "steps": [
+        {
+          "step": "vxd-firmware-from-kernelcache@1",
+          "input": "kernelcache"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/j121-touch-K1F18,3.z2fw",
+      "sha256": "b12aecc2c895561c7d9edb7d1bfb7295d041b5a0efe3c466cef54b89194a7ace",
+      "steps": [
+        {
+          "step": "z2fw-from-mtprops@1",
+          "input": "J121.mtprops",
+          "profile": "K1F18,3",
+          "packet": "K1HBPP14",
+          "load_address": 1048576,
+          "hbpp_version": 260
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j121.bin",
+      "sha256": "662293214b4d056b2b149c3d67c59d0721005c8dd15d9324ad282b53ae1d3a18",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "joyb.trx"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j121.clm_blob",
+      "sha256": "88c7bbe3a86f4a0cd35d9e0d8888917698d0a8da5f00589be7bfb7ff3eaaebf1",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "joyb.clmb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j121.txcap_blob",
+      "sha256": "90863f45fcb5fac5dd1bda973bd6ddd7c901d10f495cd9d160e2f911accd5df7",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "joyb.txcb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j121-YSBU-m-1.1.txt",
+      "sha256": "caff89ffb316c26f5fc6e8623efd3db67f6e83a2cc80a1b03725ba63fc8b0fb5",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-joyb_M-YSBU_V-m__m-1.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j121-YSBU-m-2.1.txt",
+      "sha256": "caff89ffb316c26f5fc6e8623efd3db67f6e83a2cc80a1b03725ba63fc8b0fb5",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-joyb_M-YSBU_V-m__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j121-YSBU-m-2.3.txt",
+      "sha256": "caff89ffb316c26f5fc6e8623efd3db67f6e83a2cc80a1b03725ba63fc8b0fb5",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-joyb_M-YSBU_V-m__m-2.3.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j121-YSBU-m-3.1.txt",
+      "sha256": "caff89ffb316c26f5fc6e8623efd3db67f6e83a2cc80a1b03725ba63fc8b0fb5",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-joyb_M-YSBU_V-m__m-3.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j121-YSBU-u-1.1.txt",
+      "sha256": "9e822c3c1f5ba4d62f949309106637a27f212cb8383d84b26c3abca501ad7a65",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-joyb_M-YSBU_V-u__m-1.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j121-YSBU-u-2.1.txt",
+      "sha256": "9e822c3c1f5ba4d62f949309106637a27f212cb8383d84b26c3abca501ad7a65",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-joyb_M-YSBU_V-u__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j121-YSBU-u-3.1.txt",
+      "sha256": "9e822c3c1f5ba4d62f949309106637a27f212cb8383d84b26c3abca501ad7a65",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-joyb_M-YSBU_V-u__m-3.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j121-YSBU-u-3.3.txt",
+      "sha256": "9e822c3c1f5ba4d62f949309106637a27f212cb8383d84b26c3abca501ad7a65",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-joyb_M-YSBU_V-u__m-3.3.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j121-YSBU-u-4.1.txt",
+      "sha256": "9e822c3c1f5ba4d62f949309106637a27f212cb8383d84b26c3abca501ad7a65",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-joyb_M-YSBU_V-u__m-4.1.txt"
+        }
+      ]
+    }
+  ]
 }

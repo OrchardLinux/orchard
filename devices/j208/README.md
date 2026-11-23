@@ -3,19 +3,23 @@
 Measured bring-up facts, including the hardware identity, are in
 [`docs/bring-up/j208.md`](../../docs/bring-up/j208.md). This file tracks what
 needs testing, open work, and contributed code that is not in the tree yet.
-Its `device.toml` holds identity only, from public sources: it has no `[kernel]`
-until the firmware recipe is written (open work 10).
 
 ## Needs testing
 
-Nothing J208-specific is in the kernel series yet, and without `[kernel]` in
-its descriptor Orchard doesn't build for the J208. Once it has one, a RAM boot of
-`examples/hardware-check` with the mainline `t8011-j208` device tree (SoC,
-framebuffer, buttons) would confirm display and buttons.
+The J208 shares the J120's device tree (`t8011-pro2.dtsi`) and drivers
+(see [`devices/j120/README.md`](../j120/README.md)): storage, Wi-Fi, touch
+(K1F19,2), headphones, microphones, the AOP sensors, the battery gauge and
+the Smart Cover are described, and its firmware recipe converts touch,
+Wi-Fi, AOP, SmartIO and VXD firmware. A RAM boot of
+`examples/minimal-boot` would show which of them work. Bluetooth needs its
+Patchram in the recipe.
 
 ## Open work
 
-From the review of #42. Each needs a test on a J208:
+From the review of #42. Items 1-4, 6 (the D2401 WLAN enable), 7, 9 and
+10 are covered by the iPad Pro 2 integration from #205 and need a test on
+a J208; item 8 waits for the CT709 driver (J120 open work 3). Each needs a
+test on a J208:
 
 1. Wi-Fi: `pcie-apple-h9p` T8011 support through match data and the
    device tree (port 2 and its tunables), without machine checks or DMA test
