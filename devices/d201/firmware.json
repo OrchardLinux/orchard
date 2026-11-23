@@ -14,7 +14,152 @@
         "zip": "Firmware/all_flash/DeviceTree.d201ap.im4p"
       },
       "sha256": "c0cefb27a2f77f4fec51915b26e5499b93eb144c9268f8237d53939d9b62a4da"
+    },
+    "P-apollok_M-GINS_V-m__m-4.3.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/P-apollok_M-GINS_V-m__m-4.3.txt"
+      },
+      "sha256": "27d9b8551232181cc29ad276e255b2977079d75dcdd6fb496a62a28eb4edeb5a"
+    },
+    "P-apollok_M-GINS_V-m__m-5.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/P-apollok_M-GINS_V-m__m-5.1.txt"
+      },
+      "sha256": "27d9b8551232181cc29ad276e255b2977079d75dcdd6fb496a62a28eb4edeb5a"
+    },
+    "P-apollok_M-GINS_V-m__m-5.3.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/P-apollok_M-GINS_V-m__m-5.3.txt"
+      },
+      "sha256": "27d9b8551232181cc29ad276e255b2977079d75dcdd6fb496a62a28eb4edeb5a"
+    },
+    "P-apollok_M-GINS_V-u__m-4.3.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/P-apollok_M-GINS_V-u__m-4.3.txt"
+      },
+      "sha256": "4f9637dd9c09c6b114bfd030d541b1f0f5b2684ae990b39405cbe86bef9e40d9"
+    },
+    "P-apollok_M-GINS_V-u__m-5.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/P-apollok_M-GINS_V-u__m-5.1.txt"
+      },
+      "sha256": "4f9637dd9c09c6b114bfd030d541b1f0f5b2684ae990b39405cbe86bef9e40d9"
+    },
+    "P-apollok_M-GINS_V-u__m-6.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/P-apollok_M-GINS_V-u__m-6.1.txt"
+      },
+      "sha256": "4f9637dd9c09c6b114bfd030d541b1f0f5b2684ae990b39405cbe86bef9e40d9"
+    },
+    "apollok.clmb": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/apollok.clmb"
+      },
+      "sha256": "a8f3f678d1d25179e427b093c3496ebbdf51ff2849ccb7b4f61dc099ea87ed53"
+    },
+    "apollok.trx": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/apollok.trx"
+      },
+      "sha256": "1beee614940915a770ab9c676d4c27d018374afbb3db33d8b65d88f75b3d1e82"
+    },
+    "apollok.txcb": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/apollok.txcb"
+      },
+      "sha256": "3009003a5de626d9ce226a0cafe06fd19d8f7dec241221b484b59a6c6f992ac0"
     }
   },
-  "outputs": []
+  "outputs": [
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,apollok-GINS-m-4.3.txt",
+      "sha256": "27d9b8551232181cc29ad276e255b2977079d75dcdd6fb496a62a28eb4edeb5a",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-apollok_M-GINS_V-m__m-4.3.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,apollok-GINS-m-5.1.txt",
+      "sha256": "27d9b8551232181cc29ad276e255b2977079d75dcdd6fb496a62a28eb4edeb5a",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-apollok_M-GINS_V-m__m-5.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,apollok-GINS-m-5.3.txt",
+      "sha256": "27d9b8551232181cc29ad276e255b2977079d75dcdd6fb496a62a28eb4edeb5a",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-apollok_M-GINS_V-m__m-5.3.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,apollok-GINS-u-4.3.txt",
+      "sha256": "4f9637dd9c09c6b114bfd030d541b1f0f5b2684ae990b39405cbe86bef9e40d9",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-apollok_M-GINS_V-u__m-4.3.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,apollok-GINS-u-5.1.txt",
+      "sha256": "4f9637dd9c09c6b114bfd030d541b1f0f5b2684ae990b39405cbe86bef9e40d9",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-apollok_M-GINS_V-u__m-5.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,apollok-GINS-u-6.1.txt",
+      "sha256": "4f9637dd9c09c6b114bfd030d541b1f0f5b2684ae990b39405cbe86bef9e40d9",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-apollok_M-GINS_V-u__m-6.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,apollok.clm_blob",
+      "sha256": "a8f3f678d1d25179e427b093c3496ebbdf51ff2849ccb7b4f61dc099ea87ed53",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "apollok.clmb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,apollok.bin",
+      "sha256": "1beee614940915a770ab9c676d4c27d018374afbb3db33d8b65d88f75b3d1e82",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "apollok.trx"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,apollok.txcap_blob",
+      "sha256": "3009003a5de626d9ce226a0cafe06fd19d8f7dec241221b484b59a6c6f992ac0",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "apollok.txcb"
+        }
+      ]
+    }
+  ]
 }

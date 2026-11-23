@@ -13,6 +13,10 @@ is missing or empty.
 
 ### Devices
 
+- iPhone 8, iPhone 8 Plus and iPhone X (A11): Wi-Fi on every model, not
+  only the iPhone X (GSM), with each model's Wi-Fi firmware in its recipe.
+  The iPhone X (Global) also gets the touchscreen and OLED brightness of the
+  GSM model, and all of them the side and volume buttons. Untested.
 - iPhone 6s, iPhone 6s Plus and iPhone SE (A9): battery status and charging
   through the SN2400 charger, the accelerometer, gyroscope and pressure
   sensor (AOP) and hardware video decoding, as on the iPhone 7. Untested.

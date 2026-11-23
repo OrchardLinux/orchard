@@ -31,18 +31,18 @@ status = "experimental"
 # (tools/catalog/drivers.json), plus the display's boot console.
 [features]
 display = "untested"
-screen_off = "missing"
+screen_off = "untested" # Backlight off through apple_dwi_bl
 backlight = "untested"
 gpu_desktop = "missing"
-touch = "missing"
-buttons = "missing"
+touch = "missing" # C1F5D,3 controller: part of the separate iPhone 8 / D21 touchscreen work
+buttons = "untested" # macsmc-input (t8015 SMC): side button, volume, ring switch; the Home button is untraced
 accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "missing"
 touch_id = "missing"
 storage_read = "untested"
 storage_write = "untested"
-wifi = "missing"
+wifi = "untested" # Shared A11 Wi-Fi port (t8015-common.dtsi); module from the ADT
 bluetooth_input = "missing"
 bluetooth_audio = "missing"
 cellular = "missing"

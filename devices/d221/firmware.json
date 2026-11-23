@@ -44,6 +44,30 @@
         "zip": "Firmware/D221_Multitouch.im4p"
       },
       "sha256": "5826c1d1ab24b31c41766121096b54ae113656cacd4a02c3f95b8df59f73c789"
+    },
+    "P-herculesk_M-GINS_V-m__m-4.3.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/P-herculesk_M-GINS_V-m__m-4.3.txt"
+      },
+      "sha256": "4e0855fbe6b4d1d3031167c42a58d57bb557f97acf7001b50222dd10b01edaef"
+    },
+    "P-herculesk_M-GINS_V-m__m-5.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/P-herculesk_M-GINS_V-m__m-5.1.txt"
+      },
+      "sha256": "4e0855fbe6b4d1d3031167c42a58d57bb557f97acf7001b50222dd10b01edaef"
+    },
+    "P-herculesk_M-GINS_V-u__m-4.3.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/P-herculesk_M-GINS_V-u__m-4.3.txt"
+      },
+      "sha256": "c3cf7f2260bb73c979d8995a608a47926127fc6e9c6e05bc308924f62a24a8c9"
+    },
+    "P-herculesk_M-GINS_V-u__m-5.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/P-herculesk_M-GINS_V-u__m-5.1.txt"
+      },
+      "sha256": "c3cf7f2260bb73c979d8995a608a47926127fc6e9c6e05bc308924f62a24a8c9"
     }
   },
   "outputs": [
@@ -136,6 +160,46 @@
         {
           "step": "hidspi-from-mtfw@1",
           "profile": "C1R1FC0,2-W3"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,herculesk-GINS-m-4.3.txt",
+      "sha256": "4e0855fbe6b4d1d3031167c42a58d57bb557f97acf7001b50222dd10b01edaef",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-herculesk_M-GINS_V-m__m-4.3.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,herculesk-GINS-m-5.1.txt",
+      "sha256": "4e0855fbe6b4d1d3031167c42a58d57bb557f97acf7001b50222dd10b01edaef",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-herculesk_M-GINS_V-m__m-5.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,herculesk-GINS-u-4.3.txt",
+      "sha256": "c3cf7f2260bb73c979d8995a608a47926127fc6e9c6e05bc308924f62a24a8c9",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-herculesk_M-GINS_V-u__m-4.3.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,herculesk-GINS-u-5.1.txt",
+      "sha256": "c3cf7f2260bb73c979d8995a608a47926127fc6e9c6e05bc308924f62a24a8c9",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-herculesk_M-GINS_V-u__m-5.1.txt"
         }
       ]
     }
