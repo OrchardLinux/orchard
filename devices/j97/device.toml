@@ -21,7 +21,7 @@ platform = "apple-4k"
 dtb = "t7000-j97" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until bring-up needs it.
+recipe = "firmware.json" # Pins this board's public IPSW; the GPU firmware comes from the iPod touch 6's iOS 12.4 (16G77), the tested one.
 
 [support]
 status = "experimental"

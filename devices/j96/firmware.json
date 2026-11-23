@@ -127,6 +127,19 @@
       },
       "device": "/usr/share/firmware/multitouch/J96.mtprops",
       "sha256": "59d9740b4ddfe88e22987bb77b91d4c84a1f4ced4396156ba5d7989485172c79"
+    },
+    "kernelcache-n102ap-16G77": {
+      "ipsw": {
+        "kernelcache": "n102ap",
+        "restore": {
+          "version": "12.4",
+          "build": "16G77",
+          "url": "https://updates.cdn-apple.com/2019SummerFCS/fullrestores/041-86563/9E4DEC4C-A743-11E9-87E4-CD93DBB619B1/iPodtouch_12.4_16G77_Restore.ipsw",
+          "bytes": 2813180896,
+          "sha256": "7deb8c949eaa7f5672d46c6225e9286990ed7c9dfcdfaa2db92ffd91181b213f"
+        }
+      },
+      "sha256": "1d996c85affa1f37a07c6454dd5d3a383d4855206d113c9599200d79b6467ff8"
     }
   },
   "outputs": [
@@ -300,6 +313,26 @@
           "profile": "C1F14,4",
           "calibration_address": 268472320,
           "calibration_size": 1024
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/gfx-t7000.bin",
+      "sha256": "0b60def67290391b4c6aa913d9a78a8105d6d9b03738175b8e5732689db1e5ba",
+      "steps": [
+        {
+          "step": "agx-g4p-ldr-from-kernelcache@1",
+          "input": "kernelcache-n102ap-16G77"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/gfx-t7000-border.bin",
+      "sha256": "233ffc1d7db27d9f16db17e23a9ce33082b5a7b72061af3da510bca3c94aff3e",
+      "steps": [
+        {
+          "step": "agx-g4p-border-from-kernelcache@1",
+          "input": "kernelcache-n102ap-16G77"
         }
       ]
     }
