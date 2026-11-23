@@ -1,0 +1,63 @@
+{
+  "schema": 2,
+  "device": "iPad4,2",
+  "ipsw": {
+    "version": "12.5.7",
+    "build": "16H81",
+    "url": "https://updates.cdn-apple.com/2023FCSWinter/fullrestores/032-14132/A3C10B93-0E34-405D-8A92-92AA354BABF0/iPad_64bit_12.5.7_16H81_Restore.ipsw",
+    "bytes": 2961469678,
+    "sha256": "780aa5b20fa9fb5770c18311663bd098dbbf8e89311675a19b4860303edc0cd9"
+  },
+  "inputs": {
+    "J72.mtprops": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/multitouch/J72.mtprops"
+      },
+      "device": "/usr/share/firmware/multitouch/J72.mtprops",
+      "sha256": "69f27fe207cc5810a748dac3dfe640b1c5a755709f49513b4b5125660784f0fc"
+    },
+    "dureza.trx": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/4324b5/dureza.trx"
+      },
+      "device": "/usr/share/firmware/wifi/4324b5/dureza.trx",
+      "sha256": "e32263172726b5f619c459034ebd1319fc2db23adb7b96beb1e3228922ad76c0"
+    },
+    "dureza-u-kk.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/4324b5/dureza-u-kk.txt"
+      },
+      "device": "/usr/share/firmware/wifi/4324b5/dureza-u-kk.txt",
+      "sha256": "a9661d90216e3b1dc64f8148b64a8dae49211fc6eb5b74eb4bcac2271f2b394f"
+    }
+  },
+  "outputs": [
+    {
+      "destination": "lib/firmware/apple/j72-fwstart.z2fw",
+      "sha256": "73ca290607695ca841867a2bf76cab4bc2f5c33b9ab5ac171de5b5580a7c0c09",
+      "steps": [
+        {
+          "step": "z2fw-from-z2-packet@2",
+          "input": "J72.mtprops",
+          "profile": "C1F15,1",
+          "calibration_address": 268472320,
+          "calibration_size": 1024,
+          "prox_address": 268473856,
+          "prox_size": 128
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac43241-j72-usb.bin",
+      "sha256": "bb332ba8033650f13b67df7c5044f36a5dc3e2a43c92e801b14a3c03521d5554",
+      "steps": [
+        {
+          "step": "trx-add-nvram@1",
+          "input": "dureza.trx",
+          "nvram": "dureza-u-kk.txt",
+          "placeholder_mac": "02:00:00:00:00:00"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 13:04:00 +0100
+Subject: [PATCH] arm64: dts: apple: t7000-n102: Enable the display pipe
+
+iBoot leaves the iPod touch 6's 640x1136 MIPI DSI panel running from an
+x8r8g8b8 boot framebuffer, the state the ADBE driver adopts after it has
+checked that the display DART is in bypass. Enable disp0 so that it
+replaces simpledrm, with page flips and vblank interrupts and, once its
+self-check of translated scanout passes, scanout of any client buffer
+through the display DART.
+
+No panel supply is described, so the panel stays on in system sleep, as
+it does under simpledrm. The iPhone 6 and 6 Plus (N61, N56) and the iPad
+mini 4 (J96, J97) are left alone: their device trees have not been
+compared with this pipe's yet, and the iPad mini 4 drives eDP.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t7000-n102.dts | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t7000-n102.dts b/arch/arm64/boot/dts/apple/t7000-n102.dts
+index 2893af6..01b9158 100644
+--- a/arch/arm64/boot/dts/apple/t7000-n102.dts
++++ b/arch/arm64/boot/dts/apple/t7000-n102.dts
+@@ -51,6 +51,14 @@
+ 	power-domains = <&ps_disp0 &ps_mipi_dsi>;
+ };
+ 
++/*
++ * The display pipe takes the 640x1136 panel over from simpledrm. No panel
++ * supply is given: the panel stays on in system sleep.
++ */
++&disp0 {
++	status = "okay";
++};
++
+ &gpu {
+ 	status = "okay";
+ };
+-- 
+2.49.0
+

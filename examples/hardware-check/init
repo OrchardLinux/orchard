@@ -18,23 +18,30 @@ exec </dev/console >/dev/console 2>&1
 # SmartIO DMA controller and the touchscreen behind it, get their driver from
 # the uevent helper. Then load drivers for the devices already present.
 echo /bin/modprobe > /proc/sys/kernel/modprobe
-echo /usr/libexec/module-hotplug > /proc/sys/kernel/hotplug
+if [ -e /proc/sys/kernel/hotplug ]; then
+    echo /usr/libexec/module-hotplug > /proc/sys/kernel/hotplug
+fi
 coldplug() {
     for alias in /sys/bus/*/devices/*/modalias; do
         [ -r "$alias" ] && modprobe -qb "$(cat "$alias")" 2>/dev/null || true
     done
 }
 
-# Storage: fence every NVMe namespace and partition read-only once they appear.
+# Fence internal disks in the background so USB can come up during discovery:
+# SFTL on the P105, NVMe on A9 and later, ANS1 (asp) on A7-A8X.
 (
+    . /usr/libexec/sftl-storage
+    if is_p105; then
+        watch_sftl
+    fi
     i=0
-    while [ ! -e /sys/class/block/nvme0n1 ] && [ "$i" -lt 60 ]; do
+    while [ ! -e /sys/class/block/nvme0n1 ] && [ ! -e /sys/class/block/asp0n1 ] && [ "$i" -lt 60 ]; do
         coldplug
         sleep 1
         i=$((i + 1))
     done
     sleep 2
-    for d in /sys/class/block/nvme*; do
+    for d in /sys/class/block/nvme* /sys/class/block/asp*; do
         [ -e "$d" ] && blockdev --setro "/dev/${d##*/}"
     done
     echo "$i" > /run/storage-fence

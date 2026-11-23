@@ -55,7 +55,7 @@ CATALOG_SCHEMA = 1  # catalog.SCHEMA: a breaking data change publishes to a new 
 # What the matrix shows as installable; a test keeps this equal to hardware.IMPLEMENTED_METHODS.
 IMPLEMENTED_METHODS = {'checkm8-pongo'}
 # Boards an open pull request adds; generating them here would conflict with it.
-IN_REVIEW = {'j72': 'PR #59'}
+IN_REVIEW = {}
 
 
 def secure(url):
@@ -473,8 +473,9 @@ def render():
                          f'{", ".join(device["device"]["apple_products"])} | {status_of(device)} | '
                          f'{"yes" if can_install(profile, device) else "–"} | {methods} | '
                          f'{"yes" if (path / "firmware.json").is_file() else "–"} | {"yes" if dtb else "–"} | {build} |')
-    lines += ['', 'Not generated while in review: ' + ', '.join(f'`{board}` ({reason})'
-                                                                for board, reason in IN_REVIEW.items()) + '.']
+    if IN_REVIEW:
+        lines += ['', 'Not generated while in review: ' + ', '.join(f'`{board}` ({reason})'
+                                                                    for board, reason in IN_REVIEW.items()) + '.']
     labels = tomllib.loads((ROOT / 'features.toml').read_text())
     lines += ['', '## Features', '', 'Boards Orchard builds for. '
               'States: working, untested, missing, none (no such hardware).', '',

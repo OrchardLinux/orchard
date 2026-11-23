@@ -1,0 +1,69 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 22:43:46 +0100
+Subject: [PATCH] arm64: dts: apple: s5l8960x: Add SPI1
+
+Describe the A7's SPI1 controller at 0x20a084000 (interrupt 137) with
+its pins 68 to 71, function 1, and its power state, disabled, next to
+SPI2. Its 60 MHz reference is a fixed clock, as SPI2's is. The iPad
+mini 2's touchscreen sits on it.
+
+Assisted-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/apple/s5l8960x.dtsi | 28 +++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/s5l8960x.dtsi b/arch/arm64/boot/dts/apple/s5l8960x.dtsi
+index d7b3807d4..fede9a06d 100644
+--- a/arch/arm64/boot/dts/apple/s5l8960x.dtsi
++++ b/arch/arm64/boot/dts/apple/s5l8960x.dtsi
+@@ -26,6 +26,13 @@ clkref: clock-ref {
+ 		clock-output-names = "clkref";
+ 	};
+ 
++	spi1_clk: clock-spi1 {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		clock-frequency = <60000000>;
++		clock-output-names = "spi1";
++	};
++
+ 	spi2_clk: clock-spi2 {
+ 		compatible = "fixed-clock";
+ 		#clock-cells = <0>;
+@@ -107,6 +114,20 @@ ans_mbox: mbox@208041000 {
+ 			power-domains = <&ps_ans>;
+ 		};
+ 
++		spi1: spi@20a084000 {
++			compatible = "apple,s5l8960x-spi";
++			reg = <0x2 0x0a084000 0x0 0x4000>;
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 137 IRQ_TYPE_LEVEL_HIGH>;
++			clocks = <&spi1_clk>;
++			pinctrl-0 = <&spi1_pins>;
++			pinctrl-names = "default";
++			power-domains = <&ps_spi1>;
++			#address-cells = <1>;
++			#size-cells = <0>;
++			status = "disabled";
++		};
++
+ 		spi2: spi@20a088000 {
+ 			compatible = "apple,s5l8960x-spi";
+ 			reg = <0x2 0x0a088000 0x0 0x4000>;
+@@ -347,6 +368,13 @@ i2c3_pins: i2c3-pins {
+ 					 <APPLE_PINMUX(171, 1)>;
+ 			};
+ 
++			spi1_pins: spi1-pins {
++				pinmux = <APPLE_PINMUX(68, 1)>,
++					 <APPLE_PINMUX(69, 1)>,
++					 <APPLE_PINMUX(70, 1)>,
++					 <APPLE_PINMUX(71, 1)>;
++			};
++
+ 			spi2_pins: spi2-pins {
+ 				pinmux = <APPLE_PINMUX(76, 1)>,
+ 					 <APPLE_PINMUX(77, 1)>,

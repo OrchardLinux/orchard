@@ -4,7 +4,8 @@
 No hardcoded offsets; select the exact kext via its prelink metadata, then map
 its section virtual address through the outer kernel's file-backed segments.
 For MH_FILESET kernels use the upstream ipsw kext extractor instead. The kext
-bundle identifier is the caller's board policy (T8010 by default; S8000 for A9).
+bundle identifier is the caller's board policy (T8010 by default; S8000 for A9;
+T7000 for A8 and A8X).
 """
 import argparse
 import hashlib
@@ -15,7 +16,8 @@ from orchard.apple.prelink import Kernelcache
 
 T8010 = 'com.apple.driver.AppleT8010SmartIO'
 S8000 = 'com.apple.driver.AppleS8000SmartIO'
-BUNDLES = (T8010, S8000)
+T7000 = 'com.apple.driver.AppleT7000SmartIO'
+BUNDLES = (T8010, S8000, T7000)
 
 
 def extract(blob, bundle=T8010):

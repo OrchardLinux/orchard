@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Sun, 22 Nov 2026 07:05:43 +0800
+Subject: [PATCH] arm64: dts: apple: t7001: Keep the dwi power state on
+
+The dwi power state carries the SoC's voltage requests to the PMIC.
+The boot chain leaves it on, but nothing on T7001 claims it (the T7000
+handhelds' backlight does), so Linux switches it off as unused about
+0.7 s into boot. From then on the GPU's voltage request never reaches
+the PMIC and the first GPU register read hangs the bus.
+
+Keep it on, as LLB and iPadOS do. With it on, the J81's GPU core ID
+reads 0x00070500 on Linux, as on iPadOS (OrchardLinux/gpu a8x/
+DWI-CORE-ID.md, measured by mattonik).
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t7001-pmgr.dtsi | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t7001-pmgr.dtsi b/arch/arm64/boot/dts/apple/t7001-pmgr.dtsi
+index 431ed5ff4..caa303f6f 100644
+--- a/arch/arm64/boot/dts/apple/t7001-pmgr.dtsi
++++ b/arch/arm64/boot/dts/apple/t7001-pmgr.dtsi
+@@ -101,6 +101,12 @@ ps_dwi: power-controller@20120 {
+ 		#power-domain-cells = <0>;
+ 		#reset-cells = <0>;
+ 		label = "dwi";
++		/*
++		 * Carries the voltage requests to the PMIC: with it off, the GPU
++		 * rail never comes up. The boot chain leaves it on; nothing on
++		 * T7001 holds it, unlike the T7000 handhelds' backlight.
++		 */
++		apple,always-on;
+ 	};
+ 
+ 	ps_gpio: power-controller@20128 {

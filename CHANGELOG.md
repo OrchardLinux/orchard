@@ -16,9 +16,28 @@ is missing or empty.
 - iPad Air 2 (Wi-Fi): internal storage works, so Omarchy installs with
   `orchard install` and starts from the iPad with `orchard launch`, next to
   iPadOS. The A8X storage controller (ANS1) has a kernel driver now.
+- iPad Air 2 (Wi-Fi): the speakers play, in stereo, through PipeWire. The
+  headphone jack and the microphones do not work yet.
+- iPad Air 2 (Wi-Fi): it charges. The Lightning charger driver supports the
+  iPad Air 2's D2207 PMIC, so a computer's charging port or an Apple adapter
+  gets up to 1.5 A instead of iBoot's 100 mA.
+- iPad Air 2 (Wi-Fi): sleep works. The iPad suspends when idle or on Power,
+  and Home or Power wakes it with Wi-Fi, Bluetooth and the USB network back.
+- iPad Air 2 (Wi-Fi): Bluetooth headphones play, and a Bluetooth keyboard with
+  touchpad works. Bluetooth runs at 3 Mbit/s instead of 115,200 baud, so
+  headphones no longer crackle and calls with the CVSD codec have sound.
+- iPad Air (Cellular): new, from thisiscamk's work. Touch, the display and
+  backlight, the Home button, USB serial and networking and reading its
+  internal storage work. `orchard install` is offered; writing to the
+  storage is untested so far. Wi-Fi and audio come later.
+- iPad mini 2 (Wi-Fi): the touchscreen works, on the A7 SPI and touch clock
+  support from thisiscamk's iPad Air work.
 
 ### Install & launch
 
+- A launcher may quit right after choosing a boot entry. m1n1 used to wait
+  for the computer to read its last answer before starting Linux, so the
+  device stayed on the boot splash when the launcher had already gone.
 - On Linux, `orchard run` and `orchard launch` use the released Pongo again
   instead of asking for a Mac with Xcode: the release lookup picked the
   moving `nightly` tag, which publishes no checksums.

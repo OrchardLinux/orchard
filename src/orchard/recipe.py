@@ -51,6 +51,14 @@ def _agx_g5p(step, data, expected):
     return agx.extract_g5p(data)
 
 
+def _agx_g4p(step, data, expected):
+    return agx.extract_g4p_ldr(data, expected)
+
+
+def _agx_g4p_border(step, data, expected):
+    return agx.extract_g4p_border(data, expected)
+
+
 def _im4p_payload(step, data, expected):
     return im4p_payload(data)
 
@@ -76,6 +84,11 @@ def _z2fw(step, data, expected):
 
 def _z2_packet(step, data, expected):
     return z2packet.convert(data, step['profile'], step['calibration_address'], step['calibration_size'])
+
+
+def _z2_packet_n1(step, data, expected):
+    return z2packet.convert_n1(data, step['profile'], step['calibration_address'],
+                               step['calibration_size'], step['prox_address'], step['prox_size'])
 
 
 def _z2fw_packets(step, data, expected):
@@ -117,6 +130,9 @@ STEPS = {
     # A10 GPU firmware from AGXFirmwareKextG9PRTBuddy.
     'agx-g9p-firmware-from-kernelcache@1': (_agx, {}),
     'agx-g5p-ldr-from-kernelcache@1': (_agx_g5p, {}),
+    # A8 GPU firmware (AGXFirmwareKextG4P's META LDR) and its border colour table (AGXG4P).
+    'agx-g4p-ldr-from-kernelcache@1': (_agx_g4p, {}),
+    'agx-g4p-border-from-kernelcache@1': (_agx_g4p_border, {}),
     'im4p-payload@1': (_im4p_payload, {}),
     # One image of an AOP firmware container (IPSW Firmware/AOP/aopfw-*.im4p payload).
     'aop-image@1': (_aop_image, {'coprocessor': str}),
@@ -125,6 +141,10 @@ STEPS = {
     # mtprops with one complete preconstructed Z2 boot packet (iPad 5), wrapped unmodified.
     'z2fw-from-z2-packet@1': (_z2_packet, {'profile': str, 'calibration_address': int,
                                            'calibration_size': int}),
+    # N1 legacy Z2 packet, zero proximity initialization, dynamic unit calibration.
+    'z2fw-from-z2-packet@2': (_z2_packet_n1, {'profile': str, 'calibration_address': int,
+                                         'calibration_size': int, 'prox_address': int,
+                                         'prox_size': int}),
     # mtprops with an array of preconstructed packets (iPhone 7 Plus), makez2fw's layout.
     'z2fw-from-mtprops@2': (_z2fw_packets, {'profile': str, 'packet': str}),
     # Legacy Gen1 data-form mtprops (iPhone 6), Corellium's bootstrap and board calibration bounds.
@@ -163,6 +183,11 @@ def supported(recipe):
     """
     if recipe.get('schema') != 2:
         raise UnsupportedRecipe('This firmware recipe format needs a newer Orchard')
+    for name, source in recipe['inputs'].items():
+        # Another restore image than the recipe's: its input is always pinned, and names its board.
+        location = source.get('ipsw', {})
+        if 'restore' in location and ('sha256' not in source or not isinstance(location.get('kernelcache'), str)):
+            raise ValueError('An input from another restore image needs its sha256 and board: ' + name)
     for output in recipe['outputs']:
         # A pinned hash, or a reason it is still pending; never both.
         if ('sha256' in output) == ('pending' in output):
