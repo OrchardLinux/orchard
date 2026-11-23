@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "device": "iPod7,1",
+  "firmware": [
+    {
+      "ipsw": {
+        "version": "12.5.8",
+        "build": "16H88",
+        "url": "https://updates.cdn-apple.com/2026WinterFCS/fullrestores/047-28554/C3D5CA8F-8B6F-4B05-9456-C5E632723337/iPodtouch_12.5.8_16H88_Restore.ipsw",
+        "bytes": 2821634289,
+        "sha256": "53a645c03332cd132f52612ffdf2aba3e6908ca937ab7f6c7b81aa8e15a14ec6"
+      },
+      "selected_by": "firmware-recipe",
+      "inputs": {
+        "BuildManifest.plist": {
+          "ipsw": {
+            "zip": "BuildManifest.plist"
+          },
+          "sha256": "97fe52925b0fbc3c2062019f831a18db7d6aeba60742df4be74106b3ea33d0e3"
+        },
+        "iBSS": {
+          "ipsw": {
+            "zip": "Firmware/dfu/iBSS.n102.RELEASE.im4p"
+          },
+          "sha256": "874d5fc6384ffee72e18b89020f1396702735c879d39014f39314c7ce2b84aec"
+        },
+        "iBEC": {
+          "ipsw": {
+            "zip": "Firmware/dfu/iBEC.n102.RELEASE.im4p"
+          },
+          "sha256": "5715e383b1e3eced6202eb47d515b13f1b10c41348239c6a800019111493a07c"
+        },
+        "DeviceTree": {
+          "ipsw": {
+            "zip": "Firmware/all_flash/DeviceTree.n102ap.im4p"
+          },
+          "sha256": "f59b40ce4fa554f4bb24415201c61dd2e8a6767558ca6404a4afa74dd2ec2d35"
+        }
+      }
+    }
+  ],
+  "methods": {}
+}

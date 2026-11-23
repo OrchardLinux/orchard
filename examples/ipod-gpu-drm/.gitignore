@@ -1,0 +1,5 @@
+out/
+rootfs/usr/bin/a8-gpu-drm
+rootfs/usr/share/a8-gpu-drm/
+rootfs/lib/firmware/
+rootfs/opt/

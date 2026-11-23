@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 16:03:00 +0100
+Subject: [PATCH] drm/adbe: Queue the framebuffer hold work on system_dfl_wq
+
+On the iPod touch 6 the first page flip warns "workqueue: work func
+adbe_hold_work enqueued on deprecated workqueue": the flip path queues
+the work on system_wq, which is being replaced. Nothing about the work
+needs a particular CPU, so queue it on the unbound system_dfl_wq, from
+both the flip and the work itself.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/adbe/adbe_drv.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/adbe/adbe_drv.c b/drivers/gpu/drm/adbe/adbe_drv.c
+index ed033f3..0c7058f 100644
+--- a/drivers/gpu/drm/adbe/adbe_drv.c
++++ b/drivers/gpu/drm/adbe/adbe_drv.c
+@@ -712,8 +712,8 @@ static void adbe_hold_work(struct work_struct *work)
+ 	adbe_hold_release(adbe, false);
+ 	/* The newest entry is the one on screen: it stays until replaced. */
+ 	if (READ_ONCE(adbe->nhold) > 1)
+-		schedule_delayed_work(&adbe->hold_work,
+-				      msecs_to_jiffies(ADBE_HOLD_POLL_MS));
++		queue_delayed_work(system_dfl_wq, &adbe->hold_work,
++				   msecs_to_jiffies(ADBE_HOLD_POLL_MS));
+ }
+ 
+ /*
+@@ -759,7 +759,7 @@ static void adbe_hold_push(struct adbe *adbe, struct drm_framebuffer *fb,
+ 				     "pipe not following updates, releasing the oldest held buffer\n");
+ 		drm_framebuffer_put(old);
+ 	}
+-	mod_delayed_work(system_wq, &adbe->hold_work,
++	mod_delayed_work(system_dfl_wq, &adbe->hold_work,
+ 			 msecs_to_jiffies(ADBE_HOLD_POLL_MS));
+ }
+ 
+-- 
+2.49.0
+

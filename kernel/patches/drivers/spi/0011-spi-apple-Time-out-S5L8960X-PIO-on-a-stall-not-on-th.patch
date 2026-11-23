@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 21:47:30 +0100
+Subject: [PATCH] spi: apple: Time out S5L8960X PIO on a stall, not on the
+ whole transfer
+
+The S5L8960X PIO loop yields the CPU every 256 iterations, and its
+deadline covered the whole transfer plus 200 ms. On a busy boot of the
+iPad mini 2 (J85) the yields outlasted that for the touchscreen's 57 KB
+firmware at 1 MHz: the upload stopped at 46-56 KB with -ETIMEDOUT while
+data was still moving. Keep the wire-time deadline, but only fail once
+no byte has arrived for 200 ms as well.
+
+This is the transfer path of every S5L8960X controller, so the iPad Air
+(J72) touchscreen on SPI2 takes it too. A transfer that stops moving
+still fails, once both deadlines have passed.
+
+Assisted-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/spi/spi-apple.c | 19 ++++++++++++++++---
+ 1 file changed, 16 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/spi/spi-apple.c b/drivers/spi/spi-apple.c
+index 8ef0f11b5..cffadda6e 100644
+--- a/drivers/spi/spi-apple.c
++++ b/drivers/spi/spi-apple.c
+@@ -948,12 +948,12 @@ static int apple_spi_transfer_one_s5l8960x(struct spi_controller *ctlr,
+ 	struct apple_spi *spi = spi_controller_get_devdata(ctlr);
+ 	unsigned int bits_per_word = t->bits_per_word ?: device->bits_per_word;
+ 	unsigned long rate = clk_get_rate(spi->clk);
+-	unsigned int sent = 0, received = 0, iterations = 0;
++	unsigned int sent = 0, received = 0, iterations = 0, last_received = 0;
+ 	const u8 *tx = t->tx_buf;
+ 	u8 *rx = t->rx_buf;
+ 	u32 cfg, div, status, tx_level, rx_level, word_delay;
+ 	u64 wire_us, delay_cycles;
+-	ktime_t deadline;
++	ktime_t deadline, stall_deadline;
+ 	int delay_ns, ret;
+ 
+ 	if (!t->len)
+@@ -1004,6 +1004,7 @@ static int apple_spi_transfer_one_s5l8960x(struct spi_controller *ctlr,
+ 	reg_write(spi, APPLE_SPI_RXCNT, t->len);
+ 	reg_write(spi, APPLE_SPI_CTRL, APPLE_SPI_CTRL_RUN);
+ 
++	stall_deadline = ktime_add_ms(ktime_get(), APPLE_SPI_TIMEOUT_MS);
+ 	ret = 0;
+ 	while (received < t->len) {
+ 		status = reg_read(spi, APPLE_SPI_STATUS);
+@@ -1029,7 +1030,19 @@ static int apple_spi_transfer_one_s5l8960x(struct spi_controller *ctlr,
+ 			sent++;
+ 			tx_level++;
+ 		}
+-		if (ktime_after(ktime_get(), deadline)) {
++		/*
++		 * Time out on a stall, not on the whole transfer: the loop
++		 * yields the CPU, and on a busy boot the yields alone can
++		 * outlast a fixed budget for a large transfer (the J85
++		 * touchscreen's 57 KB firmware at 1 MHz).
++		 */
++		if (received != last_received) {
++			last_received = received;
++			stall_deadline = ktime_add_ms(ktime_get(),
++						      APPLE_SPI_TIMEOUT_MS);
++		}
++		if (ktime_after(ktime_get(), deadline) &&
++		    ktime_after(ktime_get(), stall_deadline)) {
+ 			ret = -ETIMEDOUT;
+ 			break;
+ 		}

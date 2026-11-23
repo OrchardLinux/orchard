@@ -1,0 +1,54 @@
+{
+  "schema": 2,
+  "device": "iPod7,1",
+  "ipsw": {
+    "version": "12.5.8",
+    "build": "16H88",
+    "url": "https://updates.cdn-apple.com/2026WinterFCS/fullrestores/047-28554/C3D5CA8F-8B6F-4B05-9456-C5E632723337/iPodtouch_12.5.8_16H88_Restore.ipsw",
+    "bytes": 2821634289,
+    "sha256": "53a645c03332cd132f52612ffdf2aba3e6908ca937ab7f6c7b81aa8e15a14ec6"
+  },
+  "inputs": {
+    "DeviceTree.im4p": {
+      "ipsw": {
+        "zip": "Firmware/all_flash/DeviceTree.n102ap.im4p"
+      },
+      "sha256": "f59b40ce4fa554f4bb24415201c61dd2e8a6767558ca6404a4afa74dd2ec2d35"
+    },
+    "kernelcache-n102ap-16G77": {
+      "ipsw": {
+        "kernelcache": "n102ap",
+        "restore": {
+          "version": "12.4",
+          "build": "16G77",
+          "url": "https://updates.cdn-apple.com/2019SummerFCS/fullrestores/041-86563/9E4DEC4C-A743-11E9-87E4-CD93DBB619B1/iPodtouch_12.4_16G77_Restore.ipsw",
+          "bytes": 2813180896,
+          "sha256": "7deb8c949eaa7f5672d46c6225e9286990ed7c9dfcdfaa2db92ffd91181b213f"
+        }
+      },
+      "sha256": "1d996c85affa1f37a07c6454dd5d3a383d4855206d113c9599200d79b6467ff8"
+    }
+  },
+  "outputs": [
+    {
+      "destination": "lib/firmware/apple/gfx-t7000.bin",
+      "sha256": "0b60def67290391b4c6aa913d9a78a8105d6d9b03738175b8e5732689db1e5ba",
+      "steps": [
+        {
+          "step": "agx-g4p-ldr-from-kernelcache@1",
+          "input": "kernelcache-n102ap-16G77"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/gfx-t7000-border.bin",
+      "sha256": "233ffc1d7db27d9f16db17e23a9ce33082b5a7b72061af3da510bca3c94aff3e",
+      "steps": [
+        {
+          "step": "agx-g4p-border-from-kernelcache@1",
+          "input": "kernelcache-n102ap-16G77"
+        }
+      ]
+    }
+  ]
+}

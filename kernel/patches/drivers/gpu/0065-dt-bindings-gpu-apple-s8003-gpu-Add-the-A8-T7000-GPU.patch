@@ -1,0 +1,125 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 12:03:00 +0100
+Subject: [PATCH] dt-bindings: gpu: apple,s8003-gpu: Add the A8 (T7000) GPU
+
+The A8's GPU, a GX6450 (Apple's G4P), runs the A9's family of GFX
+firmware on its own META processor and is booted the same way. Its
+driver powers it in the order Apple's kernel does: the power manager's
+two global enables (clock gating, the SoC voltage manager), the GPU
+power state, the stores to the two bus bridges in front of the GPU, then
+Fender. Every access to the Rogue registers waits for the GPU's PLL to
+lock, which the power manager reports. So the node names the power
+manager's and the bridges' registers and has no power domain.
+
+Assisted-by: LLM
+---
+ .../bindings/gpu/apple,s8003-gpu.yaml         | 65 ++++++++++++++++++-
+ 1 file changed, 62 insertions(+), 3 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/gpu/apple,s8003-gpu.yaml b/Documentation/devicetree/bindings/gpu/apple,s8003-gpu.yaml
+index b29f915299..677ac589ee 100644
+--- a/Documentation/devicetree/bindings/gpu/apple,s8003-gpu.yaml
++++ b/Documentation/devicetree/bindings/gpu/apple,s8003-gpu.yaml
+@@ -4,7 +4,7 @@
+ $id: http://devicetree.org/schemas/gpu/apple,s8003-gpu.yaml#
+ $schema: http://devicetree.org/meta-schemas/core.yaml#
+ 
+-title: Apple S8003 (A9) GPU
++title: Apple S8003 (A9) and T7000 (A8) GPU
+ 
+ maintainers:
+   - Berkay Kösebay <brkosebay@users.noreply.github.com>
+@@ -15,19 +15,33 @@ description: |
+   META processor; the host loads it. The node has the shape of the A10's
+   (apple,t8010-gpu), without that chip's coprocessor and mailbox.
+ 
++  The A8's GPU (GX6450, Apple's G4P) runs the same family of firmware the
++  same way. Its driver powers the GPU itself, in the order Apple's kernel
++  does: the power manager's GPU power state, its PLL and two of its global
++  enables, and the two bus bridges in front of the GPU, so the node names
++  those registers instead of a power domain.
++
+ properties:
+   compatible:
+-    const: apple,s8003-gpu
++    enum:
++      - apple,s8003-gpu
++      - apple,t7000-gpu
+ 
+   reg:
++    minItems: 2
+     items:
+       - description: The Rogue core's registers
+       - description: Fender
++      - description: The power manager's registers (A8)
++      - description: The GPU's two bus bridges (A8)
+ 
+   reg-names:
++    minItems: 2
+     items:
+       - const: rgx
+       - const: fender
++      - const: pmgr
++      - const: bridges
+ 
+   interrupts:
+     items:
+@@ -57,7 +71,27 @@ required:
+   - reg
+   - reg-names
+   - interrupts
+-  - power-domains
++
++allOf:
++  - if:
++      properties:
++        compatible:
++          const: apple,t7000-gpu
++    then:
++      properties:
++        reg:
++          minItems: 4
++        reg-names:
++          minItems: 4
++        power-domains: false
++    else:
++      properties:
++        reg:
++          maxItems: 2
++        reg-names:
++          maxItems: 2
++      required:
++        - power-domains
+ 
+ additionalProperties: false
+ 
+@@ -85,3 +119,28 @@ examples:
+             firmware-name = "apple/gfx-s8003.bin";
+         };
+     };
++
++  - |
++    #include <dt-bindings/interrupt-controller/apple-aic.h>
++    #include <dt-bindings/interrupt-controller/irq.h>
++
++    soc {
++        #address-cells = <2>;
++        #size-cells = <2>;
++
++        gpu@201000000 {
++            compatible = "apple,t7000-gpu";
++            reg = <0x2 0x01000000 0x0 0x100000>,
++                  <0x2 0x01e00000 0x0 0x100000>,
++                  <0x2 0x0e000000 0x0 0x40000>,
++                  <0x2 0x01f00000 0x0 0x81000>;
++            reg-names = "rgx", "fender", "pmgr", "bridges";
++            interrupt-parent = <&aic>;
++            interrupts = <AIC_IRQ 134 IRQ_TYPE_LEVEL_HIGH>,
++                         <AIC_IRQ 135 IRQ_TYPE_LEVEL_HIGH>,
++                         <AIC_IRQ 136 IRQ_TYPE_LEVEL_HIGH>,
++                         <AIC_IRQ 137 IRQ_TYPE_LEVEL_HIGH>,
++                         <AIC_IRQ 138 IRQ_TYPE_LEVEL_HIGH>;
++            firmware-name = "apple/gfx-t7000.bin";
++        };
++    };

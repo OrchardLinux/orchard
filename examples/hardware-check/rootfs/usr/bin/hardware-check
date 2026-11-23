@@ -3,6 +3,7 @@
 # is present first; what the device doesn't have is SKIP, not FAIL.
 #
 #   hardware-check           the automatic checks (about 3 minutes)
+#   hardware-check storage   internal storage only
 #   hardware-check touch     drag on the screen for 20 s
 #   hardware-check keys      press the buttons for 20 s
 #   hardware-check wifi      only the Wi-Fi checks
@@ -35,6 +36,34 @@ check_system() {
 
 check_storage() {
     section "Storage"
+    . /usr/libexec/sftl-storage
+    if is_p105; then
+        i=0
+        until sftl_readonly check; do
+            if [ "$i" -ge 60 ]; then
+                result FAIL "P105 SFTL disk or partition missing, inaccessible or writable"
+                return 1
+            fi
+            sleep 1
+            i=$((i + 1))
+        done
+        if ! before=$(sftl_probe_state); then
+            result FAIL "cannot verify P105 SFTL disk and partitions are read-only and unmounted"
+            return 1
+        fi
+        bytes=$(dd if=/dev/applesftl0 bs=4096 count=1 2>>"$REPORT" | wc -c)
+        if [ "$bytes" -ne 4096 ]; then
+            result FAIL "short or failed read from applesftl0 ($bytes bytes)"
+            return 1
+        fi
+        if ! after=$(sftl_probe_state) || [ "$after" != "$before" ]; then
+            result FAIL "P105 SFTL disk, partition or mount state changed during the read"
+            return 1
+        fi
+        result PASS "P105 SFTL disk and registered partitions read-only and unmounted"
+        result PASS "read 4096 bytes from applesftl0"
+        return
+    fi
     # The internal disk: NVMe on A9 and later, ANS1 (asp) on A7-A8X.
     disk=
     for name in nvme0n1 asp0n1; do
@@ -58,7 +87,9 @@ check_storage() {
         result PASS "read 1 GiB in ${seconds}s"
     else
         result FAIL "1 GiB read from $disk"
+        return 1
     fi
+    [ "$writable" = 0 ]
 }
 
 check_pcie() {
@@ -229,8 +260,9 @@ case "${1:-all}" in
         say "Report: $REPORT, kernel log: /run/dmesg.txt (also at http://172.16.42.1:8080/)"
         ;;
     touch) section "Touch"; watch_input 'touch|multitouch|z2' touch 'Drag on the screen' ;;
+    storage) : > "$REPORT"; check_storage ;;
     keys) section "Keys"; watch_input 'gpio-keys|button|keys' keys 'Press each button a few times' ;;
     wifi) : > "$REPORT"; dmesg > /run/dmesg-boot.txt; check_system; check_wifi; dmesg > /run/dmesg.txt; say "DONE" ;;
     charge) charge ;;
-    *) echo "usage: hardware-check [wifi|touch|keys|charge]"; exit 2 ;;
+    *) echo "usage: hardware-check [storage|wifi|touch|keys|charge]"; exit 2 ;;
 esac

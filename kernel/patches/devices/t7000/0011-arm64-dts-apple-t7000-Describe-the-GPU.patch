@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 17:36:03 +0100
+Subject: [PATCH] arm64: dts: apple: t7000: Describe the GPU
+
+The A8's GPU: the Rogue core's registers and Fender, the power manager's
+and the two GPU bus bridges' registers (the driver powers the GPU
+itself, in Apple's order), and its five interrupts, the fifth the
+firmware's: AIC 138, the second of the ADT's meta-sw-interrupt tuples.
+Enable it on the iPod touch 6 (N102), where it boots.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t7000-n102.dts |  4 ++++
+ arch/arm64/boot/dts/apple/t7000.dtsi     | 17 +++++++++++++++++
+ 2 files changed, 21 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t7000-n102.dts b/arch/arm64/boot/dts/apple/t7000-n102.dts
+index 447d46e..2893af6 100644
+--- a/arch/arm64/boot/dts/apple/t7000-n102.dts
++++ b/arch/arm64/boot/dts/apple/t7000-n102.dts
+@@ -51,6 +51,10 @@
+ 	power-domains = <&ps_disp0 &ps_mipi_dsi>;
+ };
+ 
++&gpu {
++	status = "okay";
++};
++
+ &i2c0 {
+ 	status = "okay";
+ 
+diff --git a/arch/arm64/boot/dts/apple/t7000.dtsi b/arch/arm64/boot/dts/apple/t7000.dtsi
+index 72a2e7d..1a165a7 100644
+--- a/arch/arm64/boot/dts/apple/t7000.dtsi
++++ b/arch/arm64/boot/dts/apple/t7000.dtsi
+@@ -129,6 +129,23 @@
+ 		nonposted-mmio;
+ 		ranges;
+ 
++		gpu: gpu@201000000 {
++			compatible = "apple,t7000-gpu";
++			reg = <0x2 0x01000000 0x0 0x100000>,
++			      <0x2 0x01e00000 0x0 0x100000>,
++			      <0x2 0x0e000000 0x0 0x40000>,
++			      <0x2 0x01f00000 0x0 0x81000>;
++			reg-names = "rgx", "fender", "pmgr", "bridges";
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 134 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 135 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 136 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 137 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 138 IRQ_TYPE_LEVEL_HIGH>;
++			firmware-name = "apple/gfx-t7000.bin";
++			status = "disabled";
++		};
++
+ 		cpufreq: performance-controller@202220000 {
+ 			compatible = "apple,t7000-cluster-cpufreq", "apple,s5l8960x-cluster-cpufreq";
+ 			reg = <0x2 0x02220000 0 0x1000>;

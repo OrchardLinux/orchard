@@ -30,8 +30,7 @@ class N61Data(unittest.TestCase):
         self.assertEqual(path, HARDWARE / 'devices/n61/firmware.json')
         recipe = json.loads(path.read_text())
         self.assertEqual((recipe['schema'], recipe['device']), (2, 'iPhone7,2'))
-        output, = recipe['outputs']
-        self.assertEqual(output['destination'], 'lib/firmware/apple/n61-fwstart.z2fw')
+        output, = [o for o in recipe['outputs'] if o['destination'] == 'lib/firmware/apple/n61-fwstart.z2fw']
         self.assertEqual(output['sha256'], '51d2ef7b25c1d7e323fa703b531223312cb76f7183fbeb425f921dd6e5509294')
         self.assertEqual(output['steps'], [{'step': 'z2fw-from-mtprops@3', 'input': 'N61.mtprops',
             'profile': 'C1F59,1', 'packet': 'Z2', 'touch_maximum': 1024, 'prox_maximum': 128,

@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 16:13:00 +0100
+Subject: [PATCH] arm64: dts: apple: t7000-mini4: Enable the display pipe
+
+iBoot leaves the iPad mini 4's 1536x2048 eDP panel running from its boot
+framebuffer, the state the display pipe's driver adopts on the iPod
+touch 6. Enable disp0 on both models (J96, J97), so that it replaces
+simpledrm, with page flips and vblank interrupts and, once its self-check
+of translated scanout passes, scanout of client buffers through the
+display DART. dart-disp0 stays disabled: the driver enables it after
+mapping the live scanout.
+
+The panel mode is not in the ADT; the driver takes it from the boot
+framebuffer. Its self-check needs one contiguous frame-sized buffer
+(12 MiB here) from the 16 MiB CMA area, as on the iPad 5's panel of the
+same size; if that allocation fails, the driver stays in bypass.
+
+Not run on an iPad mini 4 yet.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t7000-mini4.dtsi | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t7000-mini4.dtsi b/arch/arm64/boot/dts/apple/t7000-mini4.dtsi
+index d067921..e6f2e02 100644
+--- a/arch/arm64/boot/dts/apple/t7000-mini4.dtsi
++++ b/arch/arm64/boot/dts/apple/t7000-mini4.dtsi
+@@ -174,7 +174,9 @@
+ /*
+  * ADT displayport ("displayport,t7000", embedded, four lanes): the panel
+  * link is eDP, so the pipe holds the dp domain instead of mipi_dsi and
+- * gets the transmitter's window.
++ * gets the transmitter's window. The pipe takes the 1536x2048 panel over
++ * from simpledrm. No panel supply is given: the panel stays on in system
++ * sleep.
+  */
+ &disp0 {
+ 	reg = <0x2 0x06200000 0x0 0x100000>,
+@@ -183,6 +185,7 @@
+ 	      <0x2 0x06700000 0x0 0x1000>;
+ 	reg-names = "adp", "dart0", "dart1", "dp";
+ 	power-domains = <&ps_disp0>, <&ps_dp>;
++	status = "okay";
+ };
+ 
+ &gpu {
+-- 
+2.49.0
+

@@ -340,6 +340,7 @@
     "j85": [
       "backlight",
       "buttons",
+      "touch",
       "usb_network",
       "usb_serial"
     ],
