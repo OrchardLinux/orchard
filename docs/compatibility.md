@@ -270,14 +270,14 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `j82` | experimental | yes | yes | yes | – | – | – | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes | – | – |
 | `j71s` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes |
 | `j72s` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes |
-| `n66` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | – | – | yes |
-| `n69u` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | – | – | yes |
-| `n71` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | – | – | yes |
+| `n66` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | yes | – | yes |
+| `n69u` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | yes | – | yes |
+| `n71` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | yes | – | yes |
 | `j71t` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes |
 | `j72t` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes |
-| `n66m` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | – | – | yes |
-| `n69` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | – | – | yes |
-| `n71m` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | – | – | yes |
+| `n66m` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | yes | – | yes |
+| `n69` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | yes | – | yes |
+| `n71m` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | yes | – | yes |
 | `j127` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | – | yes | yes | – | – | – | – |
 | `j128` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | – | yes | yes | – | – | – | – |
 | `j98a` | experimental | yes | – | yes | – | – | – | – | – | – | – | – | – | – | yes | yes | – | – | – | – |
@@ -321,5 +321,11 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `n53` | Speakers | missing, but a driver binds |
 | `j71s` | Microphone | untested, but no driver binds |
 | `j72s` | Microphone | untested, but no driver binds |
+| `n66` | Speakers | missing, but a driver binds |
+| `n69u` | Speakers | missing, but a driver binds |
+| `n71` | Speakers | missing, but a driver binds |
 | `j71t` | Microphone | working, but no driver binds |
 | `j72t` | Microphone | untested, but no driver binds |
+| `n66m` | Speakers | missing, but a driver binds |
+| `n69` | Speakers | missing, but a driver binds |
+| `n71m` | Speakers | missing, but a driver binds |

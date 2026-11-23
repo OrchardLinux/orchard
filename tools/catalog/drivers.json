@@ -564,6 +564,7 @@
     ],
     "n66": [
       "accelerometer",
+      "audio_output",
       "backlight",
       "battery",
       "buttons",
@@ -579,6 +580,7 @@
     ],
     "n66m": [
       "accelerometer",
+      "audio_output",
       "backlight",
       "battery",
       "buttons",
@@ -594,6 +596,7 @@
     ],
     "n69": [
       "accelerometer",
+      "audio_output",
       "backlight",
       "battery",
       "buttons",
@@ -609,6 +612,7 @@
     ],
     "n69u": [
       "accelerometer",
+      "audio_output",
       "backlight",
       "battery",
       "buttons",
@@ -624,6 +628,7 @@
     ],
     "n71": [
       "accelerometer",
+      "audio_output",
       "backlight",
       "battery",
       "buttons",
@@ -639,6 +644,7 @@
     ],
     "n71m": [
       "accelerometer",
+      "audio_output",
       "backlight",
       "battery",
       "buttons",
