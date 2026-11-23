@@ -42,6 +42,9 @@ is missing or empty.
 - iPad Air and iPad mini 2/3 (A7): Lightning charging at up to 1.05 A
   instead of iBoot's 100 mA.
 - iPad Air and iPad mini 2/3 (A7): the battery level shows on every model.
+- iPad Air, iPad mini 2/3 and iPhone 5s (A7): internal storage on every
+  model, so Omarchy can install next to iOS, not only on the J72.
+- iPad Air and iPad mini 2/3 (A7): the touchscreen on every model.
 - iPhone 6s Plus (Samsung): Linux and m1n1 read and write its internal
   storage, so Omarchy installs with `orchard install` next to iOS. The
   display, backlight and buttons work. The Samsung A9's PCIe storage
