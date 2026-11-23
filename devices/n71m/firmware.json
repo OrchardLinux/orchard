@@ -48,6 +48,250 @@
         "zip": "Firmware/AOP/aopfw-s8000aop.im4p"
       },
       "sha256": "8b13cd96c292683bde0716199fb1821394cedfdbbbf27867e9bb49914287b44d"
+    },
+    "s-C2_P-albarossa_M-BLMA_V-m__m-1.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-BLMA_V-m__m-1.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-BLMA_V-m__m-1.1.txt",
+      "sha256": "fb110dbd8a94e82dfe9c1463aa8260debcf6df2c7081d97d5d50c95ca4740b59"
+    },
+    "s-C2_P-albarossa_M-BLMA_V-m__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-BLMA_V-m__m-2.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-BLMA_V-m__m-2.1.txt",
+      "sha256": "ba157a34ad0a23b7b11c25c5e38657cd29170142b9d0ba2ee28ee72cdd8c09e0"
+    },
+    "s-C2_P-albarossa_M-BLMA_V-m__m-2.5.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-BLMA_V-m__m-2.5.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-BLMA_V-m__m-2.5.txt",
+      "sha256": "f17de8ccf757d726643d84df76f8bbd7a5ccdfe417ad0fcba59a3b9eddc91fc4"
+    },
+    "s-C2_P-albarossa_M-BLMA_V-t__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-BLMA_V-t__m-2.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-BLMA_V-t__m-2.1.txt",
+      "sha256": "294974433a0e04013c4c8badb216f83cd0d04513f3e1c303dfb06884cb624069"
+    },
+    "s-C2_P-albarossa_M-BLMA_V-t__m-2.5.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-BLMA_V-t__m-2.5.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-BLMA_V-t__m-2.5.txt",
+      "sha256": "81d24ed4469121cdf687bcdb65cc899b8499da03c3b3e22575be5ff2dab5b8af"
+    },
+    "s-C2_P-albarossa_M-BLMA_V-u__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-BLMA_V-u__m-2.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-BLMA_V-u__m-2.1.txt",
+      "sha256": "0bfd1e1ce6ab3a25c9a6f1308f2e6f3607c8562e2c7e4f5dfe14b2b7eeef9d53"
+    },
+    "s-C2_P-albarossa_M-BLMA_V-u__m-2.5.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-BLMA_V-u__m-2.5.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-BLMA_V-u__m-2.5.txt",
+      "sha256": "f638500c23aef603fcdfdb831cf35eaaedd73a02c4dc133f6cfb271dff8fee74"
+    },
+    "s-C2_P-albarossa_M-STBL_V-m__m-1.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-STBL_V-m__m-1.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-STBL_V-m__m-1.1.txt",
+      "sha256": "be9d5658dd45b764c48984363fa7b26a145030193324ba8e97715a780a07fa00"
+    },
+    "s-C2_P-albarossa_M-STBL_V-m__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-STBL_V-m__m-2.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-STBL_V-m__m-2.1.txt",
+      "sha256": "be9d5658dd45b764c48984363fa7b26a145030193324ba8e97715a780a07fa00"
+    },
+    "s-C2_P-albarossa_M-STBL_V-m__m-2.3.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-STBL_V-m__m-2.3.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-STBL_V-m__m-2.3.txt",
+      "sha256": "be9d5658dd45b764c48984363fa7b26a145030193324ba8e97715a780a07fa00"
+    },
+    "s-C2_P-albarossa_M-STBL_V-m__m-2.5.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-STBL_V-m__m-2.5.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-STBL_V-m__m-2.5.txt",
+      "sha256": "a1219c15011a7949e85901d694bcdd51e5ef4a76a4c2ddea3551433fcae0a186"
+    },
+    "s-C2_P-albarossa_M-STBL_V-t__m-2.5.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-STBL_V-t__m-2.5.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-STBL_V-t__m-2.5.txt",
+      "sha256": "e6b36c07787c792d86c0de21a1bbe1e8492fb9c3627a045bf0ba67ed7cc65e5e"
+    },
+    "s-C2_P-albarossa_M-STBL_V-u__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-STBL_V-u__m-2.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-STBL_V-u__m-2.1.txt",
+      "sha256": "23fc0499795c5b82a9fc0518e3f34e84b0d8fd92d7e9bc7ae752236ceb6f01f5"
+    },
+    "s-C2_P-albarossa_M-STBL_V-u__m-2.3.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-STBL_V-u__m-2.3.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/P-albarossa_M-STBL_V-u__m-2.3.txt",
+      "sha256": "e580859af40e374f009d17c8adeb2c94682421f70a1b62548a2664751ed44d2d"
+    },
+    "s-C2_albarossa.clmb": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/albarossa.clmb"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/albarossa.clmb",
+      "sha256": "7dee3e90bf30d2f3debd676e17ee999bf6178d000b6fec9176788d87e8c8ce0a"
+    },
+    "s-C2_albarossa.trx": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/albarossa.trx"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/albarossa.trx",
+      "sha256": "fb1c8d1d73c6742226bd12a19d09630190f4cac053792a6bae96aab6bc1e59f8"
+    },
+    "s-C2_albarossa.txcb": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C2/albarossa.txcb"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C2/albarossa.txcb",
+      "sha256": "8ed60513f15901f59b933d503483bf24fe61016b5c6d52ab4990c9fbcb0a2414"
+    },
+    "s-C5_P-albarossa_M-BLMA_V-m__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-m__m-2.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-m__m-2.1.txt",
+      "sha256": "017351e8f2dac2aaa881057c3931ee2310aa5c69a6cae602b1fa26b4c1409ca8"
+    },
+    "s-C5_P-albarossa_M-BLMA_V-m__m-2.5.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-m__m-2.5.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-m__m-2.5.txt",
+      "sha256": "2d03a6dcf9386094b76b00b7ca0b14734a946fe10cbb9de3218e7b1614a79a4a"
+    },
+    "s-C5_P-albarossa_M-BLMA_V-m__m-3.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-m__m-3.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-m__m-3.1.txt",
+      "sha256": "2d03a6dcf9386094b76b00b7ca0b14734a946fe10cbb9de3218e7b1614a79a4a"
+    },
+    "s-C5_P-albarossa_M-BLMA_V-m__m-4.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-m__m-4.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-m__m-4.1.txt",
+      "sha256": "804a416ef523cdf627f188c5dd378193cbdaeabdeaf1f915e76fadfb5ddd96fc"
+    },
+    "s-C5_P-albarossa_M-BLMA_V-m__m-5.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-m__m-5.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-m__m-5.1.txt",
+      "sha256": "804a416ef523cdf627f188c5dd378193cbdaeabdeaf1f915e76fadfb5ddd96fc"
+    },
+    "s-C5_P-albarossa_M-BLMA_V-m__m-5.5.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-m__m-5.5.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-m__m-5.5.txt",
+      "sha256": "804a416ef523cdf627f188c5dd378193cbdaeabdeaf1f915e76fadfb5ddd96fc"
+    },
+    "s-C5_P-albarossa_M-BLMA_V-t__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-t__m-2.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-t__m-2.1.txt",
+      "sha256": "49a1e1db34f3ae594f588f3f00dad9d383f0b8556e88c59d44e455e3339d54b4"
+    },
+    "s-C5_P-albarossa_M-BLMA_V-t__m-2.5.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-t__m-2.5.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-t__m-2.5.txt",
+      "sha256": "81d24ed4469121cdf687bcdb65cc899b8499da03c3b3e22575be5ff2dab5b8af"
+    },
+    "s-C5_P-albarossa_M-BLMA_V-u__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-u__m-2.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-u__m-2.1.txt",
+      "sha256": "3634c03346497d2fe17d4b21a70ddbfb53d41ff0c9b74f43f9c41b56d13b73c4"
+    },
+    "s-C5_P-albarossa_M-BLMA_V-u__m-2.5.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-u__m-2.5.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-u__m-2.5.txt",
+      "sha256": "f638500c23aef603fcdfdb831cf35eaaedd73a02c4dc133f6cfb271dff8fee74"
+    },
+    "s-C5_P-albarossa_M-BLMA_V-u__m-3.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-u__m-3.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-u__m-3.1.txt",
+      "sha256": "f638500c23aef603fcdfdb831cf35eaaedd73a02c4dc133f6cfb271dff8fee74"
+    },
+    "s-C5_P-albarossa_M-BLMA_V-u__m-4.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-u__m-4.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-u__m-4.1.txt",
+      "sha256": "912410035222d8a04dfe32de85cd32c6f56614b6a61aca42decc4db9a3e375e5"
+    },
+    "s-C5_P-albarossa_M-BLMA_V-u__m-5.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-u__m-5.1.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-u__m-5.1.txt",
+      "sha256": "912410035222d8a04dfe32de85cd32c6f56614b6a61aca42decc4db9a3e375e5"
+    },
+    "s-C5_P-albarossa_M-BLMA_V-u__m-5.3.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-u__m-5.3.txt"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/P-albarossa_M-BLMA_V-u__m-5.3.txt",
+      "sha256": "912410035222d8a04dfe32de85cd32c6f56614b6a61aca42decc4db9a3e375e5"
+    },
+    "s-C5_albarossa.clmb": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/albarossa.clmb"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/albarossa.clmb",
+      "sha256": "6c3c0b89607b5bbf7dd32eb32a42c68109680489e1089b935bd193a115a35e37"
+    },
+    "s-C5_albarossa.trx": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/albarossa.trx"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/albarossa.trx",
+      "sha256": "85b4339fb00f4cb501e678cd79f268cbcbae6736e0fa19d76d99e9da5ba08254"
+    },
+    "s-C5_albarossa.txcb": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4350__s-C5/albarossa.txcb"
+      },
+      "device": "/usr/share/firmware/wifi/C-4350__s-C5/albarossa.txcb",
+      "sha256": "2663ca41e789c5feda793e467dbb41abe7c95919be63d9fb9b3335486711a73b"
+    },
+    "BlueTool": {
+      "ipsw": {
+        "rootfs": "usr/sbin/BlueTool"
+      },
+      "device": "/usr/sbin/BlueTool"
     }
   },
   "outputs": [
@@ -111,6 +355,366 @@
         {
           "step": "aop-image@1",
           "coprocessor": "AOP_ext"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,albarossa-BLMA-m-1.1.txt",
+      "sha256": "fb110dbd8a94e82dfe9c1463aa8260debcf6df2c7081d97d5d50c95ca4740b59",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-albarossa_M-BLMA_V-m__m-1.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,albarossa-BLMA-m-2.1.txt",
+      "sha256": "ba157a34ad0a23b7b11c25c5e38657cd29170142b9d0ba2ee28ee72cdd8c09e0",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-albarossa_M-BLMA_V-m__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,albarossa-BLMA-m-2.5.txt",
+      "sha256": "f17de8ccf757d726643d84df76f8bbd7a5ccdfe417ad0fcba59a3b9eddc91fc4",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-albarossa_M-BLMA_V-m__m-2.5.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,albarossa-BLMA-t-2.1.txt",
+      "sha256": "294974433a0e04013c4c8badb216f83cd0d04513f3e1c303dfb06884cb624069",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-albarossa_M-BLMA_V-t__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,albarossa-BLMA-t-2.5.txt",
+      "sha256": "81d24ed4469121cdf687bcdb65cc899b8499da03c3b3e22575be5ff2dab5b8af",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-albarossa_M-BLMA_V-t__m-2.5.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,albarossa-BLMA-u-2.1.txt",
+      "sha256": "0bfd1e1ce6ab3a25c9a6f1308f2e6f3607c8562e2c7e4f5dfe14b2b7eeef9d53",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-albarossa_M-BLMA_V-u__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,albarossa-BLMA-u-2.5.txt",
+      "sha256": "f638500c23aef603fcdfdb831cf35eaaedd73a02c4dc133f6cfb271dff8fee74",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-albarossa_M-BLMA_V-u__m-2.5.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,albarossa-STBL-m-1.1.txt",
+      "sha256": "be9d5658dd45b764c48984363fa7b26a145030193324ba8e97715a780a07fa00",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-albarossa_M-STBL_V-m__m-1.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,albarossa-STBL-m-2.1.txt",
+      "sha256": "be9d5658dd45b764c48984363fa7b26a145030193324ba8e97715a780a07fa00",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-albarossa_M-STBL_V-m__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,albarossa-STBL-m-2.3.txt",
+      "sha256": "be9d5658dd45b764c48984363fa7b26a145030193324ba8e97715a780a07fa00",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-albarossa_M-STBL_V-m__m-2.3.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,albarossa-STBL-m-2.5.txt",
+      "sha256": "a1219c15011a7949e85901d694bcdd51e5ef4a76a4c2ddea3551433fcae0a186",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-albarossa_M-STBL_V-m__m-2.5.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,albarossa-STBL-t-2.5.txt",
+      "sha256": "e6b36c07787c792d86c0de21a1bbe1e8492fb9c3627a045bf0ba67ed7cc65e5e",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-albarossa_M-STBL_V-t__m-2.5.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,albarossa-STBL-u-2.1.txt",
+      "sha256": "23fc0499795c5b82a9fc0518e3f34e84b0d8fd92d7e9bc7ae752236ceb6f01f5",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-albarossa_M-STBL_V-u__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,albarossa-STBL-u-2.3.txt",
+      "sha256": "e580859af40e374f009d17c8adeb2c94682421f70a1b62548a2664751ed44d2d",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_P-albarossa_M-STBL_V-u__m-2.3.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,albarossa.clm_blob",
+      "sha256": "7dee3e90bf30d2f3debd676e17ee999bf6178d000b6fec9176788d87e8c8ce0a",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_albarossa.clmb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,albarossa.bin",
+      "sha256": "fb1c8d1d73c6742226bd12a19d09630190f4cac053792a6bae96aab6bc1e59f8",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_albarossa.trx"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350c2-pcie.apple,albarossa.txcap_blob",
+      "sha256": "8ed60513f15901f59b933d503483bf24fe61016b5c6d52ab4990c9fbcb0a2414",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C2_albarossa.txcb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,albarossa-BLMA-m-2.1.txt",
+      "sha256": "017351e8f2dac2aaa881057c3931ee2310aa5c69a6cae602b1fa26b4c1409ca8",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-albarossa_M-BLMA_V-m__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,albarossa-BLMA-m-2.5.txt",
+      "sha256": "2d03a6dcf9386094b76b00b7ca0b14734a946fe10cbb9de3218e7b1614a79a4a",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-albarossa_M-BLMA_V-m__m-2.5.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,albarossa-BLMA-m-3.1.txt",
+      "sha256": "2d03a6dcf9386094b76b00b7ca0b14734a946fe10cbb9de3218e7b1614a79a4a",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-albarossa_M-BLMA_V-m__m-3.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,albarossa-BLMA-m-4.1.txt",
+      "sha256": "804a416ef523cdf627f188c5dd378193cbdaeabdeaf1f915e76fadfb5ddd96fc",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-albarossa_M-BLMA_V-m__m-4.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,albarossa-BLMA-m-5.1.txt",
+      "sha256": "804a416ef523cdf627f188c5dd378193cbdaeabdeaf1f915e76fadfb5ddd96fc",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-albarossa_M-BLMA_V-m__m-5.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,albarossa-BLMA-m-5.5.txt",
+      "sha256": "804a416ef523cdf627f188c5dd378193cbdaeabdeaf1f915e76fadfb5ddd96fc",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-albarossa_M-BLMA_V-m__m-5.5.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,albarossa-BLMA-t-2.1.txt",
+      "sha256": "49a1e1db34f3ae594f588f3f00dad9d383f0b8556e88c59d44e455e3339d54b4",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-albarossa_M-BLMA_V-t__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,albarossa-BLMA-t-2.5.txt",
+      "sha256": "81d24ed4469121cdf687bcdb65cc899b8499da03c3b3e22575be5ff2dab5b8af",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-albarossa_M-BLMA_V-t__m-2.5.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,albarossa-BLMA-u-2.1.txt",
+      "sha256": "3634c03346497d2fe17d4b21a70ddbfb53d41ff0c9b74f43f9c41b56d13b73c4",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-albarossa_M-BLMA_V-u__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,albarossa-BLMA-u-2.5.txt",
+      "sha256": "f638500c23aef603fcdfdb831cf35eaaedd73a02c4dc133f6cfb271dff8fee74",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-albarossa_M-BLMA_V-u__m-2.5.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,albarossa-BLMA-u-3.1.txt",
+      "sha256": "f638500c23aef603fcdfdb831cf35eaaedd73a02c4dc133f6cfb271dff8fee74",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-albarossa_M-BLMA_V-u__m-3.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,albarossa-BLMA-u-4.1.txt",
+      "sha256": "912410035222d8a04dfe32de85cd32c6f56614b6a61aca42decc4db9a3e375e5",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-albarossa_M-BLMA_V-u__m-4.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,albarossa-BLMA-u-5.1.txt",
+      "sha256": "912410035222d8a04dfe32de85cd32c6f56614b6a61aca42decc4db9a3e375e5",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-albarossa_M-BLMA_V-u__m-5.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,albarossa-BLMA-u-5.3.txt",
+      "sha256": "912410035222d8a04dfe32de85cd32c6f56614b6a61aca42decc4db9a3e375e5",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_P-albarossa_M-BLMA_V-u__m-5.3.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,albarossa.clm_blob",
+      "sha256": "6c3c0b89607b5bbf7dd32eb32a42c68109680489e1089b935bd193a115a35e37",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_albarossa.clmb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,albarossa.bin",
+      "sha256": "85b4339fb00f4cb501e678cd79f268cbcbae6736e0fa19d76d99e9da5ba08254",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_albarossa.trx"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4350-pcie.apple,albarossa.txcap_blob",
+      "sha256": "2663ca41e789c5feda793e467dbb41abe7c95919be63d9fb9b3335486711a73b",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "s-C5_albarossa.txcb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,n71m-USI.hcd",
+      "sha256": "38b024516bd07b7b392aff280fc5121aa43ca57a7664b66e1a2e34226434aecb",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,n71m-MUR.hcd",
+      "sha256": "f105eefe7c3e52c36eb728450ac24b40dcd2725cc1226a3fb7502a4b32cd5fd0",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
         }
       ]
     }

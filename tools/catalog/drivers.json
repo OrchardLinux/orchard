@@ -632,6 +632,8 @@
       "accelerometer",
       "backlight",
       "battery",
+      "bluetooth_audio",
+      "bluetooth_input",
       "buttons",
       "charging",
       "gyroscope",
@@ -641,12 +643,15 @@
       "touch",
       "usb_network",
       "usb_serial",
-      "video_decode_hevc"
+      "video_decode_hevc",
+      "wifi"
     ],
     "n71m": [
       "accelerometer",
       "backlight",
       "battery",
+      "bluetooth_audio",
+      "bluetooth_input",
       "buttons",
       "charging",
       "gyroscope",
@@ -656,7 +661,8 @@
       "touch",
       "usb_network",
       "usb_serial",
-      "video_decode_hevc"
+      "video_decode_hevc",
+      "wifi"
     ]
   },
   "kernels": {

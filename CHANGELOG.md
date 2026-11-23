@@ -22,6 +22,10 @@ is missing or empty.
   follows the phone's orientation. The motion processor (AOP) now starts
   with the iOS 15 firmware on every A9 iPhone (6s, 6s Plus, SE), with the
   same sensor orientation; untested on the 6s and SE.
+- iPhone 6s Plus (A9): Wi-Fi works, and Bluetooth comes up and scans. The
+  iPhone 6s has the same module family and gets both too, with its own
+  firmware; untested there. The iPhone SE has a different chip and has
+  neither yet.
 
 ## [0.3.6] - 2026-11-24
 
