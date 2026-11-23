@@ -29,6 +29,14 @@
       },
       "device": "/usr/share/firmware/wifi/4324b5/dureza-u-kk.txt",
       "sha256": "a9661d90216e3b1dc64f8148b64a8dae49211fc6eb5b74eb4bcac2271f2b394f"
+    },
+    "kernelcache": {
+      "ipsw": {
+        "kernelcache": true
+      },
+      "device": {
+        "kernelcache": "active"
+      }
     }
   },
   "outputs": [
@@ -56,6 +64,17 @@
           "input": "dureza.trx",
           "nvram": "dureza-u-kk.txt",
           "placeholder_mac": "02:00:00:00:00:00"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/s5l8960x-smartio.bin",
+      "sha256": "af3d61851d4a2dd53d7301d945d7ff3f0d94eef2e15947f1de2c9a8982708e33",
+      "steps": [
+        {
+          "step": "smartio-from-kernelcache@2",
+          "input": "kernelcache",
+          "kext": "com.apple.driver.AppleS5L8960XSmartIO"
         }
       ]
     }
