@@ -14,8 +14,9 @@ is missing or empty.
 ### Devices
 
 - iPad 6, iPad 5, iPad Air 2 and the other A8, A9 and A10 boards: the boot
-  splash no longer flashes a noise pattern about four seconds into boot, when
-  the display driver takes over the screen.
+  splash stays still until the PIN screen again. When the display driver took
+  over, about four seconds into boot, it flashed a test pattern and then
+  went black for a moment.
 
 ## [0.3.5] - 2026-11-24
 
