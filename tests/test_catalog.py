@@ -313,7 +313,7 @@ class InferredInstall(unittest.TestCase):
         from orchard import hardware
         boards = {path.parent.name for path in DESCRIPTORS if not hardware.install_blockers(path.parent.name)}
         self.assertEqual(boards, {'d10', 'd101', 'd11', 'd111', 'd20', 'd201', 'd21', 'd211', 'd22', 'd221',
-                                  'j171', 'j172', 'j71', 'j71b', 'j71s', 'j71t', 'j72', 'j72b', 'j72s',
+                                  'j120', 'j121', 'j171', 'j172', 'j207', 'j208', 'j71', 'j71b', 'j71s', 'j71t', 'j72', 'j72b', 'j72s',
                                   'j72t', 'j73', 'j81', 'j82', 'j85', 'j85m', 'j86', 'j86m', 'j87', 'j87m',
                                   'j96', 'j97', 'n102', 'n51', 'n53', 'n56', 'n61', 'n66', 'n66m', 'n69', 'n69u', 'n71', 'n71m'})
 

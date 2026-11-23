@@ -9,6 +9,22 @@ releasing, rename that section to the version (`## [0.3.0] - YYYY-MM-DD`). The
 release workflow uses that section as the GitHub release notes and fails if it
 is missing or empty.
 
+## Unreleased
+
+### Devices
+
+- iPad Pro 12.9-inch (2017) (A10X): the touchscreen, internal storage,
+  Wi-Fi, Bluetooth, the battery gauge, headphones, both microphones, the
+  accelerometer, hardware video decoding and sleep, brought up by tompta1
+  (thanks!). Speakers, charging control and the light sensors follow
+  later. About half of the boots still stop early.
+- iPad Pro 12.9-inch (2017, Cellular) and iPad Pro 10.5-inch (A10X): the
+  same hardware as the iPad Pro 12.9-inch (2017), with touch and Wi-Fi
+  firmware in their recipes. Untested.
+- iPad 6, iPad 7 and the other A9 and A10 devices: fixes found during that
+  work for the coprocessor mailbox, SmartIO audio and the Lightning
+  charger's interrupt-storm fallback, shared by all of them.
+
 ## [0.3.3] - 2026-11-24
 
 ### Devices
