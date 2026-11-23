@@ -9,6 +9,14 @@ releasing, rename that section to the version (`## [0.3.0] - YYYY-MM-DD`). The
 release workflow uses that section as the GitHub release notes and fails if it
 is missing or empty.
 
+## Unreleased
+
+### Devices
+
+- iPad Air and iPad mini 2 and 3 (A7): Lightning charging draws up to
+  1.5 A instead of 1.05 A from a charger that offers it, as measured on an
+  iPad mini 2. Untested on the iPad Air and iPad mini 3.
+
 ## [0.3.3] - 2026-11-24
 
 ### Devices
