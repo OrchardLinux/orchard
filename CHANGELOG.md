@@ -9,6 +9,17 @@ releasing, rename that section to the version (`## [0.3.0] - YYYY-MM-DD`). The
 release workflow uses that section as the GitHub release notes and fails if it
 is missing or empty.
 
+## Unreleased
+
+### Devices
+
+- iPad mini 2 and the other A7 devices: writes to internal storage survive
+  suspend. The storage controller finishes its commands before sleep and is
+  restarted after it, and its NAND clock stays powered, without which every
+  disk command took seconds after wake. The A8 and A8X devices (iPad Air 2,
+  iPad mini 4, iPhone 6 and 6 Plus, iPod touch 6) share the storage driver
+  and get the same suspend and resume.
+
 ## [0.3.3] - 2026-11-24
 
 ### Devices
