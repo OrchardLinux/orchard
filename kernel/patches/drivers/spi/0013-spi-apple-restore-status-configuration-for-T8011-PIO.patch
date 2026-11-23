@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tompta1 <546706+tompta1@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 11:39:51 +0100
+Subject: [PATCH] spi: apple: restore status configuration for T8011 PIO
+ transfers
+
+Select the native PIO status configuration through T8011 match data. Retain the existing descriptor-only behavior on other chips.
+
+[Orchard: from OrchardLinux/orchard#205 (tompta1, 09038adf),
+ kernel/patches/drivers/spi/0012-spi-apple-restore-status-configuration-for-T8011-PIO.patch; rebased onto main, otherwise unchanged.]
+
+Assisted-by: LLM
+---
+ drivers/spi/spi-apple.c | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/spi/spi-apple.c b/drivers/spi/spi-apple.c
+index cffadda6e..10e9c63f2 100644
+--- a/drivers/spi/spi-apple.c
++++ b/drivers/spi/spi-apple.c
+@@ -127,6 +127,8 @@
+ struct apple_spi_hw {
+ 	bool legacy_status;
+ 	bool has_descriptor_dma;
++	/* Restore native STATUS setup before long PIO as well as short transfers. */
++	bool pio_status_config;
+ 	/* T7000: the SPI version 1 configuration register layout. */
+ 	bool spi_v1;
+ 	/*
+@@ -183,7 +185,7 @@ static bool apple_spi_t8010_uses_descriptor(struct spi_transfer *t,
+ static void apple_spi_t8010_write_status_config(struct apple_spi *spi,
+ 						bool use_descriptor)
+ {
+-	if (use_descriptor)
++	if (use_descriptor || spi->hw->pio_status_config)
+ 		reg_write(spi, APPLE_SPI_STATUS,
+ 			  APPLE_SPI_T8010_DESC_STATUS_CFG);
+ }
+@@ -1415,6 +1417,14 @@ static const struct apple_spi_hw apple_spi_hw_t8010 = {
+ 	.cfg_base = APPLE_SPI_CFG_T8010_BASE,
+ };
+ 
++static const struct apple_spi_hw apple_spi_hw_t8011 = {
++	.legacy_status = true,
++	.has_descriptor_dma = true,
++	.pio_status_config = true,
++	.min_clk_div = 2,
++	.cfg_base = APPLE_SPI_CFG_T8010_BASE,
++};
++
+ static const struct apple_spi_hw apple_spi_hw_t7000 = {
+ 	.legacy_status = true,
+ 	.spi_v1 = true,
+@@ -1430,6 +1440,7 @@ static const struct of_device_id apple_spi_of_match[] = {
+ 	{ .compatible = "apple,s5l8960x-spi", .data = &apple_spi_hw_s5l8960x, },
+ 	{ .compatible = "apple,t7000-spi", .data = &apple_spi_hw_t7000, },
+ 	{ .compatible = "apple,s8000-spi", .data = &apple_spi_hw_s8000, },
++	{ .compatible = "apple,t8011-spi", .data = &apple_spi_hw_t8011, },
+ 	{ .compatible = "apple,t8010-spi", .data = &apple_spi_hw_t8010, },
+ 	{ .compatible = "apple,t8103-spi", .data = &apple_spi_hw_default, },
+ 	{ .compatible = "apple,spi", .data = &apple_spi_hw_default, },

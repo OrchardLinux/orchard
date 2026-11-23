@@ -1,0 +1,86 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tompta1 <546706+tompta1@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 03:06:54 +0800
+Subject: [PATCH] dt-bindings: input: apple,z2-multitouch: Add the iPad Pro 2
+ touchscreens
+
+The iPad Pro 12.9 (2017) and 10.5 (J120, J121, J207, J208) have a K1
+touch controller with an analog supply, an LDO enable GPIO, three display
+sync pins switched between their function and GPIO states, and a reference
+clock.
+
+[Orchard: from OrchardLinux/orchard#205 (tompta1, 09038adf),
+ kernel/patches/drivers/input/0032; the other three iPad Pro 2 boards
+ added, whose ADTs give the same K1 controller ("hid-transport,k1") and
+ wiring.]
+
+Assisted-by: LLM
+---
+ .../touchscreen/apple,z2-multitouch.yaml      | 39 +++++++++++++++++++
+ 1 file changed, 39 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml b/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml
+index 7f5aaadae..e23795c11 100644
+--- a/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml
++++ b/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml
+@@ -23,7 +23,11 @@ properties:
+       - apple,j81-touchscreen
+       - apple,j85-touchscreen
+       - apple,j96-touchscreen
++      - apple,j120-touchscreen
++      - apple,j121-touchscreen
+       - apple,j172-touchscreen
++      - apple,j207-touchscreen
++      - apple,j208-touchscreen
+       - apple,d11-touchscreen
+       - apple,d111-touchscreen
+       - apple,d21-touchscreen
+@@ -161,6 +165,37 @@ required:
+   - touchscreen-size-y
+ 
+ allOf:
++  - if:
++      properties:
++        compatible:
++          enum:
++            - apple,j120-touchscreen
++            - apple,j121-touchscreen
++            - apple,j207-touchscreen
++            - apple,j208-touchscreen
++    then:
++      properties:
++        pinctrl-names:
++          items:
++            - const: display-sync-active
++            - const: display-sync-inactive
++        power-ana-gpios: false
++        display-sync-gpios: false
++        display-sync1-gpios: false
++        hv-supply: false
++        core-supply: false
++        attn-gpios: false
++        apple,z2-bpw16-min-len: false
++        apple,z2-no-init-ack: false
++      required:
++        - clocks
++        - ana-supply
++        - power-ldo-gpios
++        - pinctrl-0
++        - pinctrl-1
++        - pinctrl-names
++        - spi-cpha
++        - spi-cpol
+   - $ref: touchscreen.yaml#
+   - $ref: /schemas/spi/spi-peripheral-props.yaml#
+   - if:
+@@ -292,6 +327,10 @@ allOf:
+             - apple,j81-touchscreen
+             - apple,j85-touchscreen
+             - apple,j96-touchscreen
++            - apple,j120-touchscreen
++            - apple,j121-touchscreen
++            - apple,j207-touchscreen
++            - apple,j208-touchscreen
+             - apple,n61-touchscreen
+             - apple,n102-touchscreen
+             - apple,n66-touchscreen
