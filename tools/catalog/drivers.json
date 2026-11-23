@@ -446,8 +446,10 @@
       "backlight",
       "buttons",
       "gyroscope",
+      "light_sensor",
       "storage_read",
       "storage_write",
+      "touch",
       "usb_network",
       "usb_serial"
     ],
