@@ -3,6 +3,7 @@
 # is present first; what the device doesn't have is SKIP, not FAIL.
 #
 #   hardware-check           the automatic checks (about 3 minutes)
+#   hardware-check storage   internal storage only
 #   hardware-check touch     drag on the screen for 20 s
 #   hardware-check keys      press the buttons for 20 s
 #   hardware-check wifi      only the Wi-Fi checks
@@ -35,23 +36,60 @@ check_system() {
 
 check_storage() {
     section "Storage"
-    if [ ! -e /sys/class/block/nvme0n1 ]; then
-        result SKIP "no NVMe storage"
+    . /usr/libexec/sftl-storage
+    if is_p105; then
+        i=0
+        until sftl_readonly check; do
+            if [ "$i" -ge 60 ]; then
+                result FAIL "P105 SFTL disk or partition missing, inaccessible or writable"
+                return 1
+            fi
+            sleep 1
+            i=$((i + 1))
+        done
+        if ! before=$(sftl_probe_state); then
+            result FAIL "cannot verify P105 SFTL disk and partitions are read-only and unmounted"
+            return 1
+        fi
+        bytes=$(dd if=/dev/applesftl0 bs=4096 count=1 2>>"$REPORT" | wc -c)
+        if [ "$bytes" -ne 4096 ]; then
+            result FAIL "short or failed read from applesftl0 ($bytes bytes)"
+            return 1
+        fi
+        if ! after=$(sftl_probe_state) || [ "$after" != "$before" ]; then
+            result FAIL "P105 SFTL disk, partition or mount state changed during the read"
+            return 1
+        fi
+        result PASS "P105 SFTL disk and registered partitions read-only and unmounted"
+        result PASS "read 4096 bytes from applesftl0"
         return
     fi
+    # The internal disk: NVMe on A9 and later, ANS1 (asp) on A7-A8X.
+    disk=
+    for name in nvme0n1 asp0n1; do
+        [ -e "/sys/class/block/$name" ] && { disk=$name; break; }
+    done
+    if [ -z "$disk" ]; then
+        result SKIP "no NVMe or ANS1 storage"
+        return
+    fi
+    kind=${disk%%[0-9]*}
     writable=0
-    for ro in /sys/class/block/nvme*/ro; do
+    for ro in /sys/class/block/$kind*/ro; do
         [ "$(cat "$ro")" = 1 ] || writable=1
     done
-    if [ "$writable" = 0 ]; then result PASS "every NVMe namespace and partition read-only"
-    else result FAIL "an NVMe block device is still writable"; fi
+    if [ "$writable" = 0 ]; then result PASS "every $kind namespace and partition read-only"
+    else result FAIL "a $kind block device is still writable"; fi
+    say "  $disk: $(( $(cat /sys/class/block/$disk/size) * 512 )) bytes"
     start=$(uptime_s)
-    if dd if=/dev/nvme0n1 of=/dev/null bs=1M count=1024 2>>"$REPORT"; then
+    if dd if=/dev/$disk of=/dev/null bs=1M count=1024 2>>"$REPORT"; then
         seconds=$(( $(uptime_s) - start )); [ "$seconds" -gt 0 ] || seconds=1
         result PASS "read 1 GiB in ${seconds}s"
     else
-        result FAIL "1 GiB read from nvme0n1"
+        result FAIL "1 GiB read from $disk"
+        return 1
     fi
+    [ "$writable" = 0 ]
 }
 
 check_pcie() {
@@ -173,7 +211,7 @@ check_display() {
 check_log() {
     section "Kernel log"
     dmesg > /run/dmesg.txt
-    bad=$(grep -iE 'dart.*(fault|error)|nvme.*(timeout|reset)|I/O error|WARNING:|BUG:|Oops|Unable to handle|hung_task|soft lockup|blocking DMA' /run/dmesg.txt)
+    bad=$(grep -iE 'dart.*(fault|error)|nvme.*(timeout|reset)|apple-asp.*(timeout|reset|crash)|I/O error|WARNING:|BUG:|Oops|Unable to handle|hung_task|soft lockup|blocking DMA' /run/dmesg.txt)
     if [ -z "$bad" ]; then
         result PASS "no IOMMU faults, NVMe timeouts, warnings or oopses"
     else
@@ -222,8 +260,9 @@ case "${1:-all}" in
         say "Report: $REPORT, kernel log: /run/dmesg.txt (also at http://172.16.42.1:8080/)"
         ;;
     touch) section "Touch"; watch_input 'touch|multitouch|z2' touch 'Drag on the screen' ;;
+    storage) : > "$REPORT"; check_storage ;;
     keys) section "Keys"; watch_input 'gpio-keys|button|keys' keys 'Press each button a few times' ;;
     wifi) : > "$REPORT"; dmesg > /run/dmesg-boot.txt; check_system; check_wifi; dmesg > /run/dmesg.txt; say "DONE" ;;
     charge) charge ;;
-    *) echo "usage: hardware-check [wifi|touch|keys|charge]"; exit 2 ;;
+    *) echo "usage: hardware-check [storage|wifi|touch|keys|charge]"; exit 2 ;;
 esac

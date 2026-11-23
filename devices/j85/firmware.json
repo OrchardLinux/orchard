@@ -14,7 +14,69 @@
         "zip": "Firmware/all_flash/DeviceTree.j85ap.im4p"
       },
       "sha256": "ed71ed5fef2b6ada426ba77619085eb962d0639c0eee2a12c3940d2ffbe63c39"
+    },
+    "J85.mtprops": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/multitouch/J85.mtprops"
+      },
+      "sha256": "05a9b027bf1985ae2ff80c69dbe16fb6083327f350aae47f6b2f4963d6bbdef2"
+    },
+    "vidal.trx": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/4324b5/vidal.trx"
+      },
+      "sha256": "1d120647efe34f69d554a37016e9f5ee38610d0f51acef357d274aa67ddaeecc"
+    },
+    "vidal-u-kk.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/4324b5/vidal-u-kk.txt"
+      },
+      "sha256": "d505d3ebd411b0411374744101c1205bee8d9220bf994ca1a99614ed12919d33"
+    },
+    "vidal-m-mt.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/4324b5/vidal-m-mt.txt"
+      },
+      "sha256": "1eec8270b7e1d241daa6ae3aab737fd766976a71427c898acb32d835e8a97f7b"
     }
   },
-  "outputs": []
+  "outputs": [
+    {
+      "destination": "lib/firmware/apple/j85-fwstart.z2fw",
+      "sha256": "a1c41dc571f7585827b37b96a794a5575fb71f46cf39818d85301ae37a22c27b",
+      "steps": [
+        {
+          "step": "z2fw-from-z2-packet@1",
+          "input": "J85.mtprops",
+          "profile": "C1F14,3",
+          "calibration_address": 268472320,
+          "calibration_size": 1024
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac43241-j85-usb.bin",
+      "sha256": "6a3d791375a5e80f8ce52a7ffa7aac09c3ecda0f19ecda70599f3f71adccadc2",
+      "steps": [
+        {
+          "step": "trx-add-nvram@1",
+          "input": "vidal.trx",
+          "nvram": "vidal-u-kk.txt",
+          "placeholder_mac": "02:00:00:00:00:00"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac43241-j85-usb.murata.bin",
+      "sha256": "4451c3f6d5e783652f9b063f57d66b5de429dba0c7a00b4c4c83950700ec1d91",
+      "steps": [
+        {
+          "step": "trx-add-nvram@1",
+          "input": "vidal.trx",
+          "nvram": "vidal-m-mt.txt",
+          "placeholder_mac": "02:00:00:00:00:00"
+        }
+      ]
+    }
+  ]
 }

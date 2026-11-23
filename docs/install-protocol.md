@@ -62,8 +62,10 @@ progress is cut (a cut stream becomes `stream-incomplete`), and events
 queued for the old session are discarded. The phase and staged files stay.
 A host that re-attaches after a lost link does the same.
 
-The device reads exactly each header and each payload, so the host may split
-its writes into transfers however it likes and needs no zero-length packets.
+The device reads whole transfers and takes the messages out of them, so the
+host may split or combine messages in its transfers however it likes (a header
+and its payload in one transfer, several messages in one, or a message over
+several) and needs no zero-length packets.
 Every message the device sends is one transfer that ends in a short packet
 (a JSON payload is padded with one space when header and payload would fill
 whole 64-byte packets), so a host reading into a large buffer gets each

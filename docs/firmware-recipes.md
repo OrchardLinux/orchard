@@ -13,9 +13,14 @@ implements.
 - `ipsw`: the pinned restore image (version, build, URL, size, sha256).
 - `inputs`: named sources. Each lists where to find it:
   - `ipsw`: `{"rootfs": path}`, `{"zip": member}` or `{"kernelcache": true}`;
+    or `{"kernelcache": "<board>ap", "restore": {…}}`: that board's
+    kernelcache from another pinned restore image (same fields as `ipsw`),
+    for firmware the board's own image doesn't have in the build its driver
+    was written for (A8 GPU firmware below);
   - `device` (optional): the same file's path on a running iPadOS, or
     `{"kernelcache": "active"}`.
-  An optional `sha256` pins the input.
+  An optional `sha256` pins the input. An input from another restore image
+  must have one.
 - `outputs`: installed files. Each has a `destination` under
   `lib/firmware/`, a pinned `sha256`, and `steps`. The first step names an
   `input`; each later step takes the previous step's result instead. A step
@@ -145,11 +150,14 @@ The CLI used to do that; it isn't needed for recipes any more.
 | `vxd-firmware-from-kernelcache@1` | `input` (kernelcache) | the VXD (DEVA) video decoder firmware from AppleD5500 |
 | `agx-g9p-firmware-from-kernelcache@1` | `input` (kernelcache) | the A10 GPU firmware from AGXFirmwareKextG9PRTBuddy |
 | `agx-g5p-ldr-from-kernelcache@1` | `input` (kernelcache) | the A9 GPU firmware (a META LDR) from AGXFirmwareKextG5P; size and digest are pinned |
+| `agx-g4p-ldr-from-kernelcache@1` | `input` (kernelcache) | the A8 GPU firmware (a META LDR) from AGXFirmwareKextG4P: the LDR whose hash is the output's |
+| `agx-g4p-border-from-kernelcache@1` | `input` (kernelcache) | the A8 GPU's border colour table, 0x800 bytes of AGXG4P's data, whose hash is the output's |
 | `im4p-payload@1` | `input` | the payload of an IM4P container |
 | `aop-image@1` | `coprocessor` | one image (`AOP`, `AOP_ext`) of an AOP firmware container, the OSSerializeBinary payload of `Firmware/AOP/aopfw-*.im4p` |
 | `z2fw-from-mtprops@1` | `input`, `profile`, `packet`, `load_address`, `hbpp_version` | Z2 touch firmware with calibration records |
 | `z2fw-from-mtprops@2` | `input`, `profile`, `packet` | Z2 touch firmware from an mtprops packet array (iPhone 7 Plus) |
 | `z2fw-from-mtprops@3` | `input`, `profile`, `packet`, `touch_maximum`, `prox_maximum`, `fll_mval`, `ref_clk_div`, `clk32_clock_enable` | Legacy Gen1 Z2 touch firmware (iPhone 6), with full word counts, bounded calibration from the ADT and the board's kernel clock policy |
+| `z2fw-from-z2-packet@2` | `input`, `profile`, `calibration_address`, `calibration_size`, `prox_address`, `prox_size` | N1 touch firmware (iPad Air): SPI mode 0/HBPP 0x103, a zero proximity initialization packet, the unit's dynamic calibration and the unchanged legacy packet; reset, register calibration and execute stay in the driver |
 | `z2fw-from-mtfw@1` | `profile`, `otp_preflight` | Z2 touch firmware from an MTFW HBPP item list (iPad 7); each calibration loads Apple's default, then its record |
 | `hidspi-from-mtfw@1` | `profile` | the op list `apple_hidspi_ts` replays, from the MTFW of a HIDSPI controller (iPhone X); calibrations are named, not loaded |
 
@@ -257,3 +265,33 @@ verified output to `/lib/firmware/apple/gfx-s8003.bin`, named like the A10's
 Apple's LDR, byte for byte. No payload patch, calibration, firmware bytes or
 captured job is stored in the source tree. Other C0 revisions and other
 boards require separate digest qualification.
+
+## T7000 G4P META firmware
+
+powervr's A8 variant loads two files: `apple/gfx-t7000.bin`, the META LDR
+from `com.apple.AGXFirmwareKextG4P`, byte for byte, and
+`apple/gfx-t7000-border.bin`, the first 0x800 bytes of the border colour
+table in `com.apple.AGXG4P`'s data. The driver was written and tested
+against the iPod touch 6's iOS 12.4 (16G77) image: it relies on that
+image's segment layout and object offsets. So every A8 board's recipe
+(N102, N56, N61, J96, J97) reads the N102 kernelcache of that restore
+image (`restore` above) and pins the same two hashes:
+
+| File | Bytes | SHA-256 |
+|---|---|---|
+| `gfx-t7000.bin` | 115534 | `0b60def67290391b4c6aa913d9a78a8105d6d9b03738175b8e5732689db1e5ba` |
+| `gfx-t7000-border.bin` | 2048 | `233ffc1d7db27d9f16db17e23a9ce33082b5a7b72061af3da510bca3c94aff3e` |
+
+The boards' own restore images, compared with it:
+
+- iOS 12.5.8 (16H88; N102, N56) and 12.5.1 (16H22; N61): the same LDR
+  except its build-date string and the 16-bit check word of the data block
+  that holds it.
+- iPadOS 15.8.8 (19H422; J96, J97): another firmware build (114794 bytes).
+  The driver has not run it.
+- Every one of them holds the same border colour table.
+
+The iOS 12 kernelcaches have no per-kext load addresses in their prelink
+metadata, so both steps find their data by structure: every LDR whose
+records walk cleanly; the 0x800-byte table that starts with 0x440 zero
+bytes and the word 0x02040000. The output's hash selects the one installed.

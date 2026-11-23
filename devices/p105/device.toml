@@ -29,6 +29,10 @@ recipe = "firmware.json"
 # (OrchardLinux/orchard#93), freed space is never reused and writes fail once
 # the blank flash runs out. Drop this table when it lands; the installer
 # warns from it and allows the install either way.
+# On the 64 GB P105 all 16 raw devices refused programs while SFTL owned
+# the disk. Paired iOS returned all 69 counters. The handoff to Linux and
+# the physical erase footprint still need measurement
+# (docs/bring-up/p105-sftl-device-qualification.md).
 [storage]
 reclaims = false
 
@@ -46,9 +50,11 @@ accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "missing"
 touch_id = "missing"
-# The H2FMI driver reads the NAND and programs verified pages; this revision is
-# untested on hardware (docs/bring-up/p105-nand-reads.md, p105-nand-program.md).
-storage_read = "untested"
+# On the 64 GB P105, the whole logical disk matched an independent
+# reconstruction from raw flash captured during the same boot.
+# The PR #93 device trial used read-only internal volumes. The 16 GB
+# package's read-only layout (Cascadia's, mtd 0018) has not run on a tablet.
+storage_read = "working"
 storage_write = "untested"
 wifi = "untested"
 bluetooth_input = "untested"
