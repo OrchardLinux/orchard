@@ -13,6 +13,9 @@ is missing or empty.
 
 ### Devices
 
+- iPad Air 2 (Cellular) (A8X): the speakers and Lightning charging of the
+  Wi-Fi model; its recipe now carries the SmartIO firmware the speakers
+  need. Untested.
 - iPhone 8, iPhone 8 Plus and iPhone X (A11): Wi-Fi on every model, not
   only the iPhone X (GSM), with each model's Wi-Fi firmware in its recipe.
   The iPhone X (Global) also gets the touchscreen and OLED brightness of the
