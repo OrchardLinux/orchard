@@ -340,6 +340,7 @@
     "j85": [
       "backlight",
       "buttons",
+      "touch",
       "usb_network",
       "usb_serial"
     ],
@@ -435,6 +436,8 @@
       "backlight",
       "buttons",
       "gyroscope",
+      "storage_read",
+      "storage_write",
       "usb_network",
       "usb_serial"
     ],
