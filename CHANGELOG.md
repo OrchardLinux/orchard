@@ -16,7 +16,8 @@ is missing or empty.
 - iPad 6, iPad 5, iPad Air 2 and the other A8, A9 and A10 boards: the boot
   splash stays still until the PIN screen again. When the display driver took
   over, about four seconds into boot, it flashed a test pattern and then
-  went black for a moment.
+  went black for a moment. Scanning out GPU buffers directly through the
+  display DART is now off by default (adbe.dart_scanout=1 turns it on).
 
 ## [0.3.5] - 2026-11-24
 
