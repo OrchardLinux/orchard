@@ -9,6 +9,14 @@ releasing, rename that section to the version (`## [0.3.0] - YYYY-MM-DD`). The
 release workflow uses that section as the GitHub release notes and fails if it
 is missing or empty.
 
+## Unreleased
+
+### Devices
+
+- iPad 6, iPad 5, iPad Air 2 and the other A8, A9 and A10 boards: the boot
+  splash no longer flashes a noise pattern about four seconds into boot, when
+  the display driver takes over the screen.
+
 ## [0.3.5] - 2026-11-24
 
 ### Devices
