@@ -566,6 +566,8 @@
       "accelerometer",
       "backlight",
       "battery",
+      "bluetooth_audio",
+      "bluetooth_input",
       "buttons",
       "charging",
       "gyroscope",
@@ -575,12 +577,15 @@
       "touch",
       "usb_network",
       "usb_serial",
-      "video_decode_hevc"
+      "video_decode_hevc",
+      "wifi"
     ],
     "n66m": [
       "accelerometer",
       "backlight",
       "battery",
+      "bluetooth_audio",
+      "bluetooth_input",
       "buttons",
       "charging",
       "gyroscope",
@@ -590,7 +595,8 @@
       "touch",
       "usb_network",
       "usb_serial",
-      "video_decode_hevc"
+      "video_decode_hevc",
+      "wifi"
     ],
     "n69": [
       "accelerometer",
