@@ -9,6 +9,13 @@ releasing, rename that section to the version (`## [0.3.0] - YYYY-MM-DD`). The
 release workflow uses that section as the GitHub release notes and fails if it
 is missing or empty.
 
+## Unreleased
+
+### Devices
+
+- iPhone 6s Plus (A9): the phone sleeps when idle or on Power, turns its
+  screen off, and wakes on Home or Power.
+
 ## [0.3.6] - 2026-11-24
 
 ### Devices
