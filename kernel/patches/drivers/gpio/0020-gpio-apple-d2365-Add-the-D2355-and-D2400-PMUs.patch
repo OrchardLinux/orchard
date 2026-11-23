@@ -1,0 +1,164 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Tue, 24 Nov 2026 03:04:31 +0800
+Subject: [PATCH] gpio: apple-d2365: Add the D2355 and D2400 PMUs
+
+The A10X's August D2400 PMU latches 256 PMU events at 0x140 (mask at
+0x1c0), its GPIO line N being event 0x30 + N as on the D2365: the ADT
+gives the Smart Cover hall sensors on lines 0 and 10 as events 0x30 and
+0x3a. Its input levels read at 0x186 as on the D2333 and D2365. Its line
+configuration registers are not known, so add an input-only mode: the
+lines stay as the boot loader set them up and only their levels are read.
+That is enough for the hall sensors, through gpio-keys and
+"apple,wake-events" as on the iPad 6.
+
+The D2355 charger PMU's 80 events (status 0x60, mask 0xa0) are described
+as the D2089's: an event controller without GPIO lines.
+
+The event buffer grows to 32 bytes for the D2400; no other PMIC's
+behaviour changes.
+
+[Orchard: from OrchardLinux/orchard#205 (tompta1, 09038adf),
+ kernel/patches/drivers/gpio/0014 reworked: matched as
+ "apple,d2355-pmic-gpio" and "apple,d2400-pmic-gpio" in the D2089's
+ events-only pattern instead of "-pmic-events" compatibles; the D2400's
+ GPIO event base and input-only lines added, which replace the polled J120
+ cover driver (kernel/patches/drivers/input/0036, 0037).]
+
+Assisted-by: LLM
+---
+ drivers/gpio/gpio-apple-d2365.c | 58 ++++++++++++++++++++++++++++++++-
+ 1 file changed, 57 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpio/gpio-apple-d2365.c b/drivers/gpio/gpio-apple-d2365.c
+index 86be00f1a..bdbc7ce66 100644
+--- a/drivers/gpio/gpio-apple-d2365.c
++++ b/drivers/gpio/gpio-apple-d2365.c
+@@ -120,7 +120,7 @@
+ #define D2365_EVENT_BYTES	30
+ #define D2365_GPIO_EVENT	0x30
+ 
+-#define APPLE_PMIC_EVENT_BYTES_MAX	30
++#define APPLE_PMIC_EVENT_BYTES_MAX	32
+ #define APPLE_PMIC_EVENTS_MAX		(APPLE_PMIC_EVENT_BYTES_MAX * 8)
+ /* The events plus the line interrupt, hwirq nevents. */
+ #define APPLE_PMIC_IRQS_MAX		(APPLE_PMIC_EVENTS_MAX + 1)
+@@ -147,6 +147,8 @@ struct apple_pmic_gpio_info {
+ 	unsigned int function_mask;
+ 	/* Some PMICs only have a verified, boot-configured output mode. */
+ 	bool preserve_boot_direction;
++	/* No known configuration registers: inputs read at input_base only. */
++	bool input_only;
+ 	unsigned int output_update_mask;
+ 	unsigned int (*config_reg)(unsigned int offset);
+ 	const struct apple_pmic_event_info *events;
+@@ -923,6 +925,9 @@ static int apple_pmic_gpio_get_direction(struct gpio_chip *chip,
+ 	unsigned int value;
+ 	int ret;
+ 
++	if (info->input_only)
++		return GPIO_LINE_DIRECTION_IN;
++
+ 	ret = regmap_read(gpio->regmap, info->config_reg(offset), &value);
+ 	if (ret)
+ 		return ret;
+@@ -946,6 +951,8 @@ static int apple_pmic_gpio_direction_input(struct gpio_chip *chip,
+ 	struct apple_pmic_gpio *gpio = gpiochip_get_data(chip);
+ 	const struct apple_pmic_gpio_info *info = gpio->info;
+ 
++	if (info->input_only)
++		return 0;
+ 	if (info->preserve_boot_direction)
+ 		return -EOPNOTSUPP;
+ 
+@@ -961,6 +968,8 @@ static int apple_pmic_gpio_direction_output(struct gpio_chip *chip,
+ 	struct apple_pmic_gpio *gpio = gpiochip_get_data(chip);
+ 	const struct apple_pmic_gpio_info *info = gpio->info;
+ 
++	if (info->input_only)
++		return -EOPNOTSUPP;
+ 	if (info->preserve_boot_direction)
+ 		return apple_pmic_gpio_set_boot_output(gpio, offset, value);
+ 
+@@ -978,6 +987,8 @@ static int apple_pmic_gpio_get(struct gpio_chip *chip, unsigned int offset)
+ 	unsigned int value;
+ 	int ret;
+ 
++	if (info->input_only)
++		goto read_input;
+ 	ret = regmap_read(gpio->regmap, info->config_reg(offset), &value);
+ 	if (ret)
+ 		return ret;
+@@ -988,6 +999,7 @@ static int apple_pmic_gpio_get(struct gpio_chip *chip, unsigned int offset)
+ 	if ((value & info->direction_mask) != info->input_mode)
+ 		return -EINVAL;
+ 
++read_input:
+ 	ret = regmap_read(gpio->regmap, info->input_base + offset / 8,
+ 			  &value);
+ 	if (ret)
+@@ -1002,6 +1014,8 @@ static int apple_pmic_gpio_set(struct gpio_chip *chip, unsigned int offset,
+ 	struct apple_pmic_gpio *gpio = gpiochip_get_data(chip);
+ 	const struct apple_pmic_gpio_info *info = gpio->info;
+ 
++	if (info->input_only)
++		return -EOPNOTSUPP;
+ 	if (info->preserve_boot_direction)
+ 		return apple_pmic_gpio_set_boot_output(gpio, offset, value);
+ 
+@@ -1113,6 +1127,40 @@ static const struct apple_pmic_event_info d2365_event_info = {
+ 	.gpio_event = D2365_GPIO_EVENT,
+ };
+ 
++static const struct apple_pmic_event_info d2355_event_info = {
++	.status_base = 0x060,
++	.mask_base = 0x0a0,
++	.bytes = 10,
++};
++
++/* The D2355 charger PMU: events only, as on the D2089. */
++static const struct apple_pmic_gpio_info d2355_gpio_info = {
++	.label = "d2355-pmic-gpio",
++	.events = &d2355_event_info,
++};
++
++/* GPIO N is event 0x30 + N, as on the D2365 (ADT /buttons hall sensors). */
++static const struct apple_pmic_event_info d2400_event_info = {
++	.status_base = 0x140,
++	.mask_base = 0x1c0,
++	.bytes = 32,
++	.gpio_event = 0x30,
++};
++
++/*
++ * D2400: the input levels at 0x186, eight lines per byte, as on the D2333
++ * and D2365. Its configuration registers are not known, so the lines are
++ * inputs as the boot loader left them (the Smart Cover hall sensors on
++ * GPIO 0 and 10 of the iPad Pro 2 boards, ADT /buttons).
++ */
++static const struct apple_pmic_gpio_info d2400_gpio_info = {
++	.label = "d2400-pmic-gpio",
++	.ngpio = 16,
++	.input_base = 0x186,
++	.input_only = true,
++	.events = &d2400_event_info,
++};
++
+ static const struct apple_pmic_gpio_info d2365_gpio_info = {
+ 	.label = "d2365-pmic-gpio",
+ 	.ngpio = 24,
+@@ -1156,6 +1204,14 @@ static const struct of_device_id d2365_gpio_of_match[] = {
+ 		.compatible = "apple,d2186-pmic-gpio",
+ 		.data = &d2186_gpio_info,
+ 	},
++	{
++		.compatible = "apple,d2355-pmic-gpio",
++		.data = &d2355_gpio_info,
++	},
++	{
++		.compatible = "apple,d2400-pmic-gpio",
++		.data = &d2400_gpio_info,
++	},
+ 	{
+ 		.compatible = "apple,d2401-pmic-gpio",
+ 		.data = &d2401_gpio_info,
