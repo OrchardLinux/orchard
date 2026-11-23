@@ -21,7 +21,7 @@ platform = "apple-16k"
 dtb = "s8000-n66" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until bring-up needs it.
+recipe = "firmware.json" # Pins this board's public IPSW; makes the touchscreen firmware.
 
 [support]
 status = "experimental"
@@ -33,11 +33,11 @@ status = "experimental"
 display = "untested"
 screen_off = "missing"
 backlight = "untested"
-touch = "missing"
+touch = "working" # N1 C1F5C, both firmware packets; multitouch, corners checked (RAM boot 2026-11-23)
 buttons = "untested"
 accelerometer = "untested"
 gyroscope = "untested"
-light_sensor = "missing"
+light_sensor = "working" # CT821 with the unit's LSCI calibration (RAM boot 2026-11-23)
 touch_id = "missing"
 storage_read = "working" # NVMe 5 GT/s x2, 1 GiB read, no faults or timeouts (RAM boot 2026-11-22)
 storage_write = "working" # orchard install by ricktav: Omarchy booted from internal storage (2026-11-23)
