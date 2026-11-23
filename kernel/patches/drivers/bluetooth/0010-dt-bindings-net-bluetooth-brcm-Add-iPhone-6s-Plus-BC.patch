@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 15:43:09 +0100
+Subject: [PATCH] dt-bindings: net: bluetooth: brcm: Add iPhone 6s Plus
+ BCM4350C5
+
+The iPhone 6s Plus (N66) has a BCM4350C5 in its USI or Murata
+"Pinotnoir" module, on a UART. iOS loads its Patchram from BlueTool as
+"BCM4350C5_..._Pinotnoir_OS_{USI,MUR}_BM_MCC".
+
+Assisted-by: LLM
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+---
+ .../devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml        | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml b/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml
+index aecd8e794..88ba22135 100644
+--- a/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml
++++ b/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml
+@@ -32,6 +32,7 @@ properties:
+           - const: brcm,bcm4329-bt
+       - enum:
+           - apple,j81-bcm4350c2-bt
++          - apple,n66-bcm4350c5-bt
+           - apple,n102-bcm4345b1-bt
+           - brcm,bcm20702a1
+           - brcm,bcm4329-bt

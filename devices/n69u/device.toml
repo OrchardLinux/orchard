@@ -22,7 +22,7 @@ platform = "apple-16k"
 dtb = "s8000-n69u" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # Pins this board's public IPSW; makes the touchscreen, VXD and AOP firmware, and the GPU firmware from the iPad 5's iPadOS 16.7.10.
+recipe = "firmware.json" # Pins this board's public IPSW; makes the touchscreen, VXD, AOP and SmartIO firmware, and the GPU firmware from the iPad 5's iPadOS 16.7.10.
 
 [support]
 status = "experimental"
@@ -37,14 +37,14 @@ backlight = "untested"
 gpu_desktop = "untested"
 touch = "untested"
 buttons = "untested"
-accelerometer = "untested" # AOP with aopfw-s8000aop; mount-matrix not measured
+accelerometer = "untested" # AOP with aopfw-s8000aop; mount matrix measured on the N66 (shared s800x-iphone.dtsi)
 gyroscope = "untested"
 light_sensor = "untested"
 touch_id = "missing"
 storage_read = "untested"
 storage_write = "untested"
-wifi = "missing" # Not described yet: BCM4350/4345 on PCIe port 1, its control function on uart4, neither in s800-0-3.dtsi
-bluetooth_input = "missing" # Not described yet: the controller is on uart1, not in s800-0-3.dtsi
+wifi = "missing" # Different chip from the 6s and 6s Plus: a BCM4345 ("hans" module) on PCIe port 1 (ADT pci-bridge1 wlan-pcie,bcm4345); not described, and its firmware is not in the recipe
+bluetooth_input = "missing" # The BCM4345 module's Bluetooth on UART1 (power on D2255 GPIO 8 as on the 6s); not described, and its Patchram is not in the recipe
 bluetooth_audio = "missing" # Same as Bluetooth input
 cellular = "missing"
 battery = "untested" # bq27540 gauge on uart5 behind the SN2400's HDQ mux
@@ -55,7 +55,7 @@ resume = "untested"
 usb_serial = "untested"
 usb_network = "untested"
 usb_host = "missing" # Needs the Tristar VBUS path on the iPhone's Antigua PMU; only the iPad 5's D2365 one exists
-audio_output = "missing" # No Linux driver for the CS42L71 codec
+audio_output = "missing" # The loudspeaker amplifier is the 6s's, but its MCA2 link differs (ADT mca2/audio-speaker slots and SmartIO FIFO words), so it needs its own MCA setup; the earpiece and headphones need the CS42L71 codec
 audio_input = "missing" # No Linux driver for the CS42L71 codec
 camera = "missing"
 video_decode_hevc = "untested" # VXD on for every A9; vxd-deva.bin from the recipe

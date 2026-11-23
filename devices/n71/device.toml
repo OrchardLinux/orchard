@@ -22,7 +22,7 @@ platform = "apple-16k"
 dtb = "s8000-n71" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # Pins this board's public IPSW; makes the touchscreen, VXD and AOP firmware, and the GPU firmware from the iPad 5's iPadOS 16.7.10.
+recipe = "firmware.json" # Pins this board's public IPSW; makes the touchscreen, VXD, AOP, SmartIO, Wi-Fi and Bluetooth firmware, and the GPU firmware from the iPad 5's iPadOS 16.7.10.
 
 [support]
 status = "experimental"
@@ -37,15 +37,15 @@ backlight = "untested"
 gpu_desktop = "untested"
 touch = "untested"
 buttons = "untested"
-accelerometer = "untested" # AOP with aopfw-s8000aop; mount-matrix not measured
+accelerometer = "untested" # AOP with aopfw-s8000aop; mount matrix measured on the N66 (shared s800x-iphone.dtsi)
 gyroscope = "untested"
 light_sensor = "untested"
 touch_id = "missing"
 storage_read = "untested"
 storage_write = "untested"
-wifi = "missing" # Not described yet: BCM4350/4345 on PCIe port 1, its control function on uart4, neither in s800-0-3.dtsi
-bluetooth_input = "missing" # Not described yet: the controller is on uart1, not in s800-0-3.dtsi
-bluetooth_audio = "missing" # Same as Bluetooth input
+wifi = "untested" # BCM4350 "albarossa" module, wired as on the N66 (IPSW device trees); its own firmware and NVRAM in the recipe
+bluetooth_input = "untested" # BCM4350C5 on UART1 as on the N66, with the albarossa Patchrams from BlueTool
+bluetooth_audio = "untested"
 cellular = "missing"
 battery = "untested" # bq27540 gauge on uart5 behind the SN2400's HDQ mux
 charging = "untested" # SN2400 charger
@@ -55,7 +55,7 @@ resume = "untested"
 usb_serial = "untested"
 usb_network = "untested"
 usb_host = "missing" # Needs the Tristar VBUS path on the iPhone's Antigua PMU; only the iPad 5's D2365 one exists
-audio_output = "missing" # No Linux driver for the CS42L71 codec
+audio_output = "untested" # the 6s Plus's loudspeaker, described for both models in s800x-6s.dtsi (same ADT amplifier, link and route); speaker only, no speaker protection yet, output capped at -12 dB
 audio_input = "missing" # No Linux driver for the CS42L71 codec
 camera = "missing"
 video_decode_hevc = "untested" # VXD on for every A9; vxd-deva.bin from the recipe
