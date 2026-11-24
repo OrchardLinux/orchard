@@ -18,6 +18,8 @@ the limit used to size the S8003 parameter manager's render blocks.
 Affects the Apple A9 (S8003). The A10 is unchanged.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/pvr_hwrt.c | 14 ++++++++++++--
  1 file changed, 12 insertions(+), 2 deletions(-)

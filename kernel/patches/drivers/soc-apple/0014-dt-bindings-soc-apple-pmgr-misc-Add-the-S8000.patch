@@ -10,6 +10,8 @@ as a single "soc-ps" region.
 [Orchard: from orchard PR #122, commit 5775e3ed; unchanged]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../bindings/soc/apple/apple,t6000-pmgr-misc.yaml        | 9 ++++++---
  1 file changed, 6 insertions(+), 3 deletions(-)

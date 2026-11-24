@@ -29,6 +29,8 @@ differs shows why in one boot. The iPod touch 6's 4-inch, 326 ppi panel
 joins the table of physical sizes.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/adbe/Kconfig    |  5 +--
  drivers/gpu/drm/adbe/adbe_drv.c | 63 +++++++++++++++++++++++++++------

@@ -8,6 +8,8 @@ outputs and waits 600 us after enabling them. Select the register
 and mask by compatible and preserve the other register bits.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/video/backlight/apple_dwi_bl.c | 63 +++++++++++++++++---------
  1 file changed, 41 insertions(+), 22 deletions(-)

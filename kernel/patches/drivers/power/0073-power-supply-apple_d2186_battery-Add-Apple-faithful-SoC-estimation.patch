@@ -30,6 +30,8 @@ read-only (no charger control writes):
   non-increasing while discharging, clamped to 99% until CHG_END).
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/power/supply/apple_d2186_battery.c | 568 +++++++++++++++++++--
  1 file changed, 520 insertions(+), 48 deletions(-)

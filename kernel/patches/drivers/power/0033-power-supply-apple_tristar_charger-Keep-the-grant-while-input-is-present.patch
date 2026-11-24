@@ -28,6 +28,8 @@ waiting for 0x42. Update the D2365 and charging notes to match.
 
 Affects: Apple iPad 5 and iPad 6 (TriStar with D2365); battery charging unchanged
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/power/supply/apple_tristar_charger.c | 33 ++++++++++----------
  1 file changed, 17 insertions(+), 16 deletions(-)

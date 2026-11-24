@@ -22,6 +22,8 @@ gauge and keeps no per-CPU state: make the queue unbound.
  of adding a second timer]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
 diff --git a/drivers/power/supply/apple_tristar_charger.c b/drivers/power/supply/apple_tristar_charger.c
 index a953ced..f632874 100644

@@ -18,6 +18,8 @@ backlight and resumed before it. An LED driver that does not answer at
 probe is left alone, as before.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/video/backlight/Kconfig        |   1 +
  drivers/video/backlight/apple_dwi_bl.c | 116 +++++++++++++++++++++++++

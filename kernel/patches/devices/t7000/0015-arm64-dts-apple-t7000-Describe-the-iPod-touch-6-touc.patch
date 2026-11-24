@@ -11,6 +11,8 @@ lets the loader supply the unit calibration. Invert the N1 raw Y
 axis to map its bottom origin to the display top.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  arch/arm64/boot/dts/apple/t7000-n102.dts | 45 ++++++++++++++++++++++++++++++++
  1 file changed, 45 insertions(+)

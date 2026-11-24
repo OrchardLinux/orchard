@@ -16,6 +16,8 @@ optional so a missing or non-Apple OTP falls back to the board-type
 firmware names rather than failing probe.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../broadcom/brcm80211/brcmfmac/pcie.c          | 17 +++++++++++++++++
  .../broadcom/brcm80211/include/brcm_hw_ids.h    |  1 +

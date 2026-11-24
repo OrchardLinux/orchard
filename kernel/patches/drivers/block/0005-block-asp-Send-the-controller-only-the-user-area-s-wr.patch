@@ -20,6 +20,8 @@ buffer or the mailbox.
 [Orchard: rebased onto the storage driver fixes already in Orchard
  (block 0003 and 0004), unchanged otherwise.]
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/block/asp.c | 50 +++++++++++++++++++++++++++++++++++++++++++++
  1 file changed, 50 insertions(+)

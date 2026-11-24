@@ -17,6 +17,8 @@ Keep successful parsing and error returns unchanged. Affects every
 PowerVR device.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/pvr_stream.c | 101 +++++++++++++++++------
  1 file changed, 77 insertions(+), 24 deletions(-)

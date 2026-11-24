@@ -41,6 +41,8 @@ the powervr driver's Apple firmware path. Not ported: see
 docs/bring-up/gpu/a9-g5p.md in orchard.]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/Kconfig           |    6 +-
  drivers/gpu/drm/imagination/Makefile          |    1 +

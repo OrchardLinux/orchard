@@ -24,6 +24,8 @@ Tested on an iPad 5 (J71t) with the Lightning to USB camera adapter.
 [Orchard: from orchard PR #126, commit 864b4971; commit message only]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/phy/apple/ausb.c | 66 +++++++++++++++++++++++++++++-----------
  1 file changed, 48 insertions(+), 18 deletions(-)

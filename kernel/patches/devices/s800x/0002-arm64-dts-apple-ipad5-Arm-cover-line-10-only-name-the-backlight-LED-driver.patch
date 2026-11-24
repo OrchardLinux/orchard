@@ -20,6 +20,8 @@ target of /backlight function-backlight_enable). Describe it and point the
 DWI backlight at it, so that a dark panel is off.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  arch/arm64/boot/dts/apple/s800x-ipad5.dtsi | 21 +++++++++++++++++++--
  1 file changed, 19 insertions(+), 2 deletions(-)

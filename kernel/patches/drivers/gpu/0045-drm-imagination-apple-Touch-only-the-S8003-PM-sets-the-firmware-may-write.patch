@@ -28,6 +28,8 @@ every millisecond does not skip every other read.
 Affects: Apple A9 (S8003)
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/pvr_apple_s8003.c | 80 ++++++++++++++++++-
  1 file changed, 76 insertions(+), 4 deletions(-)

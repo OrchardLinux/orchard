@@ -20,6 +20,8 @@ turned on.
  Apple device trees of J71b, J72b and J171 give as on J71t]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../usb/apple,s8000-usb-role-switch.yaml      | 132 ++++++++++++++++++
  1 file changed, 132 insertions(+)

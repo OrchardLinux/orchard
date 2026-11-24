@@ -13,6 +13,8 @@ EHCI and OHCI nodes move out of the disabled block into the switch.
  copies in the #if 0 block are dropped]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  arch/arm64/boot/dts/apple/s800-0-3.dtsi | 43 +++++++++++++++++--------
  1 file changed, 30 insertions(+), 13 deletions(-)

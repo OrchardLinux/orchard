@@ -48,6 +48,8 @@ no-handshake training sequence, which needs the transmitter's own
 training pattern register, stays in the driver: the helpers have none.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/adbe/Kconfig    |   5 +-
  drivers/gpu/drm/adbe/adbe_drv.c | 597 +++++++++++++++++++++++++++++++-

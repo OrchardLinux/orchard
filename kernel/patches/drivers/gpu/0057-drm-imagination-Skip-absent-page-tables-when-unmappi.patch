@@ -27,6 +27,8 @@ pvr_mmu_op_context_load_tables() reports an absent table as success
 with a NULL table pointer, which is what the loop now checks.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/pvr_mmu.c | 59 +++++++++++++++++----------
  1 file changed, 37 insertions(+), 22 deletions(-)

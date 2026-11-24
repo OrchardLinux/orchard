@@ -24,6 +24,8 @@ Return 0x1b0000 for BRCM_CC_4345_CHIP_ID when chiprev < 6, keeping
 0x198000 for rev >= 6 (BCM43455/43456) and BRCM_CC_43454_CHIP_ID.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/net/wireless/broadcom/brcm80211/brcmfmac/chip.c | 1 +
  1 file changed, 1 insertion(+)

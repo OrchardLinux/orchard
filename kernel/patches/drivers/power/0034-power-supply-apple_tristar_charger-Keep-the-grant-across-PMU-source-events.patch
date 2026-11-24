@@ -30,6 +30,8 @@ restarts it, and the battery window, the board cap, the PMIC rewrite
 check and the event-storm guard are unchanged.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/power/supply/apple_tristar_charger.c | 192 ++++++++++++-------
  1 file changed, 122 insertions(+), 70 deletions(-)

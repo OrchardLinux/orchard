@@ -53,6 +53,8 @@ apple_jobs is now 0600, and a write to it zeroes the statistics, so one
 workload can be measured without the firmware start before it.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/pvr_apple.c       | 270 ++++++++-
  drivers/gpu/drm/imagination/pvr_apple.h       |  15 +

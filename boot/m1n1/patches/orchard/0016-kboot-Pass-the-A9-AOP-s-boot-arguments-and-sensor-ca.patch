@@ -23,6 +23,8 @@ The values are the unit's own and never leave the device: the kernel
 sends them to the AOP and nothing else.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  src/kboot.c | 69 ++++++++++++++++++++++++++++++++++++++++++++++++++++-
  1 file changed, 68 insertions(+), 1 deletion(-)

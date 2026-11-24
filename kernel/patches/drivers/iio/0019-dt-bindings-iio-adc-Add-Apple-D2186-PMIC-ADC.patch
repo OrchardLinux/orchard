@@ -8,6 +8,8 @@ used on Apple A8 devices such as the iPod touch 6 (N102), and allow the
 adc child node under the Apple PMIC MFD binding.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../bindings/iio/adc/apple,d2186-adc.yaml     | 59 +++++++++++++++++++
  .../devicetree/bindings/mfd/apple,pmic.yaml   |  3 +

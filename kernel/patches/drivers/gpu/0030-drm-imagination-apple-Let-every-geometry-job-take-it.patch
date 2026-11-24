@@ -19,6 +19,8 @@ Affects the Apple A9 (S8003). The A10 has no vm_scenes callback and is
 unchanged.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/pvr_apple.c | 6 +++++-
  1 file changed, 5 insertions(+), 1 deletion(-)

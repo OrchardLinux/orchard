@@ -26,6 +26,8 @@ the controller lost its state anyway, resume disconnects and reconnects
 as before.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/usb/dwc2/core.h     | 13 +++++++
  drivers/usb/dwc2/debugfs.c  |  1 +

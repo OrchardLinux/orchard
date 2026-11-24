@@ -34,6 +34,8 @@ allocating the new resources. PM record format and sizing are unchanged.
 Affects: Apple A9 and A10
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/pvr_apple.c       |  16 +-
  drivers/gpu/drm/imagination/pvr_apple.h       |   6 +

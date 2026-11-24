@@ -25,6 +25,8 @@ release (0x84804f0) puts the id back on a LIFO free stack and sends the
 firmware nothing.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/pvr_apple_s8003.c | 18 ++++++++++++++++--
  1 file changed, 16 insertions(+), 2 deletions(-)

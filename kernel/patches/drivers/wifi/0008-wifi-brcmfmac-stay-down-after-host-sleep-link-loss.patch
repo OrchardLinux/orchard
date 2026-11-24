@@ -15,6 +15,8 @@ suspend has nothing to tell such a device either.
  without being marked disconnected, and the suspend side got the same
  test.]
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../wireless/broadcom/brcm80211/brcmfmac/pcie.c    | 14 ++++++++++++++
  1 file changed, 14 insertions(+)

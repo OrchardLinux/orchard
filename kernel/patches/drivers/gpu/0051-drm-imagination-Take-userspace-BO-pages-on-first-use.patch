@@ -21,6 +21,8 @@ pin's page reference to our DMA-mapped sgt under the reservation instead.
 Affects: every PowerVR device
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/pvr_drv.c |  2 +-
  drivers/gpu/drm/imagination/pvr_gem.c | 79 +++++++++++++++++++++++++--

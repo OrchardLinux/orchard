@@ -21,6 +21,8 @@ is complete once one entry of every group was applied.
  calibration API of soc-apple/0015, unchanged]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/soc/apple/aop.c       | 58 +++++++++++++++++++++++++++++++++++
  include/linux/soc/apple/aop.h | 28 +++++++++++++++++

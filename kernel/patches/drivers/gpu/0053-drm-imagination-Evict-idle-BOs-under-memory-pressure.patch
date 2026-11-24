@@ -36,6 +36,8 @@ validates the A10 pressure test. Non-Apple PowerVR keeps its common default.
 Affects: Apple A9 (S8003); other Apple chips opt in per chip
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/Makefile          |   1 +
  drivers/gpu/drm/imagination/pvr_apple.c       |  13 +

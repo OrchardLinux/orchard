@@ -9,6 +9,8 @@ Dialog D2186 PMIC on Apple A8 devices without a standalone fuel-gauge IC
 Apple PMIC MFD binding.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../devicetree/bindings/mfd/apple,pmic.yaml   |  3 +
  .../power/supply/apple,d2186-battery.yaml     | 96 +++++++++++++++++++

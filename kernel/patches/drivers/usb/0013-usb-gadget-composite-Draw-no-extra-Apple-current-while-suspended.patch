@@ -13,6 +13,8 @@ configuration is applied again on resume.
 [Orchard: from orchard PR #108, commit 0674e1db; unchanged]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/usb/gadget/composite.c | 5 ++---
  1 file changed, 2 insertions(+), 3 deletions(-)

@@ -10,6 +10,8 @@ function-tx and function-rts). Using the apple,t7000-uart compatible
 gives it the T8010 oversampling required for high baud rates.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  arch/arm64/boot/dts/apple/t7000.dtsi | 19 +++++++++++++++++++
  1 file changed, 19 insertions(+)

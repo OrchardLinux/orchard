@@ -25,6 +25,8 @@ is inferred from the iPhone 6's panel, not read.
 Not run on an iPhone 6 yet.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  arch/arm64/boot/dts/apple/t7000-n61.dts | 8 ++++++++
  1 file changed, 8 insertions(+)

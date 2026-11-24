@@ -20,6 +20,8 @@ up to iOS's 8 ms.
  A10 share one description and timeout instead of a second variant]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
 --- a/drivers/soc/apple/Kconfig
 +++ b/drivers/soc/apple/Kconfig

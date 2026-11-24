@@ -11,6 +11,8 @@ RTC node names that event as its interrupt.
 [Orchard: from orchard PR #103, commit 190bb139b293]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/rtc/rtc-apple-pmic.c | 127 ++++++++++++++++++++++++++++++++++-
  1 file changed, 126 insertions(+), 1 deletion(-)

@@ -20,6 +20,8 @@ replace the live draw, and notifier cleanup drains its work.
 
 Affects: Apple A9/A10 DWC2 controllers using a named TriStar power supply
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/usb/dwc2/core.h   |  5 ++
  drivers/usb/dwc2/drd.c    |  6 +-

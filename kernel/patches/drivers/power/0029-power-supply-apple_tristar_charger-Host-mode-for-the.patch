@@ -63,6 +63,8 @@ Tested on an iPad 5 (J71t) with the Lightning to USB camera adapter.
  user of the host role, so the host-entry claim is gone]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/power/supply/Kconfig                  |  15 +-
  drivers/power/supply/Makefile                 |   3 +-

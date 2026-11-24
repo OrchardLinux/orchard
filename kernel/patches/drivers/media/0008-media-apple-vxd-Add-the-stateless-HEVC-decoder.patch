@@ -30,6 +30,8 @@ AppleD5500's BRN50577 dummy-picture workaround.
 [Orchard: from orchard PR #121, commit 4016f5e2; context adapted to main, which does not carry the VXD sleep patches of PR #117]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
 diff --git a/drivers/media/platform/apple/vxd/Kconfig b/drivers/media/platform/apple/vxd/Kconfig
 index c08ae03..ef785fc 100644

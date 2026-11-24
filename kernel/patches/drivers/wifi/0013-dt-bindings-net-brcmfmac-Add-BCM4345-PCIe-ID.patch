@@ -9,6 +9,8 @@ vdd-supply, device-wake-gpios and board type. Add it to the list of PCIe
 IDs.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../devicetree/bindings/net/wireless/brcm,bcm4329-fmac.yaml      | 1 +
  1 file changed, 1 insertion(+)

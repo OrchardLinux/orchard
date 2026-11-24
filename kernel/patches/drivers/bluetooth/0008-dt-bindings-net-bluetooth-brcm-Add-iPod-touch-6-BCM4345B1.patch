@@ -6,6 +6,8 @@ Subject: [PATCH] dt-bindings: net: bluetooth: brcm: Add iPod touch 6 BCM4345B1
 Add the Bluetooth part of the iPod touch 6's BCM4345B1 combo chip.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml        | 1 +
  1 file changed, 1 insertion(+)

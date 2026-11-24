@@ -11,6 +11,8 @@ driver they are built on.
  drivers/soc-apple, where the AOP entry is added]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  MAINTAINERS | 2 ++
  1 file changed, 2 insertions(+)

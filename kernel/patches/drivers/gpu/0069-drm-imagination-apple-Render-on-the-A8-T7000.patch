@@ -59,6 +59,8 @@ last fragment job, a fragment job for its geometry job. One sample and
 single-layer targets only.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/pvr_apple_s8003.c | 781 +++++++++++++++++-
  drivers/gpu/drm/imagination/pvr_hwrt.h        |  18 +

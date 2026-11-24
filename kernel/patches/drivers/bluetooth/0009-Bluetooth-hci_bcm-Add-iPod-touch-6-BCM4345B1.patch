@@ -9,6 +9,8 @@ code "t" to "TDK" in bcm_apple_module_vendors[], since Apple ships
 Murata, TDK and USI Bacchus modules with separate Patchram images.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/bluetooth/hci_bcm.c | 3 +++
  1 file changed, 3 insertions(+)

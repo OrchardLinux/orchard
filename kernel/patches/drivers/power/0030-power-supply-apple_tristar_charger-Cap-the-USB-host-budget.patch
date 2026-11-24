@@ -16,6 +16,8 @@ the reported and accepted values (debug).
  debug message]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/power/supply/apple_tristar_charger.c | 24 +++++++++++++++-----
  1 file changed, 18 insertions(+), 6 deletions(-)

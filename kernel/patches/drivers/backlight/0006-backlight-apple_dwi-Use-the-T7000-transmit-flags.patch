@@ -8,6 +8,8 @@ On T7000, AppleS5L8940XDWI starts a brightness transfer by writing
 on this SoC.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/video/backlight/apple_dwi_bl.c | 11 ++++++++---
  1 file changed, 8 insertions(+), 3 deletions(-)

@@ -19,6 +19,8 @@ no panel supply the driver switches, so apple,lcd-ldo-gpios is not
 allowed.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../display/apple,s8000-display-pipe.yaml     | 73 ++++++++++++++++++-
  1 file changed, 72 insertions(+), 1 deletion(-)

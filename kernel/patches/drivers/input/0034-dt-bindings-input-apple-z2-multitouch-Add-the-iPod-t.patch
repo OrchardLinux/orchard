@@ -10,6 +10,8 @@ regulator instead of a GPIO-controlled LDO.
  iPad mini 2 (J85) bindings, which now list the boards that take
  ana-supply and attn-gpios; the N102 joins both lists.]
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../touchscreen/apple,z2-multitouch.yaml      | 20 +++++++++++++++++--
  1 file changed, 18 insertions(+), 2 deletions(-)

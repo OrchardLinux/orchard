@@ -12,6 +12,8 @@ Existing single-window IOMMUs and display pipes remain valid.
 Affects: Apple S5L8960X display DART and scanout device trees.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../display/apple,s8000-display-pipe.yaml     | 31 +++++++++--
  .../devicetree/bindings/iommu/apple,dart.yaml | 52 ++++++++++++++++++-

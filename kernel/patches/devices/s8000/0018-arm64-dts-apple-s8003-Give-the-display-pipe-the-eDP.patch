@@ -10,6 +10,8 @@ panel off. Add the DisplayPort transmitter's registers (ADT displayport,
 transmitter is in the dp power domain the pipe already holds.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  arch/arm64/boot/dts/apple/s8003.dtsi | 5 +++--
  1 file changed, 3 insertions(+), 2 deletions(-)

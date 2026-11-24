@@ -11,6 +11,8 @@ existing delay. Chips with no minimum are unaffected.
 
 Affects: Apple A9 (S8003); A10 has no gate-off minimum
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/pvr_apple.c      | 9 +++++++++
  drivers/gpu/drm/imagination/pvr_apple_chip.h | 1 +

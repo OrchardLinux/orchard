@@ -15,6 +15,8 @@ with only "probe with driver powervr failed with error -2".
 Nodes with power domains take the same path as before.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/pvr_drv.c   | 14 ++++++++++----
  drivers/gpu/drm/imagination/pvr_power.c |  4 ++++

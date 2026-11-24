@@ -32,6 +32,8 @@ unbound after that.
  data, with a byte tail for SRAM sizes that are not a multiple of 4]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/soc/apple/Kconfig |  12 +--
  drivers/soc/apple/aop.c   | 173 ++++++++++++++++++++++++++++++++------

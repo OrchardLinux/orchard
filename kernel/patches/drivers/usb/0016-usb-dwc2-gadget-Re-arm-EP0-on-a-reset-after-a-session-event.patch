@@ -35,6 +35,8 @@ Log the session events and a reset outside L0 (rate-limited; rare), so
 that a gadget that stops answering names its cause.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/usb/dwc2/core_intr.c |  8 ++++++++
  drivers/usb/dwc2/gadget.c    | 27 ++++++++++++++++++++++++++-

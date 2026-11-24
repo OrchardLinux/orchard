@@ -20,6 +20,8 @@ Affects the shared Apple queue used by the A9 (S8003) and A10 (T8010).
 The A10 has been build-tested only.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/pvr_apple_queue.c | 5 +++++
  1 file changed, 5 insertions(+)

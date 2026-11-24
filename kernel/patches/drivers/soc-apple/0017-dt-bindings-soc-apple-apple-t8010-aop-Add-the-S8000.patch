@@ -18,6 +18,8 @@ sensor nodes, which the sensor drivers hand to the firmware.
  apple,spi0-domain, and the calibration text not limited to the S8000]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../bindings/soc/apple/apple,t8010-aop.yaml   | 42 +++++++++++++++++--
  1 file changed, 38 insertions(+), 4 deletions(-)

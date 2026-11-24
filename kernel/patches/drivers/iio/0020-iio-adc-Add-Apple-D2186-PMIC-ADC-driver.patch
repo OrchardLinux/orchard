@@ -29,6 +29,8 @@ touching the PMU event interrupt registers:
   (channel 0x14), and 2D VBUS/temperature Ron compensation table.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/iio/adc/Kconfig           |  16 ++
  drivers/iio/adc/Makefile          |   1 +

@@ -25,6 +25,8 @@ Mesa's compute jobs with on the iPod touch 6:
 Render jobs are refused until the A8's parameter manager is in.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/pvr_apple_s8003.c | 188 +++++++++++++++++-
  1 file changed, 187 insertions(+), 1 deletion(-)

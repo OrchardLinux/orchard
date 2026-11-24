@@ -35,6 +35,8 @@ Nothing calls the builder yet.
 [Orchard: from orchard PR #121, commit 4016f5e2; unchanged]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
 diff --git a/drivers/media/platform/apple/vxd/Makefile b/drivers/media/platform/apple/vxd/Makefile
 index 7f692f8..0877a60 100644

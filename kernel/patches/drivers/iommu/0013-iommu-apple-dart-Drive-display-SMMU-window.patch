@@ -17,6 +17,8 @@ second window; existing single-window DARTs retain their setup.
 Affects: S5L8960X display DARTs with an SMMU window.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/iommu/apple-dart.c | 191 +++++++++++++++++++++++++++++++++++--
  include/linux/apple-dart.h |   6 ++

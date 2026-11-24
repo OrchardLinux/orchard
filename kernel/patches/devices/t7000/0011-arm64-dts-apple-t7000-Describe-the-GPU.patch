@@ -10,6 +10,8 @@ firmware's: AIC 138, the second of the ADT's meta-sw-interrupt tuples.
 Enable it on the iPod touch 6 (N102), where it boots.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  arch/arm64/boot/dts/apple/t7000-n102.dts |  4 ++++
  arch/arm64/boot/dts/apple/t7000.dtsi     | 17 +++++++++++++++++

@@ -15,6 +15,8 @@ domain before enabling translation. Other masters keep their attach policy.
 Affects: Apple display DMA masters left running by the boot loader.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/iommu/apple-dart.c | 14 ++++++++++++++
  drivers/iommu/iommu.c      |  1 +

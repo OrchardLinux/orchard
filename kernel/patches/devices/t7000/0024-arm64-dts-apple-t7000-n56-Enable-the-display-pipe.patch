@@ -26,6 +26,8 @@ pattern is sized from it.
 Not run on an iPhone 6 Plus yet.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  arch/arm64/boot/dts/apple/t7000-n56.dts | 8 ++++++++
  1 file changed, 8 insertions(+)

@@ -23,6 +23,8 @@ apple_aop_set_property() instead of a private copy of the request.
  set-property request replaced by apple_aop_set_property()]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/iio/accel/Kconfig           |  2 +-
  drivers/iio/accel/apple_aop_accel.c | 59 +++++++++++++++++++++++------

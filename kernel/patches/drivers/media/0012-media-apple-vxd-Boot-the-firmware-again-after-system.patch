@@ -29,6 +29,8 @@ it active and its resume callback does not run, and take jobs again.
 The next job, or the next open, boots the firmware from the kept image.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../media/platform/apple/vxd/apple-vxd-core.c | 54 +++++++++++++++++--
  .../media/platform/apple/vxd/apple-vxd-v4l2.c | 15 +++++-

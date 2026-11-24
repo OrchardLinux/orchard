@@ -12,6 +12,8 @@ window as an optional fourth "dp" region of "apple,t7000-display-pipe",
 as the A9's pipe has it, so that a board can say which link it drives.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../bindings/display/apple,s8000-display-pipe.yaml     | 10 ++++++++--
  1 file changed, 8 insertions(+), 2 deletions(-)

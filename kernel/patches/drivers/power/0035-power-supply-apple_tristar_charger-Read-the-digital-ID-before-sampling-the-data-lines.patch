@@ -34,6 +34,8 @@ cannot be read is still identified and USB data still comes on within
 names the camera adapter the policy holds the port as before.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../power/supply/apple_tristar_accessory.c    | 26 +++++++++++++++++++
  .../power/supply/apple_tristar_accessory.h    |  6 +++++

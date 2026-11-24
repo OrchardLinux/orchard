@@ -10,6 +10,8 @@ clock and pull-up on, detach afterward, and start a released session
 from a core soft reset.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/usb/dwc2/drd.c | 19 +++++++++++++++----
  1 file changed, 15 insertions(+), 4 deletions(-)

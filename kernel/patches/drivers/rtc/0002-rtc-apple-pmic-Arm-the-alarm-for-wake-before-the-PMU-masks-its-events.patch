@@ -19,6 +19,8 @@ event in its fixed sleep mask (AppleD2365PMU sleep entry), so the alarm
 wakes it in any case.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/rtc/rtc-apple-pmic.c | 42 +++++++++++++++++++++++++++++++-----
  1 file changed, 37 insertions(+), 5 deletions(-)

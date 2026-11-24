@@ -62,6 +62,8 @@ job logs, switches and alternate paths.
 Not run on hardware.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/pvr_apple_s8003.c | 1473 ++++++++++++++++-
  1 file changed, 1428 insertions(+), 45 deletions(-)

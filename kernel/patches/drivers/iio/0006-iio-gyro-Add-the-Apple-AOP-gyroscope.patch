@@ -21,6 +21,8 @@ bootloader provides them.
  drivers/iio/0005, unchanged]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/iio/gyro/Kconfig          |  12 ++
  drivers/iio/gyro/Makefile         |   1 +

@@ -24,6 +24,8 @@ did this on the iPad 5. Log such a request at debug level, naming the
 event, so that a consumer doing so can be found.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpio/gpio-apple-d2365.c | 41 ++++++++++++++++++++++++++++++++-
  1 file changed, 40 insertions(+), 1 deletion(-)

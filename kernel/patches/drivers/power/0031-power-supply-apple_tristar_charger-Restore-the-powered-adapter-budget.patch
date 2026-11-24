@@ -16,6 +16,8 @@ the board cap, battery checks, ramp and source-event withdrawal.
 
 Affects: Apple TriStar powered Lightning camera adapters; device-mode USB unchanged
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../power/supply/apple_tristar_accessory.c    | 29 ++++++++++++-------
  1 file changed, 19 insertions(+), 10 deletions(-)

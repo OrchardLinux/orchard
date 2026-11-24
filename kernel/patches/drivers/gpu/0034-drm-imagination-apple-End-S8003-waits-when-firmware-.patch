@@ -11,6 +11,8 @@ actually arrived. Keep the latch until a new boot.
 
 Affects: Apple A9 (S8003); A10 unchanged
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/pvr_apple_s8003.c | 15 +++++++++++----
  1 file changed, 11 insertions(+), 4 deletions(-)

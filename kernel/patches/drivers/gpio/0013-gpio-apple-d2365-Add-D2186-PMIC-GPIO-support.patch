@@ -18,6 +18,8 @@ The D2186 PMU event block is not handled yet; no interrupt controller is
 registered for it.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpio/Kconfig            |  6 +++---
  drivers/gpio/gpio-apple-d2365.c | 42 +++++++++++++++++++++++++++++++--

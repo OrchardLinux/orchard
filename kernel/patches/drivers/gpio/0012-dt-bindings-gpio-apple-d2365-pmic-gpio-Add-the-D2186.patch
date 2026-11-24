@@ -11,6 +11,8 @@ Add its compatible. Its PMU event block is not wired yet, so like the
 D2333 it is not an interrupt controller.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../bindings/gpio/apple,d2365-pmic-gpio.yaml          | 11 +++++++----
  1 file changed, 7 insertions(+), 4 deletions(-)

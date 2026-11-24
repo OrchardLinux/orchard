@@ -8,6 +8,8 @@ Document the I2C LED driver whose enable is controlled separately
 from brightness on the DWI bus.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../devicetree/bindings/leds/backlight/apple,dwi-bl.yaml        | 2 +-
  Documentation/devicetree/bindings/trivial-devices.yaml          | 2 ++

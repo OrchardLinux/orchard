@@ -18,6 +18,8 @@ the powervr driver: firmware-name and operating-points-v2 as on the A10,
 the file named after the compatible.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../bindings/gpu/apple,s8003-gpu.yaml         | 79 +++++++++++++++++++
  1 file changed, 79 insertions(+)

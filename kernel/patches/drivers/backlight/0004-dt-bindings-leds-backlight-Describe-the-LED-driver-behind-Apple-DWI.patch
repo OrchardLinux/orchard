@@ -11,6 +11,8 @@ through the ADT /backlight function-backlight_enable). Let the DWI node
 name that LED driver, and add the LP8559 to the LP855x family binding.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../devicetree/bindings/leds/backlight/apple,dwi-bl.yaml  | 8 ++++++++
  .../bindings/leds/backlight/lp855x-backlight.yaml         | 1 +

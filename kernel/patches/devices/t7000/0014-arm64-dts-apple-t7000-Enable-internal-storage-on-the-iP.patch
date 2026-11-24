@@ -21,6 +21,8 @@ registers), interrupts 36-39, and a pre-loaded firmware nub with
 segment-ranges for m1n1 to read.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  arch/arm64/boot/dts/apple/t7000-common.dtsi |  1 -
  arch/arm64/boot/dts/apple/t7000-n102.dts    | 17 +++++++++++++++++

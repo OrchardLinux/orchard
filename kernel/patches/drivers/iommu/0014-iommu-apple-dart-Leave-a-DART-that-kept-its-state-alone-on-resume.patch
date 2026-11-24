@@ -19,6 +19,8 @@ its reset values and is reset and restored as before, so the PCIe DARTs
 are unchanged.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/iommu/apple-dart.c | 31 +++++++++++++++++++++++++++++++
  1 file changed, 31 insertions(+)

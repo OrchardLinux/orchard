@@ -19,6 +19,8 @@ replace the snapshot whenever the CAPTURE buffer is decoded again.
 [Orchard: from orchard PR #111, commit 883f1eaf; unchanged]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../platform/apple/vxd/apple-vxd-h264-cmd.c   | 25 +++++++++++++++----
  .../platform/apple/vxd/apple-vxd-h264-cmd.h   |  3 +++

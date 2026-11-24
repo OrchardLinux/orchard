@@ -13,6 +13,8 @@ lock, which the power manager reports. So the node names the power
 manager's and the bridges' registers and has no power domain.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  .../bindings/gpu/apple,s8003-gpu.yaml         | 65 ++++++++++++++++++-
  1 file changed, 62 insertions(+), 3 deletions(-)

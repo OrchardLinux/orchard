@@ -20,6 +20,8 @@ Two things the next chip, the A8 (T7000), does its own way:
 The A9 and A10 provide neither, so their ID read and heaps are as before.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/pvr_apple.c      | 28 ++++++++++++++++++++
  drivers/gpu/drm/imagination/pvr_apple.h      | 12 +++++++++

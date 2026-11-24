@@ -12,6 +12,8 @@ the N1 power sequence to use a regulator for the core supply.
  optional core-supply lookup here skips the J72 so it is not requested
  twice.]
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/input/touchscreen/apple_z2.c | 58 ++++++++++++++++++++++++++++
  1 file changed, 58 insertions(+)

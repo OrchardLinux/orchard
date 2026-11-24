@@ -24,6 +24,8 @@ simple-battery OCV table (with a built-in fallback curve anchored at
 charger current limits or any charging control register.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/power/supply/Kconfig               |  15 ++
  drivers/power/supply/Makefile              |   1 +

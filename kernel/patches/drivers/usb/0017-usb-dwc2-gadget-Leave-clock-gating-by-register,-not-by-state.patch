@@ -13,6 +13,8 @@ remote-wakeup signalling, and restore legitimate clock gating after an
 endpoint stop.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/usb/dwc2/core.h      |  4 ++
  drivers/usb/dwc2/core_intr.c |  9 ++--

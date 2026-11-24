@@ -16,6 +16,8 @@ need.
  every iPad with the cover, not only the iPad 5]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
 diff --git a/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml b/Documentation/devicetree/bindings/gpio/apple,d2365-pmic-gpio.yaml
 index c1cae13..a962bb0 100644

@@ -18,6 +18,8 @@ iPad 5 that is i2c0, the bus of the PMU whose charger and RTC wake the
 system.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/pmdomain/apple/pmgr-pwrstate.c | 7 ++++++-
  1 file changed, 6 insertions(+), 1 deletion(-)

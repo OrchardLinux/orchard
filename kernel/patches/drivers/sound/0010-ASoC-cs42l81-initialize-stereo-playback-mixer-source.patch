@@ -14,6 +14,8 @@ existing stereo power and volume sequence unchanged.
 [Orchard: from orchard PR #124, commit bef17c42; unchanged]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  sound/soc/codecs/cs42l81.c | 11 +++++++++++
  1 file changed, 11 insertions(+)

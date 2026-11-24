@@ -12,6 +12,8 @@ node; the login's GPU probe still falls back to the software desktop if
 it does not draw.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/pvr_device.c | 1 +
  1 file changed, 1 insertion(+)

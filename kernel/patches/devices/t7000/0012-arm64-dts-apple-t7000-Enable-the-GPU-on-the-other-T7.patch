@@ -13,6 +13,8 @@ the iPod touch 6 so far.
 The A8X (T7001) has a different GPU and is not touched.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  arch/arm64/boot/dts/apple/t7000-6.dtsi     | 4 ++++
  arch/arm64/boot/dts/apple/t7000-mini4.dtsi | 4 ++++

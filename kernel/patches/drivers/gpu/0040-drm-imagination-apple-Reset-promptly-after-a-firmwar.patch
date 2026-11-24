@@ -15,6 +15,8 @@ types are confirmed.
 
 Affects: Apple A9 (S8003); A10 event policy unchanged
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/pvr_apple.c       | 78 +++++++++++++++++++
  drivers/gpu/drm/imagination/pvr_apple_chip.h  |  7 ++

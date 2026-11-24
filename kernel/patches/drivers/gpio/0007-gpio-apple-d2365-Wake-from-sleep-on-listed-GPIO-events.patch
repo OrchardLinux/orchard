@@ -32,6 +32,8 @@ thread. Without apple,wake-events nothing changes.
  per-sleep diagnostic logging is left out]
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
 diff --git a/drivers/gpio/gpio-apple-d2365.c b/drivers/gpio/gpio-apple-d2365.c
 index ba66e8e..39d6b79 100644

@@ -57,6 +57,8 @@ with a proven PLL lock. It takes no jobs yet.
 The A9 and A10 paths are unchanged.
 
 Assisted-by: LLM
+Signed-off-by: Berkay Kösebay <brkosebay@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/231#issuecomment-7138590680
 ---
  drivers/gpu/drm/imagination/Kconfig           |    7 +-
  drivers/gpu/drm/imagination/pvr_apple.c       |   11 +-
