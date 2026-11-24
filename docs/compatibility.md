@@ -28,7 +28,7 @@ Every device Orchard installs on. ✅ works · ❌ doesn't work yet · – no su
 | iPhone 5s (Global) | A7 | 🤔 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
 | iPad mini 4 (Cellular) | A8 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
 | iPad mini 4 (Wi-Fi) | A8 | 🤔 | 🤔 | 🤔 | ✅ | ❌ | ❌ | ❌ | 🤔 | ❌ | [tcballard](https://github.com/tcballard) |
-| iPhone 6 | A8 | 🤔 | 🤔 | ✅ | 🤔 | 🤔 | ❌ | ❌ | 🤔 | ❌ | [amethyst-oak](https://github.com/amethyst-oak) |
+| iPhone 6 | A8 | 🤔 | 🤔 | ✅ | 🤔 | 🤔 | ❌ | ❌ | 🤔 | ❌ | [amethyst-oak](https://github.com/amethyst-oak), [jeroentrappers](https://github.com/jeroentrappers) |
 | iPhone 6+ | A8 | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | ❌ | ❌ | 🤔 | ❌ | – |
 | iPod touch 6 | A8 | ✅ | ✅ | ✅ | ✅ | 🤔 | ❌ | ❌ | 🤔 | ❌ | [brkosebay](https://github.com/brkosebay) |
 | iPad Air 2 (Cellular) | A8X | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | – |
