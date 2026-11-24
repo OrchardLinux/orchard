@@ -84,6 +84,10 @@ is missing or empty.
   the driver; this one is untested on every model. The headphone jack and
   the microphones do not work yet.
 
+### Install & launch
+
+- An installed system starts in the computer's time zone instead of UTC.
+
 ## [0.3.6] - 2026-11-24
 
 ### Devices
