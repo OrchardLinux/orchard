@@ -13,6 +13,14 @@ is missing or empty.
 
 ### Devices
 
+- iPod touch 6: battery status. With no fuel gauge in the iPod, the
+  charge, voltage, temperature and charging state come from its power
+  management chip, estimated the way iOS does; USB power shows too. The
+  charge estimate has not been checked against a full charge and
+  discharge, and the charge current cannot be set yet. Brought up by
+  brkosebay (thanks!). The iPhone 6 and 6 Plus, which have the same chip,
+  get its voltage and current readings too; their battery stays with
+  their gauge.
 - iPad Pro 12.9-inch (2017) (A10X): the touchscreen, internal storage,
   Wi-Fi, Bluetooth, the battery gauge, headphones, both microphones, the
   accelerometer, hardware video decoding and sleep, brought up by tompta1

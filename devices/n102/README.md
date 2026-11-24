@@ -33,7 +33,11 @@ keeps SysCfg, which Linux never writes.
   (`a8_joint`) by default.
 - Bluetooth: hci0 comes up with the module's patchram; no input or audio
   device has been paired yet.
-- The battery gauge is not described yet.
+- Battery: the charge is estimated from Apple's OCV curve for this
+  battery family; it has not been checked against a full charge and
+  discharge. The driver only reads: it reports the charge state and USB
+  power, while the PMIC charges at whatever limit the boot loader left.
+  Setting the charge current (charging) is open.
 
 ## Unmerged code
 
