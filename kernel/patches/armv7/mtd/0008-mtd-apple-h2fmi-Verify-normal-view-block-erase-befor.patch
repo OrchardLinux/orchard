@@ -6,6 +6,8 @@ Subject: [PATCH] mtd: apple-h2fmi: Verify normal-view block erase before reuse
 Add a provider erase operation for a single bus, CAU and physical block. Check the queue and operation status, then read all 128 physical pages and their OOB before returning success. Stop the bus on ambiguous completion. Exclude bootstrap blocks and keep the P105 match data disabled pending hardware qualification.
 
 Assisted-by: LLM
+Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/226#issuecomment-7133476475
 ---
  drivers/mtd/devices/mtd-apple-h2fmi-test.c |  43 ++++++++
  drivers/mtd/devices/mtd-apple-h2fmi.c      | 108 ++++++++++++++++++---
