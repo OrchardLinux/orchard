@@ -103,6 +103,12 @@ is missing or empty.
   no faults; the iPhone 6 and 6 Plus and the iPad mini 4 are untested. If the
   GPU does not draw, the login still falls back to the software desktop.
   By brkosebay (thanks!).
+- iPhone 8 Plus (A11): the touchscreen starts on every boot and after a
+  driver reload: 5 of 5 fresh boots and 10 of 10 reloads delivered touch
+  (before: about 1 boot in 4 had a dead screen, and 5 of 8 reloads hung the
+  phone). The touch reference clock runs at the 32768 Hz the board asks for,
+  and an Apple GPIO bug that left a masked level interrupt live, which could
+  hang any Apple device on a driver reload, is fixed.
 
 ### Install & launch
 
