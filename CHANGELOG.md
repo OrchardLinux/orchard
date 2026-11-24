@@ -51,6 +51,11 @@ is missing or empty.
   speaker protection yet. The iPhone 6s has the same speaker path and gets
   it too, untested. The earpiece, headphones and microphones need the
   CS42L71 codec, which has no driver yet.
+- iPhone 6s Plus (A9): the battery gauge works and the phone charges, from
+  a computer at the 500 mA it grants and from an Apple wall adapter at up to
+  about 1.4 A while awake. The charger lowers or cuts its input when the
+  battery is too cold or hot. Asleep it charges at 300 mA. The iPhone 6s and
+  SE share the change, untested.
 - iPad Air and iPad mini 2 and 3 (A7): internal storage keeps working across
   sleep, also with writes in flight. The storage controller finishes its
   commands before sleep and is restarted after it, and its NAND clock stays
