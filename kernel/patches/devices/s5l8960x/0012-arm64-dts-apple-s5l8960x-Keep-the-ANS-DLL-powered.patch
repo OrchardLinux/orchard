@@ -16,6 +16,8 @@ answering at once.
 
 Assisted-by: LLM
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/221#issuecomment-7124272492
 ---
  arch/arm64/boot/dts/apple/s5l8960x-pmgr.dtsi | 6 ++++++
  1 file changed, 6 insertions(+)

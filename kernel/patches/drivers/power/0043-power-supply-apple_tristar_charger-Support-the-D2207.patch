@@ -27,6 +27,8 @@ connection state and starts the identification on its own.
 
 Assisted-by: LLM
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/195#issuecomment-7113896676
 ---
  drivers/power/supply/apple_tristar_charger.c | 131 +++++++++++++------
  1 file changed, 94 insertions(+), 37 deletions(-)

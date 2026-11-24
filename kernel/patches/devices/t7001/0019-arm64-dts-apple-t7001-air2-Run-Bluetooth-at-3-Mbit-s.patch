@@ -26,6 +26,8 @@ over CVSD, so the controller already routes SCO over HCI.
 
 Assisted-by: LLM
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/195#issuecomment-7113896676
 ---
  arch/arm64/boot/dts/apple/t7001-air2.dtsi | 6 +++++-
  1 file changed, 5 insertions(+), 1 deletion(-)
