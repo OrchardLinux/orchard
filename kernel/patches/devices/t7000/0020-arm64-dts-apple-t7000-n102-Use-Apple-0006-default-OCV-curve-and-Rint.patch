@@ -11,14 +11,14 @@ factory internal resistance used for read-only charging IR compensation.
 
 Assisted-by: LLM
 ---
- arch/arm64/boot/dts/apple/t7000-n102.dts | 29 ++++++++++++------------
+ arch/arm64/boot/dts/apple/t7000-n102.dts | 29 +++++++++++++++--------------
  1 file changed, 15 insertions(+), 14 deletions(-)
 
 diff --git a/arch/arm64/boot/dts/apple/t7000-n102.dts b/arch/arm64/boot/dts/apple/t7000-n102.dts
-index 75576ee..d3daa5a 100644
+index 30cf9ab6cc2565ffc473cf0f74fc1496e35dc4a8..0cb7660019a1bc659f7882bf05720881e130e8a9 100644
 --- a/arch/arm64/boot/dts/apple/t7000-n102.dts
 +++ b/arch/arm64/boot/dts/apple/t7000-n102.dts
-@@ -26,9 +26,8 @@
+@@ -65,9 +65,8 @@
  
  	/*
  	 * Design capacity (1080 mAh) and shutdown voltage (3400 mV) come from
@@ -30,7 +30,7 @@ index 75576ee..d3daa5a 100644
  	 */
  	n102_battery: battery {
  		compatible = "simple-battery";
-@@ -36,18 +35,20 @@
+@@ -75,18 +74,20 @@
  		charge-full-design-microamp-hours = <1080000>;
  		voltage-min-design-microvolt = <3400000>;
  		voltage-max-design-microvolt = <4350000>;
@@ -61,7 +61,6 @@ index 75576ee..d3daa5a 100644
 +				       <3460000 1>,
  				       <3400000 0>;
  	};
- 
+ };
 -- 
-2.49.0
-
+2.47.0

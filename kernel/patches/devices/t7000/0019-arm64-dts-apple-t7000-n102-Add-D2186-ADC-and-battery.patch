@@ -13,17 +13,18 @@ Li-ion OCV capacity table is an approximation until measured on hardware.
 
 Assisted-by: LLM
 ---
- arch/arm64/boot/dts/apple/t7000-n102.dts | 47 ++++++++++++++++++++++++
- 1 file changed, 47 insertions(+)
+ arch/arm64/boot/dts/apple/t7000-n102.dts | 48 ++++++++++++++++++++++++++++++++
+ 1 file changed, 48 insertions(+)
 
 diff --git a/arch/arm64/boot/dts/apple/t7000-n102.dts b/arch/arm64/boot/dts/apple/t7000-n102.dts
-index 7723574..9c1a5f2 100644
+index 9d042aef505f049304b5061f7fdf18545f90847a..30cf9ab6cc2565ffc473cf0f74fc1496e35dc4a8 100644
 --- a/arch/arm64/boot/dts/apple/t7000-n102.dts
 +++ b/arch/arm64/boot/dts/apple/t7000-n102.dts
-@@ -24,6 +24,33 @@
- 		touchscreen0 = &touchscreen;
+@@ -62,6 +62,33 @@
+ 			linux,code = <KEY_VOLUMEUP>;
+ 		};
  	};
- 
++
 +	/*
 +	 * Design capacity (1080 mAh) and shutdown voltage (3400 mV) come from
 +	 * the board's firmware device tree. The OCV curve is an approximate
@@ -50,10 +51,9 @@ index 7723574..9c1a5f2 100644
 +				       <3580000 5>,
 +				       <3400000 0>;
 +	};
-+
- 	/* Wi-Fi REG_ON is D2186 GPIO 10 (ADT uart4/wlan function-reg_on). */
- 	wlan_vdd: regulator-wlan-vdd {
- 		compatible = "regulator-fixed";
+ };
+ 
+ /*
 @@ -212,6 +239,27 @@
  			regulator-name = "touch-core";
  		};
