@@ -1,0 +1,215 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 08:05:50 +0100
+Subject: [PATCH] power: supply: apple_tristar_charger: Resume the D2089 input
+ and restart its charge timer
+
+On an iPad Air (J71) at 1 % battery the charger identified a CDP and a
+USB-C charger and set the D2089's input limit to 1500 mA, yet the battery
+kept discharging. After iBoot had charged it to 7 % while powered off,
+the same kernel charged at +823 mA. The register state at 1 % was not
+captured; this follows what iOS 12 does instead.
+
+iOS 12 AppleD2089PMUPowerSource, with every input-limit write
+(setInputCurrentLimit), first sets bit 2 of PMIC register 0x10 for a
+limit below 75 mA and clears it otherwise. And when the charger state
+0x62 reports an expired charge timer (bit 4) and the battery is below
+90 %, at most every 300 s, it restarts the timer: it reads 0x4c8, writes
+back only bit 3 of it, then the value read.
+
+Do both on the D2089 only: clear the bit before each limit write (every
+limit this driver writes is at least 75 mA), logging the first time it
+was found set, and restart an expired charge timer while a source is
+attached and the battery charge reads below 90 %, logging each restart.
+The D2365, D2207 and D2355 are unchanged.
+
+Assisted-by: LLM
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+---
+ drivers/power/supply/apple_tristar_charger.c | 99 +++++++++++++++++++-
+ 1 file changed, 97 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/power/supply/apple_tristar_charger.c b/drivers/power/supply/apple_tristar_charger.c
+index 79eea8d74..3b850ea38 100644
+--- a/drivers/power/supply/apple_tristar_charger.c
++++ b/drivers/power/supply/apple_tristar_charger.c
+@@ -107,6 +107,9 @@ struct tristar_pmic {
+ 	u8 adc_result;		/* ADC bank: two result bytes */
+ 	bool adc_rearm;		/* clear the start bit and latch after a read */
+ 	unsigned int plug_event; /* the event that latches on plug and unplug */
++	u8 input_suspend;	/* input bank: set below 75 mA of input, 0: none */
++	u8 timeout;		/* charger state: the charge timer expired, 0: ignored */
++	u8 charge_timer;	/* control bank: rewritten to restart the charge timer */
+ };
+ 
+ /* D2365 (iPad 5, iPad 6), from iOS 16 AppleD2365PMUPowerSource */
+@@ -150,6 +153,12 @@ static const struct tristar_pmic tristar_d2207 = {
+  * 0x502 that iOS scales for channel 6 as this driver does, and is cleared
+  * through 0x501 and 0x500 after each read. ADC done is event 89; the plug
+  * event is event 0.
++ *
++ * With every input-limit write, iOS 12 (setInputCurrentLimit) first sets
++ * bit 2 of 0x10 for a limit below 75 mA and clears it otherwise. When the
++ * charger state 0x62 reports an expired charge timer (bit 4) and the
++ * battery is below 90 %, it restarts the timer: it reads 0x4c8, writes
++ * back only bit 3 of it, then the value read ("resetting charge TO").
+  */
+ static const struct tristar_pmic tristar_d2089 = {
+ 	.chip = &tristar_d2365_chip,
+@@ -161,6 +170,9 @@ static const struct tristar_pmic tristar_d2089 = {
+ 	.adc_result = 0x02,
+ 	.adc_rearm = true,
+ 	.plug_event = 0,
++	.input_suspend = BIT(2),
++	.timeout = BIT(4),
++	.charge_timer = 0x08,
+ };
+ 
+ /* D2355 reads connection state via its own status callback and a companion ADC. */
+@@ -208,6 +220,10 @@ static const struct tristar_pmic tristar_d2355 = {
+ #define TRISTAR_EVENT_DEBOUNCE_MS	50
+ /* More source events than this per second means something is stuck. */
+ #define TRISTAR_IRQ_STORM		200
++/* iOS 12 restarts an expired D2089 charge timer at most this often ... */
++#define TRISTAR_TIMER_RESTART_MS	300000
++/* ... and only below this battery charge. */
++#define TRISTAR_TIMER_RESTART_BELOW	90
+ 
+ enum tristar_phase {
+ 	TRISTAR_EMPTY,
+@@ -247,6 +263,7 @@ struct tristar_charger {
+ 	u32 status_base;
+ 	u32 control_base;
+ 	u32 adc_base;
++	u32 input_base;
+ 	unsigned int max_ma;
+ 	struct iio_channel *vbus;
+ 	bool vbus_fault;
+@@ -301,6 +318,10 @@ struct tristar_charger {
+ 	struct tristar_accessory *acc;
+ 	/* USB data is on, but the device controller is held off for a USB host role. */
+ 	bool usb_held;
++	/* The input-suspend bit was found set once: later finds are debug output. */
++	bool input_suspend_seen;
++	/* Last charge-timer restart in this attachment, 0: none */
++	u64 timer_ns;
+ };
+ 
+ static unsigned int tristar_d2365_code_ma(struct tristar_charger *chg, unsigned int code)
+@@ -321,9 +342,44 @@ static int tristar_d2365_read_limit(struct tristar_charger *chg,
+ 			   chg->control_base + chg->pmic->input_limit, code);
+ }
+ 
++/*
++ * As iOS 12 does on the D2089 with every input-limit write: suspend the
++ * input below 75 mA, resume it otherwise. Every limit this driver writes is
++ * at least 75 mA, so in practice this resumes an input left suspended.
++ */
++static int tristar_input_suspend(struct tristar_charger *chg, unsigned int code)
++{
++	u8 bit = chg->pmic->input_suspend;
++	bool suspend = chg->chip->code_ma(chg, code) < 75;
++	unsigned int value;
++	int ret;
++
++	ret = regmap_read(chg->regmap, chg->input_base, &value);
++	if (ret || !!(value & bit) == suspend)
++		return ret;
++	if (!suspend) {
++		if (!READ_ONCE(chg->input_suspend_seen)) {
++			WRITE_ONCE(chg->input_suspend_seen, true);
++			dev_info(chg->dev, "charger input was suspended (%#x = %#x); resuming it\n",
++				 chg->input_base, value);
++		} else {
++			dev_dbg(chg->dev, "charger input was suspended (%#x = %#x); resuming it\n",
++				chg->input_base, value);
++		}
++	}
++	return regmap_update_bits(chg->regmap, chg->input_base, bit, suspend ? bit : 0);
++}
++
+ static int tristar_d2365_write_limit(struct tristar_charger *chg,
+ 				     unsigned int code)
+ {
++	int ret;
++
++	if (chg->pmic->input_suspend) {
++		ret = tristar_input_suspend(chg, code);
++		if (ret)
++			return ret;
++	}
+ 	return regmap_write(chg->regmap,
+ 			    chg->control_base + chg->pmic->input_limit, code);
+ }
+@@ -931,6 +987,7 @@ static void tristar_new_attachment(struct tristar_charger *chg, u64 now)
+ 	chg->usb_type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
+ 	chg->cable_known = false;
+ 	chg->epoch_seen = atomic_read(&chg->epoch);
++	chg->timer_ns = 0;
+ 	WRITE_ONCE(chg->line_ns, 0);
+ 	if (tristar_set_code(chg, chg->chip->attach_code))
+ 		dev_crit(chg->dev, "Attach write failed; input limit unverified\n");
+@@ -1267,6 +1324,40 @@ static bool tristar_input_present(struct tristar_charger *chg)
+ 	return chg->present || (connected & chg->pmic->connected_new);
+ }
+ 
++/*
++ * The PMIC's charge timer expired: it stopped charging the battery. iOS 12
++ * restarts the D2089's timer while the battery is below 90 %, at most every
++ * five minutes, by rewriting the charger control register at 0x4c8 with only
++ * bit 3 and then with its value. Do the same while a source is attached.
++ * Without a readable battery charge, leave the timer as the PMIC set it.
++ * Caller holds lock.
++ */
++static void tristar_restart_timer(struct tristar_charger *chg, unsigned int status, u64 now)
++{
++	unsigned int reg = chg->control_base + chg->pmic->charge_timer, value;
++	struct tristar_pack pack;
++	int ret;
++
++	if (!chg->pmic->timeout || !(status & chg->pmic->timeout))
++		return;
++	if (chg->timer_ns &&
++	    (s64)(now - chg->timer_ns) < (s64)TRISTAR_TIMER_RESTART_MS * NSEC_PER_MSEC)
++		return;
++	if (tristar_read_pack(chg, &pack) || pack.capacity >= TRISTAR_TIMER_RESTART_BELOW)
++		return;
++	chg->timer_ns = now ?: 1;
++	ret = regmap_read(chg->regmap, reg, &value);
++	if (!ret)
++		ret = regmap_write(chg->regmap, reg, value & BIT(3));
++	if (!ret)
++		ret = regmap_write(chg->regmap, reg, value);
++	if (ret)
++		dev_err(chg->dev, "charge timer restart failed (%d)\n", ret);
++	else
++		dev_info(chg->dev, "charge timer expired (status %#x) at %d %%; restarted it (%#x = %#x)\n",
++			 status, pack.capacity, reg, value);
++}
++
+ static void tristar_poll(struct work_struct *work)
+ {
+ 	unsigned long ramp_delay = 0;
+@@ -1317,6 +1408,7 @@ static void tristar_poll(struct work_struct *work)
+ 		tristar_new_attachment(chg, now);
+ 		goto again;
+ 	}
++	tristar_restart_timer(chg, status, now);
+ 	if (IS_REACHABLE(CONFIG_IIO) && chg->vbus && !chg->vbus_fault &&
+ 	    (chg->phase == TRISTAR_RAMPING || chg->phase == TRISTAR_CHARGING) &&
+ 	    tristar_code_ma(chg, chg->target_code) > 1000) {
+@@ -1737,9 +1829,12 @@ static int tristar_probe(struct platform_device *pdev)
+ 			       &chg->status_base);
+ 	if (!ret)
+ 		ret = tristar_get_bank(dev, "control",
+-				       max_t(unsigned int, chg->chip->control_size,
+-					     chg->pmic->input_limit + 1),
++				       max3(chg->chip->control_size,
++					    chg->pmic->input_limit + 1u,
++					    chg->pmic->timeout ? chg->pmic->charge_timer + 1u : 0u),
+ 				       &chg->control_base);
++	if (!ret && chg->pmic->input_suspend)
++		ret = tristar_get_bank(dev, "input", 1, &chg->input_base);
+ 	if (!ret)
+ 		ret = tristar_get_bank(dev, "adc", chg->pmic->adc_result + 2, &chg->adc_base);
+ 	if (ret)

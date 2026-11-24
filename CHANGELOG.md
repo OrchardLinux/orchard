@@ -61,6 +61,11 @@ is missing or empty.
 - iPad Air and iPad mini 2 and 3 (A7): Lightning charging draws up to
   1.5 A instead of 1.05 A from a charger that offers it, as measured on an
   iPad mini 2; untested on the iPad Air and iPad mini 3.
+- iPad Air and iPad mini 2 and 3 (A7): the Lightning charger does what
+  iOS 12 does on their D2089 PMIC: with every input-limit write it takes
+  the PMIC's input out of suspend, and it restarts the PMIC's charge timer
+  when that has expired below 90 % charge. Meant for an iPad Air at 1 %
+  that kept discharging on a charger while one at 7 % charged; untested.
 - iPad mini 2 and 3 (A7): the speakers play, in stereo, through the same
   CS35L19 amplifier driver as the iPhone 6s Plus's loudspeaker, with the
   output capped at -12 dB because there is no speaker protection yet.

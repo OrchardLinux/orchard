@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 08:05:50 +0100
+Subject: [PATCH] arm64: dts: apple: s5l8960x: Describe the D2089 charger input
+ and charge timer
+
+The A7 iPads' Lightning charger now keeps the D2089's input-suspend bit
+(0x10 bit 2) in step with the input limit and restarts the charge timer
+at 0x4c8, as iOS 12 does. Give it register 0x10 as its "input" range and
+extend the control range from 0x4c0 to 0x4c8, in the iPad Air's and the
+iPad mini 2's shared files.
+
+Assisted-by: LLM
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+---
+ arch/arm64/boot/dts/apple/s5l8960x-air1.dtsi  | 9 +++++++--
+ arch/arm64/boot/dts/apple/s5l8960x-mini2.dtsi | 9 +++++++--
+ 2 files changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/s5l8960x-air1.dtsi b/arch/arm64/boot/dts/apple/s5l8960x-air1.dtsi
+index a886fbafe..a530dedd3 100644
+--- a/arch/arm64/boot/dts/apple/s5l8960x-air1.dtsi
++++ b/arch/arm64/boot/dts/apple/s5l8960x-air1.dtsi
+@@ -161,8 +161,13 @@ pmu_events: interrupt-controller {
+ 	 */
+ 	tristar_charger: charger@60 {
+ 		compatible = "apple,d2089-tristar-charger";
+-		reg = <0x60 0x0d>, <0x4c0 0x01>, <0x500 0x04>;
+-		reg-names = "status", "control", "adc";
++		/*
++		 * The control bank reaches the charge timer at 0x4c8; bit 2 of
++		 * 0x10 suspends the charger input, as iOS 12 sets it with every
++		 * input-limit write.
++		 */
++		reg = <0x60 0x0d>, <0x4c0 0x09>, <0x500 0x04>, <0x10 0x01>;
++		reg-names = "status", "control", "adc", "input";
+ 		interrupt-parent = <&pmu_events>;
+ 		/*
+ 		 * The PMU line and ADC done. No source events, as on the iPad
+diff --git a/arch/arm64/boot/dts/apple/s5l8960x-mini2.dtsi b/arch/arm64/boot/dts/apple/s5l8960x-mini2.dtsi
+index de928e2ba..831a8cc69 100644
+--- a/arch/arm64/boot/dts/apple/s5l8960x-mini2.dtsi
++++ b/arch/arm64/boot/dts/apple/s5l8960x-mini2.dtsi
+@@ -117,8 +117,13 @@ pmu_events: interrupt-controller {
+ 	 */
+ 	tristar_charger: charger@60 {
+ 		compatible = "apple,d2089-tristar-charger";
+-		reg = <0x60 0x0d>, <0x4c0 0x01>, <0x500 0x04>;
+-		reg-names = "status", "control", "adc";
++		/*
++		 * The control bank reaches the charge timer at 0x4c8; bit 2 of
++		 * 0x10 suspends the charger input, as iOS 12 sets it with every
++		 * input-limit write.
++		 */
++		reg = <0x60 0x0d>, <0x4c0 0x09>, <0x500 0x04>, <0x10 0x01>;
++		reg-names = "status", "control", "adc", "input";
+ 		interrupt-parent = <&pmu_events>;
+ 		/*
+ 		 * The PMU line and ADC done. No source events, as on the iPad

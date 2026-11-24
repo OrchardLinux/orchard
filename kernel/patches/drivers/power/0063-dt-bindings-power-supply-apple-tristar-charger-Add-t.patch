@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 08:05:50 +0100
+Subject: [PATCH] dt-bindings: power: supply: apple,tristar-charger: Add the
+ D2089 input register
+
+iOS 12 keeps bit 2 of the D2089's register 0x10 in step with the
+charger's input-current limit: set below 75 mA, clear otherwise. The
+charger also restarts the PMIC's charge timer through 0x4c8, inside the
+existing control bank.
+
+Allow a fourth register range, "input", for that register, required for
+the D2089 and not allowed for the other PMICs.
+
+Assisted-by: LLM
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+---
+ .../power/supply/apple,tristar-charger.yaml   | 23 +++++++++++++++++++
+ 1 file changed, 23 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/power/supply/apple,tristar-charger.yaml b/Documentation/devicetree/bindings/power/supply/apple,tristar-charger.yaml
+index 8b262fca8..2dbc49e83 100644
+--- a/Documentation/devicetree/bindings/power/supply/apple,tristar-charger.yaml
++++ b/Documentation/devicetree/bindings/power/supply/apple,tristar-charger.yaml
+@@ -26,6 +26,23 @@ description: |
+ 
+ allOf:
+   - $ref: power-supply.yaml#
++  - if:
++      properties:
++        compatible:
++          contains:
++            const: apple,d2089-tristar-charger
++    then:
++      properties:
++        reg:
++          minItems: 4
++        reg-names:
++          minItems: 4
++    else:
++      properties:
++        reg:
++          maxItems: 3
++        reg-names:
++          maxItems: 3
+ 
+ properties:
+   compatible:
+@@ -41,16 +58,22 @@ properties:
+       - const: apple,d2089-tristar-charger
+ 
+   reg:
++    minItems: 3
+     items:
+       - description: Charger status register bank.
+       - description: Charger control register bank.
+       - description: ADC register bank.
++      - description: |
++          The PMIC register whose bit suspends the charger input (D2089 0x10,
++          bit 2). The charger keeps it in step with the input-current limit.
+ 
+   reg-names:
++    minItems: 3
+     items:
+       - const: status
+       - const: control
+       - const: adc
++      - const: input
+ 
+   interrupts:
+     minItems: 2
