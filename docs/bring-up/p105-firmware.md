@@ -60,5 +60,6 @@ address as m1n1 does on 64-bit boards. The Cascadia loader does not fill it
 yet: the ADT's address is iBoot's to fill from syscfg and reads zero before
 then. Until the boot stage supplies it, hci_bcm keeps the BCM4334's default
 address (Apple's patchram reports `43:34:43:34:1F:AC`) instead of leaving
-the controller unconfigured (`kernel/patches/armv7/bluetooth` 0001).
+the controller unconfigured. Both changes are in
+`kernel/patches/armv7/bluetooth`: 0001 the driver, 0002 the device tree.
 Untested on hardware.
