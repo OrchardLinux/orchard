@@ -23,6 +23,7 @@ the medium before granting the block.
  a P105 compatible and the 64 GB constants; drop the controller variant]
 
 Assisted-by: LLM
+Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
 ---
  .../driver-api/mtd/apple-sftl-reclamation.rst | 33 ++++++++++++++-----
  drivers/mtd/Kconfig                           |  5 +--
