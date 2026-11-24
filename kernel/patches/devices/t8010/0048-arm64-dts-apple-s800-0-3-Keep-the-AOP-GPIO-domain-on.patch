@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 08:17:06 +0100
+Subject: [PATCH] arm64: dts: apple: s800-0-3: Keep the AOP GPIO domain on
+
+The AOP's firmware keeps running while Linux sleeps, but its GPIO
+block's power domain, aop_gpio, is not always-on like the AOP's own.
+In s2idle genpd turns aop_gpio off in the noirq phase. On an iPhone 6s
+Plus (N66) with the AOP started, pm_test=platform then never returned,
+and a real s2idle could not be woken by the Power or Home button;
+without the AOP driver both worked. Presumably the running firmware
+touches the powered-off block and the bus hangs.
+
+Mark aop_gpio always-on, as ps_aop is. With only that changed, on the
+same phone with the AOP running, pm_test=platform returns after its
+5 s, and s2idle wakes on the Power button, after which the AOP still
+answers (the barometer reads).
+
+The file is shared by every S8000 and S8003 board, so this also
+changes the iPad 5, which starts the AOP too. It is not tested there.
+
+Assisted-by: LLM
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+---
+ arch/arm64/boot/dts/apple/s800-0-3-pmgr.dtsi | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm64/boot/dts/apple/s800-0-3-pmgr.dtsi b/arch/arm64/boot/dts/apple/s800-0-3-pmgr.dtsi
+index 3af0a7093..fc73bfdae 100644
+--- a/arch/arm64/boot/dts/apple/s800-0-3-pmgr.dtsi
++++ b/arch/arm64/boot/dts/apple/s800-0-3-pmgr.dtsi
+@@ -731,6 +731,7 @@ ps_aop_gpio: power-controller@80010 {
+ 		#reset-cells = <0>;
+ 		label = "aop_gpio";
+ 		power-domains = <&ps_aop>;
++		apple,always-on; /* The running AOP firmware uses its GPIOs */
+ 	};
+ 
+ 	ps_aop_cpu: power-controller@80040 {
