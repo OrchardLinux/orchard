@@ -22,10 +22,11 @@ platform = "apple-4k"
 dtb = "t7000-j96" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until bring-up needs it.
+recipe = "firmware.json" # Pins this board's public IPSW; the GPU firmware comes from the iPod touch 6's iOS 12.4 (16G77), the tested one.
 
 [support]
 status = "experimental"
+tested_by = ["tcballard"] # omarchy-a issue #69; GPU in #196
 
 # States: working, untested, missing, none (features.toml). "working" entries were seen
 # working on this board on the J96 bring-up kernel (Hoolock 6831bc7 plus this board's
@@ -37,19 +38,20 @@ status = "experimental"
 # bring-up driver, not on apple_z2.
 [features]
 display = "working"
-screen_off = "missing"
+screen_off = "untested" # Display pipe enabled on every A8 board, as on the N61
 backlight = "working"
+gpu_desktop = "untested" # GPU driver, Vulkan and GPU buffers on the display pass here (tcballard, #196); the desktop itself not yet run on the GPU
 touch = "untested" # apple_z2 (C1F14,4) never run here; multitouch worked on a local bring-up driver.
 buttons = "working"
 accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "missing"
 touch_id = "missing"
-storage_read = "missing"
-storage_write = "missing"
+storage_read = "untested" # ANS1 on every A8 board (t7000-common.dtsi), as on the N102
+storage_write = "untested" # Same ANS1 and asp driver as the N102
 wifi = "working" # BCM4350 over PCIe (brcmfmac); C2 and C5 modules exist, C5 seen working.
-bluetooth_input = "missing"
-bluetooth_audio = "missing"
+bluetooth_input = "missing" # BlueTool has two Zinfandel patchrams per vendor (by controller revision); hci_bcm chooses by vendor only, so a unit's one isn't decidable yet
+bluetooth_audio = "missing" # Same as Bluetooth input
 cellular = "none"
 battery = "working" # bq27xxx over HDQ (W1_MASTER_UART).
 charging = "missing"

@@ -20,8 +20,10 @@ echo "Orchard $name" > "$g/strings/0x409/product"
 sh /usr/libexec/orchard/usb-identity > "$g/strings/0x409/serialnumber" 2>/dev/null ||
     echo "BOOT:$(cat /proc/sys/kernel/random/boot_id)" > "$g/strings/0x409/serialnumber"
 echo 'USB network and serial' > "$g/configs/c.1/strings/0x409/configuration"
-# Descriptor only: not charging capability or PMIC policy.
-echo 100 > "$g/configs/c.1/MaxPower"
+# What the host budgets for the device once configured. A charger driver that
+# follows the USB grant (usb-psy-name) caps its input at this; 500 mA, as the
+# installed system's and recovery's gadgets ask, is the USB 2.0 maximum.
+echo 500 > "$g/configs/c.1/MaxPower"
 mkdir "$g/functions/ncm.usb0" "$g/functions/acm.usb0"
 ln -s "$g/functions/ncm.usb0" "$g/configs/c.1/ncm.usb0"
 ln -s "$g/functions/acm.usb0" "$g/configs/c.1/acm.usb0"

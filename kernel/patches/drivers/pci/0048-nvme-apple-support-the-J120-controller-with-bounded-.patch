@@ -1,0 +1,249 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 22:40:24 +0100
+Subject: [PATCH] nvme: apple: support the J120 controller with bounded
+ namespace writes
+
+[Henrik Klee: applied next to the S8000 entry main added since]
+
+Assisted-by: LLM
+---
+ drivers/nvme/host/core.c          | 16 +++++++++-
+ drivers/nvme/host/nvme.h          | 10 ++++++
+ drivers/nvme/host/pci-apple-ans.c | 27 ++++++++++++++++
+ drivers/nvme/host/pci-internal.h  |  1 +
+ drivers/nvme/host/pci.c           | 51 +++++++++++++++++++++++++++++++
+ 5 files changed, 104 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/nvme/host/core.c b/drivers/nvme/host/core.c
+index 1322c678f..ebfdb0b26 100644
+--- a/drivers/nvme/host/core.c
++++ b/drivers/nvme/host/core.c
+@@ -2155,6 +2155,12 @@ static bool nvme_update_disk_info(struct nvme_ns *ns, struct nvme_id_ns *id,
+ 	else
+ 		lim->max_hw_discard_sectors = 0;
+ 
++	/* The primary-namespace trial admits ordinary Write and Flush only. */
++	if (ctrl->quirks & NVME_QUIRK_PRIMARY_NS_WRITES) {
++		lim->max_write_zeroes_sectors = 0;
++		lim->max_hw_discard_sectors = 0;
++	}
++
+ 	/*
+ 	 * NVMe namespaces advertise both a preferred deallocate granularity
+ 	 * (for a discard length) and alignment (for a discard starting offset).
+@@ -2194,7 +2200,10 @@ static bool nvme_update_disk_info(struct nvme_ns *ns, struct nvme_id_ns *id,
+ 
+ static bool nvme_ns_is_readonly(struct nvme_ns *ns, struct nvme_ns_info *info)
+ {
+-	return info->is_readonly || test_bit(NVME_NS_FORCE_RO, &ns->flags);
++	return info->is_readonly || test_bit(NVME_NS_FORCE_RO, &ns->flags) ||
++	       ((ns->ctrl->quirks & NVME_QUIRK_READ_ONLY) &&
++		(!(ns->ctrl->quirks & NVME_QUIRK_PRIMARY_NS_WRITES) ||
++		 ns->head->ns_id != 1));
+ }
+ 
+ static inline bool nvme_first_scan(struct gendisk *disk)
+@@ -3791,6 +3800,10 @@ int nvme_init_ctrl_finish(struct nvme_ctrl *ctrl, bool was_suspended)
+ 		ctrl->queue_count = 1;
+ 	}
+ 
++	/* Read-only bring-up leaves optional controller features untouched. */
++	if (ctrl->quirks & NVME_QUIRK_READ_ONLY)
++		goto skip_optional_features;
++
+ 	ret = nvme_configure_apst(ctrl);
+ 	if (ret < 0)
+ 		return ret;
+@@ -3805,6 +3818,7 @@ int nvme_init_ctrl_finish(struct nvme_ctrl *ctrl, bool was_suspended)
+ 
+ 	nvme_configure_opal(ctrl, was_suspended);
+ 
++skip_optional_features:
+ 	if (!ctrl->identified && !nvme_discovery_ctrl(ctrl)) {
+ 		/*
+ 		 * Do not return errors unless we are in a controller reset,
+diff --git a/drivers/nvme/host/nvme.h b/drivers/nvme/host/nvme.h
+index 75e5d5a8a..48bd6aaa4 100644
+--- a/drivers/nvme/host/nvme.h
++++ b/drivers/nvme/host/nvme.h
+@@ -183,6 +183,12 @@ enum nvme_quirks {
+ 	 * Admin queue DMA buffers must be page aligned
+ 	 */
+ 	NVME_QUIRK_ADMIN_PAGE_ALIGN		= (1 << 23),
++
++	/* Diagnostic host: expose namespaces read-only and reject media changes. */
++	NVME_QUIRK_READ_ONLY			= (1 << 24),
++
++	/* With READ_ONLY: permit only namespace 1 Write/Flush for bring-up. */
++	NVME_QUIRK_PRIMARY_NS_WRITES		= (1 << 25),
+ };
+ 
+ static inline char *nvme_quirk_name(enum nvme_quirks q)
+@@ -236,6 +242,10 @@ static inline char *nvme_quirk_name(enum nvme_quirks q)
+ 		return "dmapool_align_512";
+ 	case NVME_QUIRK_ADMIN_PAGE_ALIGN:
+ 		return "admin_page_align";
++	case NVME_QUIRK_READ_ONLY:
++		return "read_only";
++	case NVME_QUIRK_PRIMARY_NS_WRITES:
++		return "primary_ns_writes";
+ 	}
+ 
+ 	return "unknown";
+diff --git a/drivers/nvme/host/pci-apple-ans.c b/drivers/nvme/host/pci-apple-ans.c
+index cc631b7dd..986fd053b 100644
+--- a/drivers/nvme/host/pci-apple-ans.c
++++ b/drivers/nvme/host/pci-apple-ans.c
+@@ -58,6 +58,8 @@ struct apple_ans_nvme_req {
+  * @sleep_stop: the controller's port loses power in system sleep: stop the
+  *              controller first, as iOS (AppleEmbeddedNVMeController) does,
+  *              and bring it up from reset on resume
++ * @read_only: diagnostic host rejects media changes and optional feature setup
++ * @primary_ns_writes: diagnostic exception for namespace 1 Write and Flush
+  */
+ struct apple_ans_host {
+ 	u32 l1ss_ctl1;
+@@ -65,6 +67,8 @@ struct apple_ans_host {
+ 	unsigned int rdy_timeout_ms;
+ 	bool late_bus_master;
+ 	bool sleep_stop;
++	bool read_only;
++	bool primary_ns_writes;
+ };
+ 
+ static const struct apple_ans_host apple_ans_host_s8003 = {
+@@ -84,6 +88,16 @@ static const struct apple_ans_host apple_ans_host_t8010 = {
+ 	.sleep_stop = true,
+ };
+ 
++/* J120 uses the same L1SS control, verified against its native port data. */
++static const struct apple_ans_host apple_ans_host_j120 = {
++	.l1ss_ctl1 = APPLE_ANS_L1SS_CTL1_T8010,
++	.sleep_stop = true,
++	/* Namespace writes and their recovery path are not yet qualified. */
++	.read_only = true,
++	/* Isolated write-qualification candidate; never enable auxiliary writes. */
++	.primary_ns_writes = true,
++};
++
+ struct apple_ans_nvme {
+ 	const struct apple_ans_host *host;
+ 	/* Last CC written through the register hook, and when */
+@@ -105,6 +119,7 @@ static struct apple_ans_nvme *nvme_pci_apple_ans(struct nvme_dev *dev)
+ }
+ 
+ static const struct of_device_id nvme_pci_apple_ans_hosts[] = {
++	{ .compatible = "apple,j120-pcie", .data = &apple_ans_host_j120 },
+ 	{ .compatible = "apple,s8000-pcie", .data = &apple_ans_host_s8003 },
+ 	{ .compatible = "apple,s8003-pcie", .data = &apple_ans_host_s8003 },
+ 	{ .compatible = "apple,t8010-pcie", .data = &apple_ans_host_t8010 },
+@@ -142,6 +157,18 @@ bool nvme_pci_apple_ans_match(struct pci_dev *pdev)
+ 	       nvme_pci_apple_ans_host_match(pdev);
+ }
+ 
++unsigned long nvme_pci_apple_ans_quirks(struct pci_dev *pdev)
++{
++	const struct of_device_id *match = nvme_pci_apple_ans_host_match(pdev);
++	const struct apple_ans_host *host = match ? match->data : NULL;
++
++	/* Avoid automatic power-state programming during read-only bring-up. */
++	if (!host || !host->read_only)
++		return 0;
++	return NVME_QUIRK_READ_ONLY | NVME_QUIRK_NO_APST |
++		(host->primary_ns_writes ? NVME_QUIRK_PRIMARY_NS_WRITES : 0);
++}
++
+ static int nvme_pci_apple_ans_init(struct nvme_dev *dev, int node)
+ {
+ 	const struct of_device_id *match;
+diff --git a/drivers/nvme/host/pci-internal.h b/drivers/nvme/host/pci-internal.h
+index e789f1e2e..9d9a69b58 100644
+--- a/drivers/nvme/host/pci-internal.h
++++ b/drivers/nvme/host/pci-internal.h
+@@ -205,5 +205,6 @@ struct nvme_iod {
+ extern const struct nvme_pci_dma_ops nvme_pci_apple_ans_ops;
+ 
+ bool nvme_pci_apple_ans_match(struct pci_dev *pdev);
++unsigned long nvme_pci_apple_ans_quirks(struct pci_dev *pdev);
+ 
+ #endif /* _NVME_PCI_INTERNAL_H */
+diff --git a/drivers/nvme/host/pci.c b/drivers/nvme/host/pci.c
+index 327668425..6708a4458 100644
+--- a/drivers/nvme/host/pci.c
++++ b/drivers/nvme/host/pci.c
+@@ -1267,9 +1267,46 @@ static blk_status_t nvme_map_metadata(struct request *req)
+ 	return nvme_pci_setup_meta_mptr(req);
+ }
+ 
++/*
++ * Fail closed before mapping DMA, including privileged ioctl/io_uring requests.
++ * The only I/O command is Read. Admin commands can inspect the controller and
++ * manage volatile queues/events, but cannot change namespaces or saved state.
++ */
++static bool nvme_readonly_cmd_allowed(u8 opcode, bool admin, u32 feature_id)
++{
++	if (!admin)
++		return opcode == nvme_cmd_read;
++
++	switch (opcode) {
++	case nvme_admin_delete_sq:
++	case nvme_admin_create_sq:
++	case nvme_admin_get_log_page:
++	case nvme_admin_delete_cq:
++	case nvme_admin_create_cq:
++	case nvme_admin_identify:
++	case nvme_admin_abort_cmd:
++	case nvme_admin_get_features:
++	case nvme_admin_async_event:
++		return true;
++	case nvme_admin_set_features:
++		/* No Save bit or reserved bits, and only volatile queue/event setup. */
++		return feature_id == NVME_FEAT_NUM_QUEUES ||
++		       feature_id == NVME_FEAT_ASYNC_EVENT;
++	default:
++		return false;
++	}
++}
++
++static bool nvme_primary_write_allowed(u8 opcode, bool admin, u32 nsid)
++{
++	return !admin && nsid == 1 &&
++	       (opcode == nvme_cmd_write || opcode == nvme_cmd_flush);
++}
++
+ static blk_status_t nvme_prep_rq(struct request *req)
+ {
+ 	struct nvme_iod *iod = blk_mq_rq_to_pdu(req);
++	struct nvme_queue *nvmeq = req->mq_hctx->driver_data;
+ 	blk_status_t ret;
+ 
+ 	iod->flags = 0;
+@@ -1284,6 +1321,19 @@ static blk_status_t nvme_prep_rq(struct request *req)
+ 	if (ret)
+ 		return ret;
+ 
++	if (unlikely(nvmeq->dev->ctrl.quirks & NVME_QUIRK_READ_ONLY) &&
++	    !nvme_readonly_cmd_allowed(iod->cmd.common.opcode, !nvmeq->qid,
++				      le32_to_cpu(iod->cmd.features.fid)) &&
++	    !((nvmeq->dev->ctrl.quirks & NVME_QUIRK_PRIMARY_NS_WRITES) &&
++	      nvme_primary_write_allowed(iod->cmd.common.opcode, !nvmeq->qid,
++					le32_to_cpu(iod->cmd.common.nsid)))) {
++		dev_warn_ratelimited(nvmeq->dev->dev,
++			"read-only bring-up: rejected %s opcode %#x\n",
++			nvmeq->qid ? "I/O" : "admin", iod->cmd.common.opcode);
++		ret = BLK_STS_PROTECTION;
++		goto out_free_cmd;
++	}
++
+ 	if (blk_rq_nr_phys_segments(req)) {
+ 		ret = nvme_map_data(req);
+ 		if (ret)
+@@ -3809,6 +3859,7 @@ static struct nvme_dev *nvme_pci_alloc_dev(struct pci_dev *pdev,
+ 		dev->dma_ops = &nvme_pci_apple_ans_ops;
+ 		/* One MSI and shared tags, as for 106b:2002 */
+ 		quirks |= NVME_QUIRK_SINGLE_VECTOR | NVME_QUIRK_SHARED_TAGS;
++		quirks |= nvme_pci_apple_ans_quirks(pdev);
+ 	}
+ 	if (dev->dma_ops) {
+ 		ret = dev->dma_ops->init(dev, node);

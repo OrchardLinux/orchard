@@ -22,16 +22,16 @@ class N61Data(unittest.TestCase):
         self.assertEqual(self.device['kernel'], {'platform': 'apple-4k', 'dtb': 't7000-n61'})
         self.assertEqual(self.device['boot'], {'methods': ['checkm8-pongo']})
 
-    def test_installation_waits_for_storage_writes(self):
-        self.assertIn('its internal storage cannot be written yet', data.install_blockers('n61'))
+    def test_installation_follows_the_shared_a8_storage(self):
+        # ANS1 is on for every A8 board, so storage writes are untested, not missing.
+        self.assertEqual(data.install_blockers('n61'), [])
 
     def test_touch_recipe_selects_the_pinned_n61_gen1_profile(self):
         path = data.firmware_path('n61')
         self.assertEqual(path, HARDWARE / 'devices/n61/firmware.json')
         recipe = json.loads(path.read_text())
         self.assertEqual((recipe['schema'], recipe['device']), (2, 'iPhone7,2'))
-        output, = recipe['outputs']
-        self.assertEqual(output['destination'], 'lib/firmware/apple/n61-fwstart.z2fw')
+        output, = [o for o in recipe['outputs'] if o['destination'] == 'lib/firmware/apple/n61-fwstart.z2fw']
         self.assertEqual(output['sha256'], '51d2ef7b25c1d7e323fa703b531223312cb76f7183fbeb425f921dd6e5509294')
         self.assertEqual(output['steps'], [{'step': 'z2fw-from-mtprops@3', 'input': 'N61.mtprops',
             'profile': 'C1F59,1', 'packet': 'Z2', 'touch_maximum': 1024, 'prox_maximum': 128,

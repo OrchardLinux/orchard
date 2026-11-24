@@ -14,7 +14,116 @@
         "zip": "Firmware/all_flash/DeviceTree.n69uap.im4p"
       },
       "sha256": "496977992f1380c1c564125d212e138114442fb5cc18c836c8fb5108a1f9b05f"
+    },
+    "N69.mtprops": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/multitouch/N69.mtprops"
+      },
+      "device": "/usr/share/firmware/multitouch/N69.mtprops",
+      "sha256": "52646009d96ff1be1135b942eda5a148660f9387629acb8bc0462cfd93bacf94"
+    },
+    "kernelcache-j71tap-20H350": {
+      "ipsw": {
+        "kernelcache": "j71tap",
+        "restore": {
+          "version": "16.7.10",
+          "build": "20H350",
+          "url": "https://updates.cdn-apple.com/2024SpringFCS/fullrestores/062-47889/FBBD9227-79D6-4FAA-91B9-D20E087BE0E7/iPad_64bit_TouchID_ASTC_16.7.10_20H350_Restore.ipsw",
+          "bytes": 5586431671,
+          "sha256": "1709e8e27b1c0c98dc7c64ae27b4e208b49835c24a95074d1aebe135342b3112"
+        }
+      },
+      "sha256": "c6b95fcf0efe52ee9258454d01d14adc9b0cb922d94c54a04a4ce11d1ae81e0a"
+    },
+    "kernelcache": {
+      "ipsw": {
+        "kernelcache": true
+      },
+      "device": {
+        "kernelcache": "active"
+      }
+    },
+    "aop.im4p": {
+      "ipsw": {
+        "zip": "Firmware/AOP/aopfw-s8000aop.im4p"
+      },
+      "sha256": "8b13cd96c292683bde0716199fb1821394cedfdbbbf27867e9bb49914287b44d"
     }
   },
-  "outputs": []
+  "outputs": [
+    {
+      "destination": "lib/firmware/apple/n69-fwstart.z2fw",
+      "sha256": "c09be8c134a0ae76c1146ca9971ade5ceb777b27de3b4e85b149aed4bd2e40b8",
+      "steps": [
+        {
+          "step": "z2fw-from-z2-packet@2",
+          "input": "N69.mtprops",
+          "profile": "C1F57,5",
+          "calibration_address": 268472320,
+          "calibration_size": 1024,
+          "prox_address": 268473856,
+          "prox_size": 128
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/gfx-s8003.bin",
+      "sha256": "33ae20cbbe2498e4f119ba4e9a55467e4e0192d4c86d5bf1903adce63ffa5dca",
+      "steps": [
+        {
+          "step": "agx-g5p-ldr-from-kernelcache@1",
+          "input": "kernelcache-j71tap-20H350"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/vxd-deva.bin",
+      "sha256": "bf5167652e81540471aaca141943fd33d71c3990c137f145471305f5f5ade83b",
+      "steps": [
+        {
+          "step": "vxd-firmware-from-kernelcache@1",
+          "input": "kernelcache"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/aop-s8000.bin",
+      "sha256": "b3f75072d287664c98a4a14b295a30c5e9d66bdfa9c04616e4946671755662f9",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "aop.im4p"
+        },
+        {
+          "step": "aop-image@1",
+          "coprocessor": "AOP"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/aop-s8000-ext.bin",
+      "sha256": "209f7d3014774331ea4b7d2229b931765e0ef58100ff95362f5eb24d3dbed61b",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "aop.im4p"
+        },
+        {
+          "step": "aop-image@1",
+          "coprocessor": "AOP_ext"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/s8000-smartio.bin",
+      "sha256": "98242f13a7a201121f1b5029b3ba848505e1d6ca26d019fc818a77e344becc03",
+      "steps": [
+        {
+          "step": "smartio-from-kernelcache@2",
+          "input": "kernelcache",
+          "kext": "com.apple.driver.AppleS8000SmartIO"
+        }
+      ]
+    }
+  ]
 }

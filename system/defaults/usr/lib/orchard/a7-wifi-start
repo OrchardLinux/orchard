@@ -1,0 +1,21 @@
+#!/bin/sh
+# Start the HSIC Wi-Fi radio of an Apple A7 board (iPad Air, iPad mini 2 and 3): the apple_a7_wlan transport
+# brings up EHCI and the radio, then brcmfmac binds to it. See orchard-a7-wifi.service.
+set -u
+P=/sys/module/apple_a7_wlan/parameters
+log() { echo "orchard-a7-wifi: $*"; }
+modprobe apple_a7_wlan confirm_native=1 keep_active=1 || { log "transport did not load"; exit 1; }
+[ "$(cat $P/session_active 2>/dev/null)" = Y ] || { log "transport refused: $(tr '\n' ' ' < $P/status)"; exit 1; }
+dev=
+for i in $(seq 1 30); do
+    for d in /sys/bus/usb/devices/*; do
+        [ "$(cat "$d/idVendor" 2>/dev/null):$(cat "$d/idProduct" 2>/dev/null)" = 0a5c:bd1c ] && dev=${d##*/}
+    done
+    [ -n "$dev" ] && break
+    sleep 1
+done
+[ -n "$dev" ] || { log "radio did not enumerate"; exit 1; }
+modprobe brcmfmac_wcc || { log "brcmfmac_wcc did not load"; exit 1; }
+echo 1 > /sys/module/brcmfmac/parameters/hsic_bind
+[ -e "/sys/bus/usb/drivers/brcmfmac/$dev:1.0" ] || echo "$dev:1.0" > /sys/bus/usb/drivers/brcmfmac/bind
+log "radio $dev bound to brcmfmac"

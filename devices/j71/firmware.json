@@ -14,7 +14,90 @@
         "zip": "Firmware/all_flash/DeviceTree.j71ap.im4p"
       },
       "sha256": "a32f01f6e440f7121ea749c9b0b1482dc92cc9dfc664717aab125656b2b5143d"
+    },
+    "syrah.trx": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/4324b5/syrah.trx"
+      },
+      "sha256": "74fadde2473e5f2b574bdef54ab1d9b45fd2c7ffbe695486d842fccc4dbf0e07"
+    },
+    "syrah-u-kk.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/4324b5/syrah-u-kk.txt"
+      },
+      "sha256": "db5580fd94aa7b6ff68f480668ed97b8f1f9e6f8479e0e72f99bc83001ab8925"
+    },
+    "syrah-m-mt.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/4324b5/syrah-m-mt.txt"
+      },
+      "sha256": "481364b8982d3cfb7f3541014d5a22546a90ce08f1b5443f186e989528ea28c2"
+    },
+    "kernelcache": {
+      "ipsw": {
+        "kernelcache": true
+      },
+      "device": {
+        "kernelcache": "active"
+      }
+    },
+    "J71.mtprops": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/multitouch/J71.mtprops"
+      },
+      "sha256": "69f27fe207cc5810a748dac3dfe640b1c5a755709f49513b4b5125660784f0fc"
     }
   },
-  "outputs": []
+  "outputs": [
+    {
+      "destination": "lib/firmware/apple/j72-fwstart.z2fw",
+      "sha256": "73ca290607695ca841867a2bf76cab4bc2f5c33b9ab5ac171de5b5580a7c0c09",
+      "steps": [
+        {
+          "step": "z2fw-from-z2-packet@2",
+          "input": "J71.mtprops",
+          "profile": "C1F15,1",
+          "calibration_address": 268472320,
+          "calibration_size": 1024,
+          "prox_address": 268473856,
+          "prox_size": 128
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac43241-j71-usb.bin",
+      "sha256": "bd57fff45cb9573257581526cdb007fa8334df686d0dd457410be634237a4232",
+      "steps": [
+        {
+          "step": "trx-add-nvram@1",
+          "input": "syrah.trx",
+          "nvram": "syrah-u-kk.txt",
+          "placeholder_mac": "02:00:00:00:00:00"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac43241-j71-usb.murata.bin",
+      "sha256": "e0d3e9f31ebf29c65734b28a99cd12d56c830d9e8428d9e17d09698a8465b187",
+      "steps": [
+        {
+          "step": "trx-add-nvram@1",
+          "input": "syrah.trx",
+          "nvram": "syrah-m-mt.txt",
+          "placeholder_mac": "02:00:00:00:00:00"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/s5l8960x-smartio.bin",
+      "sha256": "af3d61851d4a2dd53d7301d945d7ff3f0d94eef2e15947f1de2c9a8982708e33",
+      "steps": [
+        {
+          "step": "smartio-from-kernelcache@2",
+          "input": "kernelcache",
+          "kext": "com.apple.driver.AppleS5L8960XSmartIO"
+        }
+      ]
+    }
+  ]
 }

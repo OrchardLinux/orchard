@@ -1,0 +1,184 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Tue, 24 Nov 2026 00:22:31 +0800
+Subject: [PATCH] arm64: dts: apple: s800x: Battery, charger, AOP and VXD on
+ the A9 iPhones
+
+The iPhone 6s, 6s Plus and SE had no battery gauge, charger or motion
+sensors in their device trees, and only the iPad 5 enabled the VXD
+decoder, although all of it is in their Apple device trees.
+
+Apple's iOS 15.8.8 trees (n66ap, n71ap, n69uap) put an SN2400 charger at
+i2c1 0x75 that owns the battery's HDQ line, and the bq27540 gauge on
+uart5 (function-battery_swi, AP GPIO 2): the iPhone 7's arrangement.
+Describe it once in s800x-iphone.dtsi; each model's charge current is
+the first entry of its ADT charge-limits (1924, 1195 and 1056 mA), the
+input limit the ADT usb-input-limit-max (2 A).
+
+Enable the AOP with Apple's iPhone firmware (aopfw-s8000aop) for the
+accelerometer, gyroscope and pressure sensor; its mount-matrix is not
+measured yet. Enable VXD in s800-0-3-common.dtsi for every A9 device.
+
+The iPad 5 trees are unchanged. Untested on hardware.
+
+Assisted-by: LLM
+---
+ .../arm64/boot/dts/apple/s800-0-3-common.dtsi |  5 ++
+ arch/arm64/boot/dts/apple/s800x-ipad5.dtsi    |  4 -
+ arch/arm64/boot/dts/apple/s800x-iphone.dtsi   | 73 +++++++++++++++++++
+ arch/arm64/boot/dts/apple/s800x-n66.dtsi      |  5 ++
+ arch/arm64/boot/dts/apple/s800x-n69.dtsi      |  5 ++
+ arch/arm64/boot/dts/apple/s800x-n71.dtsi      |  5 ++
+ 6 files changed, 93 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/s800-0-3-common.dtsi b/arch/arm64/boot/dts/apple/s800-0-3-common.dtsi
+index 338182c..da26665 100644
+--- a/arch/arm64/boot/dts/apple/s800-0-3-common.dtsi
++++ b/arch/arm64/boot/dts/apple/s800-0-3-common.dtsi
+@@ -56,3 +56,8 @@
+ &serial0 {
+ 	status = "okay";
+ };
++
++/* The VXD decoder is part of the SoC: every A9 device has it (ADT vxd). */
++&vxd {
++	status = "okay";
++};
+diff --git a/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi b/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
+index 70c66eb..dfd1b2d 100644
+--- a/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
++++ b/arch/arm64/boot/dts/apple/s800x-ipad5.dtsi
+@@ -387,10 +387,6 @@
+ 	status = "okay";
+ };
+ 
+-&vxd {
+-	status = "okay";
+-};
+-
+ / {
+ 	aliases {
+ 		wifi0 = &wifi;
+diff --git a/arch/arm64/boot/dts/apple/s800x-iphone.dtsi b/arch/arm64/boot/dts/apple/s800x-iphone.dtsi
+index fa7eb1f..3498ce5 100644
+--- a/arch/arm64/boot/dts/apple/s800x-iphone.dtsi
++++ b/arch/arm64/boot/dts/apple/s800x-iphone.dtsi
+@@ -73,3 +73,76 @@
+ &disp0 {
+ 	power-domains = <&ps_disp0>, <&ps_mipi_dsi>;
+ };
++
++/*
++ * Battery and charger, the same on the iPhone 6s, 6s Plus and SE (iOS
++ * 15.8.8 DeviceTree.n66ap, n71ap, n69uap): an SN2400 charger at i2c1 0x75
++ * owns the battery's HDQ line, and the bq27540 gauge answers on uart5
++ * (function-battery_swi, AP GPIO 2), as on the iPhone 7. Each model sets
++ * its own charge current: the first entry of its ADT charger charge-limits.
++ */
++/ {
++	battery_info: battery {
++		compatible = "simple-battery";
++	};
++};
++
++&i2c1 {
++	status = "okay";
++
++	charger@75 {
++		compatible = "apple,sn2400";
++		reg = <0x75>;
++
++		sn2400_charger: charger {
++			compatible = "apple,sn2400-charger";
++			monitored-battery = <&battery_info>;
++			/* ADT charger usb-input-limit-max */
++			input-current-limit-microamp = <2000000>;
++			mux-states = <&hdq_mux 0>;
++			mux-state-names = "hdq";
++		};
++
++		hdq_mux: hdq-mux {
++			compatible = "apple,sn2400-hdq-mux";
++			#mux-state-cells = <1>;
++		};
++	};
++};
++
++&pinctrl_ap {
++	battery_swi_pins: battery-swi-pins {
++		pinmux = <APPLE_PINMUX(2, 1)>;
++	};
++};
++
++&serial5 {
++	pinctrl-0 = <&battery_swi_pins>;
++	pinctrl-names = "default";
++	status = "okay";
++
++	onewire {
++		compatible = "ti,hdq-uart";
++		mux-states = <&hdq_mux 1>;
++		mux-state-names = "hdq";
++
++		fuel-gauge {
++			compatible = "ti,bq27540-hdq";
++			monitored-battery = <&battery_info>;
++		};
++	};
++};
++
++/*
++ * Apple's A9 iPhone AOP firmware (aopfw-s8000aop) serves the accelerometer,
++ * gyroscope and pressure sensor. Its mount-matrix has not been measured on
++ * a phone yet, so the sensors report in the AOP's own frame.
++ */
++&aop {
++	firmware-name = "apple/aop-s8000.bin", "apple/aop-s8000-ext.bin";
++	status = "okay";
++};
++
++&aop_mbox {
++	status = "okay";
++};
+diff --git a/arch/arm64/boot/dts/apple/s800x-n66.dtsi b/arch/arm64/boot/dts/apple/s800x-n66.dtsi
+index 3498fcc..34fc119 100644
+--- a/arch/arm64/boot/dts/apple/s800x-n66.dtsi
++++ b/arch/arm64/boot/dts/apple/s800x-n66.dtsi
+@@ -17,3 +17,8 @@
+ 	touchscreen-size-x = <1080>;
+ 	touchscreen-size-y = <1920>;
+ };
++
++/* ADT charger charge-limits[0] */
++&battery_info {
++	constant-charge-current-max-microamp = <1924000>;
++};
+diff --git a/arch/arm64/boot/dts/apple/s800x-n69.dtsi b/arch/arm64/boot/dts/apple/s800x-n69.dtsi
+index 029f23f..dc86d7a 100644
+--- a/arch/arm64/boot/dts/apple/s800x-n69.dtsi
++++ b/arch/arm64/boot/dts/apple/s800x-n69.dtsi
+@@ -17,3 +17,8 @@
+ 	touchscreen-size-x = <640>;
+ 	touchscreen-size-y = <1136>;
+ };
++
++/* ADT charger charge-limits[0] */
++&battery_info {
++	constant-charge-current-max-microamp = <1056000>;
++};
+diff --git a/arch/arm64/boot/dts/apple/s800x-n71.dtsi b/arch/arm64/boot/dts/apple/s800x-n71.dtsi
+index 640563f..f65596d 100644
+--- a/arch/arm64/boot/dts/apple/s800x-n71.dtsi
++++ b/arch/arm64/boot/dts/apple/s800x-n71.dtsi
+@@ -17,3 +17,8 @@
+ 	touchscreen-size-x = <750>;
+ 	touchscreen-size-y = <1334>;
+ };
++
++/* ADT charger charge-limits[0] */
++&battery_info {
++	constant-charge-current-max-microamp = <1195000>;
++};
+-- 
+2.54.0 (Apple Git-157)
+

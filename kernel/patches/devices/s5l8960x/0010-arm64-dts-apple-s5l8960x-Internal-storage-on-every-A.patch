@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Tue, 24 Nov 2026 00:02:32 +0800
+Subject: [PATCH] arm64: dts: apple: s5l8960x: Internal storage on every A7
+ board
+
+Internal storage was enabled on the J72 alone. Apple's device trees
+describe the same storage coprocessor on every A7 board: /arm-io/ans,
+iop,s5l8960x at 0x208040000 with the same four interrupts and an
+iop-nub,rtbuddy child, on the iPad Air (J71-J73), the iPad mini 2 and 3
+(J85-J87, J85m-J87m) and the iPhone 5s (N51, N53), iOS 12.5.7 and
+12.5.8.
+
+Enable the ANS, its power domain kept on and its firmware region, in
+the shared A7 file every board includes. m1n1 already finds ANS1 storage
+by that ADT compatible and fills the region through the asp alias, for
+the chip rather than the board.
+
+Assisted-by: LLM
+---
+ .../arm64/boot/dts/apple/s5l8960x-common.dtsi | 21 +++++++++++++++++++
+ arch/arm64/boot/dts/apple/s5l8960x-j72.dts    | 18 ----------------
+ 2 files changed, 21 insertions(+), 18 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/s5l8960x-common.dtsi b/arch/arm64/boot/dts/apple/s5l8960x-common.dtsi
+index 093e37081..ee9a8b7c4 100644
+--- a/arch/arm64/boot/dts/apple/s5l8960x-common.dtsi
++++ b/arch/arm64/boot/dts/apple/s5l8960x-common.dtsi
+@@ -42,9 +42,30 @@ reserved-memory {
+ 		ranges;
+ 
+ 		/* To be filled by loader */
++
++		ans_firmware: ans-firmware {
++			/* Filled in by the loader. */
++			reg = <0 0 0 0>;
++			no-map;
++		};
+ 	};
+ };
+ 
+ &serial0 {
+ 	status = "okay";
+ };
++
++/*
++ * Internal storage: the ANS (Apple's iop,s5l8960x with an rtbuddy nub), at
++ * the same address with the same interrupts in the device tree of every A7
++ * board. The loader fills in its firmware region from the ADT.
++ */
++&ps_ans {
++	apple,always-on;
++};
++
++&ans {
++	memory-region = <&ans_firmware>;
++	memory-region-names = "firmware";
++	status = "okay";
++};
+diff --git a/arch/arm64/boot/dts/apple/s5l8960x-j72.dts b/arch/arm64/boot/dts/apple/s5l8960x-j72.dts
+index f168323d7..cb0f6a628 100644
+--- a/arch/arm64/boot/dts/apple/s5l8960x-j72.dts
++++ b/arch/arm64/boot/dts/apple/s5l8960x-j72.dts
+@@ -15,14 +15,6 @@ / {
+ 	aliases {
+ 		touchscreen0 = &touchscreen; /* Used by loader */
+ 	};
+-
+-	reserved-memory {
+-		ans_firmware: ans-firmware {
+-			/* Filled in by the loader. */
+-			reg = <0 0 0 0>;
+-			no-map;
+-		};
+-	};
+ };
+ 
+ &pinctrl {
+@@ -51,16 +43,6 @@ touch_core: regulator-touch-core {
+ 	};
+ };
+ 
+-&ps_ans {
+-	apple,always-on;
+-};
+-
+-&ans {
+-	memory-region = <&ans_firmware>;
+-	memory-region-names = "firmware";
+-	status = "okay";
+-};
+-
+ &touchclk {
+ 	status = "okay";
+ };

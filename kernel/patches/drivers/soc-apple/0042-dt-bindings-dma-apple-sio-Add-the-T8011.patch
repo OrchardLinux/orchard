@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tompta1 <546706+tompta1@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 03:29:49 +0800
+Subject: [PATCH] dt-bindings: dma: apple,sio: Add the T8011
+
+The A10X (T8011) SmartIO has only its A7IOP mailbox window in the ADT
+(no shim window) and its firmware does not report a channel count.
+
+[Orchard: from OrchardLinux/orchard#205 (tompta1, 09038adf), the SmartIO
+ part of kernel/patches/drivers/soc-apple/0038.]
+
+Assisted-by: LLM
+---
+ .../devicetree/bindings/dma/apple,sio.yaml    | 26 ++++++++++++++++---
+ 1 file changed, 22 insertions(+), 4 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/dma/apple,sio.yaml b/Documentation/devicetree/bindings/dma/apple,sio.yaml
+index 586739b18..eff1f0f08 100644
+--- a/Documentation/devicetree/bindings/dma/apple,sio.yaml
++++ b/Documentation/devicetree/bindings/dma/apple,sio.yaml
+@@ -4,11 +4,11 @@
+ $id: http://devicetree.org/schemas/dma/apple,sio.yaml#
+ $schema: http://devicetree.org/meta-schemas/core.yaml#
+ 
+-title: Apple S5L8960X/T7000/S8000/T8010 SmartIO coprocessor and DMA controller
++title: Apple S5L8960X/T7000/S8000/T8010/T8011 SmartIO coprocessor and DMA controller
+ 
+ description: |
+-  The S5L8960X (A7), T7000 (A8, A8X), S8000 (A9) and T8010 (A10) SmartIO
+-  coprocessor provides DMA channels
++  The S5L8960X (A7), T7000 (A8, A8X), S8000 (A9), T8010 (A10) and T8011
++  (A10X) SmartIO coprocessor provides DMA channels
+   for peripheral controllers. The application processor boots the SmartIO
+   firmware and submits DMA commands through the SIO message queues. Clients
+   select the firmware endpoint number used by their peripheral.
+@@ -18,6 +18,24 @@ maintainers:
+ 
+ allOf:
+   - $ref: dma-controller.yaml#
++  - if:
++      properties:
++        compatible:
++          const: apple,t8011-sio
++    then:
++      properties:
++        reg:
++          maxItems: 1
++        reg-names:
++          maxItems: 1
++    else:
++      properties:
++        reg:
++          minItems: 2
++        reg-names:
++          minItems: 2
++      required:
++        - dma-channels
+ 
+ properties:
+   compatible:
+@@ -26,6 +44,7 @@ properties:
+       - apple,t7000-sio
+       - apple,s8000-sio
+       - apple,t8010-sio
++      - apple,t8011-sio
+ 
+   reg:
+     minItems: 1
+@@ -97,7 +116,6 @@ required:
+   - interrupts
+   - power-domains
+   - firmware-name
+-  - dma-channels
+   - '#dma-cells'
+ 
+ additionalProperties: false

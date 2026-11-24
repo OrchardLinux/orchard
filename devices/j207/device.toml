@@ -21,39 +21,41 @@ platform = "apple-16k"
 dtb = "t8011-j207" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until bring-up needs it.
+recipe = "firmware.json" # Touch, BCM4355 C0 Wi-Fi, AOP, SmartIO and VXD firmware, as on the J120.
 
 [support]
 status = "experimental"
 
 # States: working, untested, missing, none (features.toml). Nothing here has run on
 # this board with Orchard: "untested" means a driver binds in its device tree
-# (tools/catalog/drivers.json), plus the display's boot console.
+# (tools/catalog/drivers.json), plus the display's boot console. Its device tree
+# is the J120's (t8011-pro2.dtsi), whose features tompta1 saw working on a J120.
 [features]
 display = "untested"
 screen_off = "missing"
 backlight = "untested"
-touch = "missing"
+gpu_desktop = "missing"
+touch = "untested" # apple_z2 K1, as on the J120
 buttons = "untested"
-accelerometer = "missing"
-gyroscope = "missing"
-light_sensor = "missing"
+accelerometer = "untested"
+gyroscope = "untested"
+light_sensor = "untested" # two CT709 on I2C3, as on the J120
 touch_id = "missing"
-storage_read = "missing"
-storage_write = "missing"
-wifi = "missing"
-bluetooth_input = "missing"
-bluetooth_audio = "missing"
+storage_read = "untested"
+storage_write = "untested"
+wifi = "untested" # BCM4355 C0 on PCIe port 2, as on the J120
+bluetooth_input = "missing" # BCM4355 C0 as on the J120; its Patchram for this board is not in the recipe yet
+bluetooth_audio = "missing" # see bluetooth_input
 cellular = "missing"
-battery = "missing"
-charging = "missing"
+battery = "untested" # BQ27540 on UART5 HDQ, as on the J120 and seen in the J208 RAM sessions
+charging = "untested" # D2355 Tristar charger, as on the J120
 charging_control = "missing"
 suspend = "untested"
 resume = "untested"
 usb_serial = "untested"
 usb_network = "untested"
 usb_host = "missing"
-audio_output = "missing"
-audio_input = "missing"
+audio_output = "untested" # four speakers (MAX98723 on MCA2) and headphones, as on the J120
+audio_input = "untested"
 camera = "missing"
-video_decode_hevc = "missing"
+video_decode_hevc = "untested" # the VXD decodes H.264, as on the A10

@@ -1,5 +1,6 @@
 # iPad Pro 2 (12.9-inch, Wi-Fi) (J120): identity from public sources
-# (tools/catalog/generate). In its platform's kernel, no bring-up yet; see docs/device-bring-up.md.
+# (tools/catalog/generate). Integrated from tompta1's bring-up (#205); the iPad
+# Pro 2 device tree (t8011-pro2.dtsi) is shared with J121, J207 and J208.
 schema = 1
 kind = "hardware.device"
 
@@ -14,46 +15,48 @@ chip = 0x8011
 board = 0x0c
 
 [boot]
-methods = ["checkm8-pongo"] # palera1n's device list (palera.in); not run with Orchard yet.
+methods = ["checkm8-pongo"] # palera1n's device list (palera.in); tompta1 booted Linux through m1n1 (see README).
 
 [kernel]
 platform = "apple-16k"
 dtb = "t8011-j120" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until bring-up needs it.
+recipe = "firmware.json" # Touch, BCM4355 C0 Wi-Fi and Bluetooth, AOP, SmartIO and VXD firmware.
 
 [support]
 status = "experimental"
+tested_by = ["tompta1"]
 
-# States: working, untested, missing, none (features.toml). Nothing here has run on
-# this board with Orchard: "untested" means a driver binds in its device tree
-# (tools/catalog/drivers.json), plus the display's boot console.
+# States: working, untested, missing, none (features.toml). "working" was seen on
+# tompta1's J120 with his build (#205, November 2026); README lists what the
+# integration changed since. "untested" means a driver binds in its device tree.
 [features]
-display = "untested"
+display = "working" # boot framebuffer (simpledrm), 60 or 120 Hz
 screen_off = "missing"
-backlight = "untested"
-touch = "missing"
-buttons = "untested"
-accelerometer = "missing"
-gyroscope = "missing"
-light_sensor = "missing"
+backlight = "working"
+gpu_desktop = "missing"
+touch = "working" # apple_z2 K1, K1F18,3
+buttons = "working" # Power and Home; Smart Cover through both hall sensors (polled)
+accelerometer = "working" # AOP
+gyroscope = "untested"
+light_sensor = "working" # two CT709 on I2C3, calibrated illuminance
 touch_id = "missing"
-storage_read = "missing"
-storage_write = "missing"
-wifi = "missing"
-bluetooth_input = "missing"
-bluetooth_audio = "missing"
-cellular = "missing"
-battery = "missing"
-charging = "missing"
+storage_read = "working"
+storage_write = "working" # tompta1 installed to and booted from internal storage
+wifi = "working" # BCM4355 C0 on PCIe port 2
+bluetooth_input = "working"
+bluetooth_audio = "working"
+cellular = "none"
+battery = "working" # BQ27540 on UART5 HDQ
+charging = "working" # D2355 Tristar charger, up to 1.5 A while VBUS reads 4.75-5.5 V
 charging_control = "missing"
-suspend = "untested"
-resume = "untested"
-usb_serial = "untested"
-usb_network = "untested"
+suspend = "working"
+resume = "working"
+usb_serial = "working"
+usb_network = "working"
 usb_host = "missing"
-audio_output = "missing"
-audio_input = "missing"
+audio_output = "working" # four speakers (MAX98723 on MCA2) and headphones (CS42L83 on MCA4)
+audio_input = "working" # two PDM microphones
 camera = "missing"
-video_decode_hevc = "missing"
+video_decode_hevc = "untested" # the VXD decodes H.264, as on the A10

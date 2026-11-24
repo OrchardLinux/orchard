@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 12:39:17 +0100
+Subject: [PATCH] dt-bindings: input: apple,z2-multitouch: Add the iPod touch 6
+
+Describe the N102 N1 touchscreen, whose core supply is an I2C PMIC
+regulator instead of a GPIO-controlled LDO.
+
+[Orchard: renumbered from 0030 and rebased onto the iPad Air (J72) and
+ iPad mini 2 (J85) bindings, which now list the boards that take
+ ana-supply and attn-gpios; the N102 joins both lists.]
+Assisted-by: LLM
+---
+ .../touchscreen/apple,z2-multitouch.yaml      | 20 +++++++++++++++++--
+ 1 file changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml b/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml
+index 8c469e6..09613d4 100644
+--- a/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml
++++ b/Documentation/devicetree/bindings/input/touchscreen/apple,z2-multitouch.yaml
+@@ -27,6 +27,7 @@ properties:
+       - apple,d11-touchscreen
+       - apple,d111-touchscreen
+       - apple,n61-touchscreen
++      - apple,n102-touchscreen
+ 
+   interrupts:
+     maxItems: 1
+@@ -185,6 +186,7 @@ allOf:
+             - apple,j71t-touchscreen
+             - apple,j81-touchscreen
+             - apple,j96-touchscreen
++            - apple,n102-touchscreen
+     then:
+       properties:
+         pinctrl-names:
+@@ -195,7 +197,6 @@ allOf:
+         display-sync-gpios: false
+         display-sync1-gpios: false
+         hv-supply: false
+-        core-supply: false
+         spi-cpha: false
+         spi-cpol: false
+         apple,z2-bpw16-min-len: false
+@@ -203,7 +204,20 @@ allOf:
+       required:
+         - clocks
+         - ana-supply
+-        - power-ldo-gpios
++      if:
++        properties:
++          compatible:
++            const: apple,n102-touchscreen
++      then:
++        properties:
++          power-ldo-gpios: false
++        required:
++          - core-supply
++      else:
++        properties:
++          core-supply: false
++        required:
++          - power-ldo-gpios
+   - if:
+       properties:
+         compatible:
+@@ -268,6 +282,7 @@ allOf:
+             - apple,j85-touchscreen
+             - apple,j96-touchscreen
+             - apple,n61-touchscreen
++            - apple,n102-touchscreen
+     then:
+       properties:
+         ana-supply: true
+@@ -283,6 +298,7 @@ allOf:
+             - apple,j81-touchscreen
+             - apple,j85-touchscreen
+             - apple,j96-touchscreen
++            - apple,n102-touchscreen
+     then:
+       properties:
+         attn-gpios: true

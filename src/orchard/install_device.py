@@ -796,6 +796,22 @@ def kernel_version(root):
     return versions[0]
 
 
+def set_timezone(root, zone):
+    """Link ROOT's /etc/localtime to ZONE ("Area/City") when ROOT has it; otherwise the system stays on UTC.
+
+    Returns the zone set, or None.
+    """
+    if not isinstance(zone, str) or not re.fullmatch(r'[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*', zone):
+        return None
+    if not (Path(root) / 'usr/share/zoneinfo' / zone).is_file():
+        return None
+    link = Path(root) / 'etc/localtime'
+    if link.is_symlink() or link.exists():
+        link.unlink()
+    os.symlink('../usr/share/zoneinfo/' + zone, link)
+    return zone
+
+
 def finish(plan, target, present, secrets):
     """Everything after the root's files: firmware, account, the kernel (package or layer), boot entries.
 
@@ -825,6 +841,8 @@ def finish(plan, target, present, secrets):
     account = plan.get('account')
     if account:
         emit('step', step='account', state='done', user=set_account(target, account, *(secrets or (None, None))))
+    # Not a step of its own: no progress line changes.
+    set_timezone(target, plan.get('timezone'))
     # The configuration first: the kernel package's hook or trigger writes the entries from it.
     write_text(target / BOOT_CONFIG, boot_config(entry, plan['root']['partuuid'], (boot or {}).get('partuuid')))
     layer = plan['layer']

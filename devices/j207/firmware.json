@@ -14,7 +14,297 @@
         "zip": "Firmware/all_flash/DeviceTree.j207ap.im4p"
       },
       "sha256": "1b44a88e218a124ff58d102d9dc94306149293caab6e3aea3022987cf9b1a883"
+    },
+    "aop.im4p": {
+      "ipsw": {
+        "zip": "Firmware/AOP/aopfw-ipad7aop.RELEASE.im4p"
+      },
+      "sha256": "853be8f95f14740231c605cec954af5dd6d1994a66cfeb9513eb6dfcf706d90b"
+    },
+    "kernelcache": {
+      "ipsw": {
+        "kernelcache": true
+      },
+      "device": {
+        "kernelcache": "active"
+      },
+      "sha256": "f18b4df865405f2a287b84977d7aca745e056d656d9fc9df1662970ce2969de7"
+    },
+    "J207.mtprops": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/multitouch/J207.mtprops"
+      },
+      "device": "/usr/share/firmware/multitouch/J207.mtprops",
+      "sha256": "5ca3c86fad5243e9dab2af6542b834213621c2df086c34a79454f575e82a1600"
+    },
+    "angera.trx": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/angera.trx"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/angera.trx",
+      "sha256": "cdec2816c2d686bd8a180605c8389d2e27e8b3f3f7504f41672b635e6a09b530"
+    },
+    "angera.clmb": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/angera.clmb"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/angera.clmb",
+      "sha256": "965d4dcc2693fb957bf75ba6a2bd5af3d2f2f2fbb34b0bdfb693b4e48b30cb50"
+    },
+    "angera.txcb": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/angera.txcb"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/angera.txcb",
+      "sha256": "876fa318d7a684d1f2e1d0fe73a2542b39b2c8ad188a4a812cff704abc4c0ae1"
+    },
+    "P-angera_M-YSBC_V-m__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-angera_M-YSBC_V-m__m-2.1.txt"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-angera_M-YSBC_V-m__m-2.1.txt",
+      "sha256": "a3af1be23e820e9248e19ae09df179ef16d20a80e4025050c171ce0f423587be"
+    },
+    "P-angera_M-YSBC_V-m__m-2.3.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-angera_M-YSBC_V-m__m-2.3.txt"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-angera_M-YSBC_V-m__m-2.3.txt",
+      "sha256": "a3af1be23e820e9248e19ae09df179ef16d20a80e4025050c171ce0f423587be"
+    },
+    "P-angera_M-YSBC_V-m__m-3.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-angera_M-YSBC_V-m__m-3.1.txt"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-angera_M-YSBC_V-m__m-3.1.txt",
+      "sha256": "a3af1be23e820e9248e19ae09df179ef16d20a80e4025050c171ce0f423587be"
+    },
+    "P-angera_M-YSBC_V-u__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-angera_M-YSBC_V-u__m-2.1.txt"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-angera_M-YSBC_V-u__m-2.1.txt",
+      "sha256": "17ce91e1b988eae9e3ad02f57e45f1c6671524ff9eb853f9b8c26fd0bb07f1a2"
+    },
+    "P-angera_M-YSBC_V-u__m-3.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-angera_M-YSBC_V-u__m-3.1.txt"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-angera_M-YSBC_V-u__m-3.1.txt",
+      "sha256": "17ce91e1b988eae9e3ad02f57e45f1c6671524ff9eb853f9b8c26fd0bb07f1a2"
+    },
+    "P-angera_M-YSBC_V-u__m-3.3.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-angera_M-YSBC_V-u__m-3.3.txt"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-angera_M-YSBC_V-u__m-3.3.txt",
+      "sha256": "17ce91e1b988eae9e3ad02f57e45f1c6671524ff9eb853f9b8c26fd0bb07f1a2"
+    },
+    "P-angera_M-YSBC_V-u__m-4.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-angera_M-YSBC_V-u__m-4.1.txt"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-angera_M-YSBC_V-u__m-4.1.txt",
+      "sha256": "17ce91e1b988eae9e3ad02f57e45f1c6671524ff9eb853f9b8c26fd0bb07f1a2"
+    },
+    "P-angera_M-YSBU_V-m__m-1.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-angera_M-YSBU_V-m__m-1.1.txt"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-angera_M-YSBU_V-m__m-1.1.txt",
+      "sha256": "a3af1be23e820e9248e19ae09df179ef16d20a80e4025050c171ce0f423587be"
+    },
+    "P-angera_M-YSBU_V-u__m-1.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-angera_M-YSBU_V-u__m-1.1.txt"
+      },
+      "device": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4355__s-C0/P-angera_M-YSBU_V-u__m-1.1.txt",
+      "sha256": "17ce91e1b988eae9e3ad02f57e45f1c6671524ff9eb853f9b8c26fd0bb07f1a2"
     }
   },
-  "outputs": []
+  "outputs": [
+    {
+      "destination": "lib/firmware/apple/t8011-smartio.bin",
+      "sha256": "8a6e5a1bcdd2768db4515d714c7ee311d7089656e83b5073efa70b625b762b9e",
+      "steps": [
+        {
+          "step": "smartio-from-kernelcache@2",
+          "input": "kernelcache",
+          "kext": "com.apple.driver.AppleT8011SmartIO"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/aop-ipad7.bin",
+      "sha256": "a2bac8975ab0658295ecb5824187962d3606cc569e38a673770f7d1d4d1f8f54",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "aop.im4p"
+        },
+        {
+          "step": "aop-image@1",
+          "coprocessor": "AOP"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/aop-ipad7-ext.bin",
+      "sha256": "28bfaad8cbfdaa9fceb55d02e68a323a16f107f40840fb2fdabaafcd5f2c6eb1",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "aop.im4p"
+        },
+        {
+          "step": "aop-image@1",
+          "coprocessor": "AOP_ext"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/vxd-deva.bin",
+      "sha256": "bf5167652e81540471aaca141943fd33d71c3990c137f145471305f5f5ade83b",
+      "steps": [
+        {
+          "step": "vxd-firmware-from-kernelcache@1",
+          "input": "kernelcache"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/j207-touch-K1F19,2.z2fw",
+      "sha256": "54ad6b7f230c719cf6bb9ec6a004b8cad279f77be0a8124a50e37d880bfb88b9",
+      "steps": [
+        {
+          "step": "z2fw-from-mtprops@1",
+          "input": "J207.mtprops",
+          "profile": "K1F19,2",
+          "packet": "K1HBPP14",
+          "load_address": 1048576,
+          "hbpp_version": 260
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j207.bin",
+      "sha256": "cdec2816c2d686bd8a180605c8389d2e27e8b3f3f7504f41672b635e6a09b530",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "angera.trx"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j207.clm_blob",
+      "sha256": "965d4dcc2693fb957bf75ba6a2bd5af3d2f2f2fbb34b0bdfb693b4e48b30cb50",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "angera.clmb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j207.txcap_blob",
+      "sha256": "876fa318d7a684d1f2e1d0fe73a2542b39b2c8ad188a4a812cff704abc4c0ae1",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "angera.txcb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j207-YSBC-m-2.1.txt",
+      "sha256": "a3af1be23e820e9248e19ae09df179ef16d20a80e4025050c171ce0f423587be",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-angera_M-YSBC_V-m__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j207-YSBC-m-2.3.txt",
+      "sha256": "a3af1be23e820e9248e19ae09df179ef16d20a80e4025050c171ce0f423587be",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-angera_M-YSBC_V-m__m-2.3.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j207-YSBC-m-3.1.txt",
+      "sha256": "a3af1be23e820e9248e19ae09df179ef16d20a80e4025050c171ce0f423587be",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-angera_M-YSBC_V-m__m-3.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j207-YSBC-u-2.1.txt",
+      "sha256": "17ce91e1b988eae9e3ad02f57e45f1c6671524ff9eb853f9b8c26fd0bb07f1a2",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-angera_M-YSBC_V-u__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j207-YSBC-u-3.1.txt",
+      "sha256": "17ce91e1b988eae9e3ad02f57e45f1c6671524ff9eb853f9b8c26fd0bb07f1a2",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-angera_M-YSBC_V-u__m-3.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j207-YSBC-u-3.3.txt",
+      "sha256": "17ce91e1b988eae9e3ad02f57e45f1c6671524ff9eb853f9b8c26fd0bb07f1a2",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-angera_M-YSBC_V-u__m-3.3.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j207-YSBC-u-4.1.txt",
+      "sha256": "17ce91e1b988eae9e3ad02f57e45f1c6671524ff9eb853f9b8c26fd0bb07f1a2",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-angera_M-YSBC_V-u__m-4.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j207-YSBU-m-1.1.txt",
+      "sha256": "a3af1be23e820e9248e19ae09df179ef16d20a80e4025050c171ce0f423587be",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-angera_M-YSBU_V-m__m-1.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4355-pcie.apple,j207-YSBU-u-1.1.txt",
+      "sha256": "17ce91e1b988eae9e3ad02f57e45f1c6671524ff9eb853f9b8c26fd0bb07f1a2",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-angera_M-YSBU_V-u__m-1.1.txt"
+        }
+      ]
+    }
+  ]
 }

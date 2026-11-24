@@ -1,11 +1,12 @@
 # iPhone 6s (S8003) (N71M): identity from public sources
-# (tools/catalog/generate). In its platform's kernel, no bring-up yet; see docs/device-bring-up.md.
+# (tools/catalog/generate). Storage, touch and light sensor as on the N66; see docs/device-bring-up.md.
 schema = 1
 kind = "hardware.device"
 
 [device]
 profile = "n71m"
 name = "iPhone 6s (S8003)"
+short_name = "iPhone 6s"
 apple_products = ["iPhone8,1"]
 dt_compatible = ["apple,n71m"]
 
@@ -21,7 +22,7 @@ platform = "apple-16k"
 dtb = "s8003-n71m" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until bring-up needs it.
+recipe = "firmware.json" # Pins this board's public IPSW; makes the touchscreen, VXD, AOP, SmartIO, Wi-Fi and Bluetooth firmware, and the GPU firmware from the iPad 5's iPadOS 16.7.10.
 
 [support]
 status = "experimental"
@@ -31,29 +32,30 @@ status = "experimental"
 # (tools/catalog/drivers.json), plus the display's boot console.
 [features]
 display = "untested"
-screen_off = "missing"
+screen_off = "untested" # Display pipe on for every A9 board; the DSI link stays powered
 backlight = "untested"
-touch = "missing"
+gpu_desktop = "untested"
+touch = "untested"
 buttons = "untested"
-accelerometer = "untested"
+accelerometer = "untested" # AOP with aopfw-s8000aop; mount matrix measured on the N66 (shared s800x-iphone.dtsi)
 gyroscope = "untested"
-light_sensor = "missing"
+light_sensor = "untested"
 touch_id = "missing"
-storage_read = "missing"
-storage_write = "missing"
-wifi = "missing"
-bluetooth_input = "missing"
-bluetooth_audio = "missing"
+storage_read = "untested"
+storage_write = "untested"
+wifi = "untested" # BCM4350 "albarossa" module, wired as on the N66 (IPSW device trees); its own firmware and NVRAM in the recipe
+bluetooth_input = "untested" # BCM4350C5 on UART1 as on the N66, with the albarossa Patchrams from BlueTool
+bluetooth_audio = "untested"
 cellular = "missing"
-battery = "missing"
-charging = "missing"
-charging_control = "missing"
+battery = "untested" # bq27540 gauge on uart5 behind the SN2400's HDQ mux; reads on the iPhone 6s Plus (N66) with the same gauge
+charging = "untested" # SN2400 charger: follows the USB host's grant and the battery temperature, as measured on the iPhone 6s Plus (N66)
+charging_control = "missing" # The SN2400 driver has no writable limit yet
 suspend = "untested"
 resume = "untested"
 usb_serial = "untested"
 usb_network = "untested"
-usb_host = "missing"
-audio_output = "missing"
-audio_input = "missing"
+usb_host = "missing" # Needs the Tristar VBUS path on the iPhone's Antigua PMU; only the iPad 5's D2365 one exists
+audio_output = "untested" # the 6s Plus's loudspeaker, described for both models in s800x-6s.dtsi (same ADT amplifier, link and route); speaker only, no speaker protection yet, output capped at -12 dB
+audio_input = "missing" # No Linux driver for the CS42L71 codec
 camera = "missing"
-video_decode_hevc = "missing"
+video_decode_hevc = "untested" # VXD on for every A9; vxd-deva.bin from the recipe

@@ -1,0 +1,128 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Mon, 23 Nov 2026 23:41:46 +0800
+Subject: [PATCH] arm64: dts: apple: s800-0-3: Turn the GPU on for every A9
+ board
+
+The IPSW device trees of all ten A9 boards (N66, N66m, N71, N71m, N69,
+N69u, J71s, J72s, J71t, J72t) describe the same GPU: ADT sgx with the
+same registers, interrupts and power gate, compatible gpu,s8000 on the
+Samsung part and gpu,s8003 on the TSMC part. Move the node from
+s8003.dtsi to the shared A9 file, on by default, with an S8000
+compatible that falls back to the S8003's, and drop the J71t and J72t
+enables.
+
+The firmware is the iPadOS 16.7.10 image the driver was written for;
+every A9 board's firmware recipe now makes it.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/s800-0-3.dtsi  | 22 ++++++++++++++++++++++
+ arch/arm64/boot/dts/apple/s8000.dtsi     |  5 +++++
+ arch/arm64/boot/dts/apple/s8003-j71t.dts |  5 -----
+ arch/arm64/boot/dts/apple/s8003-j72t.dts |  5 -----
+ arch/arm64/boot/dts/apple/s8003.dtsi     | 22 ----------------------
+ 5 files changed, 27 insertions(+), 32 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/s800-0-3.dtsi b/arch/arm64/boot/dts/apple/s800-0-3.dtsi
+index 453d56b2..29a0b81d 100644
+--- a/arch/arm64/boot/dts/apple/s800-0-3.dtsi
++++ b/arch/arm64/boot/dts/apple/s800-0-3.dtsi
+@@ -101,6 +101,28 @@
+ 			#performance-domain-cells = <0>;
+ 		};
+ 
++		/*
++		 * The GPU: a PowerVR Rogue core (GT7600) behind Apple's Fender
++		 * block, with Apple's firmware on the core's own processor. The
++		 * IPSW device trees of every A9 board give it the same registers,
++		 * interrupts and power gate (ADT sgx); the firmware comes from
++		 * each board's recipe.
++		 */
++		gpu: gpu@201000000 {
++			compatible = "apple,s8003-gpu";
++			reg = <0x2 0x01000000 0x0 0x100000>,
++			      <0x2 0x01e00000 0x0 0x100000>;
++			reg-names = "rgx", "fender";
++			power-domains = <&ps_gfx>;
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 170 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 171 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 172 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 173 IRQ_TYPE_LEVEL_HIGH>,
++				     <AIC_IRQ 174 IRQ_TYPE_LEVEL_HIGH>;
++			firmware-name = "apple/gfx-s8003.bin";
++		};
++
+ 		/*
+ 		 * Imagination MSVDX ("VXD") H.264 decoder, ADT vxd@7F00000. It
+ 		 * has its own two-level GART, so no DART.
+diff --git a/arch/arm64/boot/dts/apple/s8000.dtsi b/arch/arm64/boot/dts/apple/s8000.dtsi
+index 7dc8603b..fbd8f6dc 100644
+--- a/arch/arm64/boot/dts/apple/s8000.dtsi
++++ b/arch/arm64/boot/dts/apple/s8000.dtsi
+@@ -181,3 +181,8 @@
+ 		};
+ 	};
+ };
++
++/* ADT sgx: gpu,s8000, the S8003's GPU */
++&gpu {
++	compatible = "apple,s8000-gpu", "apple,s8003-gpu";
++};
+diff --git a/arch/arm64/boot/dts/apple/s8003-j71t.dts b/arch/arm64/boot/dts/apple/s8003-j71t.dts
+index 018ad6c4..733cefc6 100644
+--- a/arch/arm64/boot/dts/apple/s8003-j71t.dts
++++ b/arch/arm64/boot/dts/apple/s8003-j71t.dts
+@@ -24,8 +24,3 @@
+ &wifi {
+ 	brcm,board-type = "apple,feara";
+ };
+-
+-/* The GPU: its firmware file comes from this board's firmware recipe */
+-&gpu {
+-	status = "okay";
+-};
+diff --git a/arch/arm64/boot/dts/apple/s8003-j72t.dts b/arch/arm64/boot/dts/apple/s8003-j72t.dts
+index a3e0dea9..bc36459c 100644
+--- a/arch/arm64/boot/dts/apple/s8003-j72t.dts
++++ b/arch/arm64/boot/dts/apple/s8003-j72t.dts
+@@ -24,8 +24,3 @@
+ &wifi {
+ 	brcm,board-type = "apple,fearb";
+ };
+-
+-/* The GPU: its firmware file comes from this board's firmware recipe */
+-&gpu {
+-	status = "okay";
+-};
+diff --git a/arch/arm64/boot/dts/apple/s8003.dtsi b/arch/arm64/boot/dts/apple/s8003.dtsi
+index eb469616..5049eba9 100644
+--- a/arch/arm64/boot/dts/apple/s8003.dtsi
++++ b/arch/arm64/boot/dts/apple/s8003.dtsi
+@@ -372,25 +372,3 @@
+  * the S8003 (APL1022) on 16nm. There are some minor differences
+  * such as timing in cpufreq state transistions.
+  */
+-
+-/*
+- * The GPU: a PowerVR Rogue core (GT7600) behind Apple's Fender block, with
+- * Apple's firmware on the core's own processor. Off until a driver takes it.
+- */
+-&{/soc} {
+-	gpu: gpu@201000000 {
+-		compatible = "apple,s8003-gpu";
+-		reg = <0x2 0x01000000 0x0 0x100000>,
+-		      <0x2 0x01e00000 0x0 0x100000>;
+-		reg-names = "rgx", "fender";
+-		power-domains = <&ps_gfx>;
+-		interrupt-parent = <&aic>;
+-		interrupts = <AIC_IRQ 170 IRQ_TYPE_LEVEL_HIGH>,
+-			     <AIC_IRQ 171 IRQ_TYPE_LEVEL_HIGH>,
+-			     <AIC_IRQ 172 IRQ_TYPE_LEVEL_HIGH>,
+-			     <AIC_IRQ 173 IRQ_TYPE_LEVEL_HIGH>,
+-			     <AIC_IRQ 174 IRQ_TYPE_LEVEL_HIGH>;
+-		firmware-name = "apple/gfx-s8003.bin";
+-		status = "disabled";
+-	};
+-};

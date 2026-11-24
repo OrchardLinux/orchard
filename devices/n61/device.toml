@@ -22,27 +22,29 @@ dtb = "t7000-n61"
 
 # The RAM shell uses public components; touch firmware is extracted privately.
 [firmware]
-recipe = "firmware.json"
+recipe = "firmware.json" # The GPU firmware comes from the iPod touch 6's iOS 12.4 (16G77), the tested one.
 
 [support]
 status = "experimental"
+tested_by = ["amethyst-oak", "jeroentrappers"] # issue #61; GPU in #196
 
 # States: working, untested, missing, none (features.toml).
 [features]
 display = "working" # The minimal-boot framebuffer console was visible on the LCD.
 screen_off = "untested"
 backlight = "untested"
+gpu_desktop = "untested" # GPU driver, Vulkan and GPU buffers on the display pass here (jeroentrappers, #196); the desktop itself not yet run on the GPU
 touch = "working" # Taps and swipes produced raw evdev contacts/releases in minimal-boot.
 buttons = "untested"
 accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "missing"
 touch_id = "missing"
-storage_read = "missing"
-storage_write = "missing"
-wifi = "missing"
-bluetooth_input = "missing"
-bluetooth_audio = "missing"
+storage_read = "untested" # ANS1 on every A8 board (t7000-common.dtsi), as on the N102
+storage_write = "untested" # Same ANS1 and asp driver as the N102
+wifi = "untested" # BCM4345 module shared with the N102 (t7000-bcm4345.dtsi), module tempranillo
+bluetooth_input = "untested" # Patchram follows the Wi-Fi module vendor (MUR/TDK/USI)
+bluetooth_audio = "untested"
 cellular = "missing"
 battery = "untested" # bq27xxx over HDQ (W1_MASTER_UART); the ADT gauge matches the iPad mini 4's.
 charging = "missing"

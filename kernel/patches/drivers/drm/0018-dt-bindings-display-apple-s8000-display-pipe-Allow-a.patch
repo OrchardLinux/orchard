@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Mon, 23 Nov 2026 23:44:44 +0800
+Subject: [PATCH] dt-bindings: display: apple,s8000-display-pipe: Allow a MIPI
+ DSI panel link
+
+The A9 iPhones drive their panel over MIPI DSI (Apple device tree
+mipi-dsim), not eDP: their pipe holds the mipi_dsi power domain and has
+no DisplayPort transmitter. Describe the A9 pipe's second power domain
+as the panel link, as the A8's already is, and its "dp" window as
+present on eDP boards only.
+
+Assisted-by: LLM
+---
+ .../bindings/display/apple,s8000-display-pipe.yaml        | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/display/apple,s8000-display-pipe.yaml b/Documentation/devicetree/bindings/display/apple,s8000-display-pipe.yaml
+index ae952597..20fbd86a 100644
+--- a/Documentation/devicetree/bindings/display/apple,s8000-display-pipe.yaml
++++ b/Documentation/devicetree/bindings/display/apple,s8000-display-pipe.yaml
+@@ -194,7 +194,9 @@ allOf:
+             - description: Seven-register side block
+             - description: Display DART (dart-disp0), first window
+             - description: Display DART (dart-disp0), second window
+-            - description: DisplayPort transmitter (displayport)
++            - description:
++                DisplayPort transmitter (displayport), on the boards whose
++                panel link is eDP
+ 
+         reg-names:
+           minItems: 6
+@@ -222,7 +224,9 @@ allOf:
+         power-domains:
+           items:
+             - description: Display pipe (disp0)
+-            - description: DisplayPort/eDP controller (dp)
++            - description:
++                Panel link the bootloader left running, MIPI DSI (mipi_dsi)
++                or DisplayPort (dp)
+ 
+ required:
+   - compatible

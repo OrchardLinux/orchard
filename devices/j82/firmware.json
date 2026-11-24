@@ -168,6 +168,14 @@
         "rootfs": "usr/sbin/BlueTool"
       },
       "device": "/usr/sbin/BlueTool"
+    },
+    "kernelcache": {
+      "ipsw": {
+        "kernelcache": true
+      },
+      "device": {
+        "kernelcache": "active"
+      }
     }
   },
   "outputs": [
@@ -401,6 +409,17 @@
         {
           "step": "bluetool-hcd@1",
           "input": "BlueTool"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/t7000-smartio.bin",
+      "sha256": "5fc96ee702d88b9a8f6a2526f566dd266c6c0d463b10490ba288db8e77434bd3",
+      "steps": [
+        {
+          "step": "smartio-from-kernelcache@2",
+          "input": "kernelcache",
+          "kext": "com.apple.driver.AppleT7000SmartIO"
         }
       ]
     }

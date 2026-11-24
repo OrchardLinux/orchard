@@ -1,0 +1,578 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shayne <8741557+shaynelegault@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 22:25:39 -0600
+Subject: [PATCH] mtd: apple-sftl: Rotate the healthy replicated PPN VFL banks
+
+Verify the source checkpoint, all lane tables and any later table updates before touching the alternate bank. Erase and verify its four members, publish the checkpoint that references the old tables, copy the tables, then publish their new references. Read back every replica and retain the source on every error. Exercise both directions and interrupted operations with a qualified synthetic SLC backend.
+
+Assisted-by: LLM
+Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/226#issuecomment-7133476475
+---
+ drivers/mtd/Makefile              |   3 +-
+ drivers/mtd/apple-sftl-vfl-test.c | 206 ++++++++++++++++++++++
+ drivers/mtd/apple-sftl-vfl.c      | 282 ++++++++++++++++++++++++++++++
+ drivers/mtd/apple-sftl-vfl.h      |  39 +++++
+ 4 files changed, 529 insertions(+), 1 deletion(-)
+ create mode 100644 drivers/mtd/apple-sftl-vfl-test.c
+ create mode 100644 drivers/mtd/apple-sftl-vfl.c
+ create mode 100644 drivers/mtd/apple-sftl-vfl.h
+
+diff --git a/drivers/mtd/Makefile b/drivers/mtd/Makefile
+index 8a05767a1..c22c89937 100644
+--- a/drivers/mtd/Makefile
++++ b/drivers/mtd/Makefile
+@@ -33,6 +33,7 @@ obj-$(CONFIG_MTD_UBI)		+= ubi/
+ obj-$(CONFIG_MTD_HYPERBUS)	+= hyperbus/
+ 
+ obj-$(CONFIG_MTD_APPLE_SFTL) += apple-sftl.o
+-apple-sftl-y := apple-sftl-core.o apple-sftl-block.o apple-sftl-reclaim.o
++apple-sftl-y := apple-sftl-core.o apple-sftl-block.o apple-sftl-reclaim.o apple-sftl-vfl.o
+ obj-$(CONFIG_MTD_APPLE_SFTL_KUNIT_TEST) += apple-sftl-test.o
+ obj-$(CONFIG_MTD_APPLE_SFTL_KUNIT_TEST) += apple-sftl-reclaim-test.o
++obj-$(CONFIG_MTD_APPLE_SFTL_KUNIT_TEST) += apple-sftl-vfl-test.o
+diff --git a/drivers/mtd/apple-sftl-vfl-test.c b/drivers/mtd/apple-sftl-vfl-test.c
+new file mode 100644
+index 000000000..403ae52df
+--- /dev/null
++++ b/drivers/mtd/apple-sftl-vfl-test.c
+@@ -0,0 +1,206 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* Single-fragment, two-bank synthetic VFL media with physical replica cuts. */
++#include <kunit/test.h>
++#include <linux/errno.h>
++#include <linux/slab.h>
++#include <linux/string.h>
++#include <linux/unaligned.h>
++
++#include "apple-sftl-vfl.h"
++
++#define SOURCE_AGE (U32_MAX - 128)
++#define TARGET_AGE (SOURCE_AGE - 64)
++
++struct vfl_fixture {
++	struct apple_sftl_vfl_source source;
++	struct apple_ppn ppn;
++	u8 *expected;
++	u8 next[4];
++	bool erased[4], bad_tail, target_ref, stale, bad_readback, short_erase;
++	unsigned int mutations, cut;
++};
++
++static void test_tag(u8 *oob, u8 lane, u32 age)
++{
++	memset(oob, 0xff, 64);
++	put_unaligned_le32(lane == 0xff ? 0x00ffff20 : 0x20 | (u32)lane << 8, oob);
++	put_unaligned_le32(age, oob + 4);
++	put_unaligned_le64(0, oob + 8);
++}
++
++static void test_context(struct vfl_fixture *f, u8 *data, bool initial, bool final)
++{
++	unsigned int i;
++
++	memset(data, 0, APPLE_PPN_PAGE_SIZE);
++	put_unaligned_le16(16, data + 10);
++	put_unaligned_le16(2086, data + 12);
++	put_unaligned_le16(2086, data + 14);
++	for (i = 0; i < 8; i++) {
++		put_unaligned_le16(f->source.members[i].block, data + 0x100 + i * 4);
++		data[0x102 + i * 4] = f->source.members[i].lane;
++	}
++	for (i = 0; i < 16; i++) {
++		u16 ref = initial && i == 9 ? 63 : i + 1;
++		bool other = final || (f->target_ref && !i);
++
++		ref |= (f->source.group ^ other) << 15;
++		put_unaligned_le16(ref, data + 0x200 + 32 * i);
++	}
++}
++
++static void test_target_page(struct vfl_fixture *f, unsigned int page, u8 *data, u8 *oob)
++{
++	if (!page || page == 17) {
++		test_context(f, data, !page, page == 17);
++		test_tag(oob, 0xff, TARGET_AGE - page);
++	} else {
++		/* Lane 9 received its last table update in source page 63. */
++		memset(data, page == 10 ? 63 : page, APPLE_PPN_PAGE_SIZE);
++		test_tag(oob, page - 1, TARGET_AGE - page);
++	}
++}
++
++static int test_read(void *priv, unsigned int bus, unsigned int cau, unsigned int block,
++		     unsigned int page, bool context, u8 *data, u8 *oob, u8 *status)
++{
++	struct vfl_fixture *f = priv;
++	unsigned int member = 2 * cau + bus;
++
++	if (!context || member >= 8 || block != 2087 || page >= 64)
++		return -ERANGE;
++	*status = 0x40;
++	if (member >= 4) {
++		member -= 4;
++		if (page < f->next[member]) {
++			test_target_page(f, page, data, oob);
++			if (f->bad_readback && page == 16 && member == 3)
++				data[APPLE_PPN_PAGE_SIZE - 1] ^= 1;
++		} else if (!page && !f->erased[member]) {
++			test_context(f, data, false, false);
++			test_tag(oob, 0xff, f->stale ? SOURCE_AGE - 64 : U32_MAX);
++		} else {
++			*status = 0x49;
++			memset(data, 0xff, APPLE_PPN_PAGE_SIZE);
++			memset(oob, 0xff, APPLE_PPN_OOB_SIZE);
++		}
++	} else if (page == 62) {
++		test_context(f, data, false, false);
++		test_tag(oob, 0xff, SOURCE_AGE - page);
++	} else if ((page >= 1 && page <= 16) || page == 63) {
++		memset(data, page, APPLE_PPN_PAGE_SIZE);
++		test_tag(oob, page == 63 ? 9 : page - 1, SOURCE_AGE - page);
++		if (f->bad_tail && member == 3 && page == 63)
++			data[17]++;
++	} else {
++		return -ERANGE;
++	}
++	return 0;
++}
++
++static int test_erase(void *priv, const struct apple_sftl_vfl_member *m)
++{
++	struct vfl_fixture *f = priv;
++
++	if (m->block != 2087 || m->lane < 4 || m->lane >= 8 || f->erased[m->lane - 4])
++		return -EINVAL;
++	if (!f->short_erase)
++		f->erased[m->lane - 4] = true;
++	return ++f->mutations == f->cut ? -EIO : 0;
++}
++
++static int test_program(void *priv, const struct apple_sftl_vfl_member *m, u8 page,
++			const u8 *data, const u8 *oob)
++{
++	struct vfl_fixture *f = priv;
++	u8 expected_oob[APPLE_PPN_OOB_SIZE];
++
++	if (m->block != 2087 || m->lane < 4 || m->lane >= 8 || !f->erased[m->lane - 4] ||
++	    page > 17 || f->next[m->lane - 4] != page || f->mutations != 4U * page + m->lane)
++		return -EINVAL;
++	test_target_page(f, page, f->expected, expected_oob);
++	if (memcmp(f->expected, data, APPLE_PPN_PAGE_SIZE) ||
++	    memcmp(expected_oob, oob, sizeof(expected_oob)))
++		return -EBADMSG;
++	f->next[m->lane - 4]++;
++	return ++f->mutations == f->cut ? -EIO : 0;
++}
++
++static const struct apple_ppn_ops test_read_ops = { .read_page = test_read };
++static const struct apple_sftl_vfl_ops test_write_ops = {
++	.erase = test_erase, .program = test_program,
++};
++
++static void vfl_rotate_test(struct kunit *test)
++{
++	struct vfl_fixture f = {
++		.source = { .page = 62, .age = SOURCE_AGE - 62 },
++		.ppn = { .ops = &test_read_ops, .buses = 2, .caus = 8, .blocks = 2088, .pages = 128 },
++	};
++	unsigned int i, cut;
++
++	f.ppn.priv = &f;
++	f.expected = kunit_kmalloc(test, APPLE_PPN_PAGE_SIZE, GFP_KERNEL);
++	KUNIT_ASSERT_NOT_NULL(test, f.expected);
++	for (i = 0; i < 8; i++) {
++		f.source.members[i].block = 2087;
++		f.source.members[i].lane = i;
++	}
++
++	/* Exercise every durable operation including a completed but unacknowledged
++	 * last replica. No failure permits another program or a source erase.
++	 */
++	for (cut = 0; cut <= 76; cut++) {
++		f.cut = cut;
++		f.mutations = 0;
++		memset(f.erased, 0, sizeof(f.erased));
++		memset(f.next, 0, sizeof(f.next));
++		KUNIT_ASSERT_EQ(test, apple_sftl_vfl_rotate(&f.ppn, &f.source, &test_write_ops, &f),
++				cut ? -EIO : 0);
++		KUNIT_EXPECT_EQ(test, f.mutations, cut ? cut : 76U);
++	}
++	memset(f.erased, 0, sizeof(f.erased));
++	memset(f.next, 0, sizeof(f.next));
++	f.cut = 0;
++	f.mutations = 0;
++	f.bad_tail = true;
++	KUNIT_EXPECT_EQ(test, apple_sftl_vfl_rotate(&f.ppn, &f.source, &test_write_ops, &f), -EBADMSG);
++	f.bad_tail = false;
++	f.target_ref = true;
++	KUNIT_EXPECT_EQ(test, apple_sftl_vfl_rotate(&f.ppn, &f.source, &test_write_ops, &f), -EOPNOTSUPP);
++	f.target_ref = false;
++	f.stale = true;
++	KUNIT_EXPECT_EQ(test, apple_sftl_vfl_rotate(&f.ppn, &f.source, &test_write_ops, &f), -EBADMSG);
++	KUNIT_EXPECT_EQ(test, f.mutations, 0U);
++	f.stale = false;
++	f.short_erase = true;
++	KUNIT_EXPECT_EQ(test, apple_sftl_vfl_rotate(&f.ppn, &f.source, &test_write_ops, &f), -EBADMSG);
++	KUNIT_EXPECT_EQ(test, f.mutations, 1U);
++	f.short_erase = false;
++	f.mutations = 0;
++	f.bad_readback = true;
++	KUNIT_EXPECT_EQ(test, apple_sftl_vfl_rotate(&f.ppn, &f.source, &test_write_ops, &f), -EBADMSG);
++	KUNIT_EXPECT_EQ(test, f.mutations, 72U);
++	f.bad_readback = false;
++	f.mutations = 0;
++	memset(f.erased, 0, sizeof(f.erased));
++	memset(f.next, 0, sizeof(f.next));
++	f.source.group = 1;
++	for (i = 0; i < 8; i++)
++		f.source.members[i].lane = i ^ 4;
++	KUNIT_EXPECT_EQ(test, apple_sftl_vfl_rotate(&f.ppn, &f.source, &test_write_ops, &f), 0);
++	KUNIT_EXPECT_EQ(test, f.mutations, 76U);
++}
++
++static struct kunit_case vfl_cases[] = {
++	KUNIT_CASE(vfl_rotate_test),
++	{}
++};
++
++static struct kunit_suite vfl_suite = {
++	.name = "apple-sftl-vfl-rotate",
++	.test_cases = vfl_cases,
++};
++kunit_test_suite(vfl_suite);
++
++MODULE_LICENSE("GPL");
+diff --git a/drivers/mtd/apple-sftl-vfl.c b/drivers/mtd/apple-sftl-vfl.c
+new file mode 100644
+index 000000000..9ab992bfe
+--- /dev/null
++++ b/drivers/mtd/apple-sftl-vfl.c
+@@ -0,0 +1,282 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* Healthy single-fragment VFL bank rotation on the measured 64 GB geometry. */
++#include <linux/bitops.h>
++#include <linux/errno.h>
++#include <linux/module.h>
++#include <linux/slab.h>
++#include <linux/string.h>
++#include <linux/unaligned.h>
++#include <linux/vmalloc.h>
++
++#include "apple-sftl-vfl.h"
++
++#define VFL_LANES	16
++#define VFL_COPIES	4
++#define VFL_PAGES	64
++#define VFL_GLOBAL	0xff
++
++struct vfl_page {
++	u8 data[APPLE_PPN_PAGE_SIZE];
++	u8 oob[APPLE_PPN_OOB_SIZE];
++};
++
++struct vfl_rotation {
++	struct apple_ppn *ppn;
++	const struct apple_sftl_vfl_source *source;
++	const struct apple_sftl_vfl_ops *ops;
++	void *priv;
++	struct vfl_page checkpoint, tables[VFL_LANES], first, other;
++};
++
++static int vfl_read(struct vfl_rotation *r, unsigned int group, unsigned int member,
++		    unsigned int page, struct vfl_page *out)
++{
++	const struct apple_sftl_vfl_member *m = &r->source->members[group * VFL_COPIES + member];
++	u8 status;
++	int ret;
++
++	ret = r->ppn->ops->read_page(r->ppn->priv, m->lane & 1, m->lane >> 1,
++				     m->block, page, true, out->data, out->oob, &status);
++	if (ret)
++		return ret;
++	if (status == 0x40)
++		return 0;
++	if (status == 0x49 && !memchr_inv(out, 0xff, sizeof(*out)))
++		return 0;
++	return -EIO;
++}
++
++static int vfl_read_copies(struct vfl_rotation *r, unsigned int group,
++			   unsigned int page, struct vfl_page *out)
++{
++	unsigned int i;
++	int ret;
++
++	for (i = 0; i < VFL_COPIES; i++) {
++		ret = vfl_read(r, group, i, page, i ? &r->other : out);
++		if (ret)
++			return ret;
++		if (i && memcmp(out, &r->other, sizeof(*out)))
++			return -EBADMSG;
++	}
++	return 0;
++}
++
++/* 13G36 _programVFLCxt emits a single 16-byte tag for this geometry. */
++static void vfl_tag(u8 *oob, u8 lane, u32 age)
++{
++	memset(oob, 0xff, APPLE_PPN_OOB_SIZE);
++	memset(oob, 0, 16);
++	oob[0] = 0x20;
++	oob[1] = lane;
++	oob[2] = lane == VFL_GLOBAL ? 0xff : 0;
++	put_unaligned_le32(age, oob + 4);
++}
++
++static bool vfl_tag_matches(const struct vfl_page *p, u8 lane, u32 age)
++{
++	u8 expected[APPLE_PPN_OOB_SIZE];
++
++	vfl_tag(expected, lane, age);
++	return !memcmp(p->oob, expected, sizeof(expected));
++}
++
++static bool vfl_members_valid(const struct apple_sftl_vfl_source *s)
++{
++	unsigned int i, j;
++
++	for (i = 0; i < ARRAY_SIZE(s->members); i++) {
++		const struct apple_sftl_vfl_member *m = &s->members[i];
++
++		if (m->block < 2056 || m->block >= 2088 || m->lane >= VFL_LANES)
++			return false;
++		for (j = 0; j < i; j++)
++			if (m->block == s->members[j].block && m->lane == s->members[j].lane)
++				return false;
++	}
++	return true;
++}
++
++static bool vfl_members_match(const struct apple_sftl_vfl_source *s, const u8 *data)
++{
++	unsigned int i;
++
++	for (i = 0; i < ARRAY_SIZE(s->members); i++) {
++		const u8 *entry = data + 0x100 + i * 4;
++		const struct apple_sftl_vfl_member *m = &s->members[i];
++
++		if (get_unaligned_le16(entry) != m->block || entry[2] != m->lane || entry[3])
++			return false;
++	}
++	return true;
++}
++
++static u8 *vfl_reference(struct vfl_page *p, unsigned int lane)
++{
++	return p->data + 0x200 + lane * 32;
++}
++
++/* The selected checkpoint and every older table it names must outlive erase. */
++static int vfl_source_pages(struct vfl_rotation *r)
++{
++	const struct apple_sftl_vfl_source *s = r->source;
++	struct vfl_page *cp = &r->checkpoint;
++	unsigned int lane, page;
++	int ret;
++
++	ret = vfl_read_copies(r, s->group, s->page, cp);
++	if (ret)
++		return ret;
++	if (!vfl_tag_matches(cp, VFL_GLOBAL, s->age) ||
++	    !vfl_members_match(s, cp->data) ||
++	    get_unaligned_le16(cp->data + 10) != VFL_LANES ||
++	    get_unaligned_le16(cp->data + 14) != 2086 ||
++	    memchr_inv(cp->data + 0x400, 0, sizeof(cp->data) - 0x400))
++		return -EOPNOTSUPP;
++	for (lane = 0; lane < VFL_LANES; lane++) {
++		u8 *field = vfl_reference(cp, lane);
++		u16 ref = get_unaligned_le16(field);
++
++		page = ref & 0x7fff;
++		if (ref >> 15 != s->group || page >= s->page ||
++		    memchr_inv(field + 2, 0, 30))
++			return -EOPNOTSUPP;
++		ret = vfl_read_copies(r, s->group, page, &r->tables[lane]);
++		if (ret)
++			return ret;
++		if (!vfl_tag_matches(&r->tables[lane], lane, s->age + (s->page - page)))
++			return -EBADMSG;
++	}
++	/* A full bank can end with a table update after its last global save. */
++	for (page = s->page + 1; page < VFL_PAGES; page++) {
++		ret = vfl_read_copies(r, s->group, page, &r->first);
++		if (ret)
++			return ret;
++		lane = r->first.oob[1];
++		if (lane >= VFL_LANES ||
++		    !vfl_tag_matches(&r->first, lane, s->age - (page - s->page)))
++			return -EOPNOTSUPP;
++		memcpy(&r->tables[lane], &r->first, sizeof(r->first));
++		put_unaligned_le16((s->group << 15) | page, vfl_reference(cp, lane));
++	}
++	return 0;
++}
++
++/* Refuse a stale source receipt or an interrupted/replaced target bank. */
++static int vfl_check_target(struct vfl_rotation *r)
++{
++	const struct apple_sftl_vfl_source *s = r->source;
++	unsigned int page, lane;
++	u32 first_age = 0;
++	bool ended = false;
++	int ret;
++
++	for (page = 0; page < VFL_PAGES; page++) {
++		ret = vfl_read_copies(r, !s->group, page, &r->first);
++		if (ret)
++			return ret;
++		if (!memchr_inv(&r->first, 0xff, sizeof(r->first))) {
++			ended = true;
++			continue;
++		}
++		lane = r->first.oob[1];
++		if (!page) {
++			first_age = get_unaligned_le32(r->first.oob + 4);
++			if (lane != VFL_GLOBAL)
++				return -EOPNOTSUPP;
++		}
++		if (ended || (lane != VFL_GLOBAL && lane >= VFL_LANES) ||
++		    (lane == VFL_GLOBAL && !vfl_members_match(s, r->first.data)) ||
++		    first_age < page || first_age - page <= s->age + s->page ||
++		    !vfl_tag_matches(&r->first, lane, first_age - page))
++			return -EBADMSG;
++	}
++	return 0;
++}
++
++static int vfl_erase_target(struct vfl_rotation *r)
++{
++	unsigned int group = !r->source->group, i, page;
++	int ret;
++
++	for (i = 0; i < VFL_COPIES; i++) {
++		ret = r->ops->erase(r->priv, &r->source->members[group * VFL_COPIES + i]);
++		if (ret)
++			return ret;
++		for (page = 0; page < VFL_PAGES; page++) {
++			ret = vfl_read(r, group, i, page, &r->first);
++			if (ret)
++				return ret;
++			if (memchr_inv(&r->first, 0xff, sizeof(r->first)))
++				return -EBADMSG;
++		}
++	}
++	return 0;
++}
++
++static int vfl_program(struct vfl_rotation *r, unsigned int page, struct vfl_page *p,
++		       u8 lane, u32 age)
++{
++	unsigned int group = !r->source->group, i;
++	int ret;
++
++	vfl_tag(p->oob, lane, age);
++	for (i = 0; i < VFL_COPIES; i++) {
++		ret = r->ops->program(r->priv, &r->source->members[group * VFL_COPIES + i],
++				      page, p->data, p->oob);
++		if (ret)
++			return ret;
++		ret = vfl_read(r, group, i, page, &r->first);
++		if (ret)
++			return ret;
++		if (memcmp(&r->first, p, sizeof(*p)))
++			return -EBADMSG;
++	}
++	return 0;
++}
++
++int apple_sftl_vfl_rotate(struct apple_ppn *ppn, const struct apple_sftl_vfl_source *s,
++			  const struct apple_sftl_vfl_ops *ops, void *priv)
++{
++	struct vfl_rotation *r;
++	u32 age;
++	unsigned int lane;
++	int ret;
++
++	if (!ppn || !ppn->ops || !ppn->ops->read_page || !s ||
++	    !ops || !ops->erase || !ops->program)
++		return -EOPNOTSUPP;
++	if (ppn->buses != 2 || ppn->caus != 8 || ppn->blocks != 2088 || ppn->pages != 128 ||
++	    !vfl_members_valid(s) || s->group > 1 || s->page >= VFL_PAGES ||
++	    s->age > U32_MAX - s->page ||
++	    s->age < BIT(31) + (VFL_PAGES - s->page) + VFL_LANES + 1)
++		return -EOPNOTSUPP;
++	r = kvzalloc(sizeof(*r), GFP_NOIO);
++	if (!r)
++		return -ENOMEM;
++	r->ppn = ppn;
++	r->source = s;
++	r->ops = ops;
++	r->priv = priv;
++	age = s->age - (VFL_PAGES - s->page);
++	ret = vfl_source_pages(r);
++	if (!ret)
++		ret = vfl_check_target(r);
++	if (!ret)
++		ret = vfl_erase_target(r);
++	if (!ret)
++		ret = vfl_program(r, 0, &r->checkpoint, VFL_GLOBAL, age);
++	for (lane = 0; !ret && lane < VFL_LANES; lane++) {
++		ret = vfl_program(r, lane + 1, &r->tables[lane], lane, age - lane - 1);
++		if (ret)
++			break;
++		put_unaligned_le16((!s->group << 15) | (lane + 1),
++				   vfl_reference(&r->checkpoint, lane));
++	}
++	if (!ret)
++		ret = vfl_program(r, VFL_LANES + 1, &r->checkpoint,
++				  VFL_GLOBAL, age - VFL_LANES - 1);
++	kvfree(r);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(apple_sftl_vfl_rotate);
+diff --git a/drivers/mtd/apple-sftl-vfl.h b/drivers/mtd/apple-sftl-vfl.h
+new file mode 100644
+index 000000000..58a62d7f2
+--- /dev/null
++++ b/drivers/mtd/apple-sftl-vfl.h
+@@ -0,0 +1,39 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _APPLE_SFTL_VFL_H
++#define _APPLE_SFTL_VFL_H
++
++#include <linux/mtd/apple-ppn.h>
++
++struct apple_sftl;
++
++struct apple_sftl_vfl_member {
++	u16 block;
++	u8 lane;
++};
++
++/* Location of the recovered checkpoint. Newer table records can follow it. */
++struct apple_sftl_vfl_source {
++	struct apple_sftl_vfl_member members[8];
++	u32 age;
++	u8 group, page;
++};
++
++int apple_sftl_vfl_source(struct apple_sftl *sftl,
++			  struct apple_sftl_vfl_source *out);
++
++/*
++ * Only a backend with exclusive ownership of all eight SLC members, including
++ * their physical aliases, may supply these operations. They must never remap
++ * a bad member silently. On any error, reload before attempting more writes.
++ */
++struct apple_sftl_vfl_ops {
++	int (*erase)(void *priv, const struct apple_sftl_vfl_member *member);
++	int (*program)(void *priv, const struct apple_sftl_vfl_member *member,
++		       u8 page, const u8 *data, const u8 *oob);
++};
++
++int apple_sftl_vfl_rotate(struct apple_ppn *ppn,
++			  const struct apple_sftl_vfl_source *source,
++			  const struct apple_sftl_vfl_ops *ops, void *priv);
++
++#endif

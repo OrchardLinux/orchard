@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Mon, 23 Nov 2026 19:00:00 +0800
+Subject: [PATCH] dt-bindings: mfd: syscon: Add the S5L8960X i2s-switch
+
+The A7's i2s-switch (Apple's i2s-switch,s5l8960x) is the routing block
+the A9 and A8X MCA drivers program as a syscon; on the iPad Air, MCA0
+reaches the codec's pad through it.
+
+Assisted-by: LLM
+---
+ Documentation/devicetree/bindings/mfd/syscon.yaml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/mfd/syscon.yaml b/Documentation/devicetree/bindings/mfd/syscon.yaml
+index 6ce14ebaf..98f42ea86 100644
+--- a/Documentation/devicetree/bindings/mfd/syscon.yaml
++++ b/Documentation/devicetree/bindings/mfd/syscon.yaml
+@@ -46,6 +46,7 @@ properties:
+               - apm,xgene-mcb
+               - apm,xgene-rb
+               - apm,xgene-scu
++              - apple,s5l8960x-i2s-switch
+               - apple,s8000-i2s-switch
+               - apple,t7001-i2s-switch
+               - apple,t8010-aop-i2s-oe
+-- 
+2.56.0
+

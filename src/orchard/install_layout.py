@@ -14,6 +14,8 @@ follow hardware docs/boot-contract.md:
   stays in the root's /boot. Making unallocated space is iOS's resize step.
 """
 from dataclasses import dataclass
+import os
+import re
 from typing import Dict, List, Optional
 import uuid
 
@@ -118,6 +120,23 @@ def lwvm_options(layout) -> List[Option]:
     return sorted(result, key=lambda o: o.start)
 
 
+ZONE = re.compile(r'[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*')
+
+
+def computer_timezone(localtime='/etc/localtime') -> Optional[str]:
+    """This computer's time zone as "Area/City", from the target of /etc/localtime, or None.
+
+    Linux and macOS both link it into a zoneinfo directory. The installed system
+    takes the same zone (install_device.set_timezone); without one it stays on UTC.
+    """
+    try:
+        target = os.readlink(localtime)
+    except OSError:
+        return None
+    _, found, zone = target.partition('zoneinfo/')
+    return zone if found and ZONE.fullmatch(zone) else None
+
+
 def plan(layout, option: Option, image: Dict, entry: Dict, layer: Dict, firmware: Optional[Dict] = None,
          account: Optional[Dict] = None) -> Dict:
     """The plan `install_device.py run` executes for one chosen option.
@@ -165,6 +184,7 @@ def plan(layout, option: Option, image: Dict, entry: Dict, layer: Dict, firmware
         'entry': entry,
         'firmware': firmware,
         'account': account,     # the release's install.account; secrets travel separately
+        'timezone': computer_timezone(),
     }
 
 
@@ -201,4 +221,5 @@ def lwvm_plan(layout, option, image, entry, layer, firmware, account):
         'entry': entry,
         'firmware': firmware,
         'account': account,
+        'timezone': computer_timezone(),
     }

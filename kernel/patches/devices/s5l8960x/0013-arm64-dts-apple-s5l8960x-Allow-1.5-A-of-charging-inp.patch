@@ -1,0 +1,85 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 20:38:04 +0100
+Subject: [PATCH] arm64: dts: apple: s5l8960x: Allow 1.5 A of charging input on
+ the A7 iPads
+
+The A7 iPads' charger maximum is 1050 mA, the highest input limit
+measured on an A7 when it was chosen. The ADT's charger node allows
+0x960 = 2400 mA on all of them.
+
+On an iPad mini 2 (J85), with the same D2089 charger data and a 1500 mA
+maximum:
+- a Mac's USB-C port, identified as a CDP, got 1500 mA (0x72). The
+  battery charged at +958 mA at 93 %, 31.0 C.
+- a 30 W charger on a USB-C to Lightning cable, identified as a USB-C
+  source, got 1500 mA. The battery charged at +816 falling to +693 mA
+  at 94 to 95 %, 30.8 to 30.6 C, over about four minutes.
+- the same charger's USB-A port, identified as an Apple BrickID source,
+  got 1500 mA, with the battery already full.
+
+Raise the maximum to 1500 mA in the iPad mini 2's and the iPad Air's
+shared files. The iPad Air has the same D2089 and the same ADT
+allowance, but has not run at 1500 mA. A source that advertises less
+still gets only what it advertises.
+
+Assisted-by: LLM
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/222#issuecomment-7124272762
+---
+ arch/arm64/boot/dts/apple/s5l8960x-air1.dtsi  | 8 +++++---
+ arch/arm64/boot/dts/apple/s5l8960x-mini2.dtsi | 8 +++++---
+ 2 files changed, 10 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/s5l8960x-air1.dtsi b/arch/arm64/boot/dts/apple/s5l8960x-air1.dtsi
+index 84223920d..a886fbafe 100644
+--- a/arch/arm64/boot/dts/apple/s5l8960x-air1.dtsi
++++ b/arch/arm64/boot/dts/apple/s5l8960x-air1.dtsi
+@@ -154,8 +154,10 @@ pmu_events: interrupt-controller {
+ 	/*
+ 	 * The ADT's charger node allows 0x960 = 2400 mA of input on every iPad Air.
+ 	 * The maximum here is the highest input limit measured on an A7
+-	 * so far: 1050 mA (0x4e) charged a J72's battery at +279 to +423 mA
+-	 * under the desktop, at 36 C, in thisiscamk's ten-minute run.
++	 * so far: 1500 mA (0x72) charged an iPad mini 2's battery at +958 mA
++	 * from a Mac's CDP port, at 31 C. Before that, 1050 mA (0x4e)
++	 * charged a J72's battery at +279 to +423 mA under the desktop, at
++	 * 36 C, in thisiscamk's ten-minute run.
+ 	 */
+ 	tristar_charger: charger@60 {
+ 		compatible = "apple,d2089-tristar-charger";
+@@ -169,7 +171,7 @@ tristar_charger: charger@60 {
+ 		interrupts = <112 IRQ_TYPE_EDGE_RISING>,
+ 			     <89 IRQ_TYPE_EDGE_RISING>;
+ 		apple,tristar = <&tristar>;
+-		input-current-limit-microamp = <1050000>;
++		input-current-limit-microamp = <1500000>;
+ 
+ 		/* The charger decides when USB data may come on. */
+ 		port {
+diff --git a/arch/arm64/boot/dts/apple/s5l8960x-mini2.dtsi b/arch/arm64/boot/dts/apple/s5l8960x-mini2.dtsi
+index 010eba811..d9871e397 100644
+--- a/arch/arm64/boot/dts/apple/s5l8960x-mini2.dtsi
++++ b/arch/arm64/boot/dts/apple/s5l8960x-mini2.dtsi
+@@ -110,8 +110,10 @@ pmu_events: interrupt-controller {
+ 	/*
+ 	 * The ADT's charger node allows 0x960 = 2400 mA of input on every iPad mini 2 and 3.
+ 	 * The maximum here is the highest input limit measured on an A7
+-	 * so far: 1050 mA (0x4e) charged a J72's battery at +279 to +423 mA
+-	 * under the desktop, at 36 C, in thisiscamk's ten-minute run.
++	 * so far: 1500 mA (0x72) charged an iPad mini 2's battery at +958 mA
++	 * from a Mac's CDP port, at 31 C. Before that, 1050 mA (0x4e)
++	 * charged a J72's battery at +279 to +423 mA under the desktop, at
++	 * 36 C, in thisiscamk's ten-minute run.
+ 	 */
+ 	tristar_charger: charger@60 {
+ 		compatible = "apple,d2089-tristar-charger";
+@@ -125,7 +127,7 @@ tristar_charger: charger@60 {
+ 		interrupts = <112 IRQ_TYPE_EDGE_RISING>,
+ 			     <89 IRQ_TYPE_EDGE_RISING>;
+ 		apple,tristar = <&tristar>;
+-		input-current-limit-microamp = <1050000>;
++		input-current-limit-microamp = <1500000>;
+ 
+ 		/* The charger decides when USB data may come on. */
+ 		port {

@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 16:00:00 +0100
+Subject: [PATCH] dt-bindings: display: apple,s8000-display-pipe: Add the A8's
+ eDP transmitter
+
+The iPad mini 4 is an A8 (T7000) board whose panel link is eDP, not MIPI
+DSI: its Apple device tree has a displayport node ("displayport,t7000",
+0x206700000) with an lpdp-phy and an eDP panel, where the iPod touch 6
+and the iPhone 6 have mipi-dsim. Allow the DisplayPort transmitter's
+window as an optional fourth "dp" region of "apple,t7000-display-pipe",
+as the A9's pipe has it, so that a board can say which link it drives.
+
+Assisted-by: LLM
+---
+ .../bindings/display/apple,s8000-display-pipe.yaml     | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/display/apple,s8000-display-pipe.yaml b/Documentation/devicetree/bindings/display/apple,s8000-display-pipe.yaml
+index b4b4394..ae95259 100644
+--- a/Documentation/devicetree/bindings/display/apple,s8000-display-pipe.yaml
++++ b/Documentation/devicetree/bindings/display/apple,s8000-display-pipe.yaml
+@@ -134,19 +134,25 @@ allOf:
+     then:
+       properties:
+         reg:
+-          maxItems: 3
++          minItems: 3
++          maxItems: 4
+           items:
+             - description:
+                 ADP window, with the control and interrupt registers, the
+                 parameter FIFO port and the pipe layer registers
+             - description: Display DART (dart-disp0), first window
+             - description: Display DART (dart-disp0), second window
++            - description:
++                DisplayPort transmitter (displayport), on the boards whose
++                panel link is eDP
+         reg-names:
+-          maxItems: 3
++          minItems: 3
++          maxItems: 4
+           items:
+             - const: adp
+             - const: dart0
+             - const: dart1
++            - const: dp
+         interrupts:
+           maxItems: 5
+           items:
+-- 
+2.49.0
+

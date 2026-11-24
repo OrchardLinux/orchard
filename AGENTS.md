@@ -5,6 +5,19 @@ checkouts, sharing one Orchard cache (`~/.cache/orchard`), one Podman VM and
 the devices on the desk. The rules below keep that from breaking each other's
 work. When a rule and your task conflict, ask the person you work for.
 
+## Everything benefits every device
+
+**Every change benefits every device it can.** A driver, device tree node,
+firmware recipe or desktop change is on by default for every board that has
+the hardware: describe it in the shared chip or model `.dtsi` with
+`status = "okay"`, not in one board's `.dts`. A per-board file holds only what
+really differs on that board, such as its wiring.
+
+**Every opt-in or opt-out needs a very good reason, written next to it:** the
+hardware is absent, or there is evidence that it breaks that board.
+**"Untested" is never a reason.** Neither is "I only have one device". The
+catalog marks the other boards `untested`, and their owners find out.
+
 ## Which orchard runs
 
 - `orchard` on PATH (`tools/launcher`) runs the newest nightly of orchard,

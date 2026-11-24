@@ -1,0 +1,240 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shayne <8741557+shaynelegault@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 08:44:52 -0600
+Subject: [PATCH] mtd: apple-h2fmi: Exclude raw programs while SFTL owns the
+ map
+
+Drain raw programs and their readbacks before probing SFTL. Reject new
+raw programs through every MTD on the shared controller until the disk
+has been removed and its queue drained. Reopen raw access on probe
+failure. Raw reads remain available for measurement.
+
+Exercise concurrent ownership, duplicate claims and release at the raw
+program boundary. Keep physical erase qualification separate.
+
+Assisted-by: LLM
+Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/226#issuecomment-7133476475
+---
+ drivers/mtd/apple-sftl-block.c             | 11 ++++
+ drivers/mtd/devices/mtd-apple-h2fmi-test.c | 31 ++++++++++++
+ drivers/mtd/devices/mtd-apple-h2fmi.c      |  8 +++
+ include/linux/mtd/apple-ppn-access.h       | 59 ++++++++++++++++++++++
+ include/linux/mtd/apple-ppn.h              |  3 ++
+ 5 files changed, 112 insertions(+)
+ create mode 100644 include/linux/mtd/apple-ppn-access.h
+
+diff --git a/drivers/mtd/apple-sftl-block.c b/drivers/mtd/apple-sftl-block.c
+index 31f1dfa14..148a24535 100644
+--- a/drivers/mtd/apple-sftl-block.c
++++ b/drivers/mtd/apple-sftl-block.c
+@@ -6,6 +6,7 @@
+ #include <linux/idr.h>
+ #include <linux/jiffies.h>
+ #include <linux/module.h>
++#include <linux/mtd/apple-ppn-access.h>
+ #include <linux/mutex.h>
+ #include <linux/platform_device.h>
+ #include <linux/sched/mm.h>
+@@ -188,6 +189,16 @@ static int sftl_disk_probe(struct platform_device *pdev)
+ 
+ 	if (!provider || !provider->ops || !provider->ops->read_page)
+ 		return -EINVAL;
++	/* A read-only disk also needs its recovered map to stay current. */
++	if (provider->access) {
++		ret = apple_ppn_claim_sftl(provider->access);
++		if (ret)
++			return ret;
++		ret = devm_add_action_or_reset(&pdev->dev, apple_ppn_release_sftl,
++					       provider->access);
++		if (ret)
++			return ret;
++	}
+ 	sftl = kzalloc(sizeof(*sftl), GFP_KERNEL);
+ 	if (!sftl)
+ 		return -ENOMEM;
+diff --git a/drivers/mtd/devices/mtd-apple-h2fmi-test.c b/drivers/mtd/devices/mtd-apple-h2fmi-test.c
+index b22c500e3..cb0d60e87 100644
+--- a/drivers/mtd/devices/mtd-apple-h2fmi-test.c
++++ b/drivers/mtd/devices/mtd-apple-h2fmi-test.c
+@@ -1,6 +1,7 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ #include <kunit/test.h>
+ #include <linux/module.h>
++#include <linux/mtd/apple-ppn-access.h>
+ 
+ #include "mtd-apple-h2fmi.h"
+ 
+@@ -207,7 +208,37 @@ static void h2fmi_program_status_test(struct kunit *test)
+ 	}
+ }
+ 
++static void h2fmi_raw_write_ownership_test(struct kunit *test)
++{
++	struct apple_ppn_access access;
++	bool writer;
++	int ret;
++
++	apple_ppn_access_init(&access);
++	KUNIT_ASSERT_EQ(test, apple_ppn_begin_raw_write(&access), 0);
++	/* An SFTL claim cannot pass the write lock until raw readback ends. */
++	writer = down_write_trylock(&access.lock);
++	if (writer)
++		up_write(&access.lock);
++	KUNIT_EXPECT_FALSE(test, writer);
++	apple_ppn_end_raw_write(&access);
++
++	KUNIT_ASSERT_EQ(test, apple_ppn_claim_sftl(&access), 0);
++	KUNIT_EXPECT_EQ(test, apple_ppn_claim_sftl(&access), -EBUSY);
++	ret = apple_ppn_begin_raw_write(&access);
++	if (!ret)
++		apple_ppn_end_raw_write(&access);
++	KUNIT_EXPECT_EQ(test, ret, -EBUSY);
++	apple_ppn_release_sftl(&access);
++
++	KUNIT_ASSERT_EQ(test, apple_ppn_begin_raw_write(&access), 0);
++	apple_ppn_end_raw_write(&access);
++	KUNIT_ASSERT_EQ(test, apple_ppn_claim_sftl(&access), 0);
++	apple_ppn_release_sftl(&access);
++}
++
+ static struct kunit_case h2fmi_test_cases[] = {
++	KUNIT_CASE(h2fmi_raw_write_ownership_test),
+ 	KUNIT_CASE(h2fmi_geometry_test),
+ 	KUNIT_CASE(h2fmi_invalid_geometry_test),
+ 	KUNIT_CASE(h2fmi_row_test),
+diff --git a/drivers/mtd/devices/mtd-apple-h2fmi.c b/drivers/mtd/devices/mtd-apple-h2fmi.c
+index 661bd0d1f..0f9b0d1b4 100644
+--- a/drivers/mtd/devices/mtd-apple-h2fmi.c
++++ b/drivers/mtd/devices/mtd-apple-h2fmi.c
+@@ -34,6 +34,7 @@
+ #include <linux/math64.h>
+ #include <linux/mod_devicetable.h>
+ #include <linux/module.h>
++#include <linux/mtd/apple-ppn-access.h>
+ #include <linux/mtd/apple-ppn.h>
+ #include <linux/mtd/mtd.h>
+ #include <linux/mutex.h>
+@@ -116,6 +117,7 @@ struct h2fmi {
+ 	unsigned int ndies;
+ 	struct platform_device *sftl;
+ 	struct apple_ppn_ops ppn_ops;
++	struct apple_ppn_access access;
+ };
+ 
+ /*
+@@ -557,8 +559,12 @@ static int h2fmi_mtd_write_oob(struct mtd_info *mtd, loff_t to,
+ 	    ops->ooblen != H2FMI_PAGE_OOB || ops->ooboffs ||
+ 	    !ops->datbuf || !ops->oobbuf)
+ 		return -EINVAL;
++	ret = apple_ppn_begin_raw_write(&fmi->access);
++	if (ret)
++		return ret;
+ 	ret = h2fmi_program_page(fmi, b, die->cau, block, pg,
+ 				 ops->datbuf, ops->oobbuf);
++	apple_ppn_end_raw_write(&fmi->access);
+ 	if (!ret) {
+ 		ops->retlen = H2FMI_PAGE_DATA;
+ 		ops->oobretlen = H2FMI_PAGE_OOB;
+@@ -732,6 +738,7 @@ static int h2fmi_register_sftl(struct h2fmi *fmi)
+ 		.dev = fmi->dev,
+ 		.ops = &fmi->ppn_ops,
+ 		.priv = fmi,
++		.access = &fmi->access,
+ 		.buses = H2FMI_BUSES,
+ 		.caus = g->caus,
+ 		.blocks = g->blocks,
+@@ -946,6 +953,7 @@ static int h2fmi_probe(struct platform_device *pdev)
+ 	if (!fmi)
+ 		return -ENOMEM;
+ 	fmi->dev = &pdev->dev;
++	apple_ppn_access_init(&fmi->access);
+ 
+ 	/* Six regions, in the ADT's order: FMI, FMC, ECC for bus 0, then bus 1. */
+ 	for (i = 0; i < H2FMI_BUSES; i++) {
+diff --git a/include/linux/mtd/apple-ppn-access.h b/include/linux/mtd/apple-ppn-access.h
+new file mode 100644
+index 000000000..0a6ab812f
+--- /dev/null
++++ b/include/linux/mtd/apple-ppn-access.h
+@@ -0,0 +1,59 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _LINUX_MTD_APPLE_PPN_ACCESS_H
++#define _LINUX_MTD_APPLE_PPN_ACCESS_H
++
++#include <linux/errno.h>
++#include <linux/rwsem.h>
++
++struct apple_ppn_access {
++	struct rw_semaphore lock;
++	bool sftl_claimed;
++};
++
++static inline void apple_ppn_access_init(struct apple_ppn_access *access)
++{
++	init_rwsem(&access->lock);
++	access->sftl_claimed = false;
++}
++
++/* Wait for every in-flight raw program and its readback before map discovery. */
++static inline int apple_ppn_claim_sftl(struct apple_ppn_access *access)
++{
++	int ret = 0;
++
++	down_write(&access->lock);
++	if (access->sftl_claimed)
++		ret = -EBUSY;
++	else
++		access->sftl_claimed = true;
++	up_write(&access->lock);
++	return ret;
++}
++
++/* devres releases the claim after failed probe or after the disk has drained. */
++static inline void apple_ppn_release_sftl(void *data)
++{
++	struct apple_ppn_access *access = data;
++
++	down_write(&access->lock);
++	access->sftl_claimed = false;
++	up_write(&access->lock);
++}
++
++/* Raw programs may still run on different buses when no map is cached. */
++static inline int apple_ppn_begin_raw_write(struct apple_ppn_access *access)
++{
++	down_read(&access->lock);
++	if (access->sftl_claimed) {
++		up_read(&access->lock);
++		return -EBUSY;
++	}
++	return 0;
++}
++
++static inline void apple_ppn_end_raw_write(struct apple_ppn_access *access)
++{
++	up_read(&access->lock);
++}
++
++#endif
+diff --git a/include/linux/mtd/apple-ppn.h b/include/linux/mtd/apple-ppn.h
+index 04b4b935a..48307b4a1 100644
+--- a/include/linux/mtd/apple-ppn.h
++++ b/include/linux/mtd/apple-ppn.h
+@@ -5,6 +5,7 @@
+ #include <linux/types.h>
+ 
+ struct device;
++struct apple_ppn_access;
+ 
+ #define APPLE_PPN_PAGE_SIZE 16384
+ #define APPLE_PPN_OOB_SIZE 64
+@@ -35,6 +36,8 @@ struct apple_ppn {
+ 	u16 caus;
+ 	u16 blocks;
+ 	u16 pages;
++	/* Shared by all raw writers on media also exposed through SFTL. */
++	struct apple_ppn_access *access;
+ };
+ 
+ #endif

@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 21:26:59 +0100
+Subject: [PATCH] nvme: pci-apple-ans: Add the S8000 host
+
+The n66 live ADT has the S8003's S3E values: pci-l1pm-control
+0x4044000f (0x40440000 without its enable bits) and pci-max-latency
+0x10081008. Use the S8003 host data for the S8000's root complex.
+
+Assisted-by: LLM
+---
+ drivers/nvme/host/pci-apple-ans.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/nvme/host/pci-apple-ans.c b/drivers/nvme/host/pci-apple-ans.c
+index 96da756a2..53efee55a 100644
+--- a/drivers/nvme/host/pci-apple-ans.c
++++ b/drivers/nvme/host/pci-apple-ans.c
+@@ -105,6 +105,7 @@ static struct apple_ans_nvme *nvme_pci_apple_ans(struct nvme_dev *dev)
+ }
+ 
+ static const struct of_device_id nvme_pci_apple_ans_hosts[] = {
++	{ .compatible = "apple,s8000-pcie", .data = &apple_ans_host_s8003 },
+ 	{ .compatible = "apple,s8003-pcie", .data = &apple_ans_host_s8003 },
+ 	{ .compatible = "apple,t8010-pcie", .data = &apple_ans_host_t8010 },
+ 	{ }

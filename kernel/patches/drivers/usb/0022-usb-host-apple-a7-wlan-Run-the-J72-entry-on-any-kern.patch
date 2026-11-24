@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Mon, 23 Nov 2026 18:40:00 +0800
+Subject: [PATCH] usb: host: apple-a7-wlan: Run the J72 entry on any kernel
+ release
+
+The J72 entry still refused to load unless the running kernel's release
+was "7.3.0-rc1-j72-pw1-orchard-apple-4k", the name of the J72 port's
+own development kernel. On any other kernel, Orchard's included, the
+module returned -ENODEV before touching the hardware, so the iPad Air
+never got Wi-Fi.
+
+The pin guarded a measured register sequence against an unrelated tree.
+That sequence is now part of this kernel, and the J72 entry keeps every
+baseline it enforces: each register is read and compared with the value
+measured on a J72 before anything is written, and a mismatch refuses
+the write. Drop the release pin and the field that held it; the board
+match and confirm_native=1 remain the gates.
+
+[Orchard: the pin comes from thisiscamk/ipad-air-j72-linux 2a257d6,
+ code/current/kernel/0001-j72-installed-kernel-snapshot.patch
+ (j72_wlan_transport_v3.c), carried by drivers/usb/0020 and 0021.]
+Assisted-by: LLM
+---
+ drivers/usb/host/apple-a7-wlan.c | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/drivers/usb/host/apple-a7-wlan.c b/drivers/usb/host/apple-a7-wlan.c
+index 588f2f117..d3e286e89 100644
+--- a/drivers/usb/host/apple-a7-wlan.c
++++ b/drivers/usb/host/apple-a7-wlan.c
+@@ -28,7 +28,6 @@
+ #include <linux/platform_device.h>
+ #include <linux/pm_domain.h>
+ #include <linux/pm_runtime.h>
+-#include <linux/utsname.h>
+ #include <linux/dma-direct.h>
+ #include <linux/of_device.h>
+ #include <linux/irqdomain.h>
+@@ -64,7 +63,6 @@ struct a7_wlan_board {
+ 	const char *name;
+ 	/* true: every J72 baseline is enforced exactly (J72 itself). */
+ 	bool measured;
+-	const char *release;		/* exact kernel release pin, or NULL */
+ 	const char *phy_domain;		/* PMGR child: HSIC PHY power state */
+ 	const char *host_domain;	/* PMGR child: USB2HOST power state */
+ 	u32 phy_domain_reg, host_domain_reg;
+@@ -82,7 +80,6 @@ static const struct a7_wlan_board boards[] = {
+ 		.compatible = "apple,j72",
+ 		.name = "J72",
+ 		.measured = true,
+-		.release = "7.3.0-rc1-j72-pw1-orchard-apple-4k",
+ 		.phy_domain = PMGR "power-controller@20120",	/* hsic1_phy */
+ 		.host_domain = PMGR "power-controller@20170",	/* usb2host0 */
+ 		.phy_domain_reg = 0x20120,
+@@ -446,7 +443,7 @@ static int __init observer_init(void)
+ 	for (i = 0; i < ARRAY_SIZE(boards); i++)
+ 		if (of_machine_is_compatible(boards[i].compatible))
+ 			board = &boards[i];
+-	if (!board || (board->release && strcmp(utsname()->release, board->release)))
++	if (!board)
+ 		return -ENODEV;
+ 	if (!board->measured)
+ 		pr_info(DRV_NAME ": %s: addresses from its ADT; register baselines measured on J72, unverified on %s\n",
+-- 
+2.56.0
+

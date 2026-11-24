@@ -14,7 +14,139 @@
         "zip": "Firmware/all_flash/DeviceTree.d21ap.im4p"
       },
       "sha256": "5308236843c3ec72e4415f7d98ec8623ed8bfbf2d76cd102a2246c8fb88c5c99"
+    },
+    "D21.mtprops": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/multitouch/D21.mtprops"
+      },
+      "device": "/usr/share/firmware/multitouch/D21.mtprops",
+      "sha256": "22c5b41fe54ac113a44910586fe678eb6c8395e57bb44bb2a61710434d4c4d3a"
+    },
+    "P-pegasuse_M-GINS_V-m__m-5.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/P-pegasuse_M-GINS_V-m__m-5.1.txt"
+      },
+      "sha256": "759745f7a3bdb1bf88539eb4b30a9ee79be4695c68795440714691931d6bcbe9"
+    },
+    "P-pegasuse_M-GINS_V-m__m-5.3.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/P-pegasuse_M-GINS_V-m__m-5.3.txt"
+      },
+      "sha256": "759745f7a3bdb1bf88539eb4b30a9ee79be4695c68795440714691931d6bcbe9"
+    },
+    "P-pegasuse_M-GINS_V-u__m-5.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/P-pegasuse_M-GINS_V-u__m-5.1.txt"
+      },
+      "sha256": "0d7733666d396127c8cc074ad1e0f3ba5df69f8b4feb6a1776035b47c8682320"
+    },
+    "P-pegasuse_M-GINS_V-u__m-6.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/P-pegasuse_M-GINS_V-u__m-6.1.txt"
+      },
+      "sha256": "0d7733666d396127c8cc074ad1e0f3ba5df69f8b4feb6a1776035b47c8682320"
+    },
+    "pegasuse.clmb": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/pegasuse.clmb"
+      },
+      "sha256": "852128c1f2bd847500883c261df057a17f6b28ca998fb00ed5033d2585da7e96"
+    },
+    "pegasuse.trx": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/pegasuse.trx"
+      },
+      "sha256": "403eb4ba473c1581dff651cf6c219d0c2212ee5efe83abc232b9d08957b39e43"
+    },
+    "pegasuse.txcb": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/pegasuse.txcb"
+      },
+      "sha256": "2306bdba8466c29c1d2c9c80cbe04065156749bb046b6e6527e4c688eee3da0c"
     }
   },
-  "outputs": []
+  "outputs": [
+    {
+      "destination": "lib/firmware/apple/dfrmtfw-d21-c1f5e-4.bin",
+      "sha256": "89d0874ef67842b34f0716f1f38bf4fb9822d6b0d50cf7cee8ac916d0e5ac917",
+      "steps": [
+        {
+          "step": "z2fw-from-mtprops@2",
+          "input": "D21.mtprops",
+          "profile": "C1F5E,4",
+          "packet": "Z2"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,pegasuse-GINS-m-5.1.txt",
+      "sha256": "759745f7a3bdb1bf88539eb4b30a9ee79be4695c68795440714691931d6bcbe9",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-pegasuse_M-GINS_V-m__m-5.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,pegasuse-GINS-m-5.3.txt",
+      "sha256": "759745f7a3bdb1bf88539eb4b30a9ee79be4695c68795440714691931d6bcbe9",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-pegasuse_M-GINS_V-m__m-5.3.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,pegasuse-GINS-u-5.1.txt",
+      "sha256": "0d7733666d396127c8cc074ad1e0f3ba5df69f8b4feb6a1776035b47c8682320",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-pegasuse_M-GINS_V-u__m-5.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,pegasuse-GINS-u-6.1.txt",
+      "sha256": "0d7733666d396127c8cc074ad1e0f3ba5df69f8b4feb6a1776035b47c8682320",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-pegasuse_M-GINS_V-u__m-6.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,pegasuse.clm_blob",
+      "sha256": "852128c1f2bd847500883c261df057a17f6b28ca998fb00ed5033d2585da7e96",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "pegasuse.clmb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,pegasuse.bin",
+      "sha256": "403eb4ba473c1581dff651cf6c219d0c2212ee5efe83abc232b9d08957b39e43",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "pegasuse.trx"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,pegasuse.txcap_blob",
+      "sha256": "2306bdba8466c29c1d2c9c80cbe04065156749bb046b6e6527e4c688eee3da0c",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "pegasuse.txcb"
+        }
+      ]
+    }
+  ]
 }

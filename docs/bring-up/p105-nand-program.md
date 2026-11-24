@@ -13,14 +13,17 @@ completion or mismatched readback stops further I/O on the bus.
 
 The request must align to a physical page and include a full data/OOB pair.
 Block zero and the two reserved package-tail blocks are excluded. This
-primitive exposes no erase callback and owns no free-space map. A dependent
-VFL/SFTL writer must decide which blank pages it can allocate while preserving
-Apple's native mapping records.
+raw MTD interface exposes no erase operation and owns no free-space map. The
+aggregate PPN provider exposes verified normal-block erase to SFTL for every
+package whose reported geometry validates (`armv7/mtd/0026`): the erase row
+and the pages read back after it follow from that geometry, and the bootstrap
+window at the top of each CAU is never erased. A package whose geometry does
+not validate gets no erase, and the driver logs it. SFTL owns every lane of
+the block and preserves Apple's native mapping records.
 
-The driver binds the shared `apple,s5l8940x-fmi` compatible, which P105 uses
-in this source tree. Its imported two-CAU parameter profile also needs a
-regression check before merge; the measured 64 GB profile does not qualify
-that hardware.
+SFTL models the writer, reclamation and checkpoints for the 64 GB layout only.
+The 16 GB package's provider offers erase as well, but its disk stays
+read-only until its 12H321 accounting and checkpoint formats are modelled.
 
 ## Source and evidence
 
@@ -39,8 +42,16 @@ ARMv7 generated headers. Their source hashes match this candidate, but they
 were object checks rather than a complete current-base kernel build or a
 kernel KUnit run.
 
-Earlier bounded device programming supplied protocol evidence. This exact
-revision still needs an approved physical test, including the failure and
-recovery paths. It has no new physical-programming result. Raw page readback
-does not establish logical-map persistence after restart or recovery after
-interrupted writes. P105 `storage_write` is `untested` until a device test.
+On 23 November 2026, Linux wrote a 64 MiB file through SFTL. Full readback and
+`e2fsck` passed before restart. A fresh Linux load recovered the mapping and
+the file. Two later iOS boots reported clean System and Data filesystems, while
+the file retained SHA-256
+`d41b5b52b5a8b4f5329a413c2edcd6de1f575bac32e70fd76fafcf1dfa6c6421`.
+
+The same trial erased all 16 lanes of one obsolete block. Native accounting
+was saved before Linux reused it, and a fresh load recovered the incremented
+wear plus the written page. iOS later relocated that page and reclaimed the
+block. A cold Linux boot recovered iOS's state and found every normal and SLC
+page in the block blank. P105 `storage_write` is `working` for the measured
+64 GB package. The 16 GB package stays read-only: its SFTL writer is not
+modelled.

@@ -28,12 +28,14 @@ recipe = "firmware.json" # Relative to this device.toml; public recipe, not firm
 
 [support]
 status = "experimental"
+tested_by = ["edulmartins"] # issue #40
 
 # States: working, untested, missing, none (features.toml).
 [features]
 display = "working"
 screen_off = "working" # apple_dsi_bl: bl_power off sends DBV 0, the panel goes dark; on restores the level.
 backlight = "working" # apple_dsi_bl: DCS 0x51 to the OLED panel (docs/bring-up/d221-backlight.md).
+gpu_desktop = "missing"
 touch = "working" # On the C1R1FC0,2 variant; C1R1FC0,1 and ,2-W3 are installed but untested. apple_hidspi_ts: firmware from the recipe, calibration from the ADT (docs/bring-up/d221-touch.md).
 buttons = "working" # macsmc-input: volume, side button, ring/silent switch.
 accelerometer = "missing"

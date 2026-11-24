@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Tue, 24 Nov 2026 08:27:29 +0800
+Subject: [PATCH] pmdomain: apple: read the reset back on the A10X only
+
+The reset read-back was written and run on the J120 (A10X). On every
+other SoC a reset state that does not read back as requested would now
+fail the reset where it succeeded before, so check it on the T8011 only
+until other SoCs have been tried. Register access errors are still
+returned everywhere; the MMIO regmap does not produce them.
+
+Assisted-by: LLM
+---
+ drivers/pmdomain/apple/pmgr-pwrstate.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drivers/pmdomain/apple/pmgr-pwrstate.c b/drivers/pmdomain/apple/pmgr-pwrstate.c
+index 0499a5b43..3a46a5341 100644
+--- a/drivers/pmdomain/apple/pmgr-pwrstate.c
++++ b/drivers/pmdomain/apple/pmgr-pwrstate.c
+@@ -58,6 +58,8 @@ struct apple_pmgr_ps {
+ 	u32 min_state;
+ 	bool has_genpd;
+ 	bool manual_pm;
++	/* Read the reset back; checked on the A10X only so far */
++	bool verify_reset;
+ };
+ 
+ #define genpd_to_apple_pmgr_ps(_genpd) container_of(_genpd, struct apple_pmgr_ps, genpd)
+@@ -201,6 +203,9 @@ static int apple_pmgr_reset_verify(struct apple_pmgr_ps *ps, bool asserted)
+ 	u32 val;
+ 	int ret;
+ 
++	if (!ps->verify_reset)
++		return 0;
++
+ 	ret = regmap_read(ps->regmap, ps->offset, &val);
+ 	if (ret)
+ 		return ret;
+@@ -324,6 +329,7 @@ static int apple_pmgr_ps_probe(struct platform_device *pdev)
+ 
+ 	ps->dev = dev;
+ 	ps->regmap = regmap;
++	ps->verify_reset = of_machine_is_compatible("apple,t8011");
+ 	spin_lock_init(&ps->lock);
+ 
+ 	ret = of_property_read_string(node, "label", &name);

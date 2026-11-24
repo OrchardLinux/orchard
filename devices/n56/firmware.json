@@ -14,7 +14,197 @@
         "zip": "Firmware/all_flash/DeviceTree.n56ap.im4p"
       },
       "sha256": "ad444ce60ed5f4f45884988234c9699754737e3c655e468d03f6d96dcea62ab8"
+    },
+    "kernelcache-n102ap-16G77": {
+      "ipsw": {
+        "kernelcache": "n102ap",
+        "restore": {
+          "version": "12.4",
+          "build": "16G77",
+          "url": "https://updates.cdn-apple.com/2019SummerFCS/fullrestores/041-86563/9E4DEC4C-A743-11E9-87E4-CD93DBB619B1/iPodtouch_12.4_16G77_Restore.ipsw",
+          "bytes": 2813180896,
+          "sha256": "7deb8c949eaa7f5672d46c6225e9286990ed7c9dfcdfaa2db92ffd91181b213f"
+        }
+      },
+      "sha256": "1d996c85affa1f37a07c6454dd5d3a383d4855206d113c9599200d79b6467ff8"
+    },
+    "P-barbera_M-CORO_V-m__m-3.7.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/P-barbera_M-CORO_V-m__m-3.7.txt"
+      },
+      "sha256": "ffdee774187a7e75bcfacbe0954b2d845f66c3a7ddcd9ae9aeb856c0d72a3b2e",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/P-barbera_M-CORO_V-m__m-3.7.txt"
+    },
+    "P-barbera_M-CORO_V-m__m-5.1.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/P-barbera_M-CORO_V-m__m-5.1.txt"
+      },
+      "sha256": "66b23dcfdd284492cc7c2015f08eca9c36c28245e59c77568804734d7629e3ea",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/P-barbera_M-CORO_V-m__m-5.1.txt"
+    },
+    "P-barbera_M-CORO_V-u__m-3.7.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/P-barbera_M-CORO_V-u__m-3.7.txt"
+      },
+      "sha256": "973155c9a4482eb0dbcc7238ab7340e751ed7d9a2937c6f984ddd7c09abde250",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/P-barbera_M-CORO_V-u__m-3.7.txt"
+    },
+    "barbera.clmb": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/barbera.clmb"
+      },
+      "sha256": "db2aa5b97c9afbae57a80a14091baba0668fa39369c17a9a01d9b93e96c425eb",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/barbera.clmb"
+    },
+    "barbera.trx": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/barbera.trx"
+      },
+      "sha256": "bc607420e25e9ca6bbb84b5789126c72a6fd682cbceead3c404bc7cf99ba95fd",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/barbera.trx"
+    },
+    "barbera.txcb": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/barbera.txcb"
+      },
+      "sha256": "670a7a6407d0b212695cabc969e04d0f86e63524e6263f8e3c8b977a6785c98a",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/barbera.txcb"
+    },
+    "P-barbera_M-CORO_V-t__m-3.7.txt": {
+      "ipsw": {
+        "rootfs": "usr/share/firmware/wifi/C-4345__s-B1/P-barbera_M-CORO_V-t__m-3.7.txt"
+      },
+      "sha256": "a68e65a81769ca496bf8f2b9e373275931a88ff6e394f6f3eb196e9c7c465ff4",
+      "device": "/usr/share/firmware/wifi/C-4345__s-B1/P-barbera_M-CORO_V-t__m-3.7.txt"
+    },
+    "BlueTool": {
+      "ipsw": {
+        "rootfs": "usr/sbin/BlueTool"
+      },
+      "device": "/usr/sbin/BlueTool",
+      "sha256": "0a51f90b476cff613e5ea8ce9be841b152241cab661eaf20aeb6d26912ebf918"
     }
   },
-  "outputs": []
+  "outputs": [
+    {
+      "destination": "lib/firmware/apple/gfx-t7000.bin",
+      "sha256": "0b60def67290391b4c6aa913d9a78a8105d6d9b03738175b8e5732689db1e5ba",
+      "steps": [
+        {
+          "step": "agx-g4p-ldr-from-kernelcache@1",
+          "input": "kernelcache-n102ap-16G77"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/gfx-t7000-border.bin",
+      "sha256": "233ffc1d7db27d9f16db17e23a9ce33082b5a7b72061af3da510bca3c94aff3e",
+      "steps": [
+        {
+          "step": "agx-g4p-border-from-kernelcache@1",
+          "input": "kernelcache-n102ap-16G77"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,barbera-CORO-m-3.7.txt",
+      "sha256": "ffdee774187a7e75bcfacbe0954b2d845f66c3a7ddcd9ae9aeb856c0d72a3b2e",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-barbera_M-CORO_V-m__m-3.7.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,barbera-CORO-m-5.1.txt",
+      "sha256": "66b23dcfdd284492cc7c2015f08eca9c36c28245e59c77568804734d7629e3ea",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-barbera_M-CORO_V-m__m-5.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,barbera-CORO-u-3.7.txt",
+      "sha256": "973155c9a4482eb0dbcc7238ab7340e751ed7d9a2937c6f984ddd7c09abde250",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-barbera_M-CORO_V-u__m-3.7.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,barbera.clm_blob",
+      "sha256": "db2aa5b97c9afbae57a80a14091baba0668fa39369c17a9a01d9b93e96c425eb",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "barbera.clmb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,barbera.bin",
+      "sha256": "bc607420e25e9ca6bbb84b5789126c72a6fd682cbceead3c404bc7cf99ba95fd",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "barbera.trx"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,barbera.txcap_blob",
+      "sha256": "670a7a6407d0b212695cabc969e04d0f86e63524e6263f8e3c8b977a6785c98a",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "barbera.txcb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4345-pcie.apple,barbera-CORO-t-3.7.txt",
+      "sha256": "a68e65a81769ca496bf8f2b9e373275931a88ff6e394f6f3eb196e9c7c465ff4",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-barbera_M-CORO_V-t__m-3.7.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,n56-MUR.hcd",
+      "sha256": "3c26b5cda1de209b5db34c0c4bec9074083056a103783679b0517fed4eb704fc",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,n56-TDK.hcd",
+      "sha256": "90e535051ec1be89284d12bb600e20c8068d3aac4fe567e286263c4036dab78c",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,n56-USI.hcd",
+      "sha256": "3faf9dcd6e990e4e893f6d4edd68271d2ee63750edf06d31ed21ea29b90e6b26",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
+        }
+      ]
+    }
+  ]
 }

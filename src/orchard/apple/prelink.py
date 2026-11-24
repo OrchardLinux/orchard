@@ -12,6 +12,11 @@ from orchard.apple.osserialize import apple_xml
 Section = Dict[str, Any]
 
 
+class MergedKext(ValueError):
+    """The kext's segments are merged into the kernel's own (iOS 12 kernelcaches
+    of some SoCs): it has a ModuleIndex but no load address of its own."""
+
+
 class Kernelcache:
     def __init__(self, blob: bytes):
         kind, self.segments, self.sections = macho(blob)
@@ -42,6 +47,8 @@ class Kernelcache:
         kexts = [k for k in metadata['_PrelinkInfoDictionary'] if k.get('CFBundleIdentifier') == bundle]
         if len(kexts) != 1:
             raise ValueError(f'No unique {label} kext')
+        if '_PrelinkExecutableLoadAddr' not in kexts[0] and 'ModuleIndex' in kexts[0]:
+            raise MergedKext(f'The {label} kext is merged into the kernel')
         _, _, sections = macho(self.blob, self.offset(kexts[0]['_PrelinkExecutableLoadAddr'], 32))
         return sections
 

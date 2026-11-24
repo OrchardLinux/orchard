@@ -63,6 +63,11 @@
         ]
       }
     },
+    "foundry": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Who made this die, where Apple had the chip made by more than one foundry."
+    },
     "evidence": {
       "type": "object",
       "additionalProperties": {

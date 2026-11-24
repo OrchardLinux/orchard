@@ -9,6 +9,7 @@
 display = "Display"
 screen_off = "Screen on/off"
 backlight = "Backlight"
+gpu_desktop = "GPU desktop" # the desktop draws through the GPU driver, not in software
 touch = "Touchscreen"
 buttons = "Buttons"
 accelerometer = "Accelerometer"

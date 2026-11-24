@@ -21,6 +21,37 @@
       "pattern": "^[A-Za-z]+[0-9]+,[0-9]+$"
     },
     "ipsw": {
+      "$ref": "#/$defs/ipsw"
+    },
+    "inputs": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._,-]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/input"
+      }
+    },
+    "outputs": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "$ref": "#/$defs/output"
+      },
+      "description": "Files installed under lib/firmware; empty while nothing is produced for the board yet."
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "relative": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._,/+-]*$"
+    },
+    "ipsw": {
       "type": "object",
       "required": [
         "version",
@@ -50,35 +81,8 @@
         "sha256": {
           "$ref": "#/$defs/sha256"
         }
-      }
-    },
-    "inputs": {
-      "type": "object",
-      "minProperties": 1,
-      "propertyNames": {
-        "pattern": "^[A-Za-z0-9][A-Za-z0-9._,-]*$"
       },
-      "additionalProperties": {
-        "$ref": "#/$defs/input"
-      }
-    },
-    "outputs": {
-      "type": "array",
-      "minItems": 0,
-      "items": {
-        "$ref": "#/$defs/output"
-      },
-      "description": "Files installed under lib/firmware; empty while nothing is produced for the board yet."
-    }
-  },
-  "$defs": {
-    "sha256": {
-      "type": "string",
-      "pattern": "^[0-9a-f]{64}$"
-    },
-    "relative": {
-      "type": "string",
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._,/+-]*$"
+      "description": "A public restore image, read by byte range."
     },
     "step": {
       "type": "object",
@@ -140,6 +144,25 @@
               "properties": {
                 "kernelcache": {
                   "const": true
+                }
+              }
+            },
+            {
+              "type": "object",
+              "description": "A board's kernelcache from another pinned restore image, for firmware that board's own image lacks or holds in a build the driver was not written for.",
+              "required": [
+                "kernelcache",
+                "restore"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kernelcache": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9]+ap$",
+                  "description": "The BuildManifest DeviceClass whose kernelcache is read."
+                },
+                "restore": {
+                  "$ref": "#/$defs/ipsw"
                 }
               }
             }

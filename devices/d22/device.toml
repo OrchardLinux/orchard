@@ -31,17 +31,18 @@ status = "experimental"
 # (tools/catalog/drivers.json), plus the display's boot console.
 [features]
 display = "untested"
-screen_off = "missing"
-backlight = "missing"
-touch = "missing"
-buttons = "missing"
+screen_off = "untested" # apple_dsi_bl bl_power, as on the D221
+backlight = "untested" # apple_dsi_bl, as on the D221
+gpu_desktop = "missing"
+touch = "untested" # Shared iPhone X node; D22_Multitouch.im4p is byte-identical to the D221's
+buttons = "untested" # macsmc-input, as on the D221
 accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "missing"
 touch_id = "missing"
 storage_read = "untested"
 storage_write = "untested"
-wifi = "missing"
+wifi = "untested" # Shared A11 Wi-Fi port (t8015-common.dtsi); module from the ADT
 bluetooth_input = "missing"
 bluetooth_audio = "missing"
 cellular = "missing"

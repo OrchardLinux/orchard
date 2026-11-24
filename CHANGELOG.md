@@ -13,12 +13,201 @@ is missing or empty.
 
 ### Devices
 
-- iPad Air 2 (Wi-Fi): internal storage works, so Omarchy installs with
-  `orchard install` and starts from the iPad with `orchard launch`, next to
-  iPadOS. The A8X storage controller (ANS1) has a kernel driver now.
+- iPad Pro 12.9-inch (2017) (A10X): the touchscreen, internal storage,
+  Wi-Fi, Bluetooth, the battery gauge, headphones, both microphones, the
+  accelerometer, hardware video decoding and sleep, brought up by tompta1
+  (thanks!), now also its four speakers (stereo follows the screen
+  orientation), Lightning charging up to 1.5 A, both light sensors, the
+  120 Hz display mode and the Smart Cover. About half of the boots still
+  stop early.
+- iPad Pro 12.9-inch (2017, Cellular) and iPad Pro 10.5-inch (A10X): the
+  same hardware as the iPad Pro 12.9-inch (2017), with touch and Wi-Fi
+  firmware in their recipes, and its speakers, charging and light sensors.
+  Untested.
+- iPad 6, iPad 7 and the other A9 and A10 devices: fixes found during that
+  work for the coprocessor mailbox, SmartIO audio and the Lightning
+  charger's interrupt-storm fallback, shared by all of them.
+- iPad mini 1 (Wi-Fi, A5, 64 GB): Linux writes to internal storage and reuses
+  freed flash, so the disk no longer runs full once its blank flash is used.
+  Writes, block erase and iOS's own bookkeeping survived restarts into iOS
+  with both filesystems clean. The flash driver erases on any storage chip
+  whose layout it can read and check, not one fixed model; the 16 GB iPad mini 1
+  stays read-only until its storage format is modelled.
+- iPad mini 1 (Wi-Fi, A5): Bluetooth no longer uses one fixed address
+  written into Orchard for every unit. Until the boot stage passes each
+  unit's own address, it uses the Bluetooth chip's default, which is also
+  the same on every iPad mini 1. Untested.
+- iPhone 6s Plus (A9): the phone sleeps when idle or on Power, turns its
+  screen off, and wakes on Home or Power.
+- iPad mini 2 (Wi-Fi, A7): tested on the board. The display, backlight,
+  buttons, internal storage reads, battery, charging, suspend and resume,
+  USB serial and networking work, along with touch and Wi-Fi.
+- iPhone 6s Plus (A9): the accelerometer and gyroscope work, so the screen
+  follows the phone's orientation. The motion processor (AOP) now starts
+  with the iOS 15 firmware on every A9 iPhone (6s, 6s Plus, SE), with the
+  same sensor orientation; untested on the 6s and SE.
+- iPhone 6s Plus (A9): Wi-Fi works, and Bluetooth comes up and scans. The
+  iPhone 6s has the same module family and gets both too, with its own
+  firmware; untested there. The iPhone SE has a different chip and has
+  neither yet.
+- iPhone 6s Plus (A9): the loudspeaker plays, through a new driver for its
+  CS35L21 amplifier, with the output capped at -12 dB because there is no
+  speaker protection yet. The iPhone 6s has the same speaker path and gets
+  it too, untested. The earpiece, headphones and microphones need the
+  CS42L71 codec, which has no driver yet.
+- iPhone 6s Plus (A9): the battery gauge works and the phone charges, from
+  a computer at the 500 mA it grants and from an Apple wall adapter at up to
+  about 1.4 A while awake. The charger lowers or cuts its input when the
+  battery is too cold or hot. Asleep it charges at 300 mA. The iPhone 6s and
+  SE share the change, and the iPhone 7 and 7 Plus get the same limit at a
+  computer port and the same temperature guard, all untested. RAM boots on
+  every device now ask the computer for 500 mA, as installed systems
+  already do, so devices whose charger follows the computer's limit charge
+  faster during a RAM boot.
+- iPhone 6s Plus (A9): the desktop draws on the GPU. Omarchy's compositor
+  renders through Zink on the A9's PowerVR GPU, which main already supports
+  for every A9 board. The iPhone 6s and SE are untested.
+- iPad Air and iPad mini 2 and 3 (A7): internal storage keeps working across
+  sleep, also with writes in flight. The storage controller finishes its
+  commands before sleep and is restarted after it, and its NAND clock stays
+  powered: without it every disk command took seconds after wake, and an
+  installed system on an iPad Air could hang at the logo. The A8 and A8X
+  devices (iPad Air 2, iPad mini 4, iPhone 6 and 6 Plus, iPod touch 6)
+  share the storage driver and get the same sleep handling.
+- iPad Air and iPad mini 2 and 3 (A7): Lightning charging draws up to
+  1.5 A instead of 1.05 A from a charger that offers it, as measured on an
+  iPad mini 2; untested on the iPad Air and iPad mini 3.
+- iPad mini 2 and 3 (A7): the speakers play, in stereo, through the same
+  CS35L19 amplifier driver as the iPhone 6s Plus's loudspeaker, with the
+  output capped at -12 dB because there is no speaker protection yet.
+  An iPad mini 2 (Wi-Fi) played both speakers with an earlier version of
+  the driver; this one is untested on every model. The headphone jack and
+  the microphones do not work yet.
+- iPad Air (A7): the speakers play, and the audio controller no longer
+  floods the kernel with 100000 unhandled interrupts at boot ("irq 62:
+  nobody cared"). No A7 iPad's audio controller uses its interrupt any
+  more, as the iPad mini 2's already did; playback never relied on it.
+  Thanks to ricktav. Tested on the iPad Air (Wi-Fi).
 
 ### Install & launch
 
+- An installed system starts in the computer's time zone instead of UTC.
+
+## [0.3.6] - 2026-11-24
+
+### Devices
+
+- iPad 6, iPad 5, iPad Air 2 and the other A8, A9 and A10 boards: the boot
+  splash stays still until the PIN screen again. When the display driver took
+  over, about four seconds into boot, it flashed a test pattern and then
+  went black for a moment. Scanning out GPU buffers directly through the
+  display DART is now off by default (adbe.dart_scanout=1 turns it on).
+
+## [0.3.5] - 2026-11-24
+
+### Devices
+
+- The touchscreen restart from 0.3.3 is gone again: on a healthy iPad 6 that
+  nobody touched, it restarted the touch controller every 30 seconds.
+
+## [0.3.4] - 2026-11-24
+
+### Install & launch
+
+- iPad 6 and iPad 7: starting an installed system works again. In 0.3.3 m1n1
+  crashed while starting the internal storage, and the iPad fell back to iOS.
+
+## [0.3.3] - 2026-11-24
+
+### Devices
+
+- iPad 6, iPad 5, iPad Air 2, iPad mini 2 and 4, iPod touch 6, iPhone 6s,
+  6s Plus and SE: a touchscreen that stops responding without an error is
+  restarted by itself within seconds, instead of staying dead until reboot.
+- iPhone 6, iPhone 6 Plus and iPad mini 4 (A8): internal storage on every
+  model, as on the iPod touch 6, so they can install. The iPhone 6 and
+  6 Plus also get the iPod touch 6's Wi-Fi and Bluetooth, with their own
+  firmware in their recipes. Untested.
+- iPad Air 2 (Cellular) (A8X): the speakers and Lightning charging of the
+  Wi-Fi model; its recipe now carries the SmartIO firmware the speakers
+  need. Untested.
+- iPhone 8, iPhone 8 Plus and iPhone X (A11): Wi-Fi on every model, not
+  only the iPhone X (GSM), with each model's Wi-Fi firmware in its recipe.
+  The iPhone X (Global) also gets the touchscreen and OLED brightness of the
+  GSM model, and all of them the side and volume buttons. Untested.
+- iPhone 6s, iPhone 6s Plus and iPhone SE (A9): battery status and charging
+  through the SN2400 charger, the accelerometer, gyroscope and pressure
+  sensor (AOP) and hardware video decoding, as on the iPhone 7. Untested.
+- iPhone 7 and iPhone 7 Plus (A10): the iPhone 7 gets the touchscreen,
+  Wi-Fi, battery gauge, charger and light sensor the 7 Plus had, and all four
+  models get Bluetooth, the accelerometer and gyroscope (AOP), hardware video
+  decoding and the SN2400 charger driver, which was not built before. Their
+  firmware recipes carry the GPU, video decoder and AOP firmware. Untested.
+- iPad 6 (Cellular) and iPad 7 (Cellular) (A10): Bluetooth, as on the Wi-Fi
+  models; the Patchram follows the module vendor. iPad 7 (A10): charging
+  control is offered as on the iPad 6. Untested.
+- iPad Air 2 (Wi-Fi): internal storage works, so Omarchy installs with
+  `orchard install` and starts from the iPad with `orchard launch`, next to
+  iPadOS. The A8X storage controller (ANS1) has a kernel driver now.
+- iPad Air 2 (Wi-Fi): the speakers play, in stereo, through PipeWire. The
+  headphone jack and the microphones do not work yet.
+- iPad Air 2 (Wi-Fi): it charges. The Lightning charger driver supports the
+  iPad Air 2's D2207 PMIC, so a computer's charging port or an Apple adapter
+  gets up to 1.5 A instead of iBoot's 100 mA.
+- iPad Air 2 (Wi-Fi): sleep works. The iPad suspends when idle or on Power,
+  and Home or Power wakes it with Wi-Fi, Bluetooth and the USB network back.
+- iPad Air 2 (Wi-Fi): Bluetooth headphones play, and a Bluetooth keyboard with
+  touchpad works. Bluetooth runs at 3 Mbit/s instead of 115,200 baud, so
+  headphones no longer crackle and calls with the CVSD codec have sound.
+- iPad Air (Cellular): new, from thisiscamk's work. Touch, the display and
+  backlight, the Home button, USB serial and networking and reading its
+  internal storage work, and Omarchy installs next to iPadOS with
+  `orchard install`.
+- iPad mini 2 (Wi-Fi): the touchscreen works, on the A7 SPI and touch clock
+  support from thisiscamk's iPad Air work.
+- iPad mini 2 (Wi-Fi): Wi-Fi works when started from RAM (it cannot install
+  yet). A kernel transport, from thisiscamk's iPad Air work, brings up the
+  A7's HSIC link to the BCM43241 radio, and `orchard-a7-wifi.service` starts
+  it at boot.
+- iPad Air and iPad mini 2 (A7): Wi-Fi on every model, not only the J72 and
+  J85 (the iPad mini 3 lacks firmware: iOS 12.5.8 does not ship its files).
+- iPad Air (A7): the speakers play in stereo on every model.
+- iPad Air and iPad mini 2/3 (A7): Lightning charging at up to 1.05 A
+  instead of iBoot's 100 mA.
+- iPad Air and iPad mini 2/3 (A7): the battery level shows on every model.
+- iPad Air, iPad mini 2/3 and iPhone 5s (A7): internal storage on every
+  model, so Omarchy can install next to iOS, not only on the J72.
+- iPad Air and iPad mini 2/3 (A7): the touchscreen on every model.
+- iPhone 6s Plus (Samsung): Linux and m1n1 read and write its internal
+  storage, so Omarchy installs with `orchard install` next to iOS. The
+  display, backlight and buttons work. The Samsung A9's PCIe storage
+  controller works like the TSMC A9's without its phy-ip block. From
+  ricktav's work.
+- iPhone 6s, iPhone 6s Plus (TSMC) and iPhone SE: storage, the touchscreen
+  and the light sensor are switched on as on the iPhone 6s Plus (Samsung),
+  and the iPad 5 (Samsung) gets storage and Wi-Fi like the TSMC model; not
+  tried on these devices yet.
+- All A9 iPhones and the iPad 5 (Samsung): the GPU driver and the display
+  pipe driver are switched on as on the iPad 5 (TSMC), with the GPU firmware
+  from iPadOS 16.7.10; not tried on these devices yet.
+- iPod touch 6: internal storage works, so Omarchy installs with
+  `orchard install` next to iOS. The touchscreen, backlight, buttons and
+  Wi-Fi work, and Bluetooth comes up. From Berkay Kösebay's work.
+- The compatibility page opens with a "Does my device work?" table: every
+  device Orchard installs on, its chip beside it (Samsung or TSMC for the
+  A9), and whether it installs, has a GPU desktop, touch, Wi-Fi, Bluetooth,
+  sound, charging, sleep and rotation, and who has tested it. The README
+  links straight to it.
+
+### Install & launch
+
+- A launcher may quit right after choosing a boot entry. m1n1 used to wait
+  for the computer to read its last answer before starting Linux, so the
+  device stayed on the boot splash when the launcher had already gone.
+- Orchard's Pongo is built from palera1n's PongoOS, at the revision
+  palera1n 3.0.0-beta.4 uses, so the same quiet Pongo also boots iPadOS
+  through palera1n with its overlay; with the old one iPadOS came up
+  without it and half hung.
 - On Linux, `orchard run` and `orchard launch` use the released Pongo again
   instead of asking for a Mac with Xcode: the release lookup picked the
   moving `nightly` tag, which publishes no checksums.

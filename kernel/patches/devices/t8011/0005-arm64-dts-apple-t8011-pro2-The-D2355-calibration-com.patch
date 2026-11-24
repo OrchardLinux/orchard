@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Tue, 24 Nov 2026 08:30:59 +0800
+Subject: [PATCH] arm64: dts: apple: t8011-pro2: The D2355 calibration comes
+ from m1n1
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8011-pro2.dtsi | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8011-pro2.dtsi b/arch/arm64/boot/dts/apple/t8011-pro2.dtsi
+index cd2026ff3..ec80bc47c 100644
+--- a/arch/arm64/boot/dts/apple/t8011-pro2.dtsi
++++ b/arch/arm64/boot/dts/apple/t8011-pro2.dtsi
+@@ -228,7 +228,7 @@
+ 					      <&d2355_events 53 IRQ_TYPE_EDGE_RISING>;
+ 			apple,tristar = <&tristar>;
+ 			apple,adc-pmic = <&august_pmic>;
+-			firmware-name = "apple/j120/usb-input-limit-calibration-hv.bin";
++			/* The boot loader adds this unit's ADT calibration table. */
+ 			/* A conservative window, not Apple's production limits. */
+ 			apple,pack-limits = <150 350 3400000 4200000 (-2000000) 2000000>;
+ 			/* 1.5 A only while the Lightning VBUS reads 4.75-5.5 V. */

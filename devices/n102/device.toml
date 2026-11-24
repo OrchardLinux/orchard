@@ -22,17 +22,19 @@ platform = "apple-4k"
 dtb = "t7000-n102" # arch/arm64/boot/dts/apple/<dtb>.dtb
 
 [firmware]
-recipe = "firmware.json" # The touchscreen, Wi-Fi and Bluetooth firmware from this board's public IPSW.
+recipe = "firmware.json" # Pins this board's public IPSW: the touchscreen, Wi-Fi and Bluetooth firmware from it; the GPU firmware comes from iOS 12.4 (16G77), the tested one.
 
 [support]
 status = "experimental"
+tested_by = ["brkosebay"]
 
 # States: working, untested, missing, none (features.toml). "untested" means a driver
 # binds in its device tree (tools/catalog/drivers.json).
 [features]
 display = "working" # The console and the desktop.
-screen_off = "missing"
+screen_off = "untested" # Display pipe enabled on every A8 board, as on the N61
 backlight = "working" # DWI and the LM3534: brightness set and read back.
+gpu_desktop = "working"
 touch = "working" # N1 on apple_z2: 640x1136, several contacts.
 buttons = "working" # Home, power and both volume buttons (gpio-keys).
 accelerometer = "missing"

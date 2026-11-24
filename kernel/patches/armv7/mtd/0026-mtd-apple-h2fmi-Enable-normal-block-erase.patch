@@ -1,0 +1,257 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 16:20:08 -0600
+Subject: [PATCH 26/27] mtd: apple-h2fmi: Enable normal-block erase
+
+Give SFTL the erase operation on every package whose reported geometry
+validates. The erase row and the pages it verifies follow from that
+geometry; the bootstrap window at the top of each CAU is never erased.
+
+The P105 trial erased all 16 lanes of block 122 and read every normal and
+SLC page blank. Linux persisted the incremented wear, reused one page
+through native accounting, and recovered the mapping on a fresh load. iOS
+then moved the witness and reclaimed the block again. A later Linux boot
+recovered wear 9 and scanned the block blank. Both iOS returns passed
+System and Data filesystem checks, and the 64 MiB Linux witness retained
+its SHA-256.
+
+The existing SFTL path checks full ownership and publishes native
+accounting before reuse. It reads each lane back after erase, then reloads
+the medium before granting the block.
+
+[Henrik: derive the erase extent from the discovered geometry instead of
+ a P105 compatible and the 64 GB constants; drop the controller variant]
+
+Assisted-by: LLM
+Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
+---
+ .../driver-api/mtd/apple-sftl-reclamation.rst | 33 ++++++++++++++-----
+ drivers/mtd/Kconfig                           |  5 +--
+ drivers/mtd/devices/Kconfig                   |  5 +--
+ drivers/mtd/devices/mtd-apple-h2fmi-test.c    | 14 ++++++++
+ drivers/mtd/devices/mtd-apple-h2fmi.c         | 23 ++++++-------
+ drivers/mtd/devices/mtd-apple-h2fmi.h         | 30 +++++++++++++----
+ 6 files changed, 79 insertions(+), 31 deletions(-)
+
+diff --git a/Documentation/driver-api/mtd/apple-sftl-reclamation.rst b/Documentation/driver-api/mtd/apple-sftl-reclamation.rst
+index 079a758..468e787 100644
+--- a/Documentation/driver-api/mtd/apple-sftl-reclamation.rst
++++ b/Documentation/driver-api/mtd/apple-sftl-reclamation.rst
+@@ -11,8 +11,11 @@ The block writer allocates from verified blank blocks. An optional, verified
+ ``erase_block`` provider operation lets the allocator also reclaim obsolete
+ blocks. With a complete native accounting policy the allocator can also
+ reserve fresh context sites, relocate live data and publish a checkpoint.
+-P105 H2FMI does not enable physical erase or supply this policy. When verified
+-blank blocks run out on that profile, a write returns ``-ENOSPC``.
++H2FMI supplies the erase operation for every package whose reported
++geometry validates; the erase row and the pages it clears follow from that
++geometry. The writer and its native accounting are modelled for the 64 GB
++layout only, so the 16 GB layout stays read-only. A writer without the erase
++operation returns ``-ENOSPC`` when blank blocks run out.
+ 
+ Reclaiming an obsolete block
+ ----------------------------
+@@ -179,12 +182,26 @@ bit count. The 13G36 provider builder at 0x8109de94 also supplies CAU and view
+ fields. Both saved parameter copies agree: page bits 7, block bits 12 and CAU
+ bits 3. A normal block's page-0 row is ``(cau << 19) | (block << 7)``; the SLC
+ view adds bit 22. The normal view reports 128 pages per block. Physical erase
+-effects, the SLC alias relationship, timeout, retirement and partial completion
+-across CAUs remain unqualified. The H2FMI implementation issues the
+-single-row command and checks the erased status, data and OOB on all 128
+-normal-view pages. Enabling its callback on hardware requires a qualified
+-physical erase extent, exclusive ownership across all affected views, and
+-device recovery and interruption checks.
++effects and the SLC alias relationship were checked on a 64 GB P105. The trial
++erased all 16 lanes of an obsolete block. Every one of its 2,048 normal pages
++and 1,024 SLC aliases then read erased, including data and OOB. Linux published
++the incremented wear before it reused the block. A fresh load recovered the
++same mapping and data.
++
++After iOS booted, its System and Data filesystem checks passed. iOS moved the
++test page, reclaimed the block again and saved its next wear value. A second
++Linux boot recovered that state and scanned the full block blank. The final
++iOS boot passed both filesystem checks and reread the 64 MiB Linux witness
++with the same SHA-256.
++
++The H2FMI implementation issues the single-row command and checks the erased
++status, data and OOB on every normal-view page of the block. SFTL owns every
++lane of the block and stops the writer after an uncertain result. Synthetic
++tests cover timeout, retirement and interrupted multi-lane erase behavior.
++The physical callback is enabled for every package whose discovered geometry
++is self-consistent: the page, block and CAU fields fit their address bits and
++the SLC view aliases half of the normal pages. Blocks in the bootstrap window
++at the top of each CAU are never erased.
+ 
+ The source research began with `Cascadia's NAND notes
+ <https://github.com/rzxvx/Project-Cascadia/blob/c20b85ebb951c704d7e3a664c378dde8276e3928/docs/research/p105-nand.md>`_.
+diff --git a/drivers/mtd/Kconfig b/drivers/mtd/Kconfig
+index 7bebb81..42e979b 100644
+--- a/drivers/mtd/Kconfig
++++ b/drivers/mtd/Kconfig
+@@ -220,8 +220,9 @@ config MTD_APPLE_SFTL
+ 
+ 	  Writes are appended to verified blank blocks. A provider with a
+ 	  qualified erase operation can also recycle verified retired blocks.
+-	  The physical P105 provider remains append-only and returns ENOSPC
+-	  when its supply of blank blocks runs out.
++	  H2FMI supplies this operation for packages whose geometry
++	  validates. Providers without a qualified erase operation return
++	  ENOSPC when their supply of blank blocks runs out.
+ 
+ config MTD_APPLE_SFTL_KUNIT_TEST
+ 	tristate "KUnit tests for Apple VFL/SwissPPNFTL" if !KUNIT_ALL_TESTS
+diff --git a/drivers/mtd/devices/Kconfig b/drivers/mtd/devices/Kconfig
+index ef6a7fa..33b1222 100644
+--- a/drivers/mtd/devices/Kconfig
++++ b/drivers/mtd/devices/Kconfig
+@@ -219,8 +219,9 @@ config MTD_APPLE_H2FMI
+ 
+ 	  Pages are programmed whole, only when they read back erased, and
+ 	  each program is verified by reading it back. The aggregate PPN
+-	  provider can verify a single-block erase on qualified hardware.
+-	  Erase is disabled on the P105.
++	  provider verifies single-block erase on every package whose
++	  reported geometry validates; the erase extent follows from that
++	  geometry.
+ 
+ 	  If unsure, say N.
+ 
+diff --git a/drivers/mtd/devices/mtd-apple-h2fmi-test.c b/drivers/mtd/devices/mtd-apple-h2fmi-test.c
+index e842057..a8434b0 100644
+--- a/drivers/mtd/devices/mtd-apple-h2fmi-test.c
++++ b/drivers/mtd/devices/mtd-apple-h2fmi-test.c
+@@ -110,9 +110,23 @@ static void h2fmi_erase_row_test(struct kunit *test)
+ 
+ 	h2fmi_test_params(params, ppn_16gb);
+ 	KUNIT_ASSERT_EQ(test, h2fmi_parse_geometry(params, sizeof(params), &g), 0);
++	KUNIT_EXPECT_TRUE(test, h2fmi_erase_geometry_valid(&g));
++	KUNIT_EXPECT_EQ(test, h2fmi_erase_row(&g, 2, 1, &row), -EINVAL);
++	KUNIT_EXPECT_EQ(test, h2fmi_erase_row(&g, 0, 1064, &row), -EINVAL);
++	KUNIT_EXPECT_EQ(test, h2fmi_erase_row(&g, 0, 0, &row), -EPERM);
++	KUNIT_EXPECT_EQ(test, h2fmi_erase_row(&g, 1, 1032, &row), -EPERM);
++	KUNIT_EXPECT_EQ(test, h2fmi_erase_row(&g, 1, 1063, &row), -EPERM);
++	KUNIT_ASSERT_EQ(test, h2fmi_erase_row(&g, 0, 1, &row), 0);
++	KUNIT_EXPECT_EQ(test, row, 0x100U);
++	KUNIT_ASSERT_EQ(test, h2fmi_erase_row(&g, 1, 1031, &row), 0);
++	KUNIT_EXPECT_EQ(test, row, 0xc0700U);
++	g.slc_pages = 64;
++	KUNIT_EXPECT_FALSE(test, h2fmi_erase_geometry_valid(&g));
+ 	KUNIT_EXPECT_EQ(test, h2fmi_erase_row(&g, 0, 1, &row), -EOPNOTSUPP);
++	row = 0xdeadbeef;
+ 	h2fmi_test_params(params, ppn_64gb);
+ 	KUNIT_ASSERT_EQ(test, h2fmi_parse_geometry(params, sizeof(params), &g), 0);
++	KUNIT_EXPECT_TRUE(test, h2fmi_erase_geometry_valid(&g));
+ 	KUNIT_EXPECT_EQ(test, h2fmi_erase_row(&g, 8, 1, &row), -EINVAL);
+ 	KUNIT_EXPECT_EQ(test, h2fmi_erase_row(&g, 0, 2088, &row), -EINVAL);
+ 	KUNIT_EXPECT_EQ(test, h2fmi_erase_row(&g, 0, 0, &row), -EPERM);
+diff --git a/drivers/mtd/devices/mtd-apple-h2fmi.c b/drivers/mtd/devices/mtd-apple-h2fmi.c
+index b24d13e..1a4fd73 100644
+--- a/drivers/mtd/devices/mtd-apple-h2fmi.c
++++ b/drivers/mtd/devices/mtd-apple-h2fmi.c
+@@ -45,7 +45,6 @@
+ #include <linux/mtd/mtd.h>
+ #include <linux/mutex.h>
+ #include <linux/platform_device.h>
+-#include <linux/property.h>
+ #include <linux/slab.h>
+ 
+ #include "mtd-apple-h2fmi.h"
+@@ -168,10 +167,6 @@ struct h2fmi_die {
+ 	u8 cau;
+ };
+ 
+-struct h2fmi_variant {
+-	bool normal_erase_qualified;
+-};
+-
+ struct h2fmi {
+ 	struct device *dev;
+ 	struct h2fmi_bus bus[H2FMI_BUSES];
+@@ -1292,7 +1287,6 @@ static int h2fmi_ppn_erase(void *priv, unsigned int bus, unsigned int cau,
+ 
+ static int h2fmi_register_sftl(struct h2fmi *fmi)
+ {
+-	const struct h2fmi_variant *variant = device_get_match_data(fmi->dev);
+ 	const struct h2fmi_geometry *g = &fmi->bus[0].geometry;
+ 	struct apple_ppn provider = {
+ 		.dev = fmi->dev,
+@@ -1312,8 +1306,16 @@ static int h2fmi_register_sftl(struct h2fmi *fmi)
+ 		return 0;
+ 	fmi->ppn_ops.read_page = h2fmi_ppn_read;
+ 	fmi->ppn_ops.program_page = h2fmi_ppn_program;
+-	if (variant && variant->normal_erase_qualified)
++	/*
++	 * Erase follows the discovered geometry. SFTL verifies every erased
++	 * block blank in both views and checks its accounting before reuse.
++	 */
++	if (h2fmi_erase_geometry_valid(g))
+ 		fmi->ppn_ops.erase_block = h2fmi_ppn_erase;
++	else
++		dev_info(fmi->dev,
++			 "PPN geometry %u CAUs x %u blocks x %u pages has no valid erase extent; reclamation stays off\n",
++			 g->caus, g->blocks, g->pages);
+ 	fmi->sftl = platform_device_register_data(fmi->dev, "apple-sftl",
+ 						 PLATFORM_DEVID_AUTO,
+ 						 &provider, sizeof(provider));
+@@ -1607,13 +1609,8 @@ static void h2fmi_remove(struct platform_device *pdev)
+ 		mtd_device_unregister(&fmi->mtd[i]);
+ }
+ 
+-/* Normal/SLC aliasing and the physical erase extent remain unqualified. */
+-static const struct h2fmi_variant s5l8940x_ppn = {
+-	.normal_erase_qualified = false,
+-};
+-
+ static const struct of_device_id h2fmi_of_match[] = {
+-	{ .compatible = "apple,s5l8940x-fmi", .data = &s5l8940x_ppn },
++	{ .compatible = "apple,s5l8940x-fmi" },
+ 	{ }
+ };
+ MODULE_DEVICE_TABLE(of, h2fmi_of_match);
+diff --git a/drivers/mtd/devices/mtd-apple-h2fmi.h b/drivers/mtd/devices/mtd-apple-h2fmi.h
+index 93502b3..0639a2b 100644
+--- a/drivers/mtd/devices/mtd-apple-h2fmi.h
++++ b/drivers/mtd/devices/mtd-apple-h2fmi.h
+@@ -87,18 +87,36 @@ static inline int h2fmi_page_row(const struct h2fmi_geometry *g,
+ 	return 0;
+ }
+ 
+-/* The single-row erase trace is available only for the 64 GB package. */
++/* SLC-view bootstrap members may occupy any of the last 32 blocks. */
++#define H2FMI_BOOTSTRAP_BLOCKS	32
++
++/*
++ * A single-row erase clears one block of one CAU: the row of its first
++ * normal-view page, and the pages behind it. Both follow from the geometry
++ * the package reports, so erase is offered only when that geometry is
++ * self-consistent: the page, block and CAU fields fit their address bits,
++ * the SLC view aliases half of the normal pages, and there are blocks below
++ * the bootstrap window.
++ */
++static inline bool h2fmi_erase_geometry_valid(const struct h2fmi_geometry *g)
++{
++	return g->page_bits < 32 && g->block_bits < 32 && g->cau_bits < 32 &&
++	       g->page_bits + g->block_bits + g->cau_bits < 32 &&
++	       g->pages && g->pages == BIT(g->page_bits) &&
++	       g->slc_pages * 2 == g->pages &&
++	       g->blocks > H2FMI_BOOTSTRAP_BLOCKS + 1 &&
++	       g->blocks <= BIT(g->block_bits) &&
++	       g->caus && g->caus <= BIT(g->cau_bits);
++}
++
+ static inline int h2fmi_erase_row(const struct h2fmi_geometry *g,
+ 				 unsigned int cau, unsigned int block, u32 *row)
+ {
+-	if (g->caus != 8 || g->blocks != 2088 || g->pages != 128 ||
+-	    g->slc_pages != 64 || g->page_bits != 7 ||
+-	    g->block_bits != 12 || g->cau_bits != 3)
++	if (!h2fmi_erase_geometry_valid(g))
+ 		return -EOPNOTSUPP;
+ 	if (cau >= g->caus || block >= g->blocks)
+ 		return -EINVAL;
+-	/* SLC-view bootstrap members may occupy any of the last 32 blocks. */
+-	if (!block || block >= g->blocks - 32)
++	if (!block || block >= g->blocks - H2FMI_BOOTSTRAP_BLOCKS)
+ 		return -EPERM;
+ 	return h2fmi_page_row(g, cau, block, 0, row);
+ }

@@ -1,0 +1,81 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Mon, 23 Nov 2026 19:45:00 +0800
+Subject: [PATCH] power: supply: apple_tristar_charger: Support the D2089
+
+The A7's D2089 (iPad Air, iPad mini 2 and 3) keeps its charger
+registers where the D2207 does.
+iOS 12.5.7's AppleD2089PMUPowerSource and AppleD2089PMU, on the J72:
+
+  function               D2089 (iOS 12)                       D2207
+  connection state       0x60 bit 0, new connection bit 3     same
+  charger state          0x62                                 same
+  input-current limit    0x4c0, code = (mA - 75) / 12.5       same
+  ADC start              0x500, 0x80 | channel 6 (BrickID)    same
+  ADC result             0x502, 12 bits, scaled as here       same
+  ADC clear              0x501 bits 7:3, 0x500 bit 7          same
+  ADC done / plug event  89 / 0                               same
+
+The encoding agrees with the J72's own values: iBoot hands over 0x4c0 at
+0x02 (100 mA), and 0x4e (1050 mA) charged the battery at +279 to
++423 mA under the desktop in thisiscamk's measurements.
+
+Add apple,d2089-tristar-charger with its own match data. The D2207 and
+D2365 entries are unchanged.
+
+Assisted-by: LLM
+---
+ drivers/power/supply/apple_tristar_charger.c | 26 +++++++++++++++++++-
+ 1 file changed, 25 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/power/supply/apple_tristar_charger.c b/drivers/power/supply/apple_tristar_charger.c
+index f2c11557c..2364fe33b 100644
+--- a/drivers/power/supply/apple_tristar_charger.c
++++ b/drivers/power/supply/apple_tristar_charger.c
+@@ -1,7 +1,8 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ /*
+  * Lightning charging for Apple devices with a Tristar (CBTL1610) port
+- * controller and a D2365-family PMIC (D2365, or the iPad Air 2's D2207).
++ * controller and a D2365-family PMIC (D2365, the iPad Air 2's D2207 or the
++ * A7 iPads' D2089).
+  *
+  * iBoot leaves the PMIC input-current limit at 100 mA. On every attachment
+  * this driver identifies the source and grants what it advertises, up to the
+@@ -107,6 +108,28 @@ static const struct tristar_pmic tristar_d2207 = {
+ 	.plug_event = 0,
+ };
+ 
++/*
++ * D2089 (A7 iPads), from iOS 12 AppleD2089PMU and AppleD2089PMUPowerSource:
++ * the D2207's layout. The power source reads the 13 status bytes at 0x60
++ * and takes bit 0 of 0x60 as connected, needing bit 3 as well for a new
++ * connection; it writes the input limit to 0x4c0 as (mA - 75) / 12.5. The
++ * ADC starts with bit 7 and the channel in 0x500 (6 for the Tristar's
++ * BrickID line, the ADT's function-brick_id_voltage), returns 12 bits at
++ * 0x502 that iOS scales for channel 6 as this driver does, and is cleared
++ * through 0x501 and 0x500 after each read. ADC done is event 89; the plug
++ * event is event 0.
++ */
++static const struct tristar_pmic tristar_d2089 = {
++	.connected = 0x00,
++	.connected_new = BIT(3),
++	.status = 0x02,
++	.input_limit = 0x00,
++	.adc_start = TRISTAR_CHG_ADC_START | 6,
++	.adc_result = 0x02,
++	.adc_rearm = true,
++	.plug_event = 0,
++};
++
+ /* Interrupts: the PMU line, ADC completion, then the source-change events. */
+ #define TRISTAR_IRQ_LINE		0
+ #define TRISTAR_IRQ_ADC			1
+@@ -1769,6 +1792,7 @@ static const struct dev_pm_ops tristar_pm_ops = {
+ };
+ 
+ static const struct of_device_id tristar_of_match[] = {
++	{ .compatible = "apple,d2089-tristar-charger", .data = &tristar_d2089 },
+ 	{ .compatible = "apple,d2207-tristar-charger", .data = &tristar_d2207 },
+ 	{ .compatible = "apple,tristar-charger", .data = &tristar_d2365 },
+ 	{ }

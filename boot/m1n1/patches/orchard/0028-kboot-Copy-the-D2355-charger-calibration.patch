@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Tue, 24 Nov 2026 08:35:25 +0800
+Subject: [PATCH] kboot: Copy the D2355 charger calibration
+
+The D2355 Lightning charger of the A10X iPad Pro 2 scales its input
+current by the unit's factory calibration, the 84-byte
+usb-input-limit-calibration-hv of the ADT's /charger node. Copy it into
+the charger's node (apple,d2355-tristar-charger), as the touch and light
+sensor calibrations are, so that Linux reads it from there instead of a
+file the installer extracted from the ADT. Units without the table are
+left without it; the charger driver then does not bind.
+
+Assisted-by: LLM
+---
+ src/kboot.c | 30 ++++++++++++++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/src/kboot.c b/src/kboot.c
+index b75bb45..52737e0 100644
+--- a/src/kboot.c
++++ b/src/kboot.c
+@@ -1018,6 +1018,34 @@ static int dt_set_als(void)
+     return 0;
+ }
+ 
++/*
++ * The D2355 Lightning charger (A10X iPad Pro 2) scales its input-current
++ * limit by the unit's calibration in the ADT's /charger node. Copy the
++ * table into the charger's node.
++ */
++static int dt_set_charger_calibration(void)
++{
++    int node = fdt_node_offset_by_compatible(dt, -1, "apple,d2355-tristar-charger");
++    if (node < 0)
++        return 0;
++
++    int anode = adt_path_offset(adt, "/charger");
++    if (anode < 0) {
++        printf("ADT: /charger not found\n");
++        return 0;
++    }
++
++    u32 len;
++    const u8 *table = adt_getprop(adt, anode, "usb-input-limit-calibration-hv", &len);
++    if (!table || len != 84) {
++        printf("ADT: charger input-limit calibration missing\n");
++        return 0;
++    }
++    if (fdt_setprop(dt, node, "apple,usb-input-limit-calibration-hv", table, len) < 0)
++        bail("FDT: failed to set apple,usb-input-limit-calibration-hv\n");
++    return 0;
++}
++
+ /*
+  * The A9's AOP firmware also takes the AOP target number and the chip's ID and
+  * revision in its boot arguments, and each motion sensor's factory
+@@ -3230,6 +3258,8 @@ int kboot_prepare_dt(void *fdt)
+         return -1;
+     if (dt_set_als())
+         return -1;
++    if (dt_set_charger_calibration())
++        return -1;
+     if (dt_set_aop())
+         return -1;
+     if (dt_set_sep())

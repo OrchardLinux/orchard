@@ -1,0 +1,172 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Tue, 24 Nov 2026 00:27:04 +0800
+Subject: [PATCH] arm64: dts: apple: t8015: Describe Wi-Fi on every A11 iPhone
+
+Only the iPhone X (GSM, D221) described its Wi-Fi. Apple's iOS 16.7.16
+device trees give all six A11 iPhones the same Wi-Fi wiring: a BCM4357
+on PCIe port 3 behind dart-apcie3, PERST# on AP GPIO 167, CLKREQ# on
+163, device-wake on 40 and REG_ON on SMC PMU GPIO 14 ("gP0e"); only the
+module (apolloe, apollok, pegasuse, pegasusk, herculese, herculesk)
+differs, and brcmfmac reads that from the ADT.
+
+Move the port, the regulator and the endpoint from t8015-x.dtsi and the
+D221 board file to t8015-common.dtsi, so the iPhone 8, iPhone 8 Plus and
+iPhone X (Global) get Wi-Fi too. The D221 tree only gains the wifi0
+alias. Untested on the other boards.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8015-common.dtsi | 61 +++++++++++++++++++++
+ arch/arm64/boot/dts/apple/t8015-d221.dts    | 28 +---------
+ arch/arm64/boot/dts/apple/t8015-x.dtsi      | 26 ---------
+ 3 files changed, 64 insertions(+), 51 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8015-common.dtsi b/arch/arm64/boot/dts/apple/t8015-common.dtsi
+index 243c02f..f1b9296 100644
+--- a/arch/arm64/boot/dts/apple/t8015-common.dtsi
++++ b/arch/arm64/boot/dts/apple/t8015-common.dtsi
+@@ -108,3 +108,64 @@
+ 	apple,always-on;
+ 	apple,manual-pm;
+ };
++
++/*
++ * Wi-Fi, the same on every A11 iPhone (iOS 16.7.16 DeviceTree.d20ap, d201ap,
++ * d21ap, d211ap, d22ap, d221ap): a BCM4357 on PCIe port 3 behind
++ * dart-apcie3, PERST# on AP GPIO 167, CLKREQ# on 163, device-wake on 40, and
++ * REG_ON on SMC PMU GPIO 14 ("gP0e"). brcmfmac takes the module (apolloe,
++ * pegasusk, herculese, ...) from the ADT's module-instance.
++ */
++/ {
++	aliases {
++		wifi0 = &wifi0;
++	};
++
++	wlan_vdd: regulator-wlan-vdd {
++		compatible = "regulator-fixed";
++		regulator-name = "wlan-vdd";
++		gpio = <&smc_gpio 14 GPIO_ACTIVE_HIGH>;
++		enable-active-high;
++		off-on-delay-us = <2500>;
++	};
++};
++
++&apcie {
++	iommu-map = <0x100 &dart_apcie3 0 0x0 0x80000000 0x0 0x3ffff000 1>;
++	iommu-map-mask = <0xff00>;
++	pinctrl-0 = <&wifi_clkreq>;
++	pinctrl-names = "default";
++	status = "okay";
++
++	port03: pci@3,0 {
++		device_type = "pci";
++		reg = <0x1800 0x0 0x0 0x0 0x0>;
++		bus-range = <1 1>;
++		max-link-speed = <2>;
++		apple,manual-availability-iommu = <&dart_apcie3 0>;
++		reset-gpios = <&pinctrl_ap 167 GPIO_ACTIVE_LOW>;
++
++		#address-cells = <3>;
++		#size-cells = <2>;
++		ranges;
++
++		wifi0: wifi@0,0 {
++			compatible = "pci14e4,440a";
++			reg = <0x10000 0x0 0x0 0x0 0x0>;
++			device-wake-gpios = <&pinctrl_ap 40 GPIO_ACTIVE_HIGH>;
++			vdd-supply = <&wlan_vdd>;
++			brcm,ccode-map-trivial;
++		};
++	};
++};
++
++/* The Wi-Fi port's DART: apple-h9p reloads it by hand and needs its device. */
++&dart_apcie3 {
++	status = "okay";
++};
++
++&pinctrl_ap {
++	wifi_clkreq: wifi-clkreq-pins {
++		pinmux = <APPLE_PINMUX(163, 1)>;
++	};
++};
+diff --git a/arch/arm64/boot/dts/apple/t8015-d221.dts b/arch/arm64/boot/dts/apple/t8015-d221.dts
+index 4abebf4..210790e 100644
+--- a/arch/arm64/boot/dts/apple/t8015-d221.dts
++++ b/arch/arm64/boot/dts/apple/t8015-d221.dts
+@@ -11,31 +11,9 @@
+ / {
+ 	compatible = "apple,d221", "apple,t8015", "apple,arm-platform";
+ 	model = "Apple iPhone X (GSM)";
+-
+-	/* The BCM4357's REG_ON: SMC PMU GPIO 14 ("gP0e"), active-high. */
+-	wlan_vdd: regulator-wlan-vdd {
+-		compatible = "regulator-fixed";
+-		regulator-name = "wlan-vdd";
+-		gpio = <&smc_gpio 14 GPIO_ACTIVE_HIGH>;
+-		enable-active-high;
+-		off-on-delay-us = <2500>;
+-	};
+-};
+-
+-&apcie {
+-	status = "okay";
+-};
+-
+-&dart_apcie3 {
+-	status = "okay";
+ };
+ 
+-&port03 {
+-	wifi0: wifi@0,0 {
+-		compatible = "apple,d221-bcm4357-wifi", "pci14e4,440a";
+-		reg = <0x10000 0x0 0x0 0x0 0x0>;
+-		device-wake-gpios = <&pinctrl_ap 40 GPIO_ACTIVE_HIGH>;
+-		vdd-supply = <&wlan_vdd>;
+-		brcm,ccode-map-trivial;
+-	};
++/* The D221 keeps its own name for the module ahead of the PCI ID. */
++&wifi0 {
++	compatible = "apple,d221-bcm4357-wifi", "pci14e4,440a";
+ };
+diff --git a/arch/arm64/boot/dts/apple/t8015-x.dtsi b/arch/arm64/boot/dts/apple/t8015-x.dtsi
+index 84d09c4..d34080a 100644
+--- a/arch/arm64/boot/dts/apple/t8015-x.dtsi
++++ b/arch/arm64/boot/dts/apple/t8015-x.dtsi
+@@ -17,32 +17,6 @@
+ 	};
+ };
+ 
+-&apcie {
+-	iommu-map = <0x100 &dart_apcie3 0 0x0 0x80000000 0x0 0x3ffff000 1>;
+-	iommu-map-mask = <0xff00>;
+-	pinctrl-0 = <&wifi_clkreq>;
+-	pinctrl-names = "default";
+-
+-	port03: pci@3,0 {
+-		device_type = "pci";
+-		reg = <0x1800 0x0 0x0 0x0 0x0>;
+-		bus-range = <1 1>;
+-		max-link-speed = <2>;
+-		apple,manual-availability-iommu = <&dart_apcie3 0>;
+-		reset-gpios = <&pinctrl_ap 167 GPIO_ACTIVE_LOW>;
+-
+-		#address-cells = <3>;
+-		#size-cells = <2>;
+-		ranges;
+-	};
+-};
+-
+-&pinctrl_ap {
+-	wifi_clkreq: wifi-clkreq-pins {
+-		pinmux = <APPLE_PINMUX(163, 1)>;
+-	};
+-};
+-
+ &i2c3 {
+ 	status = "okay";
+ 
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Fri, 20 Nov 2026 09:38:35 +0100
+Subject: [PATCH] dt-bindings: media: describe the T8011 VXD decoder
+
+T8011 reports decoder version 10, with the same two register ranges as T8010. Describe its specific compatible with the T8010 fallback.
+
+[Orchard: from OrchardLinux/orchard#205 (tompta1, 09038adf),
+ kernel/patches/drivers/media/0013-dt-bindings-media-describe-the-T8011-VXD-decoder.patch; rebased onto main, otherwise unchanged.]
+
+Assisted-by: LLM
+---
+ .../bindings/media/apple,s8000-vxd.yaml       | 19 ++++++++++++-------
+ 1 file changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/media/apple,s8000-vxd.yaml b/Documentation/devicetree/bindings/media/apple,s8000-vxd.yaml
+index a6c1aebb7..cb60e14c8 100644
+--- a/Documentation/devicetree/bindings/media/apple,s8000-vxd.yaml
++++ b/Documentation/devicetree/bindings/media/apple,s8000-vxd.yaml
+@@ -13,21 +13,26 @@ description:
+   The Apple "VXD" block is a multi-standard hardware video decoder, an
+   Imagination PowerVR MSVDX core whose MTX (META) microcontroller runs the
+   DEVA firmware. Apple has used this IP family since the S5L8940X (A4); the
+-  S8000/S8003 (A9) reports vxd-version 7 in the Apple device tree, the T8010
+-  (A10) vxd-version 10. The block has no DART; it translates its own memory accesses through a two-level
+-  "GART" that the host programs through the MTX MMU registers.
++  S8000/S8003 (A9) reports vxd-version 7 in the Apple device tree, and T8010
++  (A10) and T8011 (A10X) report vxd-version 10. The block has no DART; it
++  translates its own memory accesses through a two-level "GART" that the host
++  programs through the MTX MMU registers.
+ 
+ properties:
+   compatible:
+-    enum:
+-      - apple,s8000-vxd
+-      - apple,t8010-vxd
++    oneOf:
++      - enum:
++          - apple,s8000-vxd
++          - apple,t8010-vxd
++      - items:
++          - const: apple,t8011-vxd
++          - const: apple,t8010-vxd
+ 
+   reg:
+     minItems: 1
+     items:
+       - description: decoder core registers
+-      - description: second register range of the T8010 block
++      - description: integration registers on T8010 and T8011
+ 
+   interrupts:
+     maxItems: 1

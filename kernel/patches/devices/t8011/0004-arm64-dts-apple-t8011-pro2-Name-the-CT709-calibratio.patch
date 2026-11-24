@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Tue, 24 Nov 2026 08:30:40 +0800
+Subject: [PATCH] arm64: dts: apple: t8011-pro2: Name the CT709 calibration
+ records
+
+The J120's calibration has record 6 for the sensor at 0x29 and record 5
+for the one at 0x39, as the CT709 driver took them from the addresses.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t8011-pro2.dtsi | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t8011-pro2.dtsi b/arch/arm64/boot/dts/apple/t8011-pro2.dtsi
+index 6fd90acbe..cd2026ff3 100644
+--- a/arch/arm64/boot/dts/apple/t8011-pro2.dtsi
++++ b/arch/arm64/boot/dts/apple/t8011-pro2.dtsi
+@@ -260,14 +260,17 @@
+ &i2c3 {
+ 	status = "okay";
+ 
++	/* Calibration records: orientation 6 for 0x29, 5 for 0x39 (J120). */
+ 	als0: light-sensor@29 {
+ 		compatible = "apple,ct709";
+ 		reg = <0x29>;
++		apple,als-orientation = <6>;
+ 	};
+ 
+ 	light-sensor@39 {
+ 		compatible = "apple,ct709";
+ 		reg = <0x39>;
++		apple,als-orientation = <5>;
+ 	};
+ };
+ 

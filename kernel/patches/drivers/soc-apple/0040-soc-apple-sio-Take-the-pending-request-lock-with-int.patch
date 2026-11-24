@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Tue, 24 Nov 2026 03:29:26 +0800
+Subject: [PATCH] soc: apple: sio: Take the pending-request lock with
+ interrupts off
+
+The receive path looks requests up under the xarray lock with interrupts
+saved, but submission inserts them with plain xa_insert(), and setup
+replies submit from hard interrupt context. That is a lock inversion and
+can deadlock on one CPU, on every SoC with SmartIO (speakers and
+microphones on the A9 and A10 iPads). Make the xarray IRQ-safe and insert
+with interrupts off.
+
+[Orchard: from OrchardLinux/orchard#205 (tompta1, 09038adf), split out of
+ kernel/patches/drivers/soc-apple/0045 (its T8011 DMA range change is in
+ the T8011 SmartIO patch).]
+
+Assisted-by: LLM
+---
+ drivers/soc/apple/apple-sio-core.c | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/soc/apple/apple-sio-core.c b/drivers/soc/apple/apple-sio-core.c
+index 0fc5b5928..919fbc59e 100644
+--- a/drivers/soc/apple/apple-sio-core.c
++++ b/drivers/soc/apple/apple-sio-core.c
+@@ -593,7 +593,14 @@ apple_sio_request_async_common(struct apple_sio *sio, u8 endpoint, u8 opcode,
+ 	request->status = -EINPROGRESS;
+ 	request->active = true;
+ 
+-	ret = xa_insert(&sio->pending, request->key, request, gfp);
++	/* Setup replies submit requests from hard IRQ context. */
++	if (atomic) {
++		xa_lock_irqsave(&sio->pending, flags);
++		ret = __xa_insert(&sio->pending, request->key, request, gfp);
++		xa_unlock_irqrestore(&sio->pending, flags);
++	} else {
++		ret = xa_insert_irq(&sio->pending, request->key, request, gfp);
++	}
+ 	if (ret) {
+ 		apple_sio_tag_free(sio, endpoint, tag);
+ 		apple_sio_async_put(request);
+@@ -1050,7 +1057,7 @@ static int apple_sio_probe(struct platform_device *pdev)
+ 	mutex_init(&sio->tx_lock);
+ 	spin_lock_init(&sio->tx_hw_lock);
+ 	spin_lock_init(&sio->tag_lock);
+-	xa_init(&sio->pending);
++	xa_init_flags(&sio->pending, XA_FLAGS_LOCK_IRQ);
+ 	spin_lock_init(&sio->desc0_lock);
+ 	platform_set_drvdata(pdev, sio);
+ 
