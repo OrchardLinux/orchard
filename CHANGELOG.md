@@ -56,6 +56,9 @@ is missing or empty.
   about 1.4 A while awake. The charger lowers or cuts its input when the
   battery is too cold or hot. Asleep it charges at 300 mA. The iPhone 6s and
   SE share the change, untested.
+- iPhone 6s Plus (A9): the desktop draws on the GPU. Omarchy's compositor
+  renders through Zink on the A9's PowerVR GPU, which main already supports
+  for every A9 board. The iPhone 6s and SE are untested.
 - iPad Air and iPad mini 2 and 3 (A7): internal storage keeps working across
   sleep, also with writes in flight. The storage controller finishes its
   commands before sleep and is restarted after it, and its NAND clock stays
