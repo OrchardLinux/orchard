@@ -39,7 +39,7 @@ Every device Orchard installs on. ✅ works · ❌ doesn't work yet · – no su
 | iPad 5 (Wi-Fi) | A9, TSMC | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [brkosebay](https://github.com/brkosebay) |
 | iPhone 6s | A9, Samsung | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | – |
 | iPhone 6s | A9, TSMC | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | – |
-| iPhone 6s Plus | A9, Samsung | ✅ | 🤔 | ✅ | ✅ | 🤔 | ✅ | 🤔 | ✅ | ✅ | [ricktav](https://github.com/ricktav) |
+| iPhone 6s Plus | A9, Samsung | ✅ | 🤔 | ✅ | ✅ | 🤔 | ✅ | ✅ | ✅ | ✅ | [ricktav](https://github.com/ricktav) |
 | iPhone 6s Plus | A9, TSMC | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | – |
 | iPhone SE | A9, Samsung | 🤔 | 🤔 | 🤔 | ❌ | ❌ | ❌ | 🤔 | 🤔 | 🤔 | – |
 | iPhone SE | A9, TSMC | 🤔 | 🤔 | 🤔 | ❌ | ❌ | ❌ | 🤔 | 🤔 | 🤔 | – |
@@ -217,7 +217,7 @@ Boards Orchard builds for. States: working, untested, missing, none (no such har
 | `j82` | untested | untested | untested | missing | untested | untested | missing | missing | missing | missing | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | untested | untested | missing | untested | missing | missing | missing |
 | `j71s` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | none | untested | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested |
 | `j72s` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested |
-| `n66` | working | working | working | untested | working | working | working | working | working | missing | working | working | working | untested | untested | missing | untested | untested | missing | working | working | untested | untested | missing | working | missing | missing | untested |
+| `n66` | working | working | working | untested | working | working | working | working | working | missing | working | working | working | untested | untested | missing | working | working | missing | working | working | untested | untested | missing | working | missing | missing | untested |
 | `n69u` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | missing | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | missing | missing | missing | missing | untested |
 | `n71` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | missing | untested | untested | missing | untested | untested | untested | untested | missing | untested | missing | missing | untested |
 | `j71t` | working | working | working | working | working | working | working | working | working | missing | working | working | working | working | untested | none | working | working | working | working | working | working | working | working | working | working | missing | working |

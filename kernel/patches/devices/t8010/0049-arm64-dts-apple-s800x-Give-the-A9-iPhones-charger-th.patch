@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 21:29:55 +0100
+Subject: [PATCH] arm64: dts: apple: s800x: Give the A9 iPhones' charger the
+ USB host's grant
+
+The A9 iPhones' SN2400 charger runs the iPhone 7 charging policy, whose
+input foldback ramps towards the 2 A of the ADT usb-input-limit-max
+until VBUS droops. The USB device controller names no supply, so on a
+computer port nothing caps that ramp at what the host allows.
+
+Give usbdev usb-psy-name, so the charger follows the host's grant
+(100 mA unconfigured, then bMaxPower, more after an Apple host's
+grant), and give serial5, the gauge's HDQ UART, a fixed alias as on
+the iPad 5.
+
+On the iPhone 6s Plus (2026-11-23) the gauge reads over HDQ through the
+SN2400 switch, and from a Mac port the charger runs at the 500 mA grant
+(0x09 = 0x29) and the battery charges at +250 mA net.
+
+Assisted-by: LLM
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+---
+ arch/arm64/boot/dts/apple/s800x-iphone.dtsi | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/s800x-iphone.dtsi b/arch/arm64/boot/dts/apple/s800x-iphone.dtsi
+index ac41c8e40..a6baf77a7 100644
+--- a/arch/arm64/boot/dts/apple/s800x-iphone.dtsi
++++ b/arch/arm64/boot/dts/apple/s800x-iphone.dtsi
+@@ -14,6 +14,7 @@ aliases {
+ 		als0 = &als;	/* the loader copies the ADT's alsCalibration here */
+ 		spi2 = &spi2;
+ 		touchscreen0 = &touchscreen;	/* the loader copies the ADT calibration */
++		serial5 = &serial5;	/* the gauge's HDQ UART: a fixed port, as on the iPad 5 */
+ 	};
+ };
+ 
+@@ -175,3 +176,8 @@ &aop_gyro {
+ 		       "0", "1", "0",
+ 		       "0", "0", "1";
+ };
++
++/* The USB device controller tells the SN2400 driver what the USB host allows. */
++&usbdev {
++	usb-psy-name = "usb";
++};

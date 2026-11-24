@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 21:59:45 +0100
+Subject: [PATCH] power: supply: apple_sn2400_charger: Read IBUS at 7.8 mA per
+ LSB
+
+The driver converts the IBUS ADC channel at 10 mA per LSB. iOS 15.8.8's
+AppleSN2400Charger (iPhone 6s Plus kernelcache) converts channel 2 as
+value * 78 / 10000 A, channel 0 (VBUS) as 25 mV and channels 6 and 10
+(VDD_MAIN) as 2.5 V + 10 mV per LSB, which the driver already uses.
+
+On the iPhone 6s Plus the old scale read 640 mA with the input limit at
+500 mA (0x09 = 0x29, which iOS writes for 500 mA), 130 mA at 100 mA and
+110 mA at 90 mA: all 64, 13 and 11 LSB, which at 7.8 mA are 499, 101
+and 86 mA. The battery's +250 mA at 500 mA in agrees with the lower
+value. The input limit was right; only the reading was high.
+
+Assisted-by: LLM
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+---
+ drivers/power/supply/apple_sn2400_charger.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/power/supply/apple_sn2400_charger.c b/drivers/power/supply/apple_sn2400_charger.c
+index def90d99e..31e57028a 100644
+--- a/drivers/power/supply/apple_sn2400_charger.c
++++ b/drivers/power/supply/apple_sn2400_charger.c
+@@ -148,7 +148,8 @@ static int sn2400_read_adc(struct sn2400_charger *charger,
+ 		*result = value * 25000;
+ 		break;
+ 	case SN2400_ADC_CHANNEL_IBUS:
+-		*result = value * 10000;
++		/* iOS AppleSN2400Charger: 78/10000 A per LSB */
++		*result = value * 7800;
+ 		break;
+ 	case SN2400_ADC_CHANNEL_VDD_MAIN:
+ 		*result = 2500000 + value * 10000;
