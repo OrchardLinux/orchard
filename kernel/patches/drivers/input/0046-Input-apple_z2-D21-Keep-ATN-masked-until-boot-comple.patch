@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dugs <dugahol@protonmail.com>
+Date: Wed, 25 Nov 2026 02:00:00 +0800
+Subject: [PATCH 46/47] Input: apple_z2: D21: Keep ATN masked until boot
+ completes
+
+Re-mask the D21 touch interrupt after the firmware wait-IRQ step and
+unmask it once, after the first post-boot read, instead of leaving it
+live through the rest of the boot.
+
+[Orchard: ported from ryzensnyper/iPhOmarchy bf21c603 unchanged]
+
+Assisted-by: LLM
+Signed-off-by: Dugs <dugahol@protonmail.com>
+---
+ drivers/input/touchscreen/apple_z2_d21.h | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/drivers/input/touchscreen/apple_z2_d21.h b/drivers/input/touchscreen/apple_z2_d21.h
+index 54a6d09..3d33c9a 100644
+--- a/drivers/input/touchscreen/apple_z2_d21.h
++++ b/drivers/input/touchscreen/apple_z2_d21.h
+@@ -4838,6 +4838,11 @@ static int apple_z2_d21_upload_firmware(struct apple_z2_d21 *z2)
+ 			error = apple_z2_d21_wait_ready_irq(z2, timeout_ms);
+ 			if (error)
+ 				return error;
++			if (apple_z2_d21_is_d21(z2)) {
++				/* Keep ATN masked through the rest of boot. */
++				apple_z2_d21_irq_off(z2);
++				z2->upload_irq_masked = true;
++			}
+ 			if (apple_z2_d21_is_j172(z2)) {
+ 				apple_z2_d21_irq_off(z2);
+ 				error = apple_z2_d21_read_device_info_locked(z2);
+@@ -4871,6 +4876,10 @@ static int apple_z2_d21_upload_firmware(struct apple_z2_d21 *z2)
+ 		if (!error) {
+ 			z2->booted = true;
+ 			error = apple_z2_d21_read_packet(z2);
++			if (!error) {
++				z2->upload_irq_masked = false;
++				apple_z2_d21_irq_on(z2);
++			}
+ 		}
+ 		mutex_unlock(&z2->io_lock);
+ 		if (!error && d21_poll_hz) {
+-- 
+2.54.0 (Apple Git-157)
+
