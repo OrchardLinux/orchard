@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tom <tompt@seznam.cz>
+Date: Sun, 22 Nov 2026 12:45:19 +0100
+Subject: [PATCH] dt-bindings: power: describe the D2355 VBUS monitor
+
+Assisted-by: LLM
+---
+ .../bindings/power/supply/apple,d2355-tristar-charger.yaml  | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/power/supply/apple,d2355-tristar-charger.yaml b/Documentation/devicetree/bindings/power/supply/apple,d2355-tristar-charger.yaml
+index 23f5c5769..1dba6fb63 100644
+--- a/Documentation/devicetree/bindings/power/supply/apple,d2355-tristar-charger.yaml
++++ b/Documentation/devicetree/bindings/power/supply/apple,d2355-tristar-charger.yaml
+@@ -19,6 +19,12 @@ allOf:
+   - $ref: power-supply.yaml#
+ 
+ properties:
++  io-channels:
++    maxItems: 1
++
++  io-channel-names:
++    const: vbus
++
+   compatible:
+     const: apple,d2355-tristar-charger
+ 
