@@ -88,7 +88,6 @@ is missing or empty.
   nobody cared"). No A7 iPad's audio controller uses its interrupt any
   more, as the iPad mini 2's already did; playback never relied on it.
   Thanks to ricktav. Tested on the iPad Air (Wi-Fi).
-
 - iPod touch 6, iPhone 6 and 6 Plus and iPad mini 4 (A8): an installed
   system's desktop finds the GPU on every boot, without a kernel option, and
   a GPU app started on the GPU desktop no longer crashes or takes the GPU
