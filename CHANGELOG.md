@@ -51,6 +51,18 @@ is missing or empty.
   speaker protection yet. The iPhone 6s has the same speaker path and gets
   it too, untested. The earpiece, headphones and microphones need the
   CS42L71 codec, which has no driver yet.
+- iPhone 6s Plus (A9): the battery gauge works and the phone charges, from
+  a computer at the 500 mA it grants and from an Apple wall adapter at up to
+  about 1.4 A while awake. The charger lowers or cuts its input when the
+  battery is too cold or hot. Asleep it charges at 300 mA. The iPhone 6s and
+  SE share the change, and the iPhone 7 and 7 Plus get the same limit at a
+  computer port and the same temperature guard, all untested. RAM boots on
+  every device now ask the computer for 500 mA, as installed systems
+  already do, so devices whose charger follows the computer's limit charge
+  faster during a RAM boot.
+- iPhone 6s Plus (A9): the desktop draws on the GPU. Omarchy's compositor
+  renders through Zink on the A9's PowerVR GPU, which main already supports
+  for every A9 board. The iPhone 6s and SE are untested.
 - iPad Air and iPad mini 2 and 3 (A7): internal storage keeps working across
   sleep, also with writes in flight. The storage controller finishes its
   commands before sleep and is restarted after it, and its NAND clock stays
