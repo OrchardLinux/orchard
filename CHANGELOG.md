@@ -83,6 +83,13 @@ is missing or empty.
   An iPad mini 2 (Wi-Fi) played both speakers with an earlier version of
   the driver; this one is untested on every model. The headphone jack and
   the microphones do not work yet.
+- iPod touch 6, iPhone 6 and 6 Plus and iPad mini 4 (A8): an installed
+  system's desktop finds the GPU on every boot, without a kernel option, and
+  a GPU app started on the GPU desktop no longer crashes or takes the GPU
+  down with it. On the iPod touch 6 two GPU apps ran next to the desktop with
+  no faults; the iPhone 6 and 6 Plus and the iPad mini 4 are untested. If the
+  GPU does not draw, the login still falls back to the software desktop.
+  By brkosebay (thanks!).
 
 ## [0.3.6] - 2026-11-24
 
