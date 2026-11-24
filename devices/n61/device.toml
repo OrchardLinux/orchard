@@ -26,14 +26,14 @@ recipe = "firmware.json" # The GPU firmware comes from the iPod touch 6's iOS 12
 
 [support]
 status = "experimental"
-tested_by = ["amethyst-oak"] # issue #61
+tested_by = ["amethyst-oak", "jeroentrappers"] # issue #61; GPU in #196
 
 # States: working, untested, missing, none (features.toml).
 [features]
 display = "working" # The minimal-boot framebuffer console was visible on the LCD.
 screen_off = "untested"
 backlight = "untested"
-gpu_desktop = "untested"
+gpu_desktop = "untested" # GPU driver, Vulkan and GPU buffers on the display pass here (jeroentrappers, #196); the desktop itself not yet run on the GPU
 touch = "working" # Taps and swipes produced raw evdev contacts/releases in minimal-boot.
 buttons = "untested"
 accelerometer = "missing"
