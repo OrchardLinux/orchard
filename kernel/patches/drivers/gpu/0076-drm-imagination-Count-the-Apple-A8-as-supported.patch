@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 19:30:00 +0100
+Subject: [PATCH] drm/imagination: Count the Apple A8 as supported
+
+The A8's GPU (BVNC 3.10.4.5) runs Vulkan and, through Zink, the GLES
+desktop on the iPod touch 6, and passes the probe, Vulkan and display
+checks on the iPhone 6 and the iPad mini 4. Bind to it without
+powervr.exp_hw_support, as to the A9's and the A10's, so an installed
+system's desktop finds the GPU on every boot of a board that enables its
+node; the login's GPU probe still falls back to the software desktop if
+it does not draw.
+
+Assisted-by: LLM
+---
+ drivers/gpu/drm/imagination/pvr_device.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/gpu/drm/imagination/pvr_device.c b/drivers/gpu/drm/imagination/pvr_device.c
+index 01f9f6041c..54e51102e1 100644
+--- a/drivers/gpu/drm/imagination/pvr_device.c
++++ b/drivers/gpu/drm/imagination/pvr_device.c
+@@ -542,6 +542,7 @@ pvr_gpu_support_level(const struct pvr_gpu_id *gpu_id)
+ 	case PVR_PACKED_BVNC(36, 53, 104, 796):
+ 	case PVR_PACKED_BVNC(13, 10, 6, 2):	/* Apple A10 (T8010) */
+ 	case PVR_PACKED_BVNC(9, 15, 6, 2):	/* Apple A9 (S8003) */
++	case PVR_PACKED_BVNC(3, 10, 4, 5):	/* Apple A8 (T7000) */
+ 		return PVR_GPU_SUPPORTED;
+
+ 	default:
