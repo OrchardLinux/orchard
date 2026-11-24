@@ -189,7 +189,7 @@ index 8f1bc7a54..7ee7fe4b0 100644
 +	WRITE_ONCE(charger->usb_grant_ua, grant);
 +	dev_dbg(charger->dev, "USB host allows %u mA\n", grant / 1000);
 +	if (charger->control && !charger->stopped)
-+		mod_delayed_work(system_wq, &charger->work, 0);
++		mod_delayed_work(system_percpu_wq, &charger->work, 0);
 +	mutex_unlock(&charger->lock);
 +
 +	power_supply_changed(psy);
