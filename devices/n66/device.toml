@@ -51,7 +51,7 @@ cellular = "missing"
 battery = "untested" # bq27540 gauge on uart5 behind the SN2400's HDQ mux
 charging = "untested" # SN2400 charger
 charging_control = "missing" # The SN2400 driver has no writable limit yet
-suspend = "working" # s2idle from idle and from Power, 6 of 6 (3 s to 9 min), wakes on Home and Power; cable plugged in asleep (Omarchy A from storage, 2026-11-23)
+suspend = "working" # s2idle from idle and from Power, 6 of 6 (3 s to 9 min), wakes on Home and Power; cable plugged in asleep (Omarchy A from storage, 2026-11-23). With the AOP running it needs the AOP GPIO domain kept on (t8010/0048): pm_test=platform and a Power wake, the AOP still answering after (RAM boot, 2026-11-24)
 resume = "working" # every one of the 6 sleeps woke on Home or Power with the screen back in 1-15 ms and the USB network back (Omarchy A from storage, 2026-11-23)
 usb_serial = "untested"
 usb_network = "untested"
