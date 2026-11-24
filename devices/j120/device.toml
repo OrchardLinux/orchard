@@ -32,15 +32,15 @@ tested_by = ["tompta1"]
 # tompta1's J120 with his build (#205, November 2026); README lists what the
 # integration changed since. "untested" means a driver binds in its device tree.
 [features]
-display = "working" # boot framebuffer (simpledrm)
+display = "working" # boot framebuffer (simpledrm), 60 or 120 Hz
 screen_off = "missing"
 backlight = "working"
 gpu_desktop = "missing"
 touch = "working" # apple_z2 K1, K1F18,3
-buttons = "working" # Power and Home; the Smart Cover is now a D2400 GPIO key, untested
+buttons = "working" # Power and Home; Smart Cover through both hall sensors (polled)
 accelerometer = "working" # AOP
 gyroscope = "untested"
-light_sensor = "missing" # two CT709 on I2C3; driver not merged yet (README)
+light_sensor = "working" # two CT709 on I2C3, calibrated illuminance
 touch_id = "missing"
 storage_read = "working"
 storage_write = "working" # tompta1 installed to and booted from internal storage
@@ -49,14 +49,14 @@ bluetooth_input = "working"
 bluetooth_audio = "working"
 cellular = "none"
 battery = "working" # BQ27540 on UART5 HDQ
-charging = "untested" # the D2355 Tristar charger driver is not merged yet; the boot loader's input limit stays (README)
+charging = "working" # D2355 Tristar charger, up to 1.5 A while VBUS reads 4.75-5.5 V
 charging_control = "missing"
 suspend = "working"
 resume = "working"
 usb_serial = "working"
 usb_network = "working"
 usb_host = "missing"
-audio_output = "untested" # headphones (CS42L83 on MCA4); the four speakers are not merged yet (README)
+audio_output = "working" # four speakers (MAX98723 on MCA2) and headphones (CS42L83 on MCA4)
 audio_input = "working" # two PDM microphones
 camera = "missing"
 video_decode_hevc = "untested" # the VXD decodes H.264, as on the A10

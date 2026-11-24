@@ -2,7 +2,7 @@
 
 Hardware identity, the boot method and the firmware recipe are in
 [`device.toml`](device.toml). This file tracks what needs testing, known
-issues, open work and contributed code that is not in the tree yet.
+issues and the cleanup still open.
 
 The J120 was brought up by tompta1 (#205). His drivers were reworked to
 match each other board with the same hardware: the device tree lives in
@@ -10,6 +10,11 @@ match each other board with the same hardware: the device tree lives in
 device trees differ only in panel, touch personality, Wi-Fi module and
 baseband), and the shared drivers are keyed on the SoC or chip, not on
 the J120.
+
+The parts first held back (speakers, charging, light sensors, 120 Hz, the
+Smart Cover driver, his storage limits and HDQ transport) are in as he
+built them, with Orchard's adaptations and cleanups on top; his #205 commit
+is tagged `contrib/tompta1-j120`.
 
 ## Known issues
 
@@ -29,54 +34,36 @@ These changed between tompta1's build and the integrated one:
 - Wi-Fi: powered by the BCM4355 sequence the iPad 6 uses, with the ADT's
   device-wake GPIO 164, instead of REG_ON only.
 - Bluetooth: Patchram and regulatory table now named by module vendor
-  (`BCM.apple,j120-USI.hcd`, `-MUR`), the vendor read through the Wi-Fi
-  node; the unit's address and RF calibration from m1n1.
-- Storage: handled as on the A10 iPads, without the bring-up write limits
-  (namespace 1 only, no discard, admin allow-list).
-- Battery: the shared HDQ transport, without the J120 read budget,
-  command allow-list and stop-on-first-error.
-- Smart Cover: D2400 GPIO 0 through gpio-keys, with both hall events as
-  wake events (cover-open wake is new).
+  (`BCM.apple,j120-USI.hcd`, `-MUR`), the vendor read from the Wi-Fi OTP by
+  brcmfmac (the same record and key as tompta1's OTP layout read); the
+  unit's address and RF calibration from m1n1.
 - Touch: renamed to the K1 controller; logging trimmed.
+- Charging: the unit's input-current calibration comes from m1n1 (ADT
+  `/charger usb-input-limit-calibration-hv`) instead of a file the
+  installer extracted, so the charger also binds on a RAM boot.
+- Light sensors: each CT709 finds its calibration record by
+  `apple,als-orientation` (6 for 0x29, 5 for 0x39), no longer by board.
+- Display: the 60/120 Hz switch is keyed on the H9G display and panel, not
+  on the board.
+- PMGR reset read-back: on the A10X only.
+- Smart Cover and speakers: described in the shared iPad Pro 2 device tree.
 
-## Open work
+Storage keeps tompta1's write limits (namespace 1 only), the battery his
+bounded HDQ transport and the Smart Cover his two-sensor polled driver, as
+in his working setup.
 
-1. Speakers: the four MAX98723 amplifiers (I2C1/I2C2 at 0x31/0x32, shared
-   reset GPIO 119) as a codec driver (the register map is MAX98927's) with
-   per-board `speaker-config` in the device tree, and the T8011 MCA2
-   (eight 16-bit slots, 256-clock frame, V/I feedback capture). Speaker
-   protection needs a stated plan.
-2. Charging: the D2355 Tristar charger with its per-unit input-current
-   calibration copied by m1n1 from the ADT (`/charger
-   usb-input-limit-calibration-hv`), battery limits from
-   `monitored-battery`, the Orion VBUS ADC guard, and a check of the
-   "input disabled" handoff code on unplug, remove and suspend.
-3. Light sensors: a CT709 (TCS3400 family) IIO driver keyed on the
-   sensor, with the calibration record per sensor node.
-4. Display: 120 Hz through an H9G display driver, not simpledrm.
-5. Boot from internal storage: an m1n1 NVMe backend for `apcie,t8011`
-   (the J120 m1n1 changes were not published).
-6. HDQ: a generic write-opcode filter for every HDQ master and w1 master
-   parent registration, if still needed on J120.
-7. `pmdomain: apple: verify PMGR reset state`: check on J71b first.
+## Cleanup
+
+What still needs a J120 is tracked in
+[#225](https://github.com/OrchardLinux/orchard/issues/225):
+
+1. Speakers on the upstream MAX98927 codec driver with per-board
+   `speaker-config`, and a speaker protection plan.
+2. 120 Hz in the adbe display driver instead of simpledrm.
+3. The Smart Cover as a general driver over the D2400 GPIO lines.
+4. A generic HDQ write-opcode filter instead of the J120 transport.
+5. The PMGR reset read-back on the other SoCs (J71b first).
+6. Boot from internal storage: an m1n1 NVMe backend for `apcie,t8011`.
+7. The storage write limits and the charging window, once qualified.
 8. Firmware recipes for J121, J207 and J208 (Wi-Fi joyb/angera/angerb,
    touch J121/J207/J208.mtprops, Bluetooth).
-
-## Unmerged code
-
-From #205 (tompta1, commit `09038adf`), to be tagged
-`contrib/tompta1-j120` when it lands:
-
-| Path in #205 | Contents |
-| --- | --- |
-| `kernel/patches/drivers/sound/0028`-`0034` | T8011 MCA2 and the J120 speaker amplifier driver (open work 1) |
-| `kernel/patches/drivers/power/0044`, `0045`, `0047`, `0049`, `0053`-`0058` | D2355 Tristar charger, VBUS guard (open work 2) |
-| `kernel/patches/drivers/iio/0016`, `0017` | Orion Bellatrix VBUS ADC (open work 2) |
-| `kernel/patches/drivers/iio/0010`, `0011`, `0013`-`0015` | CT709 light sensors (open work 3) |
-| `kernel/patches/drivers/drm/0012` | simpledrm 60/120 Hz cadences (open work 4) |
-| `kernel/patches/drivers/w1/0003`, `0004`, `0006`, `drivers/power/0048` | bounded HDQ transport, stale-reading expiry (open work 6) |
-| `kernel/patches/drivers/pmdomain/0002` | PMGR reset read-back (open work 7) |
-| `kernel/patches/drivers/input/0036`, `0037` | polled cover driver (replaced by the D2400 GPIO) |
-| `kernel/patches/drivers/nvmem/*`, `drivers/wifi/0011`, `0012` | OTP module-vendor layout (replaced by the existing vendor path) |
-| `src/orchard/apple/adt.py`, `install_remote.py`, `service.py`, `boot-entries`, udev rule | per-unit charger calibration at install (open work 2: m1n1 instead) |
-| `src/orchard/install_direct.py` | FAT flush after unmount (all devices; its own change) |

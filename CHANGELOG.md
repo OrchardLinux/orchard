@@ -16,11 +16,14 @@ is missing or empty.
 - iPad Pro 12.9-inch (2017) (A10X): the touchscreen, internal storage,
   Wi-Fi, Bluetooth, the battery gauge, headphones, both microphones, the
   accelerometer, hardware video decoding and sleep, brought up by tompta1
-  (thanks!). Speakers, charging control and the light sensors follow
-  later. About half of the boots still stop early.
+  (thanks!), now also its four speakers (stereo follows the screen
+  orientation), Lightning charging up to 1.5 A, both light sensors, the
+  120 Hz display mode and the Smart Cover. About half of the boots still
+  stop early.
 - iPad Pro 12.9-inch (2017, Cellular) and iPad Pro 10.5-inch (A10X): the
   same hardware as the iPad Pro 12.9-inch (2017), with touch and Wi-Fi
-  firmware in their recipes. Untested.
+  firmware in their recipes, and its speakers, charging and light sensors.
+  Untested.
 - iPad 6, iPad 7 and the other A9 and A10 devices: fixes found during that
   work for the coprocessor mailbox, SmartIO audio and the Lightning
   charger's interrupt-storm fallback, shared by all of them.

@@ -51,10 +51,10 @@ Every device Orchard installs on. ✅ works · ❌ doesn't work yet · – no su
 | iPhone 7 (Qualcomm) | A10 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | – |
 | iPhone 7 Plus (Intel) | A10 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | – |
 | iPhone 7 Plus (Qualcomm) | A10 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | – |
-| iPad Pro (10.5-inch, Cellular) | A10X | 🤔 | ❌ | 🤔 | 🤔 | ❌ | 🤔 | ❌ | 🤔 | 🤔 | – |
-| iPad Pro (10.5-inch, Wi-Fi) | A10X | 🤔 | ❌ | 🤔 | 🤔 | ❌ | 🤔 | ❌ | 🤔 | 🤔 | – |
-| iPad Pro 2 (12.9-inch, Cellular) | A10X | 🤔 | ❌ | 🤔 | 🤔 | ❌ | 🤔 | ❌ | 🤔 | 🤔 | – |
-| iPad Pro 2 (12.9-inch, Wi-Fi) | A10X | ✅ | ❌ | ✅ | ✅ | ✅ | 🤔 | 🤔 | ✅ | ✅ | [tompta1](https://github.com/tompta1) |
+| iPad Pro (10.5-inch, Cellular) | A10X | 🤔 | ❌ | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | 🤔 | – |
+| iPad Pro (10.5-inch, Wi-Fi) | A10X | 🤔 | ❌ | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | 🤔 | – |
+| iPad Pro 2 (12.9-inch, Cellular) | A10X | 🤔 | ❌ | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | 🤔 | – |
+| iPad Pro 2 (12.9-inch, Wi-Fi) | A10X | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [tompta1](https://github.com/tompta1) |
 | iPhone 8 (GSM) | A11 | 🤔 | ❌ | ❌ | 🤔 | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
 | iPhone 8 (Global) | A11 | 🤔 | ❌ | ❌ | 🤔 | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
 | iPhone 8 Plus (GSM) | A11 | 🤔 | ❌ | ❌ | 🤔 | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
@@ -237,10 +237,10 @@ Boards Orchard builds for. States: working, untested, missing, none (no such har
 | `j172` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested |
 | `j71b` | working | working | working | working | working | working | working | untested | untested | missing | working | working | working | working | working | none | working | working | working | working | working | working | working | untested | working | working | missing | untested |
 | `j72b` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested |
-| `j120` | working | missing | working | missing | working | working | working | untested | missing | missing | working | working | working | working | working | none | working | untested | missing | working | working | working | working | missing | untested | working | missing | untested |
-| `j121` | untested | missing | untested | missing | untested | untested | untested | untested | missing | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | untested | untested | missing | untested |
-| `j207` | untested | missing | untested | missing | untested | untested | untested | untested | missing | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | untested | untested | missing | untested |
-| `j208` | untested | missing | untested | missing | untested | untested | untested | untested | missing | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | untested | untested | missing | untested |
+| `j120` | working | missing | working | missing | working | working | working | untested | working | missing | working | working | working | working | working | none | working | working | missing | working | working | working | working | missing | working | working | missing | untested |
+| `j121` | untested | missing | untested | missing | untested | untested | untested | untested | untested | missing | untested | untested | untested | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | missing | untested | untested | missing | untested |
+| `j207` | untested | missing | untested | missing | untested | untested | untested | untested | untested | missing | untested | untested | untested | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | missing | untested | untested | missing | untested |
+| `j208` | untested | missing | untested | missing | untested | untested | untested | untested | untested | missing | untested | untested | untested | missing | missing | missing | untested | untested | missing | untested | untested | untested | untested | missing | untested | untested | missing | untested |
 | `d20` | untested | untested | untested | missing | missing | untested | missing | missing | missing | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `d201` | untested | untested | untested | missing | missing | untested | missing | missing | missing | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `d21` | untested | untested | untested | missing | untested | untested | missing | missing | missing | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
@@ -294,10 +294,10 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `j172` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
 | `j71b` | supported | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
 | `j72b` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| `j120` | experimental | yes | yes | yes | yes | yes | – | yes | yes | yes | yes | yes | yes | – | yes | yes | – | yes | yes | yes |
-| `j121` | experimental | yes | yes | yes | yes | yes | – | yes | yes | yes | yes | yes | yes | – | yes | yes | – | yes | yes | yes |
-| `j207` | experimental | yes | yes | yes | yes | yes | – | yes | yes | yes | yes | yes | yes | – | yes | yes | – | yes | yes | yes |
-| `j208` | experimental | yes | yes | yes | yes | yes | – | yes | yes | yes | yes | yes | yes | – | yes | yes | – | yes | yes | yes |
+| `j120` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes | yes | yes |
+| `j121` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes | yes | yes |
+| `j207` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes | yes | yes |
+| `j208` | experimental | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | – | yes | yes | yes |
 | `d20` | experimental | yes | – | yes | – | – | – | yes | yes | yes | – | – | yes | – | yes | yes | – | – | – | – |
 | `d201` | experimental | yes | – | yes | – | – | – | yes | yes | yes | – | – | yes | – | yes | yes | – | – | – | – |
 | `d21` | experimental | yes | yes | yes | – | – | – | yes | yes | yes | – | – | yes | – | yes | yes | – | – | – | – |
@@ -321,7 +321,6 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `j72s` | Microphone | untested, but no driver binds |
 | `j71t` | Microphone | working, but no driver binds |
 | `j72t` | Microphone | untested, but no driver binds |
-| `j120` | Charging | untested, but no driver binds |
 | `j121` | Bluetooth input devices | missing, but a driver binds |
 | `j121` | Bluetooth audio | missing, but a driver binds |
 | `j207` | Bluetooth input devices | missing, but a driver binds |
