@@ -27,15 +27,15 @@ recipe = "firmware.json" # Public recipe, not firmware bytes: the touch firmware
 status = "experimental"
 tested_by = ["ryzensnyper"]
 
-# States: working, untested, missing, none (features.toml). Nothing here has run on
-# this board with Orchard: "untested" means a driver binds in its device tree
-# (tools/catalog/drivers.json), plus the display's boot console.
+# States: working, untested, missing, none (features.toml). Apart from touch, nothing
+# here has been confirmed on this board with Orchard: "untested" means a driver
+# binds in its device tree (tools/catalog/drivers.json), plus the display's boot console.
 [features]
 display = "untested"
 screen_off = "untested" # Backlight off through apple_dwi_bl
 backlight = "untested"
 gpu_desktop = "missing"
-touch = "untested" # apple_z2 with the D21 backend (the contributor's JADE driver; C1F5E,4 firmware from the recipe, calibration from the ADT); JADE starts touch on 6 of 7 starts on this kernel.
+touch = "working" # apple_z2 with the D21 backend (C1F5E,4 firmware from the recipe, calibration from the ADT); ryzensnyper: 5 of 5 first boots and 10 of 10 driver reloads (2026-11-24)
 buttons = "untested" # macsmc-input (t8015 SMC): side button, volume, ring switch; the Home button is untraced
 accelerometer = "missing"
 gyroscope = "missing"

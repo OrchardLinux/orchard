@@ -13,6 +13,11 @@ is missing or empty.
 
 ### Devices
 
+- iPhone 8 Plus: the touchscreen works from the first start and every
+  time its driver is reloaded, where it used to come up only on some
+  starts and could hang the phone on a reload. Fixed by ryzensnyper
+  (thanks!). The hang came from how GPIO interrupts were set up, and that
+  fix applies to every board.
 - iPod touch 6: battery status. With no fuel gauge in the iPod, the
   charge, voltage, temperature and charging state come from its power
   management chip, estimated the way iOS does; USB power shows too. The
