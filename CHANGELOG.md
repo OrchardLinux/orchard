@@ -101,6 +101,17 @@ is missing or empty.
   nobody cared"). No A7 iPad's audio controller uses its interrupt any
   more, as the iPad mini 2's already did; playback never relied on it.
   Thanks to ricktav. Tested on the iPad Air (Wi-Fi).
+- iPad Air and iPad mini 2 and 3 (A7): the ambient light sensor, and on
+  the iPad Air the Smart Cover. Closing the cover reports a cover switch,
+  which Omarchy follows to turn the screen off and on; opening the cover
+  does not wake the iPad from sleep yet. The light sensor reports lux for
+  automatic brightness; on the iPad Air it is uncalibrated, as its device
+  tree has no calibration, and on the iPad mini 2 and 3 it uses the
+  unit's factory calibration. The iPad mini 2 and 3 get no cover switch:
+  the line Apple names for it reads "closed" whatever the cover does.
+  Cover and light sensor tested on the iPad Air (Wi-Fi); the light
+  sensor reads light on an iPad mini 2 (Wi-Fi), its calibration is
+  untested.
 - iPod touch 6, iPhone 6 and 6 Plus and iPad mini 4 (A8): an installed
   system's desktop finds the GPU on every boot, without a kernel option, and
   a GPU app started on the GPU desktop no longer crashes or takes the GPU
