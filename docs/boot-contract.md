@@ -8,7 +8,7 @@ two standards, applied with as few additions as possible:
 
 Status (2026-11-01): implemented. The installer writes it (since 2026-11-17 with
 `boot-entries`, which the kernel packages run on every update), and `orchard launch`
-boots it through m1n1's boot manager (orchard m1n1 patches 0007-0010, see
+boots it through m1n1's boot manager (orchard m1n1 patches 0008-0011, see
 [Host and m1n1](#host-and-m1n1)); hardware-tested on J71b. The default entry
 from `loader.conf` and m1n1's autoboot (patches 0016-0018, 2026-11-17) are
 unit-tested only so far. It replaces the old layout (root directory on an "OmarchySystems"
@@ -179,7 +179,7 @@ write it from the same artwork their own m1n1 draws, so install and launch
 show the same picture: a release's install picture (its `logo`, the file
 after m1n1 in the install payload) may be this splash, which m1n1 then
 draws centred at its own size in place of m1n1's fixed 256 px custom logo
-(boot/m1n1 patch 0014). Each distribution picks the size that suits its
+(boot/m1n1 patch 0015). Each distribution picks the size that suits its
 mark.
 
 ## Selection

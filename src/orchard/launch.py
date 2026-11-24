@@ -31,7 +31,7 @@ from .state import exclusive_operation, private_directory
 from .state import DeviceState
 from .transports.m1n1 import M1n1Proxy
 
-# m1n1's appended-variable form, as `chosen.bootargs=` is (orchard m1n1 0018); zeros end the payloads.
+# m1n1's appended-variable form, as `chosen.bootargs=` is (orchard m1n1 0019); zeros end the payloads.
 AUTOBOOT = b'autoboot=1\n' + bytes(4)
 
 
@@ -236,7 +236,7 @@ def launch(*, entry=None, list_entries=False, progress=None, chooser=None):
         return autoboot(progress, clock)
     port = proxy_port(progress, clock)
     report = {'operation': 'launch', 'entry': entry, 'started': False}
-    # m1n1 keeps storage up after a failure (orchard m1n1 0017), so it stays ready for the next command.
+    # m1n1 keeps storage up after a failure (orchard m1n1 0018), so it stays ready for the next command.
     with M1n1Proxy(port) as proxy:
         proxy.storage_init()
         if entry is None:
