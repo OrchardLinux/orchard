@@ -90,5 +90,25 @@ class InstallLayout(unittest.TestCase):
             L.plan(disk, option, {**IMAGE, 'expanded_bytes': int(fits)}, ENTRY, {**LAYER, 'expanded_bytes': 4 * L.MIB})
 
 
+class ComputerTimezone(unittest.TestCase):
+    def test_reads_the_zone_from_the_localtime_link(self):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as d:
+            link = os.path.join(d, 'localtime')
+            os.symlink('/var/db/timezone/zoneinfo/Asia/Makassar', link)
+            self.assertEqual(L.computer_timezone(link), 'Asia/Makassar')
+            os.unlink(link)
+            os.symlink('../usr/share/zoneinfo/UTC', link)
+            self.assertEqual(L.computer_timezone(link), 'UTC')
+
+    def test_none_without_a_zoneinfo_link(self):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(L.computer_timezone(os.path.join(d, 'missing')))
+            link = os.path.join(d, 'localtime')
+            os.symlink('/somewhere/else', link)
+            self.assertIsNone(L.computer_timezone(link))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -11,6 +11,7 @@ controller is no longer read-only.
  package geometry instead of a P105 compatible]
 
 Assisted-by: LLM
+Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
 ---
  arch/arm/boot/dts/apple/s5l8942x-p105.dts | 3 ++-
  1 file changed, 2 insertions(+), 1 deletion(-)

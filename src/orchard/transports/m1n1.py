@@ -19,10 +19,10 @@ CMD_LEN, REPLY_LEN, EVENT_HDR_LEN = 56, 36, 8
 
 P_HEAPBLOCK_ALLOC, P_HEAPBLOCK_SET_LIMIT = 0x600, 0x604
 P_MAIN_STORAGE_INIT, P_MAIN_STORAGE_SHUTDOWN = 0xf08, 0xf09
-P_BOOT_ENTRIES, P_BOOT_ENTRIES_FREE, P_BOOT_START = 0x1500, 0x1501, 0x1502   # orchard m1n1 0007, 0008; Orchard-local
+P_BOOT_ENTRIES, P_BOOT_ENTRIES_FREE, P_BOOT_START = 0x1500, 0x1501, 0x1502   # orchard m1n1 0008, 0009; Orchard-local
 BOOT_CONTRACT = 1
 # An m1n1 without the boot manager ops answers them with "bad command".
-NO_BOOT_MANAGER = ('This loader has no boot manager (orchard m1n1 patches 0007-0009); '
+NO_BOOT_MANAGER = ('This loader has no boot manager (orchard m1n1 patches 0008-0010); '
                    'update orchard, or rebuild the loader from this checkout')
 
 M1N1_HEAP = 128 << 20   # room left to m1n1's own heap, as proxyclient does
@@ -168,7 +168,7 @@ class M1n1Proxy:
         """m1n1's own reading of the boot partition: (id, keys, problems) per entry, in BLS order.
 
         Needs storage_init first. The reply format is in docs/boot-contract.md; the default entry
-        has the key `default` (orchard m1n1 0016). Without DEVICETREE m1n1 checks the entries
+        has the key `default` (orchard m1n1 0017). Without DEVICETREE m1n1 checks the entries
         against the board it runs on.
         """
         out = self.memalign(8, 16)
@@ -187,7 +187,7 @@ class M1n1Proxy:
         return parse_boot_entries(text)
 
     def boot_start(self, entry_id, devicetree=None, timeout=120.0):
-        """m1n1 loads entry_id from storage, shuts storage down and boots it (orchard m1n1 patch 0008).
+        """m1n1 loads entry_id from storage, shuts storage down and boots it (orchard m1n1 patch 0009).
 
         m1n1 replies before the jump. On failure it stays in the proxy; the reason is on its console.
         """

@@ -10,6 +10,7 @@ S5L8940X controller.
  selects its behaviour from the package geometry it reads from the chip]
 
 Assisted-by: LLM
+Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
 ---
  .../devicetree/bindings/mtd/apple,h2fmi.yaml  | 47 +++++++++++++++++++
  MAINTAINERS                                   |  9 ++++

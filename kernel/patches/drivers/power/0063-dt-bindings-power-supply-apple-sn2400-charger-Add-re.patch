@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 16:30:26 +0100
+Subject: [PATCH] dt-bindings: power: supply: apple,sn2400-charger: Add
+ read-only properties
+
+A board being brought up may need its SN2400 charger left as the
+bootloader set it. The iPhone 6s Plus has the iPhone 7's SN2400, but its
+iOS driver never programs the battery charge-current limit. Describe
+both opt-ins: apple,read-only for a board whose charger may only be
+read, apple,keep-charge-limit for one whose charge limit stays as the
+bootloader set it.
+
+Assisted-by: LLM
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+---
+ .../bindings/power/supply/apple,sn2400-charger.yaml  | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/power/supply/apple,sn2400-charger.yaml b/Documentation/devicetree/bindings/power/supply/apple,sn2400-charger.yaml
+index 6ec7a7147..034380cf7 100644
+--- a/Documentation/devicetree/bindings/power/supply/apple,sn2400-charger.yaml
++++ b/Documentation/devicetree/bindings/power/supply/apple,sn2400-charger.yaml
+@@ -31,6 +31,18 @@ properties:
+     description:
+       Maximum USB input current that the foldback policy may request.
+ 
++  apple,read-only:
++    type: boolean
++    description:
++      Only read the charger and leave it as the bootloader programmed it. For
++      boards whose charging policy has not been tested yet.
++
++  apple,keep-charge-limit:
++    type: boolean
++    description:
++      Leave the battery charge-current limit as the bootloader set it, for
++      boards whose iOS driver never programs it.
++
+   mux-states:
+     maxItems: 1
+ 

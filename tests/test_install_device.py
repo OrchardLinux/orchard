@@ -1,5 +1,6 @@
 """install_device.py: the storage fence, and writing orchard's platform layer into a new root."""
 import hashlib
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -289,6 +290,22 @@ class RemoveOldEntries(unittest.TestCase):
             self.assertEqual(D.remove_old_entries(boot, {'new-root'}), ['other.conf'])
             self.assertTrue(elsewhere.exists())
             self.assertTrue((boot / 'shared/linux').exists())
+
+
+class Timezone(unittest.TestCase):
+    def test_links_an_existing_zone_and_ignores_others(self):
+        from orchard import install_device as D
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / 'etc').mkdir()
+            (root / 'usr/share/zoneinfo/Asia').mkdir(parents=True)
+            (root / 'usr/share/zoneinfo/Asia/Makassar').write_bytes(b'TZif')
+            (root / 'etc/localtime').symlink_to('../usr/share/zoneinfo/UTC')
+            self.assertEqual(D.set_timezone(root, 'Asia/Makassar'), 'Asia/Makassar')
+            self.assertEqual(os.readlink(root / 'etc/localtime'), '../usr/share/zoneinfo/Asia/Makassar')
+            for zone in (None, 'Mars/Olympus', '../../etc/passwd', 'Asia/../x'):
+                self.assertIsNone(D.set_timezone(root, zone))
+            self.assertEqual(os.readlink(root / 'etc/localtime'), '../usr/share/zoneinfo/Asia/Makassar')
 
 
 if __name__ == '__main__':

@@ -33,6 +33,10 @@ is missing or empty.
   with both filesystems clean. The flash driver erases on any storage chip
   whose layout it can read and check, not one fixed model; the 16 GB iPad mini 1
   stays read-only until its storage format is modelled.
+- iPad mini 1 (Wi-Fi, A5): Bluetooth no longer uses one fixed address
+  written into Orchard for every unit. Until the boot stage passes each
+  unit's own address, it uses the Bluetooth chip's default, which is also
+  the same on every iPad mini 1. Untested.
 - iPhone 6s Plus (A9): the phone sleeps when idle or on Power, turns its
   screen off, and wakes on Home or Power.
 - iPad mini 2 (Wi-Fi, A7): tested on the board. The display, backlight,
@@ -51,6 +55,18 @@ is missing or empty.
   speaker protection yet. The iPhone 6s has the same speaker path and gets
   it too, untested. The earpiece, headphones and microphones need the
   CS42L71 codec, which has no driver yet.
+- iPhone 6s Plus (A9): the battery gauge works and the phone charges, from
+  a computer at the 500 mA it grants and from an Apple wall adapter at up to
+  about 1.4 A while awake. The charger lowers or cuts its input when the
+  battery is too cold or hot. Asleep it charges at 300 mA. The iPhone 6s and
+  SE share the change, and the iPhone 7 and 7 Plus get the same limit at a
+  computer port and the same temperature guard, all untested. RAM boots on
+  every device now ask the computer for 500 mA, as installed systems
+  already do, so devices whose charger follows the computer's limit charge
+  faster during a RAM boot.
+- iPhone 6s Plus (A9): the desktop draws on the GPU. Omarchy's compositor
+  renders through Zink on the A9's PowerVR GPU, which main already supports
+  for every A9 board. The iPhone 6s and SE are untested.
 - iPad Air and iPad mini 2 and 3 (A7): internal storage keeps working across
   sleep, also with writes in flight. The storage controller finishes its
   commands before sleep and is restarted after it, and its NAND clock stays
@@ -71,6 +87,10 @@ is missing or empty.
   100000 unhandled interrupts at boot ("irq 62: nobody cared"); it now
   leaves its interrupt alone, as the iPad mini 2's already did. Playback
   never relied on it.
+
+### Install & launch
+
+- An installed system starts in the computer's time zone instead of UTC.
 
 ## [0.3.6] - 2026-11-24
 
