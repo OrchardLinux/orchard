@@ -67,6 +67,10 @@ is missing or empty.
   An iPad mini 2 (Wi-Fi) played both speakers with an earlier version of
   the driver; this one is untested on every model. The headphone jack and
   the microphones do not work yet.
+- iPad Air (A7): the audio controller no longer floods the kernel with
+  100000 unhandled interrupts at boot ("irq 62: nobody cared"); it now
+  leaves its interrupt alone, as the iPad mini 2's already did. Playback
+  never relied on it.
 
 ## [0.3.6] - 2026-11-24
 
