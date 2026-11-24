@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dugs <dugahol@protonmail.com>
+Date: Wed, 25 Nov 2026 01:00:00 +0800
+Subject: [PATCH] pinctrl: apple: Do not arm a masked interrupt in set_type
+
+The pin mode field doubles as the interrupt mask (IN_IRQ_OFF), but
+apple_gpio_irq_set_type() wrote the trigger mode unconditionally. A
+type change on a masked or disabled interrupt (irq mapping, request_irq
+with IRQF_NO_AUTOEN, irq_set_irq_type() on a disabled line) therefore
+armed the pin in hardware while the IRQ core still considered it masked.
+mask_irq() then skips the hardware for that interrupt, and with no
+irq_mask_ack callback handle_level_irq() only acks it, so an asserted
+level interrupt re-fires forever and wedges the CPU servicing the bank.
+
+Seen on the iPhone 8 Plus touchscreen: after a module reload the touch
+IRQ pin was in group 0 with mode=3 while core_masked=1, and the system
+hung when the controller powered up and pulled the line low.
+
+Only write the mode when the interrupt is unmasked; unmask applies the
+stored trigger type.
+
+Assisted-by: LLM
+Signed-off-by: Dugs <dugahol@protonmail.com>
+---
+diff --git a/drivers/pinctrl/pinctrl-apple-gpio.c b/drivers/pinctrl/pinctrl-apple-gpio.c
+index cc515c1..5a31235 100644
+--- a/drivers/pinctrl/pinctrl-apple-gpio.c
++++ b/drivers/pinctrl/pinctrl-apple-gpio.c
+@@ -354,8 +354,17 @@ static int apple_gpio_irq_set_type(struct irq_data *data, unsigned int type)
+ 	if (irqtype == REG_GPIOx_IN_IRQ_OFF)
+ 		return -EINVAL;
+ 
+-	apple_gpio_set_reg(pctl, data->hwirq, REG_GPIOx_MODE,
+-			   FIELD_PREP(REG_GPIOx_MODE, irqtype));
++	/*
++	 * The pin's mode field is also its interrupt mask: IN_IRQ_OFF is the
++	 * masked state. Writing the trigger mode into a masked pin would arm it
++	 * behind the IRQ core's back, and since mask_irq() skips the hardware
++	 * for an interrupt it already believes masked, a level interrupt then
++	 * fires forever. Only arm the pin when it is unmasked;
++	 * apple_gpio_irq_unmask() applies the stored trigger type otherwise.
++	 */
++	if (!irqd_irq_masked(data))
++		apple_gpio_set_reg(pctl, data->hwirq, REG_GPIOx_MODE,
++				   FIELD_PREP(REG_GPIOx_MODE, irqtype));
+ 
+ 	if (type & IRQ_TYPE_LEVEL_MASK)
+ 		irq_set_handler_locked(data, handle_level_irq);
