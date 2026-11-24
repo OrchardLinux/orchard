@@ -12,12 +12,18 @@ Cascadia history of this file: rzxvx <rrzxznewid@gmail.com> (36 commits);
 [Orchard: Cascadia compiles this file with dtc outside the kernel and lists
 a non-existent ipad-mini1.dtb in arch/arm/boot/dts/Makefile. Moved into
 arch/arm/boot/dts/apple/ as s5l8942x-p105.dts, named like the arm64 Apple
-device trees, and built from there by make dtbs; content unchanged.]
+device trees, and built from there by make dtbs.]
+
+[Orchard: local-bd-address was the fixed 02:10:5A:05:00:04, the same on
+every P105. It is now a zero placeholder for the boot stage to fill with
+the unit's address through the new bluetooth0 alias, as m1n1 does on
+64-bit boards; the Cascadia loader does not fill it yet, so the chip keeps
+its default address (armv7/bluetooth 0001).]
 ---
  arch/arm/boot/dts/Makefile                |    2 +-
  arch/arm/boot/dts/apple/Makefile          |    2 +
- arch/arm/boot/dts/apple/s5l8942x-p105.dts | 1007 +++++++++++++++++++++
- 3 files changed, 1010 insertions(+), 1 deletion(-)
+ arch/arm/boot/dts/apple/s5l8942x-p105.dts | 1008 +++++++++++++++++++++
+ 3 files changed, 1011 insertions(+), 1 deletion(-)
  create mode 100644 arch/arm/boot/dts/apple/Makefile
  create mode 100644 arch/arm/boot/dts/apple/s5l8942x-p105.dts
 
@@ -51,7 +57,7 @@ new file mode 100644
 index 000000000..f4fe413c6
 --- /dev/null
 +++ b/arch/arm/boot/dts/apple/s5l8942x-p105.dts
-@@ -0,0 +1,1007 @@
+@@ -0,0 +1,1008 @@
 +// SPDX-License-Identifier: GPL-2.0 OR MIT
 +/*
 + * Apple iPad mini, 1st generation -- iPad2,5 / P105AP / S5L8942X (Apple A5).
@@ -91,6 +97,7 @@ index 000000000..f4fe413c6
 +	aliases {
 +		serial0 = &uart0;
 +		serial1 = &uart1;
++		bluetooth0 = &bluetooth;
 +	};
 +
 +	chosen {
@@ -506,10 +513,10 @@ index 000000000..f4fe413c6
 +		 * from syscfg and reads zero in this tree, and with Apple's
 +		 * patchram the chip says 43:34:43:34:1F:AC, the same on every
 +		 * iPad -- a placeholder, which btbcm.c is taught to treat as one
-+		 * so that this property is used.  A fixed address in the same
-+		 * family as the gadget's and Wi-Fi's MACs,
-+		 * 02:10:5A:05:00:04 (bytes reversed here).  Put the iPad's own
-+		 * (Settings > General > About > Bluetooth) here to use that.
++		 * so that this property is used.  It is a zero placeholder for
++		 * the boot stage to fill with the unit's own address (alias
++		 * bluetooth0, as m1n1 does on 64-bit boards); left zero, the
++		 * chip keeps its default address.
 +		 */
 +		uart1: serial@2600000 {
 +			/* s5l8940x: UCON bit 10, the 24 MHz clock, which iBoot sets
@@ -524,13 +531,13 @@ index 000000000..f4fe413c6
 +			pinctrl-0 = <&uart1_pins>;
 +			status = "okay";
 +
-+			bluetooth {
++			bluetooth: bluetooth {
 +				compatible = "brcm,bcm4334-bt";
 +				shutdown-gpios = <&pmu 2 0>;
 +				device-wakeup-gpios = <&gpio 9 0>;
 +				vddio-supply = <&wlan_lpo>;
 +				max-speed = <1500000>;
-+				local-bd-address = [04 00 05 5a 10 02];
++				local-bd-address = [00 00 00 00 00 00];
 +			};
 +		};
 +

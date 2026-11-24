@@ -33,6 +33,10 @@ is missing or empty.
   with both filesystems clean. The flash driver erases on any storage chip
   whose layout it can read and check, not one fixed model; the 16 GB iPad mini 1
   stays read-only until its storage format is modelled.
+- iPad mini 1 (Wi-Fi, A5): Bluetooth no longer uses one fixed address
+  written into Orchard for every unit. Until the boot stage passes each
+  unit's own address, it uses the Bluetooth chip's default, which is also
+  the same on every iPad mini 1. Untested.
 - iPhone 6s Plus (A9): the phone sleeps when idle or on Power, turns its
   screen off, and wakes on Home or Power.
 - iPad mini 2 (Wi-Fi, A7): tested on the board. The display, backlight,
