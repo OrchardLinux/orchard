@@ -83,6 +83,12 @@ is missing or empty.
   An iPad mini 2 (Wi-Fi) played both speakers with an earlier version of
   the driver; this one is untested on every model. The headphone jack and
   the microphones do not work yet.
+- iPad Air (A7): the speakers play, and the audio controller no longer
+  floods the kernel with 100000 unhandled interrupts at boot ("irq 62:
+  nobody cared"). No A7 iPad's audio controller uses its interrupt any
+  more, as the iPad mini 2's already did; playback never relied on it.
+  Thanks to ricktav. Tested on the iPad Air (Wi-Fi).
+
 - iPod touch 6, iPhone 6 and 6 Plus and iPad mini 4 (A8): an installed
   system's desktop finds the GPU on every boot, without a kernel option, and
   a GPU app started on the GPU desktop no longer crashes or takes the GPU
@@ -90,6 +96,10 @@ is missing or empty.
   no faults; the iPhone 6 and 6 Plus and the iPad mini 4 are untested. If the
   GPU does not draw, the login still falls back to the software desktop.
   By brkosebay (thanks!).
+
+### Install & launch
+
+- An installed system starts in the computer's time zone instead of UTC.
 
 ## [0.3.6] - 2026-11-24
 

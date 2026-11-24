@@ -26,6 +26,8 @@ when the replayed journal does not end at the allocation floor.
  the NOIO follow-up into this patch; shortened the commit message]
 
 Assisted-by: LLM
+Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/226#issuecomment-7133476475
 ---
  Documentation/driver-api/mtd/apple-sftl.rst |  83 ++-
  drivers/mtd/Kconfig                         |  11 +-

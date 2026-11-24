@@ -9,6 +9,8 @@ Snapshot the recovered whole-device map, encode native context and range records
 Port the source from c8fb01811bc8 to the upstream ARMv7 append writer and its existing KUnit fixture. The provider still performs no erase and the allocator still uses append-only writes.
 
 Assisted-by: LLM
+Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/226#issuecomment-7133476475
 ---
  .../driver-api/mtd/apple-sftl-reclamation.rst |  85 +++
  Documentation/driver-api/mtd/index.rst        |   4 +-

@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ricktav <82380971+ricktav@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 08:45:59 +0100
+Subject: [PATCH] ASoC: apple: s8000-mca: Leave the interrupt alone on every A7
+ MCA
+
+The iPad Air's MCA0 (apple,s5l8960x-mca) storms like the iPad mini 2's
+MCA1 did before apple,s5l8960x-mca-tdm got no_irq: on a J71 the line
+stays asserted at boot with both version 1 enables clear and no known
+cause in the status register, 100000 unhandled interrupts, then "irq 62:
+nobody cared" and "Disabling IRQ #62". Playback keeps working after
+that, as it is DMA-driven.
+
+Set no_irq on the I2S variant too, so no A7 MCA requests its interrupt.
+Nothing on the J71/J72 path depends on it: the handler only acks and
+masks error causes (with a rate-limited debug message); it reports no
+underrun or fault to ALSA.
+
+Signed-off-by: ricktav <82380971+ricktav@users.noreply.github.com>
+Assisted-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ sound/soc/apple/s8000-mca.c | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/sound/soc/apple/s8000-mca.c b/sound/soc/apple/s8000-mca.c
+index 00270d00de79a..184b1038c36da 100644
+--- a/sound/soc/apple/s8000-mca.c
++++ b/sound/soc/apple/s8000-mca.c
+@@ -268,11 +268,13 @@ struct s8000_mca_hw {
+ 	unsigned int sync_bits;		/* 0: half a frame */
+ 	u32 stream_irqs;		/* error causes open while TX is prepared */
+ 	/*
+-	 * Leave the interrupt line alone. On the iPad mini 2 (J85), A7 MCA1's
+-	 * line stayed asserted with both version 1 enables clear and no known
+-	 * cause in the status register: 100000 unhandled interrupts during
+-	 * the first prepare, which starved the touchscreen's SPI firmware
+-	 * upload.
++	 * Leave the interrupt line alone. On the A7 the line stays asserted
++	 * with both version 1 enables clear and no known cause in the status
++	 * register, on MCA0 (iPad Air, J71) as on MCA1 (iPad mini 2, J85):
++	 * 100000 unhandled interrupts, then "nobody cared". On the J85 that
++	 * starved the touchscreen's SPI firmware upload. Playback is
++	 * DMA-driven and the handler only masks error causes, so nothing
++	 * else depends on it.
+ 	 */
+ 	bool no_irq;
+ 	/*
+@@ -1484,6 +1486,7 @@ static const struct s8000_mca_hw t7001_mca_hw = {
+  */
+ static const struct s8000_mca_hw s5l8960x_mca_hw = {
+ 	.version = 1,
++	.no_irq = true,
+ 	.regs = &mca_v1_regs,
+ 	.dai_format = SND_SOC_DAIFMT_I2S,
+ 	.v1_ctl = MCA_V1_XX_CTL_A7,

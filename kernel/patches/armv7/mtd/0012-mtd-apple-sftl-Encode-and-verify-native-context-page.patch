@@ -12,6 +12,8 @@ Prebuild the planned checkpoint before any copy and program the verified
 alternate context in whole pages with independent readback.
 
 Assisted-by: LLM
+Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
+Link: https://github.com/OrchardLinux/orchard/pull/226#issuecomment-7133476475
 ---
  drivers/mtd/Makefile                  |   4 +-
  drivers/mtd/apple-sftl-account-test.c | 189 ++++++++++++++++
