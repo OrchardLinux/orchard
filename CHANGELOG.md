@@ -15,8 +15,6 @@ is missing or empty.
 
 - iPad mini 1 (Wi-Fi): verified all four ARM alignment handlers on a RAM boot
   with internal flash disabled, then removed the Cascadia alignment workaround.
-- iPad Air (Cellular): checkra1n starts it unless another is chosen, as on the
-  other A7 iPads.
 - iPad Air (Cellular): Wi-Fi, speakers, charging with charging control, battery
   status and screen on/off work, and a normal install completes with the
   released kernel. Tested by thisiscamk (thanks!).
