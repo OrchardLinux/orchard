@@ -35,7 +35,7 @@ command -v uv >/dev/null 2>&1 || {
 export UV_PROJECT_ENVIRONMENT="$root/.venv"
 # These can go to orchard2; tools/launcher has the switch.
 case ${1:-} in
-    build|inputs|devices|cache|run)
+    build|inputs|install|launch|distros|devices|cache|run)
         if [ -f "$root/tools/launcher" ]; then
             ORCHARD_LAUNCH_CHECKOUT=$root exec sh "$root/tools/launcher" "$@"
         fi ;;

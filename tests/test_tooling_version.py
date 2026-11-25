@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -138,6 +139,52 @@ class Orchard2Switch(Fixture):
     def test_arguments_are_passed_on_as_they_are(self):
         self.assertEqual(self.ran('build', 'a b', '--explain', ORCHARD2='1'),
                          [f'orchard2 build a b --explain {self.env["data"]}'])
+
+    def fake_python(self, lock='yield 3'):
+        # The version's Python, with a lock of its own.
+        package = self.root / 'fake-package/orchard'
+        package.mkdir(parents=True, exist_ok=True)
+        (package / '__init__.py').touch()
+        (package / 'state.py').write_text(
+            'import contextlib, os\n@contextlib.contextmanager\ndef operation_lock():\n'
+            f"    os.dup2(os.open({str(self.root / 'lock')!r}, os.O_CREAT | os.O_RDWR), 3)\n    {lock}\n")
+        self.ran('doctor', ORCHARD2='0')  # clones the version
+        python = self.clone / '.venv/bin/python'
+        python.parent.mkdir(parents=True, exist_ok=True)
+        python.write_text(f'#!/bin/sh\nPYTHONPATH={package.parent} exec {sys.executable} "$@"\n')
+        python.chmod(0o755)
+
+    def test_install_and_launch_run_with_the_lock_and_their_entry(self):
+        self.orchard2('printf "orchard2 %s entry=%s data=%s\\n" "$*" "${ORCHARD_ENTRY:-}" "$ORCHARD_DATA" >> "$LOG"; [ -e /dev/fd/3 ] && echo locked >> "$LOG"; exit 4')
+        shutil.rmtree(self.clone, ignore_errors=True)
+        self.fake_python()
+        data = f'data={self.clone}'
+        for arguments, expected in (
+                (['install', 'omarchy-a', '--yes'], f'orchard2 install omarchy-a --yes entry= {data}'),
+                (['install', '--via', 'checkra1n', 'a b'], f'orchard2 install a b entry=checkra1n {data}'),
+                (['install', '--manifest', 'r.toml'], f'orchard2 install --index r.toml entry= {data}'),
+                (['install', '--release=r.toml'], f'orchard2 install --index=r.toml entry= {data}'),
+                (['launch', '--via=palera1n', '--list'], f'orchard2 launch --list entry=palera1n {data}')):
+            self.assertEqual(self.ran(*arguments, ORCHARD2='1'), [expected, 'locked'], self.result.stderr)
+            self.assertEqual(self.result.returncode, 4)
+        self.assertEqual(self.ran('launch', ORCHARD2='1', ORCHARD_VIA='checkra1n')[0], f'orchard2 launch entry=checkra1n {data}')
+        self.assertEqual(self.ran('launch', '--via', 'other', ORCHARD2='1'), [])
+        self.assertEqual(self.result.returncode, 2)
+        self.assertEqual(self.ran('launch', '--list'), ['python launch --list'])
+
+    def test_a_busy_device_or_an_older_version_stops_before_orchard2(self):
+        shutil.rmtree(self.clone, ignore_errors=True)
+        for lock, message in (("raise ValueError('Another Orchard device operation is active')", 'operation is active'),
+                              ('yield', 'older than the switch')):
+            self.fake_python(lock)
+            self.assertEqual(self.ran('install', 'x', ORCHARD2='1'), [])
+            self.assertEqual(self.result.returncode, 1)
+            self.assertIn(message, self.result.stderr)
+
+    def test_distros_are_refused_not_ignored(self):
+        self.assertEqual(self.ran('distros', 'a', 'https://example.org', ORCHARD2='1'), [])
+        self.assertEqual(self.result.returncode, 2)
+        self.assertEqual(self.ran('distros'), ['python distros'])
 
     def test_cache_is_orchard2s_with_its_own_spelling(self):
         self.orchard2('printf "orchard2 %s\\n" "$*" >> "$LOG"; exit 8')

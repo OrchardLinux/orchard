@@ -77,7 +77,7 @@ def operation_lock():
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise ValueError('Another Orchard device operation is active; wait for it to finish') from error
-        yield
+        yield fd
     finally:
         os.close(fd)
 

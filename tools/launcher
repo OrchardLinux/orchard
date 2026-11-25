@@ -13,9 +13,9 @@
 #
 # orchard2, the Rust tool, builds instead when it is switched on for this
 # computer: ORCHARD2=1 (0: off), else a line orchard2 = true in
-# ~/.config/orchard/config.toml. build, inputs, devices, cache and the build
-# step of run then go to the orchard2 on PATH, with the same version's data;
-# everything else stays here. A checkout's bin/orchard follows the same switch.
+# ~/.config/orchard/config.toml. build, inputs, install, launch, devices, cache
+# and the build step of run then go to the orchard2 on PATH, with the same
+# version's data; everything else stays here. A checkout's bin/orchard follows the same switch.
 set -eu
 
 cache=${ORCHARD_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/orchard}
@@ -91,6 +91,48 @@ orchard2_command() {
         orchard2 "$@"
 }
 
+# orchard2 install or launch ARGS. The operation lock is the Python commands':
+# it is held for as long as orchard2 runs, so that no run, boot or install of
+# theirs works on the device at the same time.
+orchard2_on_device() {
+    needs_orchard2
+    entry=${ORCHARD_ENTRY:-${ORCHARD_VIA:-}}
+    count=$#
+    while [ "$count" -gt 0 ]; do
+        argument=$1
+        shift
+        count=$((count - 1))
+        case $argument in
+            --via)
+                [ "$count" -gt 0 ] || { echo 'orchard: --via palera1n or --via checkra1n' >&2; exit 2; }
+                entry=$1; shift; count=$((count - 1)) ;;
+            --via=*) entry=${argument#*=} ;;
+            --manifest|--release) set -- "$@" --index ;;
+            --manifest=*|--release=*) set -- "$@" "--index=${argument#*=}" ;;
+            *) set -- "$@" "$argument" ;;
+        esac
+    done
+    case $entry in
+        ''|palera1n|checkra1n) ;;
+        *) echo "orchard: no entry $entry; there are palera1n and checkra1n" >&2; exit 2 ;;
+    esac
+    uv sync --quiet --project "$root" >&2
+    [ -z "$entry" ] || export ORCHARD_ENTRY="$entry"
+    export ORCHARD_DATA="${ORCHARD_DATA:-$root}"
+    exec "$root/.venv/bin/python" -c '
+import os, sys
+from orchard.state import operation_lock
+try:
+    with operation_lock() as lock:
+        if lock is None:
+            raise ValueError("this orchard is older than the switch for install and launch; unset ORCHARD_VERSION or set ORCHARD2=0")
+        os.set_inheritable(lock, True)
+        os.execvp(sys.argv[1], sys.argv[1:])
+except ValueError as error:
+    sys.exit(f"orchard: {error}")
+' orchard2 "$@"
+}
+
 # A checkout's bin/orchard names itself, for its own code.
 checkout=${ORCHARD_LAUNCH_CHECKOUT:-}
 unset ORCHARD_LAUNCH_CHECKOUT
@@ -161,6 +203,15 @@ case ${1:-} in
         if orchard2_on; then
             orchard2_command "$@"
             exit
+        fi ;;
+    install|launch)
+        if orchard2_on; then
+            orchard2_on_device "$@"
+        fi ;;
+    distros)
+        if orchard2_on; then
+            echo 'orchard: orchard2 installs from a name (OrchardLinux/NAME), a URL or a file; it has no registered distros' >&2
+            exit 2
         fi ;;
     run)
         # What run builds first; booting it stays here.
