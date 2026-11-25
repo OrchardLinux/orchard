@@ -27,7 +27,8 @@ An optional `orchard.toml` beside `init` names the payload (`name = "..."`) and
 describes it under `[payload]`, never its board (the older `payload.toml` is
 still read, with a notice):
 
-- `transport = false` leaves the USB session helper (network, SSH) out;
+- `transport = false` leaves the USB session helper (network, SSH;
+  `boot/session/`) out;
 - `modules = true` stages the kernel's modules without loading them;
 - `firmware = true` adds the booted board's firmware: `orchard run` reads it from
   Apple's restore image once, keeps it in Orchard's private cache and adds it as its

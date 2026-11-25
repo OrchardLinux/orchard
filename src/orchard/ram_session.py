@@ -11,7 +11,6 @@ host key checking instead; verify the host key out of band on first connection.
 Without SSH, push and pull can use length-prefixed serial transfers checked by SHA-256.
 """
 import hashlib
-from importlib import resources
 from pathlib import Path
 import re
 import shlex
@@ -47,11 +46,14 @@ def identity():
     return key
 
 
-def payload_files():
-    """RAM-root files that enable the USB session in a payload."""
-    helper = resources.files('orchard') / 'usb-session'
-    return {HELPER: Path(str(helper)),
-            'usr/libexec/orchard/usb-identity': Path(str(resources.files('orchard') / 'usb-identity')),
+def payload_files(hardware):
+    """RAM-root files that enable the USB session in a payload, from the recipes in HARDWARE.
+
+    They are data beside the recipes (boot/session), which orchard2 packs the same way.
+    """
+    session = Path(hardware) / 'boot/session'
+    return {HELPER: session / 'usb-session',
+            'usr/libexec/orchard/usb-identity': session / 'usb-identity',
             AUTHORIZED: identity().with_suffix('.pub')}
 
 

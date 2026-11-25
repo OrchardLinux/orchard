@@ -22,6 +22,11 @@ is missing or empty.
   board's own restore image (iOS 12.5.8; 12.5.1 on the iPhone 6) instead of
   the iPod touch 6's iOS 12.4. The firmware code is the same; only its build
   date differs.
+- iPad Air (Wi-Fi): display, backlight, buttons, storage, Wi-Fi, battery,
+  charging, suspend and resume, USB serial and USB networking are recorded
+  as working, from an installed Omarchy A on main. Touch stays untested: it
+  stops after 10 to 40 minutes until the driver is rebound. Tested by ricktav
+  (thanks!).
 
 ### Install & launch
 

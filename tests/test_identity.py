@@ -121,7 +121,7 @@ class GadgetIdentity(unittest.TestCase):
         boot = self.root / 'proc/sys/kernel/random/boot_id'
         boot.parent.mkdir(parents=True)
         boot.write_text(BOOT)
-        self.script = (ROOT / 'src/orchard/usb-identity').read_text().replace(
+        self.script = (ROOT / 'boot/session/usb-identity').read_text().replace(
             '/proc/sys/kernel/random/boot_id', str(boot))
 
     def serial(self):
@@ -151,7 +151,7 @@ class GadgetIdentity(unittest.TestCase):
     def test_installed_and_ram_gadgets_use_the_same_stable_serial_before_binding(self):
         (self.tree / 'serial-number').write_bytes(b'HardwareSerialA\0')
         expected = self.serial().stdout.strip()
-        for relative in ('boot/initramfs/root/init', 'src/orchard/usb-session'):
+        for relative in ('boot/initramfs/root/init', 'boot/session/usb-session'):
             with self.subTest(path=relative):
                 source = (ROOT / relative).read_text()
                 if relative.endswith('/init'):

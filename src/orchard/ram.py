@@ -289,7 +289,7 @@ def _build_directory(directory, *, hardware, cache, kernel, busybox, loader, pon
             files.setdefault(TOOL_DESTINATIONS.get(tool.name, 'usr/bin') + '/' + tool.name, tool)
     if settings['transport']:
         from . import ram_session
-        for destination, source in ram_session.payload_files().items():
+        for destination, source in ram_session.payload_files(hardware).items():
             if destination in files:
                 raise ValueError(f'rootfs/ provides {destination}; set transport = false under [payload] in orchard.toml to supply your own')
             files[destination] = source
