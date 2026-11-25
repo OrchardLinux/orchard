@@ -578,6 +578,7 @@
       "bluetooth_audio",
       "bluetooth_input",
       "buttons",
+      "charging",
       "storage_read",
       "storage_write",
       "touch",
