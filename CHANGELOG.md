@@ -13,6 +13,9 @@ is missing or empty.
 
 ### Devices
 
+- iPad mini 2 (Cellular): display, touch, storage, Wi-Fi, speakers, charging,
+  sleep and wake and USB networking work on an installed Omarchy A. Tested by
+  perryraskin (thanks!).
 - A8 to A11 devices with Apple's NVMe storage: storage no longer stops for
   30 seconds when status queries (such as udisks at boot) run beside reads.
   It stalled every few seconds under that load on an iPad 6 and could darken
@@ -34,6 +37,9 @@ is missing or empty.
 
 ### Install & launch
 
+- Linux: a device that is already plugged in when the installer sets up USB
+  access gets the new permissions at once, instead of waiting until it is
+  reconnected. Found by perryraskin (thanks!).
 - The installer waits up to 60 seconds for Pongo to appear instead of 30. On an
   iPad Air (Cellular) it took 40 to 42 seconds, and the install stopped just
   before. Found and fixed by thisiscamk (thanks!).
