@@ -131,7 +131,9 @@ class Orchard2Switch(Fixture):
         for text in ('orchard2 = true\n', '# x\n  orchard2=true # testing\n'):
             self.config(text)
             self.assertEqual(self.ran('build', '.'), expected)
-        self.assertEqual(self.ran('devices'), ['python devices'])
+        self.assertEqual(self.ran('devices'), [f'orchard2 devices {self.env["data"]}'])
+        self.assertEqual(self.ran('devices', ORCHARD2='0'), ['python devices'])
+        self.assertEqual(self.ran('doctor'), ['python doctor'])
 
     def test_a_checkout_is_named_as_data(self):
         self.assertEqual(self.ran('build', '--hardware', 'a b', '--explain', ORCHARD2='1'),
