@@ -137,7 +137,7 @@ def build(output, *, loaders, boards=None, release=None, hardware=None):
     describe (default: every one). RELEASE is a release directory whose
     index.toml (and the release.toml it pins, if a local file) it carries.
     """
-    from importlib.metadata import version
+    from . import version
     from .hardware import ROOT, profiles
     hardware = Path(hardware or ROOT)
     boards = sorted(boards) if boards is not None else profiles(hardware)
@@ -164,7 +164,7 @@ def build(output, *, loaders, boards=None, release=None, hardware=None):
             if 'file' in receipt:  # a local release; a published one fetches it by URL
                 path, _ = resolve_local(index, release, receipt)
                 data['release/' + receipt['file']] = path.read_bytes()
-    info = {'schema': 1, 'version': version('orchard'), 'orchard': _revision(), 'boards': boards}
+    info = {'schema': 1, 'version': version(), 'orchard': _revision(), 'boards': boards}
     data['core.json'] = (json.dumps(info, indent=2) + '\n').encode()
     data['__main__.py'] = BOOTSTRAP.encode()
     output = Path(output)

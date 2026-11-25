@@ -17,6 +17,11 @@ recovery runtime, recipes) are files under `$ORCHARD`. A build that runs
 under `orchard build` gets `ORCHARD_CHECKOUT` set to the snapshot; a build
 without orchard takes it as an argument.
 
+Under orchard2, the Rust tool, the build also gets `ORCHARD_TOOL`, the path of
+that tool. The entry then resolves its inputs with `$ORCHARD_TOOL inputs`
+instead of `orchard.inputs`: the same arguments and document, with paths into
+orchard2's cache (`ORCHARD_CACHE`). Every other command runs from the snapshot.
+
 `orchard build` passes a developer's checkouts the same way, as paths, and
 does nothing with them itself: `ORCHARD_KERNEL_TREE` (`--kernel-tree`, or
 `kernel-tree` in `orchard.local.toml`), which `orchard.inputs` builds the
