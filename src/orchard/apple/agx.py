@@ -14,8 +14,8 @@ image, so its size and SHA-256 are pinned: the C0 image of iPadOS 16.7.10.
 
 A8 (G4P): AGXFirmwareKextG4P holds the same kind of META LDR, and AGXG4P's
 data holds the border colour table the driver loads beside it. The iOS 12
-kernelcaches that carry the tested image have no per-kext load addresses in
-their prelink metadata, so both are found by their structure: every LDR whose
+kernelcaches have no per-kext load addresses in their prelink metadata, so
+both are found by their structure: every LDR whose
 records walk cleanly, and the one 0x800-byte table that opens with 0x440 zero
 bytes and then the word 0x02040000. The recipe's output hash picks the image,
 as for BlueTool's patchrams.

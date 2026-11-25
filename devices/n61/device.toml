@@ -22,7 +22,7 @@ dtb = "t7000-n61"
 
 # The RAM shell uses public components; touch firmware is extracted privately.
 [firmware]
-recipe = "firmware.json" # The GPU firmware comes from the iPod touch 6's iOS 12.4 (16G77), the tested one.
+recipe = "firmware.json" # The GPU firmware comes from this board's pinned IPSW.
 
 [support]
 status = "experimental"

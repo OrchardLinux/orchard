@@ -15,18 +15,10 @@
       },
       "sha256": "ad444ce60ed5f4f45884988234c9699754737e3c655e468d03f6d96dcea62ab8"
     },
-    "kernelcache-n102ap-16G77": {
+    "kernelcache": {
       "ipsw": {
-        "kernelcache": "n102ap",
-        "restore": {
-          "version": "12.4",
-          "build": "16G77",
-          "url": "https://updates.cdn-apple.com/2019SummerFCS/fullrestores/041-86563/9E4DEC4C-A743-11E9-87E4-CD93DBB619B1/iPodtouch_12.4_16G77_Restore.ipsw",
-          "bytes": 2813180896,
-          "sha256": "7deb8c949eaa7f5672d46c6225e9286990ed7c9dfcdfaa2db92ffd91181b213f"
-        }
-      },
-      "sha256": "1d996c85affa1f37a07c6454dd5d3a383d4855206d113c9599200d79b6467ff8"
+        "kernelcache": true
+      }
     },
     "P-barbera_M-CORO_V-m__m-3.7.txt": {
       "ipsw": {
@@ -88,11 +80,11 @@
   "outputs": [
     {
       "destination": "lib/firmware/apple/gfx-t7000.bin",
-      "sha256": "0b60def67290391b4c6aa913d9a78a8105d6d9b03738175b8e5732689db1e5ba",
+      "sha256": "5f99a8ab88ddd34f8f32c11adb21f6b2410bece3d23a9aee560ca80fe8e45f55",
       "steps": [
         {
           "step": "agx-g4p-ldr-from-kernelcache@1",
-          "input": "kernelcache-n102ap-16G77"
+          "input": "kernelcache"
         }
       ]
     },
@@ -102,7 +94,7 @@
       "steps": [
         {
           "step": "agx-g4p-border-from-kernelcache@1",
-          "input": "kernelcache-n102ap-16G77"
+          "input": "kernelcache"
         }
       ]
     },
