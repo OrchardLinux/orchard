@@ -523,6 +523,10 @@ TOOL_INPUTS = ['boot/initramfs/recovery/' + name for name in
                ('build-tools', 'build-tools-in-container', 'Containerfile', 'Containerfile.arm',
                 'install-toolchain', 'upstream.lock', 'check-tools.py', 'orchard-write.c',
                 'orchard-install-usb.c')] + ['producers/buildenv.py']
+# A 32-bit board's Cascadia loader; {profile} is the board's cascadia.toml.
+CASCADIA_INPUTS = ['boot/cascadia', 'producers/cascadia.py', '{profile}', 'producers/buildenv.py']
+# producers/contract.toml states these lists, PONGO_RECIPE and KERNEL_PRODUCER for
+# orchard2; tests/test_contract.py keeps it equal.
 
 
 def recipe_work(components, recipe, key):
@@ -589,8 +593,8 @@ def prepare_payload_loader(hardware=None, cache=None, *, device):
             raise ValueError('Unsupported payload loader: ' + kind)
         from .hardware import payload_profile
         profile = payload_profile(device, 'cascadia', hardware)
-        inputs = ['boot/cascadia', 'producers/cascadia.py', str(profile.relative_to(hardware)),
-                  'producers/buildenv.py']
+        inputs = [str(profile.relative_to(hardware)) if path == '{profile}' else path
+                  for path in CASCADIA_INPUTS]
         def produce(stage):
             command(hardware / 'boot/cascadia/build', '--profile', profile, '--output', stage)
         return cached_component(components, 'loader-cascadia-' + device,

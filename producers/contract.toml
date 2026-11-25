@@ -1,0 +1,36 @@
+# What these recipes say about themselves to the tool that builds from them
+# (orchard2: tools/crates/build). It is updated apart from the recipes, so
+# what a cache key is made from is stated here, not compiled into it: a tool
+# that finds more here than it knows refuses to build.
+# orchard's Python has the same in src/orchard/build.py; tests/test_contract.py
+# keeps the two equal.
+
+# The form of this file.
+schema = 1
+
+# The version of the kernel producers (kernel/build, kernel/build-modules,
+# kernel/stage-modules.py, kernel/series.py, producers/buildenv.py). Their text
+# is not part of a kernel's key; raise this when a change alters what they make.
+kernel-producer = 3  # 3: strip module debug sections from staged outputs
+
+# The files and directories that decide each component, in the order they are
+# hashed.
+[inputs]
+# orchard's m1n1, the quiet one every device boots.
+m1n1 = ["boot/m1n1", "boot/quiet/m1n1.patch", "producers/buildenv.py"]
+# The static tools; the rest of the recovery directory is recovery runtime.
+tools = [
+    "boot/initramfs/recovery/build-tools",
+    "boot/initramfs/recovery/build-tools-in-container",
+    "boot/initramfs/recovery/Containerfile",
+    "boot/initramfs/recovery/Containerfile.arm",
+    "boot/initramfs/recovery/install-toolchain",
+    "boot/initramfs/recovery/upstream.lock",
+    "boot/initramfs/recovery/check-tools.py",
+    "boot/initramfs/recovery/orchard-write.c",
+    "boot/initramfs/recovery/orchard-install-usb.c",
+    "producers/buildenv.py",
+]
+pongo = ["boot/quiet/build-pongo.py", "boot/quiet/pongo.patch"]
+# A 32-bit board's Cascadia loader; {profile} is the board's cascadia.toml.
+cascadia = ["boot/cascadia", "producers/cascadia.py", "{profile}", "producers/buildenv.py"]
