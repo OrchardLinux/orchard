@@ -1,0 +1,179 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 19:42:36 -0600
+Subject: [PATCH] ARM: apple: restore the standard SVC IRQ entry
+
+Linux keeps IRQs disabled through init_IRQ(). AIC1 clears the escape
+flag while its IRQ controller is initialized, before any ordinary IRQ
+entry can observe it. Drop the assembly escape and its redundant
+counterpart in the handler. Remove the empty CBAR drain calls.
+
+Link: https://github.com/OrchardLinux/orchard/issues/79
+Assisted-by: LLM
+---
+ arch/arm/kernel/entry-armv.S     | 10 ----------
+ arch/arm/mach-apple/apple.c      | 17 -----------------
+ drivers/irqchip/irq-apple-aic1.c | 30 +++---------------------------
+ init/main.c                      |  4 +---
+ 4 files changed, 4 insertions(+), 57 deletions(-)
+
+diff --git a/arch/arm/kernel/entry-armv.S b/arch/arm/kernel/entry-armv.S
+index e4084f15d..1dfae1af8 100644
+--- a/arch/arm/kernel/entry-armv.S
++++ b/arch/arm/kernel/entry-armv.S
+@@ -224,15 +224,6 @@ ENDPROC(__dabt_svc)
+ 	.align	5
+ __irq_svc:
+ 	svc_entry
+-	@ P105 aic1q24: like lab IRQ stub — force SPSR.I, skip C irq_enter/exit.
+-	ldr	r0, =apple_aic1_early_irq_escape
+-	ldrb	r0, [r0]
+-	cmp	r0, #0
+-	beq	1001f
+-	ldr	r5, [sp, #S_PSR]
+-	orr	r5, r5, #PSR_I_BIT
+-	svc_exit r5, irq = 1
+-1001:
+ 	irq_handler from_user=0
+ 
+ #ifdef CONFIG_PREEMPTION
+@@ -244,7 +235,6 @@ __irq_svc:
+ 	blne	svc_preempt
+ #endif
+ 
+-	ldr	r5, [sp, #S_PSR]
+ 	svc_exit r5, irq = 1			@ return from exception
+  UNWIND(.fnend		)
+ ENDPROC(__irq_svc)
+diff --git a/arch/arm/mach-apple/apple.c b/arch/arm/mach-apple/apple.c
+index 8c81318c8..4b33c6c2c 100644
+--- a/arch/arm/mach-apple/apple.c
++++ b/arch/arm/mach-apple/apple.c
+@@ -20,13 +20,6 @@
+ pid_t __init apple_s5l_rest_spawn_init(int (*fn)(void *), void *arg,
+ 				       unsigned long flags);
+ 
+-/*
+- * Lab IRQ stub forced SPSR.I on return against sticky nIRQ.  Keep true through
+- * first enables; apple_aic1_release_escape() clears it after 0x5004 drain +
+- * successful irq_thaw (aic1-lab v30: I0 HOLD OK without force).
+- */
+-bool apple_aic1_early_irq_escape = true;
+-
+ void __init apple_s5l_pmccntr_enable_counter(void);
+ void __init apple_s5l_pmccntr_init(unsigned long rate);
+ unsigned long __init apple_s5l_calibrate_cpu_hz(void);
+@@ -36,16 +29,6 @@ void __init apple_s5l_pmu_clkevt_init(unsigned long cpu_hz);
+ /* P105AP recovery scanout address. */
+ #define P105_FB_PHYS	0x9f6fc000
+ 
+-/*
+- * Lab: CBAR phys 0x3E100000 R/W is fine bare-metal.  Under Linux, both
+- * ioremap and static MT_DEVICE map of that window hang (aic1q33 stuck after
+- * printing CP15 CBAR).  Skip GIC MMIO; rely on AIC EVENT@0x5004 drain.
+- */
+-void apple_a9_gic_drain(void)
+-{
+-	/* no CBAR map — AIC drain only */
+-}
+-
+ pid_t __init apple_s5l_rest_spawn_init(int (*fn)(void *), void *arg,
+ 				       unsigned long flags)
+ {
+diff --git a/drivers/irqchip/irq-apple-aic1.c b/drivers/irqchip/irq-apple-aic1.c
+index eaa6cf85b..347efc49d 100644
+--- a/drivers/irqchip/irq-apple-aic1.c
++++ b/drivers/irqchip/irq-apple-aic1.c
+@@ -131,11 +131,9 @@ static struct apple_aic1 *apple_aic1;
+  * Read by the late_initcall smoke-test at the bottom of the file. */
+ static unsigned int aic1_handler_entries;
+ 
+-void apple_a9_gic_drain(void);
+ void apple_aic1_arm_cpu0(void);
+ void apple_aic1_hw_quiesce(bool read_back);
+ int __init apple_aic1_timer_start(void);
+-extern bool apple_aic1_early_irq_escape;
+ 
+ static void aic1_tmr_event(struct apple_aic1 *aic);
+ 
+@@ -506,17 +504,6 @@ static int __init aic1_init_smp(struct apple_aic1 *aic) { return 0; }
+ void apple_aic1_ipi_wake(unsigned int cpu) { }
+ #endif
+ 
+-/**
+- * apple_aic1_release_escape - drop SPSR.I force after lab-proven drain
+- *
+- * Call only after aic1_clear_sticky_nirq() / hw_quiesce and a successful
+- * local_irq_enable window (see irq_thaw / arm_cpu0).
+- */
+-void apple_aic1_release_escape(void)
+-{
+-	apple_aic1_early_irq_escape = false;
+-}
+-
+ /** Software-trigger one hwirq (lab SW_SET path). */
+ void apple_aic1_sw_trigger(unsigned int hwirq)
+ {
+@@ -586,15 +573,9 @@ static void __exception_irq_entry aic1_handle_irq(struct pt_regs *regs)
+ 
+ 	aic1_handler_entries++;
+ 
+-	if (apple_aic1_early_irq_escape)
+-		regs->ARM_cpsr |= PSR_I_BIT;
+-
+-	if (!aic) {
+-		apple_a9_gic_drain();
++	if (!aic)
+ 		return;
+-	}
+ 
+-	apple_a9_gic_drain();
+ 	event = aic1_read_event(aic);
+ 	if (!event) {
+ 		/* They do happen in normal running, a few a minute.  Not
+@@ -737,14 +718,9 @@ static int __init aic1_of_init(struct device_node *node,
+ 	 * Turn it back on now that IPI/domain setup is done. */
+ 	aic1_enable_hw(aic);
+ 
+-	/* FIX (2026-09-13): drop the early-IRQ escape (forces PSR.I on handler
+-	 * return). Was intended to be cleared after "first enables" but the
+-	 * caller was never wired up. Without this, CPU stays interrupt-blind. */
+-	apple_aic1_early_irq_escape = false;
+-
+-	pr_info("aic,1: %u IRQs, WHOAMI=%u, CONFIG=%#x (EVENT@0x5004), escape=%d\n",
++	pr_info("aic,1: %u IRQs, WHOAMI=%u, CONFIG=%#x (EVENT@0x5004)\n",
+ 		aic->nr_irq, aic1_read(aic, AIC1_WHOAMI),
+-		aic1_read(aic, AIC1_CONFIG), apple_aic1_early_irq_escape);
++		aic1_read(aic, AIC1_CONFIG));
+ 
+ 	/* DIAG-2 (2026-09-13): bulk unmask ALL IRQs — MASK register semantics
+ 	 * are set/clr write-only (reading returns 0xffffffff on this HW),
+diff --git a/init/main.c b/init/main.c
+index c56cc011e..b9c43ed81 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -1490,7 +1490,7 @@ static int __ref kernel_init(void *unused)
+ 
+ 		apple_aic1_quiesce();
+ 		apple_aic1_hw_quiesce(true);
+-		/* CFG off; keep early_irq_escape for sticky nIRQ */
++		/* Check for a sticky nIRQ with the controller disabled. */
+ 		early_boot_irqs_disabled = false;
+ 		local_irq_enable();
+ 		local_irq_disable();
+@@ -1501,7 +1501,6 @@ static int __ref kernel_init(void *unused)
+ 		early_boot_irqs_disabled = true;
+ 	}
+ 	{
+-		void apple_aic1_release_escape(void);
+ 		void apple_aic1_quiesce(void);
+ 		void apple_aic1_hw_quiesce(bool read_back);
+ 		void apple_aic1_rearm(void);
+@@ -1516,7 +1515,6 @@ static int __ref kernel_init(void *unused)
+ 		apple_aic1_rearm();
+ 		early_boot_irqs_disabled = false;
+ 		local_irq_enable();
+-		apple_aic1_release_escape();
+ 		apple_aic1_timer_start();
+ 	}
+ #endif

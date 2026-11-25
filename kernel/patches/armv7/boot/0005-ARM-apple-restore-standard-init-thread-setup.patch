@@ -1,0 +1,88 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 19:42:36 -0600
+Subject: [PATCH] ARM: apple: restore standard init thread setup
+
+The alternate-stack experiment is gone and the remaining wrapper only
+changes the file-table sharing flag for PID 1. Use the normal rest_init
+call and restore normal initcall IRQ checking after the AIC is ready.
+
+Link: https://github.com/OrchardLinux/orchard/issues/79
+Assisted-by: LLM
+---
+ arch/arm/mach-apple/apple.c | 10 ----------
+ init/main.c                 | 14 +-------------
+ 2 files changed, 1 insertion(+), 23 deletions(-)
+
+diff --git a/arch/arm/mach-apple/apple.c b/arch/arm/mach-apple/apple.c
+index 4b33c6c2c..647bfecf9 100644
+--- a/arch/arm/mach-apple/apple.c
++++ b/arch/arm/mach-apple/apple.c
+@@ -12,14 +12,10 @@
+ #include <linux/memblock.h>
+ #include <linux/of.h>
+ #include <linux/of_address.h>
+-#include <linux/sched/task.h>
+ #include <asm/cputype.h>
+ #include <asm/mach/arch.h>
+ #include <asm/memory.h>
+ 
+-pid_t __init apple_s5l_rest_spawn_init(int (*fn)(void *), void *arg,
+-				       unsigned long flags);
+-
+ void __init apple_s5l_pmccntr_enable_counter(void);
+ void __init apple_s5l_pmccntr_init(unsigned long rate);
+ unsigned long __init apple_s5l_calibrate_cpu_hz(void);
+@@ -29,12 +25,6 @@ void __init apple_s5l_pmu_clkevt_init(unsigned long cpu_hz);
+ /* P105AP recovery scanout address. */
+ #define P105_FB_PHYS	0x9f6fc000
+ 
+-pid_t __init apple_s5l_rest_spawn_init(int (*fn)(void *), void *arg,
+-				       unsigned long flags)
+-{
+-	return user_mode_thread(fn, arg, flags | CLONE_FILES);
+-}
+-
+ static void __init apple_s5l_reserve(void)
+ {
+ 	phys_addr_t phys = P105_FB_PHYS & ~(SZ_1M - 1);
+diff --git a/init/main.c b/init/main.c
+index b9c43ed81..1813fbf2d 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -698,11 +698,6 @@ static void __init setup_command_line(char *command_line)
+ 
+ static __initdata DECLARE_COMPLETION(kthreadd_done);
+ 
+-#ifdef CONFIG_ARCH_APPLE_S5L
+-pid_t __init apple_s5l_rest_spawn_init(int (*fn)(void *), void *arg,
+-				       unsigned long flags);
+-#endif
+-
+ static noinline void __ref __noreturn rest_init(void)
+ {
+ 	struct task_struct *tsk;
+@@ -714,11 +709,7 @@ static noinline void __ref __noreturn rest_init(void)
+ 	 * the init task will end up wanting to create kthreads, which, if
+ 	 * we schedule it before we create kthreadd, will OOPS.
+ 	 */
+-#ifdef CONFIG_ARCH_APPLE_S5L
+-	pid = apple_s5l_rest_spawn_init(kernel_init, NULL, CLONE_FS);
+-#else
+ 	pid = user_mode_thread(kernel_init, NULL, CLONE_FS);
+-#endif
+ 	/*
+ 	 * Pin init on the boot CPU. Task migration is not properly working
+ 	 * until sched_init_smp() has been run. It will set the allowed
+@@ -1286,10 +1277,7 @@ int __init_or_module do_one_initcall(initcall_t fn)
+ 	}
+ 	if (irqs_disabled()) {
+ 		strlcat(msgbuf, "disabled interrupts ", sizeof(msgbuf));
+-#ifdef CONFIG_ARCH_APPLE_S5L
+-		if (!early_boot_irqs_disabled)
+-#endif
+-			local_irq_enable();
++		local_irq_enable();
+ 	}
+ 	WARN(msgbuf[0], "initcall %pS returned with %s\n", fn, msgbuf);
+ 

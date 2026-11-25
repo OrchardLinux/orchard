@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 19:50:16 -0600
+Subject: [PATCH] ARM: SMP: restore the standard secondary FIQ state
+
+AIC1 dispatches interrupts through the normal IRQ path. Restore
+secondary_start_kernel()'s interrupt state for ARM instead of leaving
+FIQ masked for every machine in a multi-platform kernel.
+
+Link: https://github.com/OrchardLinux/orchard/issues/79
+Assisted-by: LLM
+---
+ arch/arm/kernel/smp.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/arch/arm/kernel/smp.c b/arch/arm/kernel/smp.c
+index 2d46adad3..3431c0553 100644
+--- a/arch/arm/kernel/smp.c
++++ b/arch/arm/kernel/smp.c
+@@ -469,8 +469,7 @@ asmlinkage void secondary_start_kernel(struct task_struct *task)
+ 	complete(&cpu_running);
+ 
+ 	local_irq_enable();
+-	/* Cascadia: the A5's AIC delivers everything as IRQ; FIQ stays off on
+-	 * secondaries until something is known to need it. */
++	local_fiq_enable();
+ 	local_abt_enable();
+ 
+ 	/*

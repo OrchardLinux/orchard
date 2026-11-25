@@ -1,0 +1,745 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 19:28:46 -0600
+Subject: [PATCH] ARM: apple: drop the dormant P105 framebuffer tracer
+
+The helper never enables drawing. Remove the scanout tracer, the unused
+alternate stack experiment and the trace calls in core boot and fork code.
+Preserve the framebuffer reservation and the AIC register readback because
+the event read can consume a pending interrupt.
+
+Link: https://github.com/OrchardLinux/orchard/issues/79
+Assisted-by: LLM
+---
+ arch/arm/mach-apple/Makefile      |   2 +-
+ arch/arm/mach-apple/apple.c       | 191 +++------------------------
+ arch/arm/mach-apple/p105_fb_dbg.c | 212 ------------------------------
+ arch/arm/mach-apple/p105_fb_dbg.h |  22 ----
+ init/main.c                       |  41 +-----
+ kernel/fork.c                     |  24 ----
+ 6 files changed, 23 insertions(+), 469 deletions(-)
+ delete mode 100644 arch/arm/mach-apple/p105_fb_dbg.c
+ delete mode 100644 arch/arm/mach-apple/p105_fb_dbg.h
+
+diff --git a/arch/arm/mach-apple/Makefile b/arch/arm/mach-apple/Makefile
+index 71f116425..23ac8f780 100644
+--- a/arch/arm/mach-apple/Makefile
++++ b/arch/arm/mach-apple/Makefile
+@@ -1,4 +1,4 @@
+ # SPDX-License-Identifier: GPL-2.0-only
+-obj-$(CONFIG_ARCH_APPLE_S5L)	+= apple.o pmccntr.o p105_fb_dbg.o apple_wdt_clkevt.o apple_pmu_clkevt.o apple_sof_clkevt.o
++obj-$(CONFIG_ARCH_APPLE_S5L)	+= apple.o pmccntr.o apple_wdt_clkevt.o apple_pmu_clkevt.o apple_sof_clkevt.o
+ obj-$(CONFIG_SMP)		+= platsmp.o headsmp.o
+ obj-$(CONFIG_SERIAL_EARLYCON)	+= j1_earlyfb.o
+diff --git a/arch/arm/mach-apple/apple.c b/arch/arm/mach-apple/apple.c
+index e4aaa6c00..19e4fb048 100644
+--- a/arch/arm/mach-apple/apple.c
++++ b/arch/arm/mach-apple/apple.c
+@@ -12,29 +12,17 @@
+ #include <linux/memblock.h>
+ #include <linux/of.h>
+ #include <linux/of_address.h>
+-#include <linux/sched.h>
+ #include <linux/sched/task.h>
+ #include <asm/cputype.h>
+ #include <asm/barrier.h>
+-#include <asm/thread_info.h>
+-#include <asm/exception.h>
+ #include <asm/mach/arch.h>
+ #include <asm/mach/map.h>
+ #include <asm/memory.h>
+ 
+-#include "p105_fb_dbg.h"
+-
+-extern bool early_boot_irqs_disabled;
+-extern pid_t user_mode_thread(int (*fn)(void *), void *arg, unsigned long flags);
+-void apple_aic1_quiesce(void);
+-void apple_aic1_enable(void);
+ void apple_aic1_arm_cpu0(void);
+-void apple_aic1_release_escape(void);
+-void apple_aic1_hw_quiesce(void);
+-void apple_aic1_hw_quiesce_quiet(void);
+-
+-/* Bump when changing rest_init spawn path so FB confirms the flashed image. */
+-#define APPLE_BOOT_STAMP	0x26082634ul
++void apple_aic1_hw_quiesce(bool read_back);
++pid_t __init apple_s5l_rest_spawn_init(int (*fn)(void *), void *arg,
++				       unsigned long flags);
+ 
+ /*
+  * Lab IRQ stub forced SPSR.I on return against sticky nIRQ.  Keep true through
+@@ -49,16 +37,8 @@ unsigned long __init apple_s5l_calibrate_cpu_hz(void);
+ void __init apple_s5l_wdt_clocksource_init(void);
+ void __init apple_s5l_pmu_clkevt_init(unsigned long cpu_hz);
+ 
+-/*
+- * P105AP Recovery live scanout (confirmed): phys 0x9F6FC000, portrait
+- * 768x1024, stride 3072 (=768*4), BGRA.
+- */
++/* P105AP recovery scanout address. */
+ #define P105_FB_PHYS	0x9f6fc000
+-#define P105_FB_STRIDE	3072
+-
+-unsigned long p105_fb_phys = P105_FB_PHYS;
+-unsigned long p105_fb_stride = P105_FB_STRIDE;
+-unsigned p105_vis_row0 = 4;
+ 
+ #define P105_AIC_PHYS	0x3f200000
+ #define P105_AIC_VIRT	0xF0500000UL
+@@ -93,19 +73,6 @@ static struct map_desc apple_aic_desc __initdata = {
+  * ioremap and static MT_DEVICE map of that window hang (aic1q33 stuck after
+  * printing CP15 CBAR).  Skip GIC MMIO; rely on AIC EVENT@0x5004 drain.
+  */
+-static bool apple_aic_quiesce_silent;
+-
+-void apple_a9_periph_quiesce(void)
+-{
+-	u32 cbar;
+-
+-	asm volatile("mrc p15, 4, %0, c15, c0, 0" : "=r"(cbar));
+-	if (!apple_aic_quiesce_silent) {
+-		p105_fb_dbg_hex("cbar", cbar & 0xffffe000u);
+-		p105_fb_dbg("cbar_skip");
+-	}
+-}
+-
+ void apple_a9_gic_drain(void)
+ {
+ 	/* no CBAR map — AIC drain only */
+@@ -116,14 +83,12 @@ void apple_a9_gic_drain(void)
+  * TARGET=0, MASK, IPI, drain EVENT@0x5004 (and 0x2004), CFG.enable=0.
+  * Never PMGR gate 0x4D while AIC must live.
+  */
+-void apple_aic1_hw_quiesce(void)
++void apple_aic1_hw_quiesce(bool read_back)
+ {
+ 	void __iomem *base = (void __iomem *)P105_AIC_VIRT;
+ 	unsigned int i, n, cpu;
+ 	u32 cfg;
+ 
+-	apple_a9_periph_quiesce();
+-
+ 	for (i = 0; i < P105_AIC_NR_WORDS; i++) {
+ 		writel_relaxed(~0U, base + P105_AIC_MASK_SET + i * 4);
+ 		writel_relaxed(~0U, base + P105_AIC_SW_CLR + i * 4);
+@@ -159,21 +124,17 @@ void apple_aic1_hw_quiesce(void)
+ 	writel_relaxed(cfg, base + P105_AIC_CONFIG);
+ 	dsb(sy);
+ 
+-	if (!apple_aic_quiesce_silent) {
+-		p105_fb_dbg_hex("cfg", readl_relaxed(base + P105_AIC_CONFIG));
+-		p105_fb_dbg_hex("e5", readl_relaxed(base + P105_AIC_EVENT_CPU0));
+-		p105_fb_dbg_hex("tgt", readl_relaxed(base + P105_AIC_TARGET_CPU));
++	if (read_back) {
++		/*
++		 * Reading EVENT consumes a pending event. Keep the readback
++		 * sequence used during the first quiesce.
++		 */
++		readl_relaxed(base + P105_AIC_CONFIG);
++		readl_relaxed(base + P105_AIC_EVENT_CPU0);
++		readl_relaxed(base + P105_AIC_TARGET_CPU);
+ 	}
+ }
+ 
+-/** Silent P0 quiesce for irq_thaw (no FB dump flood). */
+-void apple_aic1_hw_quiesce_quiet(void)
+-{
+-	apple_aic_quiesce_silent = true;
+-	apple_aic1_hw_quiesce();
+-	apple_aic_quiesce_silent = false;
+-}
+-
+ /* Affinity to CPU0 after IRQs are on; drain per-CPU EVENT. */
+ void apple_aic1_arm_cpu0(void)
+ {
+@@ -199,129 +160,22 @@ void apple_aic1_arm_cpu0(void)
+ 	}
+ }
+ 
+-struct apple_spawn_args {
+-	int (*fn)(void *);
+-	void *arg;
+-	unsigned long flags;
+-	pid_t pid;
+-	unsigned long old_sp;
+-};
+-
+-static void __noclone noinline apple_spawn_fn(void *a)
+-{
+-	struct apple_spawn_args *s = a;
+-
+-	s->pid = user_mode_thread(s->fn, s->arg, s->flags);
+-}
+-
+-static noinline pid_t apple_spawn_on_alt_stack(int (*fn)(void *), void *arg,
+-					       unsigned long flags)
+-{
+-	struct apple_spawn_args s = {
+-		.fn = fn,
+-		.arg = arg,
+-		.flags = flags,
+-		.pid = -ENOMEM,
+-	};
+-	unsigned long sp, old_sp;
+-	u8 *stk;
+-	void (*spawn)(void *) = apple_spawn_fn;
+-
+-	stk = memblock_alloc(THREAD_SIZE, THREAD_SIZE);
+-	if (!stk)
+-		return -ENOMEM;
+-
+-	sp = (unsigned long)stk + THREAD_SIZE - 8;
+-	sp &= ~7UL;
+-
+-	asm volatile(
+-		"mov	%0, sp\n"
+-		"mov	sp, %1\n"
+-		"mov	r0, %2\n"
+-		"blx	%3\n"
+-		"mov	sp, %0\n"
+-		: "=&r" (old_sp)
+-		: "r" (sp), "r" (&s), "r" (spawn)
+-		: "r0", "lr", "memory");
+-
+-	s.old_sp = old_sp;
+-	return s.pid;
+-}
+-
+-static unsigned long apple_current_sp(void)
+-{
+-	unsigned long sp;
+-
+-	asm volatile("mov %0, sp" : "=r" (sp));
+-	return sp;
+-}
+-
+ pid_t __init apple_s5l_rest_spawn_init(int (*fn)(void *), void *arg,
+ 				       unsigned long flags)
+ {
+-	unsigned long top = (unsigned long)current->stack + THREAD_SIZE;
+-	pid_t pid;
+-
+-	p105_fb_dbg_hex("bld", APPLE_BOOT_STAMP);
+-	p105_fb_dbg_hex("sp", apple_current_sp());
+-	p105_fb_dbg_hex("stk", top - apple_current_sp());
+-
+-	/*
+-	 * IRQs already probed+frozen in start_kernel (irq_frz).  Do not
+-	 * re-quiesce/enable here.  Spawn on the normal task stack — alt-stack
+-	 * SP breaks on_accessible_stack()/canary checks on the way out of
+-	 * kernel_clone (hang after kc_woke).
+-	 */
+-	p105_fb_dbg("irq_ok");
+-
+-	p105_fb_dbg("umt_go");
+-	flags |= CLONE_FILES;
+-	pid = user_mode_thread(fn, arg, flags);
+-	p105_fb_dbg("umt_ret");
+-	p105_fb_dbg_hex("pid", (unsigned long)pid);
+-
+-	return pid;
+-}
+-
+-static phys_addr_t p105_fb_section(void)
+-{
+-	phys_addr_t phys = (phys_addr_t)p105_fb_phys & ~(SZ_1M - 1);
+-
+-	if (phys < 0x9f000000 || phys >= 0x9ff00000)
+-		phys = P105_FB_PHYS & ~(SZ_1M - 1);
+-	return phys;
++	return user_mode_thread(fn, arg, flags | CLONE_FILES);
+ }
+ 
+ static void __init apple_s5l_reserve(void)
+ {
+-	phys_addr_t phys = p105_fb_section();
++	phys_addr_t phys = P105_FB_PHYS & ~(SZ_1M - 1);
+ 
+-	memblock_remove(phys, 0x9f6fc000 - phys);
++	memblock_remove(phys, P105_FB_PHYS - phys);
+ }
+ 
+ static void __init apple_s5l_map_io(void)
+ {
+-	/*
+-	 * Do not iotable_init the framebuffer. Mapping 0x9f6fxxxx as
+-	 * MT_DEVICE_WC at 0xF0000000 hung at mio_fb (create_mapping /
+-	 * memblock for the static VM). Early identity map of
+-	 * 0x9f000000–0xa0000000 (kept in prepare_page_table) is enough
+-	 * for p105_fb_dbg; simplefb can ioremap later.
+-	 */
+-	p105_fb_dbg("mio_enter");
+-	p105_fb_dbg("aic1q34");	/* EVENT@0x5004; CBAR map skipped; release escape */
+-	p105_fb_phys = P105_FB_PHYS;
+-	p105_fb_stride = P105_FB_STRIDE;
+-
+-	p105_fb_dbg("mio_aic");
+ 	iotable_init(&apple_aic_desc, 1);
+-	p105_fb_dbg("mio_nocbar");
+-
+-	p105_vis_row0 = 4;
+-	/* Stay on phys identity — never p105_fb_dbg_use_virt(). */
+-	p105_fb_dbg("map_io");
+-	p105_fb_dbg_hex("fb", p105_fb_phys);
+-	p105_fb_dbg_hex("str", p105_fb_stride);
+ }
+ 
+ /*
+@@ -351,12 +205,6 @@ static void __init apple_s5l_a9_errata(void)
+ 		variant, midr & 0xf, diag);
+ }
+ 
+-static void __init apple_s5l_init_early(void)
+-{
+-	p105_fb_dbg("init_early");
+-	apple_s5l_a9_errata();
+-}
+-
+ /*
+  * The L2's other half.  The ADT's pl310 node has two register blocks: the
+  * PL310 itself and Apple's CIF at 0x3fd00000.  iOS 6.1's AppleS5L8940XPL310,
+@@ -390,9 +238,7 @@ out:
+ 
+ static void __init apple_s5l_init_irq(void)
+ {
+-	p105_fb_dbg("irqchip_init");
+ 	irqchip_init();
+-	p105_fb_dbg("irqchip_done");
+ 	apple_s5l_cif_l2_on();
+ }
+ 
+@@ -404,7 +250,6 @@ static void __init apple_s5l_init_time(void)
+ 	 * exact 24 MHz reference, and only then register the clocksource -- its
+ 	 * rate used to be a hardcoded 1 GHz guess, which made all wall-clock time
+ 	 * wrong.  The same measured figure is what the PMU tick is scaled by. */
+-	p105_fb_dbg("pmccntr_init");
+ 	apple_s5l_pmccntr_enable_counter();
+ 	cpu_hz = apple_s5l_calibrate_cpu_hz();
+ 
+@@ -416,9 +261,7 @@ static void __init apple_s5l_init_time(void)
+ 
+ 	/* Tick from the PMU overflow interrupt; it self-tests at late_initcall and
+ 	 * leaves the system exactly as tickless as before if the IRQ never lands. */
+-	p105_fb_dbg("pmu_timer");
+ 	apple_s5l_pmu_clkevt_init(cpu_hz);
+-	p105_fb_dbg("pmccntr_done");
+ }
+ 
+ static const char * const apple_s5l_dt_compat[] __initconst = {
+@@ -431,7 +274,7 @@ DT_MACHINE_START(APPLE_S5L, "Apple S5L (Device Tree)")
+ 	.dt_compat	= apple_s5l_dt_compat,
+ 	.reserve	= apple_s5l_reserve,
+ 	.map_io		= apple_s5l_map_io,
+-	.init_early	= apple_s5l_init_early,
++	.init_early	= apple_s5l_a9_errata,
+ 	.init_irq	= apple_s5l_init_irq,
+ 	.init_time	= apple_s5l_init_time,
+ 	/* Keep iBoot's AUX (16 x 64 KB); a mask at all is what makes
+diff --git a/arch/arm/mach-apple/p105_fb_dbg.c b/arch/arm/mach-apple/p105_fb_dbg.c
+deleted file mode 100644
+index 8eb7f5771..000000000
+--- a/arch/arm/mach-apple/p105_fb_dbg.c
++++ /dev/null
+@@ -1,212 +0,0 @@
+-// SPDX-License-Identifier: GPL-2.0-only
+-/*
+- * P105AP early FB text debug (phys identity map + WC virt after map_io).
+- *
+- * Live Recovery scanout: 0x9F6FC000, 768x1024, stride 3072, BGRA.
+- *
+- * Lifetime: not __init (rest_init can race free_initmem).  Phys identity
+- * writes are only safe while early maps live — call p105_fb_dbg_shutdown()
+- * before free_initmem; do not stamp FB after schedule_preempt_disabled().
+- */
+-
+-#include <linux/init.h>
+-#include <linux/kernel.h>
+-#include <linux/sizes.h>
+-#include <linux/types.h>
+-
+-#include "font8x8.h"
+-#include "p105_fb_dbg.h"
+-
+-#define P105_FB_PHYS	0x9f6fc000ul
+-#define P105_FB_WIDTH	768
+-#define P105_FB_HEIGHT	1024
+-#define P105_FB_STRIDE	3072
+-#define P105_FB_VIRT	0xF0000000UL
+-
+-#define P105_FG		0xffffffffu
+-#define P105_BG		0xff102030u
+-#define P105_SCALE	2
+-#define P105_LINE_PX	((FONT8_H * P105_SCALE) + 2)
+-#define P105_MARGIN_X	8
+-#define P105_MARGIN_Y	8
+-
+-extern unsigned long p105_fb_phys;
+-extern unsigned long p105_fb_stride;
+-
+-/* Non-zero after apple_s5l_map_io installs WC map at P105_FB_VIRT. */
+-static int p105_fb_use_virt;
+-static unsigned p105_dbg_row;
+-/* Cleared before free_initmem — phys identity map is not safe once idle runs. */
+-static bool p105_fb_dbg_alive = false;
+-
+-void p105_fb_dbg_shutdown(void)
+-{
+-	p105_fb_dbg_alive = false;
+-}
+-
+-void __init p105_fb_dbg_use_virt(void)
+-{
+-	p105_fb_use_virt = 1;
+-}
+-
+-static unsigned long p105_dbg_base(void)
+-{
+-	phys_addr_t section;
+-
+-	if (!p105_fb_use_virt)
+-		return P105_FB_PHYS;
+-
+-	section = (phys_addr_t)p105_fb_phys & ~(SZ_1M - 1);
+-	if (section < 0x9f000000 || section >= 0x9ff00000)
+-		section = P105_FB_PHYS & ~(SZ_1M - 1);
+-	return P105_FB_VIRT + (p105_fb_phys - section);
+-}
+-
+-static u32 p105_dbg_stride(void)
+-{
+-	u32 s = (u32)p105_fb_stride;
+-
+-	if (s < 2048 || s > 8192 || (s & 3))
+-		return P105_FB_STRIDE;
+-	return s;
+-}
+-
+-static void p105_px(unsigned long base, u32 stride, int x, int y, u32 c)
+-{
+-	if ((unsigned)x >= P105_FB_WIDTH || (unsigned)y >= P105_FB_HEIGHT)
+-		return;
+-	*(volatile u32 *)(base + (unsigned long)y * stride + (unsigned)x * 4) = c;
+-}
+-
+-static void p105_fill_rect(unsigned long base, u32 stride,
+-			   int x, int y, int w, int h, u32 c)
+-{
+-	int i, j;
+-
+-	for (j = 0; j < h; j++)
+-		for (i = 0; i < w; i++)
+-			p105_px(base, stride, x + i, y + j, c);
+-}
+-
+-static void p105_draw_char(unsigned long base, u32 stride,
+-			   int x, int y, int ch, u32 c)
+-{
+-	const unsigned char *g;
+-	int row, col, dy, dx;
+-
+-	if (ch < FONT8_FIRST || ch > FONT8_LAST)
+-		ch = FONT8_FIRST;
+-	g = &font8x8[(ch - FONT8_FIRST) * FONT8_H];
+-	for (row = 0; row < FONT8_H; row++) {
+-		unsigned char bits = g[row];
+-
+-		for (col = 0; col < FONT8_W; col++) {
+-			if (bits & 1u) {
+-				for (dy = 0; dy < P105_SCALE; dy++)
+-					for (dx = 0; dx < P105_SCALE; dx++)
+-						p105_px(base, stride,
+-							x + col * P105_SCALE + dx,
+-							y + row * P105_SCALE + dy, c);
+-			}
+-			bits >>= 1;
+-		}
+-	}
+-}
+-
+-void p105_fb_dbg_clear(void)
+-{
+-	unsigned long base = p105_dbg_base();
+-	u32 stride = p105_dbg_stride();
+-	unsigned y, x;
+-	u32 *row;
+-
+-	if (!p105_fb_dbg_alive)
+-		return;
+-
+-	p105_fb_phys = P105_FB_PHYS;
+-	p105_fb_stride = P105_FB_STRIDE;
+-
+-	for (y = 0; y < P105_FB_HEIGHT; y++) {
+-		row = (u32 *)(base + (unsigned long)y * stride);
+-		for (x = 0; x < P105_FB_WIDTH; x++)
+-			row[x] = P105_BG;
+-	}
+-	p105_dbg_row = 0;
+-}
+-
+-void p105_fb_dbg(const char *msg)
+-{
+-	unsigned long base = p105_dbg_base();
+-	u32 stride = p105_dbg_stride();
+-	int x, y, step = FONT8_W * P105_SCALE;
+-	unsigned max_rows;
+-
+-	if (!p105_fb_dbg_alive || !msg)
+-		return;
+-
+-	max_rows = (P105_FB_HEIGHT - P105_MARGIN_Y) / P105_LINE_PX;
+-	if (max_rows < 1)
+-		max_rows = 1;
+-	if (p105_dbg_row >= max_rows) {
+-		p105_fb_dbg_clear();
+-		base = p105_dbg_base();
+-		stride = p105_dbg_stride();
+-	}
+-
+-	y = P105_MARGIN_Y + (int)p105_dbg_row * P105_LINE_PX;
+-	p105_fill_rect(base, stride, 0, y, P105_FB_WIDTH, P105_LINE_PX, P105_BG);
+-
+-	x = P105_MARGIN_X;
+-	while (*msg && x + step <= P105_FB_WIDTH - P105_MARGIN_X) {
+-		p105_draw_char(base, stride, x, y + 1, (unsigned char)*msg++, P105_FG);
+-		x += step;
+-	}
+-	p105_dbg_row++;
+-}
+-
+-void p105_fb_dbg_hex(const char *tag, unsigned long val)
+-{
+-	static const char hexd[] = "0123456789ABCDEF";
+-	char buf[48];
+-	unsigned i = 0, j;
+-
+-	if (tag) {
+-		while (*tag && i < 24)
+-			buf[i++] = *tag++;
+-		if (i < 24)
+-			buf[i++] = ' ';
+-	}
+-	for (j = 0; j < 8 && i < sizeof(buf) - 1; j++)
+-		buf[i++] = hexd[(val >> (28 - j * 4)) & 0xf];
+-	buf[i] = '\0';
+-	p105_fb_dbg(buf);
+-}
+-
+-void __init p105_ioremap_paint(u32 color, unsigned row0, unsigned nrows)
+-{
+-	(void)color;
+-	(void)row0;
+-	(void)nrows;
+-}
+-
+-void __init p105_stamp_row(unsigned row, u32 color)
+-{
+-	(void)row;
+-	(void)color;
+-}
+-
+-void __init p105_stamp_step(unsigned step, u32 color)
+-{
+-	char buf[12];
+-
+-	(void)color;
+-	buf[0] = 's';
+-	buf[1] = 't';
+-	buf[2] = 'e';
+-	buf[3] = 'p';
+-	buf[4] = ' ';
+-	buf[5] = '0' + (step / 10) % 10;
+-	buf[6] = '0' + step % 10;
+-	buf[7] = '\0';
+-	p105_fb_dbg(buf);
+-}
+diff --git a/arch/arm/mach-apple/p105_fb_dbg.h b/arch/arm/mach-apple/p105_fb_dbg.h
+deleted file mode 100644
+index 1880315dc..000000000
+--- a/arch/arm/mach-apple/p105_fb_dbg.h
++++ /dev/null
+@@ -1,22 +0,0 @@
+-/* SPDX-License-Identifier: GPL-2.0-only */
+-#ifndef _MACH_APPLE_P105_FB_DBG_H
+-#define _MACH_APPLE_P105_FB_DBG_H
+-
+-#include <linux/types.h>
+-
+-/*
+- * Early framebuffer text for P105AP (iPad mini 1) Recovery scanout.
+- * Panel is portrait 768x1024, stride 3072, BGRA @ 0x9F6FC000.
+- */
+-void p105_fb_dbg_clear(void);
+-void p105_fb_dbg(const char *msg);
+-void p105_fb_dbg_hex(const char *tag, unsigned long val);
+-void p105_fb_dbg_use_virt(void);
+-/* Stop phys-FB writes before free_initmem / idle (identity map goes away). */
+-void p105_fb_dbg_shutdown(void);
+-
+-/* Spawn init on alt stack with IRQs on; returns init pid or negative errno. */
+-pid_t __init apple_s5l_rest_spawn_init(int (*fn)(void *), void *arg,
+-				       unsigned long flags);
+-
+-#endif
+diff --git a/init/main.c b/init/main.c
+index 296545649..4cb431401 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -699,7 +699,6 @@ static void __init setup_command_line(char *command_line)
+ static __initdata DECLARE_COMPLETION(kthreadd_done);
+ 
+ #ifdef CONFIG_ARCH_APPLE_S5L
+-void p105_fb_dbg(const char *msg);
+ pid_t __init apple_s5l_rest_spawn_init(int (*fn)(void *), void *arg,
+ 				       unsigned long flags);
+ #endif
+@@ -716,8 +715,6 @@ static noinline void __ref __noreturn rest_init(void)
+ 	 * we schedule it before we create kthreadd, will OOPS.
+ 	 */
+ #ifdef CONFIG_ARCH_APPLE_S5L
+-	p105_fb_dbg("rest_init");
+-	p105_fb_dbg("pre_spawn");
+ 	pid = apple_s5l_rest_spawn_init(kernel_init, NULL, CLONE_FS);
+ #else
+ 	pid = user_mode_thread(kernel_init, NULL, CLONE_FS);
+@@ -1487,57 +1484,39 @@ static int __ref kernel_init(void *unused)
+ #ifdef CONFIG_ARCH_APPLE_S5L
+ 	{
+ 		void apple_aic1_quiesce(void);
+-		void apple_aic1_hw_quiesce(void);
++		void apple_aic1_hw_quiesce(bool read_back);
+ 		void apple_aic1_enable(void);
+ 		void apple_aic1_arm_cpu0(void);
+-		extern bool apple_aic1_early_irq_escape;
+ 
+-		p105_fb_dbg("irq_quiesce");
+ 		apple_aic1_quiesce();
+-		apple_aic1_hw_quiesce();
++		apple_aic1_hw_quiesce(true);
+ 		/* CFG off; keep early_irq_escape for sticky nIRQ */
+-		p105_fb_dbg("irq_try");
+ 		early_boot_irqs_disabled = false;
+ 		local_irq_enable();
+-		p105_fb_dbg("irq_on");
+ 		local_irq_disable();
+ 		apple_aic1_enable();
+ 		apple_aic1_arm_cpu0();
+ 		local_irq_enable();
+-		p105_fb_dbg("irq_arm");
+ 		local_irq_disable();
+ 		early_boot_irqs_disabled = true;
+-		p105_fb_dbg("irq_frz");
+ 	}
+-#else
+-#endif
+-	p105_fb_dbg("init_go");
+-#ifdef CONFIG_ARCH_APPLE_S5L
+ 	{
+ 		void apple_aic1_release_escape(void);
+ 		void apple_aic1_quiesce(void);
+-		void apple_aic1_hw_quiesce_quiet(void);
++		void apple_aic1_hw_quiesce(bool read_back);
+ 		void apple_aic1_rearm(void);
+ 
+-		p105_fb_dbg("init_go");
+ 		apple_aic1_quiesce();
+-		apple_aic1_hw_quiesce_quiet();
++		apple_aic1_hw_quiesce(false);
+ 		/* FIX (2026-09-14): both quiesce calls above clear CFG.ENABLE and zero
+ 		 * TARGET_CPU for all 192 lines.  Without this re-arm the AIC stays dead
+ 		 * for the whole of do_initcalls(), which is why every /proc/interrupts
+ 		 * counter (incl. IPIs) stayed at 0. */
+ 		apple_aic1_rearm();
+-		p105_fb_dbg("irq_rearm");
+ 		early_boot_irqs_disabled = false;
+-		p105_fb_dbg("irq_thaw");
+ 		local_irq_enable();
+-		p105_fb_dbg("thaw_on");
+ 		apple_aic1_release_escape();
+-		p105_fb_dbg("esc_off");
+ 	}
+-#endif
+-#ifdef CONFIG_ARCH_APPLE_S5L
+-	p105_fb_dbg("kt_done");
+ #endif
+ 	kernel_init_freeable();
+ 	/* need to finish all async __init code before freeing the memory */
+@@ -1548,13 +1527,6 @@ static int __ref kernel_init(void *unused)
+ 	ftrace_free_init_mem();
+ 	kgdb_free_init_mem();
+ 	exit_boot_config();
+-#ifdef CONFIG_ARCH_APPLE_S5L
+-	{
+-		void p105_fb_dbg_shutdown(void);
+-
+-		p105_fb_dbg_shutdown();
+-	}
+-#endif
+ 	free_initmem();
+ 	mark_readonly();
+ 
+@@ -1572,10 +1544,7 @@ static int __ref kernel_init(void *unused)
+ 	do_sysctl_args();
+ 
+ 	if (ramdisk_execute_command) {
+-	#ifdef CONFIG_ARCH_APPLE_S5L
+-	p105_fb_dbg("init_run");
+-#endif
+-	ret = run_init_process(ramdisk_execute_command);
++		ret = run_init_process(ramdisk_execute_command);
+ 		if (!ret)
+ 			return 0;
+ 		pr_err("Failed to execute %s (error %d)\n",
+diff --git a/kernel/fork.c b/kernel/fork.c
+index eb4f68a52..22f43721d 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -2814,14 +2814,7 @@ pid_t kernel_clone(struct kernel_clone_args *args)
+ 		task_unlock(p);
+ 	}
+ 
+-#ifdef CONFIG_ARCH_APPLE_S5L
+-void p105_fb_dbg(const char *msg);
+-	p105_fb_dbg("kc_wake");
+-#endif
+ 	wake_up_new_task(p);
+-#ifdef CONFIG_ARCH_APPLE_S5L
+-	p105_fb_dbg("kc_woke");
+-#endif
+ 
+ 	/* forking complete and child started to run, tell ptracer */
+ 	if (unlikely(trace))
+@@ -2832,13 +2825,7 @@ void p105_fb_dbg(const char *msg);
+ 			ptrace_event_pid(PTRACE_EVENT_VFORK_DONE, pid);
+ 	}
+ 
+-#ifdef CONFIG_ARCH_APPLE_S5L
+-	p105_fb_dbg("kc_put");
+-#endif
+ 	put_pid(pid);
+-#ifdef CONFIG_ARCH_APPLE_S5L
+-	p105_fb_dbg("kc_out");
+-#endif
+ 	return nr;
+ }
+ 
+@@ -2864,19 +2851,8 @@ pid_t kernel_thread(int (*fn)(void *), void *arg, const char *name,
+ /*
+  * Create a user mode thread.
+  */
+-#ifdef CONFIG_ARCH_APPLE_S5L
+-void p105_fb_dbg(const char *msg);
+-#endif
+-
+ pid_t user_mode_thread(int (*fn)(void *), void *arg, unsigned long flags)
+ {
+-#ifdef CONFIG_ARCH_APPLE_S5L
+-	static int apple_fork_fb_left = 32;
+-	if (apple_fork_fb_left > 0) {
+-		apple_fork_fb_left--;
+-		p105_fb_dbg("umt_in");
+-	}
+-#endif
+ 	struct kernel_clone_args args = {
+ 		.flags		= ((lower_32_bits(flags) | CLONE_VM |
+ 				    CLONE_UNTRACED) & ~CSIGNAL),

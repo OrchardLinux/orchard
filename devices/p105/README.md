@@ -31,6 +31,25 @@ unit's syscfg `MtCl`, captured from its jailbroken iOS and supplied through
 The Wi-Fi firmware carries a placeholder address; the platform layer gives
 each iPad its own at boot ([Wi-Fi address](../../docs/bring-up/p105-firmware.md#wi-fi-address)).
 
+## ARMv7 boot cleanup
+
+For [issue #79](https://github.com/OrchardLinux/orchard/issues/79), the
+P105 booted the baseline and the patched Orchard ARMv7 kernel from RAM
+through the owner-provisioned USB handoff. The patched Linux topic ended
+at `726f3d9f5`. Replaying the Orchard series on its pinned Linux base
+reproduced the tested kernel source. The test device tree disabled the
+internal flash controller during both boots.
+
+Both boots reached the USB serial console and accepted SSH over USB.
+Both CPUs came online with an AIC1 clockevent on each. On the patched
+kernel, clockevent setup ran before CPU1 came online. The 768 by 1024
+simple framebuffer passed a full pixel readback on each kernel, and the
+iPad owner confirmed the colour bands on the LCD.
+
+Each kernel passed 256 unaligned pipe I/O round trips. The kernel alignment
+fault count stayed at zero, so the imported alignment workaround still
+needs a test that triggers a kernel-mode alignment fault.
+
 ## Open work
 
 - Storage: the NAND driver (OrchardLinux/orchard#86, #87), the iOS disk
