@@ -15,6 +15,17 @@ is missing or empty.
 
 - iPad mini 1 (Wi-Fi): verified all four ARM alignment handlers on a RAM boot
   with internal flash disabled, then removed the Cascadia alignment workaround.
+- iPad Air (Cellular): Wi-Fi, speakers, charging with charging control, battery
+  status and screen on/off work, and a normal install completes with the
+  released kernel. Tested by thisiscamk (thanks!).
+
+### Install & launch
+
+- The installer waits up to 60 seconds for Pongo to appear instead of 30. On an
+  iPad Air (Cellular) it took 40 to 42 seconds, and the install stopped just
+  before. Found and fixed by thisiscamk (thanks!).
+- The installer no longer stops over a missing index schema when its Python has
+  the jsonschema package installed.
 
 ## [0.3.8] - 2026-11-25
 
