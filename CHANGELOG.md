@@ -9,6 +9,15 @@ releasing, rename that section to the version (`## [0.3.0] - YYYY-MM-DD`). The
 release workflow uses that section as the GitHub release notes and fails if it
 is missing or empty.
 
+## Unreleased
+
+### Devices
+
+- iPad Air (Wi-Fi): display, backlight, buttons, storage, Wi-Fi, battery,
+  charging, suspend and resume, USB serial and USB networking are recorded
+  as working, from an installed Omarchy A on main. Touch stays untested: it
+  stops after 10 to 40 minutes until the driver is rebound.
+
 ## [0.3.8] - 2026-11-25
 
 ### Devices
