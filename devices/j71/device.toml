@@ -14,7 +14,7 @@ chip = 0x8960
 board = 0x10
 
 [boot]
-methods = ["checkm8-pongo"] # checkra1n's device list (checkra.in); not run on this board with Orchard yet.
+methods = ["checkm8-pongo"] # checkra1n -> PongoOS -> m1n1, J71 2026-11-24
 entries = ["checkra1n"]
 
 [kernel]
@@ -28,33 +28,33 @@ recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until
 status = "experimental"
 tested_by = ["ricktav"] # #230
 
-# States: working, untested, missing, none (features.toml). Nothing here has run on
-# this board with Orchard: "untested" means a driver binds in its device tree
-# (tools/catalog/drivers.json), plus the display's boot console.
+# States: working, untested, missing, none (features.toml). "working" was seen on this
+# board (ricktav, 2026-11-24); "untested" means a driver binds in its device tree
+# (tools/catalog/drivers.json) but it has not been shown to work here.
 [features]
-display = "untested"
+display = "working" # simple framebuffer 1536x2048, console and the Omarchy desktop; installed Omarchy A, kernel main eab974c plus test patches, J71 2026-11-24
 screen_off = "missing"
-backlight = "untested"
+backlight = "working" # PMIC backlight, brightness from the Omarchy menu (1412/2047 at 60 %); installed Omarchy A, kernel main eab974c plus test patches, J71 2026-11-24
 gpu_desktop = "missing"
-touch = "untested" # N1 on SPI2 as on the J72 (ADT spi2/multi-touch, multi-touch,j72), same J72.mtprops; not yet run on this board
-buttons = "untested"
+touch = "untested" # N1 on SPI2 with the J72 path reports contacts in Omarchy, but after 10-40 min it logs "J72 touch stopped after error -71" and stays off until apple-z2 is rebound; installed Omarchy A, kernel main eab974c plus test patches, J71 2026-11-24
+buttons = "working" # gpio-keys: Home wakes from s2idle, the side switch reports KEY_MUTE; installed Omarchy A, kernel main eab974c plus test patches, J71 2026-11-24
 accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "working" # CT819 at 0x39 on i2c3 (ADT als-i2c0/als-i2c3, probe-for-hardware) with tsl2583: raw 0 covered, 97 dim, 22133 under a lamp; uncalibrated lux, the ADT carries no LSCI; J71 2026-11-24, a7/cover-als a7b4561 and ba2e3c4 RAM boots
 touch_id = "missing"
-storage_read = "untested" # ANS (iop,s5l8960x) at the same address as on the J72, whose storage reads and writes with Orchard (ADT /arm-io/ans); not yet run on this board
+storage_read = "working" # asp on the ANS with ans_dll always-on (#221): the installed system boots and runs from storage; first read 0.13 s in a RAM boot; installed Omarchy A, kernel main eab974c plus test patches, J71 2026-11-24
 storage_write = "working" # Omarchy A installed and running from storage on main eab974c plus #230 (ricktav, 2026-11-24)
-wifi = "untested" # BCM43241 on HSIC, EHCI0 port 3 as on the J72 (ADT usb-ehci0/wlan, module syrah): apple-a7-wlan + brcmfmac with this board's TRX/NVRAM recipe; not yet run on this board
+wifi = "working" # BCM43241 on HSIC (apple-a7-wlan + brcmfmac): NetworkManager connects, SSH over Wi-Fi; installed Omarchy A, kernel main eab974c plus test patches, J71 2026-11-24
 bluetooth_input = "missing"
 bluetooth_audio = "missing"
 cellular = "missing"
-battery = "untested" # BQ2754x on UART5 HDQ, as on every A7 iPad (ADT uart5/gas-gauge), with the J72 gauge profile; not yet run on this board
-charging = "untested" # the shared A7 Tristar charger on the D2089 (ADT pmu,d2089 + tristar,cbtl1610), up to 1500 mA as measured on a J85; not yet run on this board
-charging_control = "untested" # as on the J72: source identified at each plug, grant ramped, back to 100 mA on unplug; not yet run on this board
-suspend = "untested"
-resume = "untested"
-usb_serial = "untested"
-usb_network = "untested"
+battery = "working" # BQ2754x on UART5 HDQ: capacity, voltage, current, temperature and cycle count; installed Omarchy A, kernel main eab974c plus test patches, J71 2026-11-24
+charging = "working" # Apple USB-C charger seen as Type-C 1.5 A: +0.8 to +1 A into the battery with the desktop up at 60 % backlight; a Mac CDP port gave 1.35 A at 4.5 V (D2089 ADC), not enough at full backlight; installed Omarchy A, kernel main eab974c plus test patches, J71 2026-11-24
+charging_control = "working" # source identified at each plug (CDP, Type-C 1.5 A), grant ramped 100 -> 1500 mA, as logged with D2089 ADC telemetry in a RAM boot of main eab974c plus a logging patch; J71 2026-11-24
+suspend = "working" # s2idle from Omarchy, many rounds; it is not low-power yet: 61 % to 0 in about 14 h asleep on a Mac port; installed Omarchy A, kernel main eab974c plus test patches, J71 2026-11-24
+resume = "working" # Home wakes it; ANS back with 0 busy tags, Wi-Fi, USB and touch back; installed Omarchy A, kernel main eab974c plus test patches, J71 2026-11-24
+usb_serial = "working" # ttyACM over the Lightning port: orchard exec in RAM boots; J71 2026-11-24
+usb_network = "working" # CDC NCM: SSH to the installed system at 172.16.42.1; installed Omarchy A, kernel main eab974c plus test patches, J71 2026-11-24
 usb_host = "missing"
 audio_output = "working" # CS42L81 speakers on SPI3 + MCA0; "iPad Air Speakers" card came up and a browser game played through the speakers, with MCA0's interrupt left alone (#230, installed Omarchy A, J71 2026-11-24). After s2idle a browser tab stayed silent until reloaded
 audio_input = "missing"

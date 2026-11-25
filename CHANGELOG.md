@@ -18,6 +18,11 @@ is missing or empty.
 - iPad Air (Cellular): Wi-Fi, speakers, charging with charging control, battery
   status and screen on/off work, and a normal install completes with the
   released kernel. Tested by thisiscamk (thanks!).
+- iPad Air (Wi-Fi): display, backlight, buttons, storage, Wi-Fi, battery,
+  charging, suspend and resume, USB serial and USB networking are recorded
+  as working, from an installed Omarchy A on main. Touch stays untested: it
+  stops after 10 to 40 minutes until the driver is rebound. Tested by ricktav
+  (thanks!).
 
 ### Install & launch
 
