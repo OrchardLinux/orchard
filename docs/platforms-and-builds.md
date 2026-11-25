@@ -157,7 +157,7 @@ contract tests in orchard check how they call them.
 | 2: root | the system | the project (a distribution's root), or orchard (the recovery/installer) |
 
 A RAM example (`examples/minimal-boot`) is the case without a stage 2: its
-`init` and `rootfs/` are packed into the initramfs (`orchard.image.initramfs`)
+`init` and `rootfs/` are packed into the initramfs (`producers/initramfs.py`)
 and nothing switches root.
 
 The boot mode is where stage 1 gets the root from, chosen when booting, not

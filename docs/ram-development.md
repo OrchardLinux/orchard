@@ -27,7 +27,8 @@ An optional `orchard.toml` beside `init` names the payload (`name = "..."`) and
 describes it under `[payload]`, never its board (the older `payload.toml` is
 still read, with a notice):
 
-- `transport = false` leaves the USB session helper (network, SSH) out;
+- `transport = false` leaves the USB session helper (network, SSH;
+  `boot/session/`) out;
 - `modules = true` stages the kernel's modules without loading them;
 - `firmware = true` adds the booted board's firmware: `orchard run` reads it from
   Apple's restore image once, keeps it in Orchard's private cache and adds it as its
@@ -46,11 +47,11 @@ The CLI supplies BusyBox, the hardware's other static tools (Dropbear, and
 framing, then writes artifacts to `DIRECTORY/out/PLATFORM/`; `orchard.toml` decides
 about modules and firmware (see above). Pongo is the latest release's when this
 checkout's Pongo recipe (`boot/quiet`) is unchanged since, so building needs no Xcode;
-a changed recipe is built on macOS. Component override flags: `--hardware`, `--cache`, `--kernel-dir`, `--busybox`, `--loader`, `--pongo`.
+a changed recipe is built on macOS. Component override flags: `--cache`, `--kernel-dir`, `--busybox`, `--loader`, `--pongo`.
 No parent-directory layout is required: `examples/`, `use_cases/`, a deeply nested
 folder or an unrelated absolute path all work. Hardware resources come from the
 hardware data and recipes of the orchard checkout it runs from,
-not a guessed sibling directory. `--hardware PATH` explicitly overrides that source.
+not a guessed sibling directory: run a checkout's `bin/orchard` to build with its.
 The default shared cache is `~/.cache/orchard/`, respecting `XDG_CACHE_HOME`;
 `ORCHARD_CACHE_DIR` or `--cache DIR` overrides its root. Outputs stay in the supplied
 directory's `out/`, independently of its name or location.
@@ -76,12 +77,13 @@ kernel bundle (`Image.gz`, DTBs), an initramfs and m1n1, from a published
 build or your own, assemble it without orchard:
 
 ```sh
-python3 src/orchard/image/assemble.py --bootargs 'console=tty0 loglevel=7 rdinit=/init' \
+python3 producers/assemble.py --bootargs 'console=tty0 loglevel=7 rdinit=/init' \
     --loader m1n1.bin --dtb t8010-j71b.dtb --kernel Image.gz \
     --initramfs initramfs.cpio.gz --output linux.bin
 ```
 
-The script uses only Python's standard library. The same bytes by hand:
+The script uses only Python's standard library (its older path,
+`src/orchard/image/assemble.py`, still runs it). The same bytes by hand:
 
 ```sh
 { cat m1n1.bin

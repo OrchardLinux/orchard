@@ -21,7 +21,7 @@ import tomllib
 from . import explain, sources, kernel as kernels
 
 # The kernel producers' version: kernel/build, kernel/build-modules,
-# kernel/stage-modules.py, kernel/series.py, src/orchard/buildenv.py,
+# kernel/stage-modules.py, kernel/series.py, producers/buildenv.py,
 # src/orchard/kernel_sdk.py and orchard.kernel's build functions. Their text is
 # not part of the cache key, so a refactor rebuilds nothing; raise this when a
 # change alters what they produce (files, contents or layout of a kernel bundle).
@@ -518,11 +518,15 @@ def has_loader_patches(hardware):
 # What the static tools are built from; the rest of the recovery directory is
 # recovery runtime and doesn't change them.
 # What orchard's m1n1 (the quiet one every device boots) is built from.
-M1N1_INPUTS = ['boot/m1n1', 'boot/quiet/m1n1.patch', 'src/orchard/buildenv.py']
+M1N1_INPUTS = ['boot/m1n1', 'boot/quiet/m1n1.patch', 'producers/buildenv.py']
 TOOL_INPUTS = ['boot/initramfs/recovery/' + name for name in
                ('build-tools', 'build-tools-in-container', 'Containerfile', 'Containerfile.arm',
                 'install-toolchain', 'upstream.lock', 'check-tools.py', 'orchard-write.c',
-                'orchard-install-usb.c')] + ['src/orchard/buildenv.py']
+                'orchard-install-usb.c')] + ['producers/buildenv.py']
+# A 32-bit board's Cascadia loader; {profile} is the board's cascadia.toml.
+CASCADIA_INPUTS = ['boot/cascadia', 'producers/cascadia.py', '{profile}', 'producers/buildenv.py']
+# producers/contract.toml states these lists, PONGO_RECIPE and KERNEL_PRODUCER for
+# orchard2; tests/test_contract.py keeps it equal.
 
 
 def recipe_work(components, recipe, key):
@@ -589,8 +593,8 @@ def prepare_payload_loader(hardware=None, cache=None, *, device):
             raise ValueError('Unsupported payload loader: ' + kind)
         from .hardware import payload_profile
         profile = payload_profile(device, 'cascadia', hardware)
-        inputs = ['boot/cascadia', 'src/orchard/image/cascadia.py', str(profile.relative_to(hardware)),
-                  'src/orchard/buildenv.py']
+        inputs = [str(profile.relative_to(hardware)) if path == '{profile}' else path
+                  for path in CASCADIA_INPUTS]
         def produce(stage):
             command(hardware / 'boot/cascadia/build', '--profile', profile, '--output', stage)
         return cached_component(components, 'loader-cascadia-' + device,

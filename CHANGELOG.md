@@ -9,14 +9,45 @@ releasing, rename that section to the version (`## [0.3.0] - YYYY-MM-DD`). The
 release workflow uses that section as the GitHub release notes and fails if it
 is missing or empty.
 
-## Unreleased
+## [Unreleased]
 
 ### Devices
 
+- iPad mini 1 (Wi-Fi): verified all four ARM alignment handlers on a RAM boot
+  with internal flash disabled, then removed the Cascadia alignment workaround.
+- iPad Air (Cellular): Wi-Fi, speakers, charging with charging control, battery
+  status and screen on/off work, and a normal install completes with the
+  released kernel. Tested by thisiscamk (thanks!).
 - iPad Air (Wi-Fi): display, backlight, buttons, storage, Wi-Fi, battery,
   charging, suspend and resume, USB serial and USB networking are recorded
   as working, from an installed Omarchy A on main. Touch stays untested: it
-  stops after 10 to 40 minutes until the driver is rebound.
+  stops after 10 to 40 minutes until the driver is rebound. Tested by ricktav
+  (thanks!).
+
+### Install & launch
+
+- The installer waits up to 60 seconds for Pongo to appear instead of 30. On an
+  iPad Air (Cellular) it took 40 to 42 seconds, and the install stopped just
+  before. Found and fixed by thisiscamk (thanks!).
+- The installer no longer stops over a missing index schema when its Python has
+  the jsonschema package installed.
+- 32-bit boards: the installer carries the code that makes their payload, which
+  it was missing.
+
+### Building
+
+- The scripts recipes and distributions run by path moved to `producers/`
+  (`buildenv.py`, `initramfs.py`, `assemble.py`, `cascadia.py`). Their old paths
+  and module names still work. m1n1, the static tools and the Cascadia loader
+  are built once more, because their keys name the new paths.
+- `orchard build`, `inputs`, `install`, `launch`, `devices`, `cache` and the build
+  step of `run` can go to orchard2, the Rust tool (docs/tooling.md says what
+  differs): `ORCHARD2=1`, or `orchard2 = true` in
+  `~/.config/orchard/config.toml`. Off by default.
+- `orchard build` and `run` no longer take `--hardware`: a checkout's `bin/orchard`
+  builds with that checkout's data and recipes.
+- A distribution's build entry is told the tool that runs it as `ORCHARD_TOOL`
+  (orchard2 only), and resolves its inputs with `$ORCHARD_TOOL inputs`.
 
 ## [0.3.8] - 2026-11-25
 

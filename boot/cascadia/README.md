@@ -12,7 +12,7 @@ ELF check requires executable ARM code at the upload address and checks
 every allocated section against the raw bytes. ARM unwind tables are
 discarded so they cannot displace the entry instruction.
 
-`src/orchard/image/cascadia.py` assembles one board's payload (also by file
+`producers/cascadia.py` assembles one board's payload (also by file
 path: `--profile --loader [--loader-elf] --kernel --dtb --initramfs
 --output`). Kernel bytes stay unchanged. The DTB's `/chosen`
 `linux,initrd-start`/`-end`, placeholders in the board's tree, are set in

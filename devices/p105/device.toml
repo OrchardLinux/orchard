@@ -38,6 +38,8 @@ reclaims = true
 [support]
 status = "experimental"
 tested_by = ["shaynelegault"]
+# Issue #79: the four kernel alignment handlers passed fault probes on a
+# flash-disabled RAM boot (docs/bring-up/p105-alignment.md).
 
 # States: working, untested, missing, none (features.toml).
 [features]
@@ -70,8 +72,8 @@ suspend = "missing"
 resume = "missing"
 # The issue #79 RAM boot verified both functions over the attached cable.
 # Cold-handoff qualification is tracked in docs/bring-up/p105-usb-handoff.md.
-usb_serial = "untested"
-usb_network = "untested"
+usb_serial = "working"
+usb_network = "working"
 usb_host = "missing"
 audio_output = "untested"
 audio_input = "missing"

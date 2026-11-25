@@ -13,7 +13,7 @@ import unittest
 from unittest import mock
 import zipfile
 
-from orchard import installer
+from orchard import installer, manifests
 from orchard.cache import STATE_VERSION, check_state
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -67,6 +67,14 @@ class StandardLibraryOnly(unittest.TestCase):
                     self.assertNotIn('\nfrom jsonschema', text)
                     self.assertNotIn('\nimport jsonschema', text)
 
+    def test_the_core_needs_no_schemas_where_jsonschema_is_installed(self):
+        # The zipapp has none; its Python may have jsonschema.
+        with tempfile.TemporaryDirectory() as empty, \
+                mock.patch.dict(manifests.SCHEMAS, {kind: Path(empty) / path.name for kind, path in manifests.SCHEMAS.items()}), \
+                mock.patch.object(manifests, 'schema_validator', return_value=mock.Mock()) as validator:
+            self.assertEqual(manifests.load(FIXTURE / 'index.toml')['kind'], 'orchard.index')
+            validator.assert_not_called()
+
 
 class Store(unittest.TestCase):
     def setUp(self):
@@ -103,6 +111,9 @@ class Zipapp(Store):
         for name in ('run', 'udhcpd.conf'):
             self.assertTrue((cores[0] / 'boot/initramfs/install' / name).is_file(), name)
         self.assertFalse((cores[0] / 'src/orchard/build.py').exists())
+        # A 32-bit board's payload: the module the install imports and the producer it runs.
+        self.assertTrue((cores[0] / 'producers/cascadia.py').is_file())
+        self.assertIn('orchard.image.cascadia', {module_name(name) for name in installer.core_files()})
         self.assertEqual(json.loads((self.home / 'store/state.json').read_text()), {'version': STATE_VERSION})
         # Every module imports without site-packages (no jsonschema); install_device runs on the recovery.
         modules = sorted(module_name(name) for name in installer.core_files()

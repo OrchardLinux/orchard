@@ -78,13 +78,16 @@ def schema_validator():
 
 
 def validate(document, *, schema=None):
-    """DOCUMENT, checked; against its JSON schema if SCHEMA is true, or by default where jsonschema is installed."""
+    """DOCUMENT, checked; against its JSON schema if SCHEMA is true, or by default where both
+    jsonschema and the schema are installed."""
     if not isinstance(document, dict):
         raise ManifestError('Expected a TOML table')
     kind = document.get('kind')
     if not isinstance(kind, str) or kind not in SCHEMAS:
         raise ManifestError('Unknown manifest kind: ' + repr(kind))
-    validator = schema_validator() if schema is not False else None
+    # The core's zipapp carries no schemas, whatever the Python it runs on has installed.
+    wanted = schema or (schema is None and SCHEMAS[kind].is_file())
+    validator = schema_validator() if wanted else None
     if schema and validator is None:
         raise ManifestError('Schema validation needs jsonschema (pip install jsonschema)')
     if validator is not None:

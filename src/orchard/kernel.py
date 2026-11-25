@@ -301,7 +301,7 @@ def build_device(hardware, cache, device, base, output, tree=None):
             target = sdk / module.relative_to(base / 'lib/modules' / release / 'kernel')
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(module, target)
-        command(sys.executable, Path(hardware) / 'src/orchard/buildenv.py', 'build',
+        command(sys.executable, Path(hardware) / 'producers/buildenv.py', 'build',
                 '--file', hardware / 'kernel/Containerfile', '--context', hardware / 'kernel',
                 '--image', 'localhost/orchard-hardware-kernel-toolchain:bookworm')
         external = []

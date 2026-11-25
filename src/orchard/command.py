@@ -37,7 +37,6 @@ def main():
         command.add_argument('--platform', action='append',
                              help='the platform to build, e.g. apple-16k; a distribution checkout takes it '
                              'more than once, or all (default: orchard.local.toml, else the attached board)')
-        command.add_argument('--hardware', type=Path, help='use the hardware data and recipes of another orchard checkout')
         command.add_argument('--cache', type=Path, help='override the shared component cache')
         command.add_argument('--kernel-dir', type=Path, help='reuse a staged kernel/DTB/module tree')
         command.add_argument('--kernel-tree', type=Path, help='build this kernel tree as it is, with its own '
@@ -140,7 +139,7 @@ def main():
         if args.action in ('build', 'run'):
             from orchard import distro
             root = distro.find(args.directory)
-            payload_only = [name for name in ('hardware', 'cache', 'kernel_dir',
+            payload_only = [name for name in ('cache', 'kernel_dir',
                                               'pongo', 'busybox', 'loader') if getattr(args, name) is not None]
             if root is None and args.packages is not None:
                 raise ValueError('--packages is for distribution checkouts (orchard.toml [release])')
@@ -191,7 +190,7 @@ def main():
             platform = args.platform[0]
         if args.action == 'build':
             from orchard.ram import build_directory
-            output = build_directory(args.directory, hardware=args.hardware, cache=args.cache,
+            output = build_directory(args.directory, cache=args.cache,
                                      kernel=args.kernel_dir, busybox=args.busybox, loader=args.loader,
                                      pongo=args.pongo, device=args.device, platform=platform,
                                      kernel_tree=args.kernel_tree)
@@ -235,7 +234,7 @@ def main():
         if args.action == 'run':
             from orchard.boot import run_directory
             run_directory(args.directory, yes=args.yes, build=not args.no_build, device=args.device,
-                          platform=platform, hardware=args.hardware, cache=args.cache,
+                          platform=platform, cache=args.cache,
                           kernel=args.kernel_dir, busybox=args.busybox, loader=args.loader, pongo=args.pongo,
                           kernel_tree=args.kernel_tree)
             return

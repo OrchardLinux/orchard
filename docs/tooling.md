@@ -21,7 +21,8 @@ Inside orchard, code is split by where it runs and how it is used:
 
 - `src/orchard/`: all Python imported on the host, one package.
 - `devices/`, `schemas/`, `features.toml`: data.
-- `kernel/`, `boot/`: recipes, standalone programs. They run `src/orchard/buildenv.py` by path and need only Python 3.11 and its standard library.
+- `kernel/`, `boot/`: recipes, standalone programs. They run `producers/buildenv.py` by path and need only Python 3.11 and its standard library.
+- `producers/`: the standalone scripts recipes and distributions run by path (`buildenv.py`, `initramfs.py`, `assemble.py`, `cascadia.py`): standard library only, no orchard package. Their old paths in `src/orchard/` are small files that run them.
 - `runtime/`: device-side code, copied into images, never imported.
 - `examples/`: RAM payloads to start from.
 
@@ -46,6 +47,17 @@ Two launchers, and neither looks at the current directory:
 
 - **`orchard` on PATH** is `tools/launcher` (`./setup` installs it, `orchard update` replaces it with the newest nightly's). Every command runs the newest nightly: looked up once (`nightly/latest.json`), a shallow clone of its tag in `~/.cache/orchard/tooling/NAME`, so a command runs one version from start to end. Offline: the newest cached nightly. `ORCHARD_VERSION=nightly-YYYYMMDD-COMMIT` (or `vX.Y.Z`) pins one, e.g. to reproduce a bug. A launcher older than the nightly it runs says so.
 - **A checkout's `bin/orchard`** runs that checkout, called by its path (`~/src/orchard/bin/orchard build …`), from any directory: that is how to work on orchard itself, in a worktree per branch (`git worktree add ../orchard-gpu -b gpu-a10`). uv installs it editable; an edit counts from the next command.
+
+**orchard2 builds where it is switched on** for the computer: `ORCHARD2=1` (`0`: off), else `orchard2 = true` in `~/.config/orchard/config.toml`. Both launchers then hand `build`, `inputs`, `install`, `launch`, `devices`, `cache` and the build step of `run` to the `orchard2` on PATH, with the recipes and Python environment of the version they run; everything else, booting included, stays in Python. orchard2 has a cache of its own, with its own spelling (`orchard cache ls`, `rm`, `prune`, `clear`); `cache` also says what Python's uses.
+
+What `install` and `launch` do then is described in OrchardLinux/tools, [`crates/cli`](https://github.com/OrchardLinux/tools/blob/main/crates/cli/README.md). Compared with Python's:
+
+- `install` puts the system into the space after iPadOS and erases the partitions there, after a yes (`--yes`); `--split [GB]` resizes iPadOS first. Python asks for a place and never resizes. It takes a name (`omarchy-a`: the newest release of `OrchardLinux/NAME`), a URL, or an index or manifest file, and without one, in a distribution checkout, its last build. `distros` is refused: it has no registered names.
+- Both start from DFU mode only, and show the steps of the device that is connected in another mode. A running recovery is not resumed, and a Pongo or m1n1 that waits is not used.
+- `launch` starts the one installed system; with several it lets you choose with the arrow keys. `launch --list` prints them and starts nothing; `--entry ID` starts that one.
+- Only one iPhone or iPad may be connected. 32-bit boards are refused.
+- palera1n enters every board. `--via checkra1n` (and `ORCHARD_VIA`) become `ORCHARD_ENTRY=checkra1n`; Python follows the board's `[boot] entries` instead.
+- The operation lock of the Python commands is held while orchard2 runs.
 
 `orchard python ARGS` runs Python in the running version's environment, for a distribution's own scripts. An `orchard = "PATH"` line in `orchard.local.toml`, which used to choose the checkout, is refused with what to use instead.
 

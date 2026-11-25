@@ -167,7 +167,7 @@ def layer_boot_files(layer, devicetree):
 
 
 def payload(m1n1, logo, layer, devicetree, extra):
-    """m1n1's own payload format (image/assemble.py): one file for Pongo to start."""
+    """m1n1's own payload format (producers/assemble.py): one file for Pongo to start."""
     files = layer_boot_files(layer, devicetree)
     initramfs = files['initrd'] + bytes(-len(files['initrd']) % 4) + extra
     return b''.join((Path(m1n1).read_bytes(), Path(logo).read_bytes() if logo else b'',
@@ -176,7 +176,7 @@ def payload(m1n1, logo, layer, devicetree, extra):
 
 
 def cascadia_payload(loader, profile, layer, devicetree, extra, *, serial=None, bootargs=None):
-    """The Cascadia loader's payload (image/cascadia.py): one file for a patched iBEC to start, on 32-bit boards.
+    """The Cascadia loader's payload (producers/cascadia.py): one file for a patched iBEC to start, on 32-bit boards.
 
     The same kernel, initrd and add-on as m1n1's payload. The loader copies the initrd and the
     add-on, one archive, to the board's initrd address before it turns off the MMU (the form

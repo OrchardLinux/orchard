@@ -82,7 +82,7 @@ def run_process_group(argv, *, timeout, **kwargs):
         raise subprocess.CalledProcessError(returncode, argv)
 
 
-def start_pongo(device, image, log, say, *, chip, board, product, seconds=30, quiet=False, entry=entries.DEFAULT):
+def start_pongo(device, image, log, say, *, chip, board, product, seconds=60, quiet=False, entry=entries.DEFAULT):
     """Start Pongo once on the selected device in DFU; never retried.
 
     Every boot path goes through here so they share the cable hint, the

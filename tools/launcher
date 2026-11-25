@@ -10,6 +10,12 @@
 #
 #   orchard update           install the newest nightly's launcher as this one
 #   orchard python ARGS      Python in the running version's environment
+#
+# orchard2, the Rust tool, builds instead when it is switched on for this
+# computer: ORCHARD2=1 (0: off), else a line orchard2 = true in
+# ~/.config/orchard/config.toml. build, inputs, install, launch, devices, cache
+# and the build step of run then go to the orchard2 on PATH, with the same
+# version's data; everything else stays here. A checkout's bin/orchard follows the same switch.
 set -eu
 
 cache=${ORCHARD_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/orchard}
@@ -60,6 +66,77 @@ pick() {
     exit 1
 }
 
+orchard2_on() {
+    case ${ORCHARD2:-} in
+        1) return 0 ;;
+        0) return 1 ;;
+        '') grep -Eqs '^[[:space:]]*orchard2[[:space:]]*=[[:space:]]*true[[:space:]]*(#.*)?$' \
+                "${XDG_CONFIG_HOME:-${HOME:-}/.config}/orchard/config.toml" ;;
+        *) echo 'orchard: ORCHARD2 is 1 (orchard2 builds) or 0' >&2; exit 1 ;;
+    esac
+}
+
+needs_orchard2() {
+    command -v orchard2 >/dev/null 2>&1 || {
+        echo 'orchard: orchard2 is switched on (ORCHARD2 or ~/.config/orchard/config.toml) but not on PATH' >&2
+        exit 1
+    }
+}
+
+# orchard2 COMMAND ARGS, with the recipes in $root and its Python environment.
+orchard2_command() {
+    needs_orchard2
+    uv sync --quiet --project "$root" >&2
+    ORCHARD_DATA=${ORCHARD_DATA:-$root} ORCHARD_PYTHON=${ORCHARD_PYTHON:-$root/.venv/bin/python} \
+        orchard2 "$@"
+}
+
+# orchard2 install or launch ARGS. The operation lock is the Python commands':
+# it is held for as long as orchard2 runs, so that no run, boot or install of
+# theirs works on the device at the same time.
+orchard2_on_device() {
+    needs_orchard2
+    entry=${ORCHARD_ENTRY:-${ORCHARD_VIA:-}}
+    count=$#
+    while [ "$count" -gt 0 ]; do
+        argument=$1
+        shift
+        count=$((count - 1))
+        case $argument in
+            --via)
+                [ "$count" -gt 0 ] || { echo 'orchard: --via palera1n or --via checkra1n' >&2; exit 2; }
+                entry=$1; shift; count=$((count - 1)) ;;
+            --via=*) entry=${argument#*=} ;;
+            --manifest|--release) set -- "$@" --index ;;
+            --manifest=*|--release=*) set -- "$@" "--index=${argument#*=}" ;;
+            *) set -- "$@" "$argument" ;;
+        esac
+    done
+    case $entry in
+        ''|palera1n|checkra1n) ;;
+        *) echo "orchard: no entry $entry; there are palera1n and checkra1n" >&2; exit 2 ;;
+    esac
+    uv sync --quiet --project "$root" >&2
+    [ -z "$entry" ] || export ORCHARD_ENTRY="$entry"
+    export ORCHARD_DATA="${ORCHARD_DATA:-$root}"
+    exec "$root/.venv/bin/python" -c '
+import os, sys
+from orchard.state import operation_lock
+try:
+    with operation_lock() as lock:
+        if lock is None:
+            raise ValueError("this orchard is older than the switch for install and launch; unset ORCHARD_VERSION or set ORCHARD2=0")
+        os.set_inheritable(lock, True)
+        os.execvp(sys.argv[1], sys.argv[1:])
+except ValueError as error:
+    sys.exit(f"orchard: {error}")
+' orchard2 "$@"
+}
+
+# A checkout's bin/orchard names itself, for its own code.
+checkout=${ORCHARD_LAUNCH_CHECKOUT:-}
+unset ORCHARD_LAUNCH_CHECKOUT
+
 # The launcher this is, through links.
 self=$0
 while [ -L "$self" ]; do
@@ -72,17 +149,37 @@ done
 
 # orchard = "PATH" in orchard.local.toml used to choose the checkout; it no longer does.
 top=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
-if [ -f "$top/orchard.local.toml" ] && grep -Eq '^orchard[[:space:]]*=' "$top/orchard.local.toml"; then
+if [ -z "$checkout" ] && [ -f "$top/orchard.local.toml" ] && grep -Eq '^orchard[[:space:]]*=' "$top/orchard.local.toml"; then
     echo "orchard: $top/orchard.local.toml names an orchard (orchard = ...); that is no longer read." >&2
     echo "  Run a checkout's bin/orchard to use it, or set ORCHARD_VERSION to pin a version; then remove the line." >&2
     exit 1
+fi
+
+# orchard2 has a cache of its own, listed and pruned by its own commands.
+# Python's stays, for what still runs here.
+if [ "${1:-}" = cache ] && orchard2_on; then
+    shift
+    needs_orchard2
+    case ${1:-ls} in
+        ls|rm|prune|clear|help|-h|--help|--json|--cache|--cache=*) ;;
+        --prune|--keep|--keep=*) echo 'orchard: orchard2 prunes with: orchard cache prune [--keep N]' >&2; exit 2 ;;
+        *) echo "orchard: orchard2 removes with: orchard cache rm $1" >&2; exit 2 ;;
+    esac
+    status=0
+    orchard2 cache "$@" || status=$?
+    python=${ORCHARD_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/orchard}
+    if [ -d "$python" ]; then
+        size=$(du -sh "$python" 2>/dev/null | cut -f1)
+        echo "orchard: Python's own cache uses $size in $python (ORCHARD2=0 orchard cache --prune)" >&2
+    fi
+    exit "$status"
 fi
 
 command -v uv >/dev/null 2>&1 || {
     echo 'orchard: install uv: https://docs.astral.sh/uv/getting-started/installation/' >&2
     exit 1
 }
-root=$(pick)
+root=${checkout:-$(pick)}
 export UV_PROJECT_ENVIRONMENT="$root/.venv"
 case ${1:-} in
     update)
@@ -98,9 +195,52 @@ case ${1:-} in
         fi
         exit 0 ;;
 esac
-if [ -f "$root/tools/launcher" ] && ! cmp -s "$self" "$root/tools/launcher"; then
+if [ -z "$checkout" ] && [ -f "$root/tools/launcher" ] && ! cmp -s "$self" "$root/tools/launcher"; then
     echo "orchard: a newer launcher is in $(basename "$root"); run orchard update" >&2
 fi
+case ${1:-} in
+    build|inputs|devices)
+        if orchard2_on; then
+            orchard2_command "$@"
+            exit
+        fi ;;
+    install|launch)
+        if orchard2_on; then
+            orchard2_on_device "$@"
+        fi ;;
+    distros)
+        if orchard2_on; then
+            echo 'orchard: orchard2 installs from a name (OrchardLinux/NAME), a URL or a file; it has no registered distros' >&2
+            exit 2
+        fi ;;
+    run)
+        # What run builds first; booting it stays here.
+        if orchard2_on; then
+            shift
+            build=1
+            for argument; do
+                case $argument in --no-build|-h|--help) build= ;; esac
+            done
+            if [ -n "$build" ]; then
+                (
+                    count=$#
+                    while [ "$count" -gt 0 ]; do
+                        argument=$1
+                        shift
+                        count=$((count - 1))
+                        case $argument in
+                            -y|--yes|--via=*) ;;
+                            --via) shift; count=$((count - 1)) ;;
+                            *) set -- "$@" "$argument" ;;
+                        esac
+                    done
+                    orchard2_command build "$@" >&2
+                )
+                set -- --no-build "$@"
+            fi
+            set -- run "$@"
+        fi ;;
+esac
 case ${1:-} in
     python) shift; exec uv run --quiet --project "$root" python "$@" ;;
     *) exec uv run --quiet --project "$root" orchard "$@" ;;
