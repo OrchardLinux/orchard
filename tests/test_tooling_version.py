@@ -139,6 +139,22 @@ class Orchard2Switch(Fixture):
         self.assertEqual(self.ran('build', 'a b', '--explain', ORCHARD2='1'),
                          [f'orchard2 build a b --explain {self.env["data"]}'])
 
+    def test_cache_is_orchard2s_with_its_own_spelling(self):
+        self.orchard2('printf "orchard2 %s\\n" "$*" >> "$LOG"; exit 8')
+        for arguments in ([], ['ls'], ['rm', 'kernel/0b'], ['prune', '--keep', '2'], ['--json']):
+            self.assertEqual(self.ran('cache', *arguments, ORCHARD2='1'), [' '.join(['orchard2 cache', *arguments])])
+            self.assertEqual(self.result.returncode, 8)
+        self.assertNotIn("Python's own cache", self.result.stderr)  # there is none yet
+        (self.root / 'cache').mkdir()
+        self.ran('cache', ORCHARD2='1')
+        self.assertIn("Python's own cache uses", self.result.stderr)
+        self.assertEqual(self.result.stdout, '')
+        for arguments, hint in ((['--prune'], 'cache prune'), (['--keep', '2'], 'cache prune'), (['m1n1'], 'cache rm m1n1')):
+            self.assertEqual(self.ran('cache', *arguments, ORCHARD2='1'), [])
+            self.assertEqual(self.result.returncode, 2)
+            self.assertIn(hint, self.result.stderr)
+        self.assertEqual(self.ran('cache', '--prune'), ['python cache --prune'])
+
     def test_run_builds_with_it_and_boots_here(self):
         self.assertEqual(self.ran('run', '-y', 'a', '--via', 'checkra1n', '--device', 'j71b', ORCHARD2='1'),
                          [f'orchard2 build a --device j71b {self.env["data"]}',

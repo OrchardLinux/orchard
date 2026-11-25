@@ -13,9 +13,9 @@
 #
 # orchard2, the Rust tool, builds instead when it is switched on for this
 # computer: ORCHARD2=1 (0: off), else a line orchard2 = true in
-# ~/.config/orchard/config.toml. build, inputs, devices and the build step of
-# run then go to the orchard2 on PATH, with the same version's data; everything
-# else stays here. A checkout's bin/orchard follows the same switch.
+# ~/.config/orchard/config.toml. build, inputs, devices, cache and the build
+# step of run then go to the orchard2 on PATH, with the same version's data;
+# everything else stays here. A checkout's bin/orchard follows the same switch.
 set -eu
 
 cache=${ORCHARD_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/orchard}
@@ -76,12 +76,16 @@ orchard2_on() {
     esac
 }
 
-# orchard2 COMMAND ARGS, with the recipes in $root and its Python environment.
-orchard2_command() {
+needs_orchard2() {
     command -v orchard2 >/dev/null 2>&1 || {
         echo 'orchard: orchard2 is switched on (ORCHARD2 or ~/.config/orchard/config.toml) but not on PATH' >&2
         exit 1
     }
+}
+
+# orchard2 COMMAND ARGS, with the recipes in $root and its Python environment.
+orchard2_command() {
+    needs_orchard2
     uv sync --quiet --project "$root" >&2
     ORCHARD_DATA=${ORCHARD_DATA:-$root} ORCHARD_PYTHON=${ORCHARD_PYTHON:-$root/.venv/bin/python} \
         orchard2 "$@"
@@ -107,6 +111,26 @@ if [ -z "$checkout" ] && [ -f "$top/orchard.local.toml" ] && grep -Eq '^orchard[
     echo "orchard: $top/orchard.local.toml names an orchard (orchard = ...); that is no longer read." >&2
     echo "  Run a checkout's bin/orchard to use it, or set ORCHARD_VERSION to pin a version; then remove the line." >&2
     exit 1
+fi
+
+# orchard2 has a cache of its own, listed and pruned by its own commands.
+# Python's stays, for what still runs here.
+if [ "${1:-}" = cache ] && orchard2_on; then
+    shift
+    needs_orchard2
+    case ${1:-ls} in
+        ls|rm|prune|clear|help|-h|--help|--json|--cache|--cache=*) ;;
+        --prune|--keep|--keep=*) echo 'orchard: orchard2 prunes with: orchard cache prune [--keep N]' >&2; exit 2 ;;
+        *) echo "orchard: orchard2 removes with: orchard cache rm $1" >&2; exit 2 ;;
+    esac
+    status=0
+    orchard2 cache "$@" || status=$?
+    python=${ORCHARD_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/orchard}
+    if [ -d "$python" ]; then
+        size=$(du -sh "$python" 2>/dev/null | cut -f1)
+        echo "orchard: Python's own cache uses $size in $python (ORCHARD2=0 orchard cache --prune)" >&2
+    fi
+    exit "$status"
 fi
 
 command -v uv >/dev/null 2>&1 || {
