@@ -69,18 +69,18 @@ class StartPongo(unittest.TestCase):
                 mock.patch.object(boot, 'ensure_tool', return_value='/tool') as ensure, \
                 mock.patch.object(boot.usb, 'selected'), \
                 mock.patch.object(boot.replug, 'port_control', return_value=None) as control, \
-                mock.patch.object(boot, 'wait_mode'), \
+                mock.patch.object(boot, 'wait_mode') as wait, \
                 mock.patch.object(boot, 'run_process_group') as execute:
             boot.start_pongo(self.DEVICE, 'pongo.bin', log, lambda text: None, chip=0x8010, board=0x18,
                              product='', entry=entry)
-        return ensure.call_args.args[0], execute.call_args.args[0], control.called
+        return ensure.call_args.args[0], execute.call_args.args[0], control.called, wait.call_args.kwargs['seconds']
 
     def test_palera1n_is_unchanged(self):
-        self.assertEqual(self.run_entry('palera1n'), ('palera1n', ['/tool', '-p', '-k', 'pongo.bin'], True))
+        self.assertEqual(self.run_entry('palera1n'), ('palera1n', ['/tool', '-p', '-k', 'pongo.bin'], True, 60))
 
     def test_checkra1n_runs_on_a_chip_it_has_not_run_on(self):
         self.assertEqual(self.run_entry('checkra1n'),
-                         ('checkra1n', ['/tool', '-E', '-p', '-v', '-n', '-k', 'pongo.bin'], False))
+                         ('checkra1n', ['/tool', '-E', '-p', '-v', '-n', '-k', 'pongo.bin'], False, 60))
 
 
 class EnsureTool(unittest.TestCase):
