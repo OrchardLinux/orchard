@@ -8,8 +8,8 @@ import shutil
 import subprocess
 import sys
 
-# Recipes use buildenv.py by path, without installing the orchard package.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src/orchard'))
+# Recipes use producers/buildenv.py by path, without the orchard package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'producers'))
 import buildenv  # noqa: E402
 
 

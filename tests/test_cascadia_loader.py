@@ -209,7 +209,7 @@ class CascadiaLoaderTests(unittest.TestCase):
             directory = Path(temporary)
             files = {'loader': loader(), 'loader-elf': executable(loader()), 'kernel': kernel(),
                      'dtb': cascadia.write_fdt(tree()), 'initramfs': b'cpio'}
-            command = [sys.executable, str(ROOT / 'src/orchard/image/cascadia.py')]
+            command = [sys.executable, str(ROOT / 'producers/cascadia.py')]
             for name, value in files.items():
                 path = directory / name
                 path.write_bytes(value)

@@ -20,7 +20,7 @@ class KernelCacheKey(unittest.TestCase):
         for name, text in {'kernel/configs/apple-16k/config': 'CONFIG_A=y\n', 'kernel/Containerfile': 'FROM x\n',
                            'kernel/install-toolchain': 'apt-get install clang-19\n', 'kernel/build': 'make\n',
                            'kernel/series.py': 'series\n', 'kernel/stage-modules.py': 'stage\n',
-                           'src/orchard/buildenv.py': 'env\n', 'kernel/build-modules': 'modules\n',
+                           'producers/buildenv.py': 'env\n', 'kernel/build-modules': 'modules\n',
                            'kernel/modules/j71b/Makefile': 'obj-m += x.o\n'}.items():
             path = self.hardware / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -41,7 +41,7 @@ class KernelCacheKey(unittest.TestCase):
 
     def test_editing_the_build_scripts_keeps_cached_kernels(self):
         base, device = self.base(), self.device()
-        for name in ('kernel/build', 'kernel/series.py', 'kernel/stage-modules.py', 'src/orchard/buildenv.py',
+        for name in ('kernel/build', 'kernel/series.py', 'kernel/stage-modules.py', 'producers/buildenv.py',
                      'kernel/build-modules'):
             (self.hardware / name).write_text('refactored\n')
         self.assertEqual(self.base(), base)

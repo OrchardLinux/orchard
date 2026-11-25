@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 
-SCRIPT = Path(__file__).resolve().parents[1] / 'src/orchard/image/assemble.py'
+SCRIPT = Path(__file__).resolve().parents[1] / 'producers/assemble.py'
 
 
 class StandaloneAssembly(unittest.TestCase):

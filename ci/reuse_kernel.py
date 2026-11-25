@@ -37,7 +37,7 @@ sys.path.insert(0, str(ROOT / 'src'))
 # What builds a kernel besides the inputs of its source key. A directory counts
 # with everything below it; a path may be missing on both sides.
 GUARDED = ('kernel/build', 'kernel/build-modules', 'kernel/stage-modules.py', 'kernel/series.py',
-           'kernel/modules', 'src/orchard/buildenv.py')
+           'kernel/modules', 'producers/buildenv.py')
 LIMIT = 2 * 1024 * 1024 * 1024
 
 

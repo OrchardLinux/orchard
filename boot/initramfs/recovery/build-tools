@@ -64,9 +64,9 @@ else
   # Cross-compiled on this machine's own architecture: Apple and most ARM64 hosts cannot run ARMv7.
   image=localhost/orchard-hardware-recovery-tools-arm:bookworm containerfile=Containerfile.arm build_arch=()
 fi
-"$python" "$here/../../../src/orchard/buildenv.py" build ${build_arch[@]+"${build_arch[@]}"} \
+"$python" "$here/../../../producers/buildenv.py" build ${build_arch[@]+"${build_arch[@]}"} \
   --file "$here/$containerfile" --image "$image" --context "$here"
-"$python" "$here/../../../src/orchard/buildenv.py" run ${build_arch[@]+"${build_arch[@]}"} \
+"$python" "$here/../../../producers/buildenv.py" run ${build_arch[@]+"${build_arch[@]}"} \
   --bind "$work:/work:rw" --bind "$here:/recipe:ro" --env "ORCHARD_RECOVERY_ARCH=$arch" \
   --image "$image" -- bash /recipe/build-tools-in-container
 echo "Recovery tools: $work/bin"

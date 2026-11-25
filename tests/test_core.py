@@ -111,6 +111,9 @@ class Zipapp(Store):
         for name in ('run', 'udhcpd.conf'):
             self.assertTrue((cores[0] / 'boot/initramfs/install' / name).is_file(), name)
         self.assertFalse((cores[0] / 'src/orchard/build.py').exists())
+        # A 32-bit board's payload: the module the install imports and the producer it runs.
+        self.assertTrue((cores[0] / 'producers/cascadia.py').is_file())
+        self.assertIn('orchard.image.cascadia', {module_name(name) for name in installer.core_files()})
         self.assertEqual(json.loads((self.home / 'store/state.json').read_text()), {'version': STATE_VERSION})
         # Every module imports without site-packages (no jsonschema); install_device runs on the recovery.
         modules = sorted(module_name(name) for name in installer.core_files()

@@ -34,6 +34,10 @@ PACKAGE = Path(__file__).resolve().parent
 # Development tooling (building kernels, payloads, distributions), not the core.
 DEVELOPMENT = {'__main__.py', 'boot.py', 'build.py', 'buildenv.py', 'command.py', 'components.py', 'distro.py', 'kernel.py',
                'inputs.py', 'kernel_sdk.py', 'published.py', 'ram.py', 'ram_session.py', 'sources.py', 'image'}
+# The one part of image/ an install needs: a 32-bit board's payload (install_direct.py).
+# image/cascadia.py runs producers/cascadia.py, which the zipapp carries at the same relative place.
+CORE_IMAGE = {'image/__init__.py', 'image/cascadia.py'}
+CORE_PRODUCERS = ('cascadia.py',)
 MAX_CORE = 128 * 1024 * 1024
 RELEASES = 'https://github.com/OrchardLinux/orchard/releases'
 MARKER = '# orchard: the user\'s orchard'
@@ -112,7 +116,7 @@ def core_files():
     files = {}
     for path in sorted(PACKAGE.rglob('*.py')):
         relative = path.relative_to(PACKAGE)
-        if relative.parts[0] in DEVELOPMENT or '__pycache__' in relative.parts:
+        if (relative.parts[0] in DEVELOPMENT and relative.as_posix() not in CORE_IMAGE) or '__pycache__' in relative.parts:
             continue
         files['src/orchard/' + relative.as_posix()] = path
     return files
@@ -140,6 +144,8 @@ def build(output, *, loaders, boards=None, release=None, hardware=None):
     members = core_files()
     # The boot entries' script, which the install runs beside install_device.py.
     members['src/orchard/boot-entries'] = PACKAGE / 'boot-entries'
+    for name in CORE_PRODUCERS:
+        members['producers/' + name] = PACKAGE.parents[1] / 'producers' / name
     # What the install adds to a kernel's initrd (install_direct.py).
     for name in ('run', 'udhcpd.conf'):
         members[f'boot/initramfs/install/{name}'] = hardware / 'boot/initramfs/install' / name

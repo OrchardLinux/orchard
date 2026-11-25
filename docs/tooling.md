@@ -21,7 +21,8 @@ Inside orchard, code is split by where it runs and how it is used:
 
 - `src/orchard/`: all Python imported on the host, one package.
 - `devices/`, `schemas/`, `features.toml`: data.
-- `kernel/`, `boot/`: recipes, standalone programs. They run `src/orchard/buildenv.py` by path and need only Python 3.11 and its standard library.
+- `kernel/`, `boot/`: recipes, standalone programs. They run `producers/buildenv.py` by path and need only Python 3.11 and its standard library.
+- `producers/`: the standalone scripts recipes and distributions run by path (`buildenv.py`, `initramfs.py`, `assemble.py`, `cascadia.py`): standard library only, no orchard package. Their old paths in `src/orchard/` are small files that run them.
 - `runtime/`: device-side code, copied into images, never imported.
 - `examples/`: RAM payloads to start from.
 

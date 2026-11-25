@@ -76,12 +76,13 @@ kernel bundle (`Image.gz`, DTBs), an initramfs and m1n1, from a published
 build or your own, assemble it without orchard:
 
 ```sh
-python3 src/orchard/image/assemble.py --bootargs 'console=tty0 loglevel=7 rdinit=/init' \
+python3 producers/assemble.py --bootargs 'console=tty0 loglevel=7 rdinit=/init' \
     --loader m1n1.bin --dtb t8010-j71b.dtb --kernel Image.gz \
     --initramfs initramfs.cpio.gz --output linux.bin
 ```
 
-The script uses only Python's standard library. The same bytes by hand:
+The script uses only Python's standard library (its older path,
+`src/orchard/image/assemble.py`, still runs it). The same bytes by hand:
 
 ```sh
 { cat m1n1.bin
