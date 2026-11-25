@@ -1,0 +1,6 @@
+out/
+rootfs/usr/bin/arcade
+rootfs/usr/bin/hedgewick
+rootfs/usr/bin/voidmoths
+rootfs/usr/bin/glint
+rootfs/lib/firmware/

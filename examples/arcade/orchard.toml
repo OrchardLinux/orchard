@@ -1,0 +1,25 @@
+# orchard.toml: how `orchard build` turns this directory into a RAM payload.
+name = "arcade"
+
+# A payload is `init` (the first program the kernel runs) plus the files under
+# `rootfs/`: here the picker and the three games (/usr/bin/arcade, hedgewick,
+# voidmoths, glint; built by src/build.sh, git-ignored) and the notice
+# helper. The same programs run on every board; each one looks for what the
+# device has (screen size, buttons, touchscreen, motion sensor, speaker).
+
+# Stage the kernel's modules (not loaded). gpio-keys, evdev, simpledrm,
+# fbcon, the SPI controller and the touch regulator are built in. init loads,
+# by name and only when the device tree describes the part: apple_z2 (the
+# touchscreen), on the N66 also apple_aop + apple_aop_accel (the tilt sensor)
+# and the loudspeaker's modules. There is no coldplug, so the NVMe driver (a
+# module) never binds and storage stays untouched.
+[payload]
+modules = true
+
+# Add the booted board's firmware: the touchscreen's (apple/<board>-fwstart.z2fw)
+# on every board, and on the N66 the AOP's and SmartIO's for the tilt sensor
+# and the speaker. `orchard run` reads it from Apple's restore image once,
+# keeps it in Orchard's private cache, and adds it as its own layer; it never
+# lands in this directory. It only provides files: Wi-Fi, Bluetooth and GPU
+# firmware come along too, but their drivers are modules init never loads.
+firmware = true
