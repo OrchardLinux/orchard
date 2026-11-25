@@ -46,7 +46,10 @@ class DistributionContract(unittest.TestCase):
             self.assertIn(option, release)
 
     def test_the_by_path_scripts_need_no_orchard_package(self):
-        for script in ('src/orchard/image/assemble.py', 'src/orchard/image/cascadia.py', 'src/orchard/buildenv.py'):
+        # The producers, and the paths they had inside the package, which stay as shims.
+        for script in ('producers/assemble.py', 'producers/cascadia.py', 'producers/initramfs.py', 'producers/buildenv.py',
+                       'boot/cascadia/build', 'src/orchard/image/assemble.py', 'src/orchard/image/cascadia.py',
+                       'src/orchard/image/initramfs.py', 'src/orchard/buildenv.py'):
             with self.subTest(script=script):
                 result = subprocess.run([sys.executable, '-I', str(ROOT / script), '--help'], capture_output=True,
                                         text=True, cwd=tempfile.gettempdir())

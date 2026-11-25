@@ -17,6 +17,11 @@ recovery runtime, recipes) are files under `$ORCHARD`. A build that runs
 under `orchard build` gets `ORCHARD_CHECKOUT` set to the snapshot; a build
 without orchard takes it as an argument.
 
+Under orchard2, the Rust tool, the build also gets `ORCHARD_TOOL`, the path of
+that tool. The entry then resolves its inputs with `$ORCHARD_TOOL inputs`
+instead of `orchard.inputs`: the same arguments and document, with paths into
+orchard2's cache (`ORCHARD_CACHE`). Every other command runs from the snapshot.
+
 `orchard build` passes a developer's checkouts the same way, as paths, and
 does nothing with them itself: `ORCHARD_KERNEL_TREE` (`--kernel-tree`, or
 `kernel-tree` in `orchard.local.toml`), which `orchard.inputs` builds the
@@ -41,9 +46,16 @@ and installs them in place of `[orchard]`'s. Unset, both change nothing.
 | `orchard.installer release DIR [--installer-url URL] [--pongo FILE] [--m1n1 FILE]` | the installer of a release | `DIR/install.sh`, `DIR/orchard-install.pyz` |
 | `orchard.manifests FILE … [--verify-local]` | checks release manifests | exit status |
 | `orchard.image.publish --distro NAME --tag TAG --release-dir DIR [--release-dir DIR] --output DIR` | the hosted release; one `--release-dir` per root architecture ([two roots](#two-roots-in-one-release)) | `DIR` |
-| `$ORCHARD/src/orchard/image/assemble.py` (by path) | an m1n1 payload | see [ram-development.md](ram-development.md#assembling-by-hand) |
-| `$ORCHARD/src/orchard/image/cascadia.py --profile devices/BOARD/cascadia.toml --loader FILE [--loader-elf FILE] --kernel zImage --dtb FILE --initramfs FILE --output FILE` (by path) | a 32-bit board's Cascadia payload | the image and `IMAGE.json` |
-| `$ORCHARD/src/orchard/buildenv.py` (by path; standard library only) | the build container or native build of a recipe: `build`, `run`, and as a module `native()`, `build()`, `run()`, `identity()` | — |
+| `$ORCHARD/producers/assemble.py` (by path) | an m1n1 payload | see [ram-development.md](ram-development.md#assembling-by-hand) |
+| `$ORCHARD/producers/cascadia.py --profile devices/BOARD/cascadia.toml --loader FILE [--loader-elf FILE] --kernel zImage --dtb FILE --initramfs FILE --output FILE` (by path) | a 32-bit board's Cascadia payload | the image and `IMAGE.json` |
+| `$ORCHARD/producers/buildenv.py` (by path; standard library only) | the build container or native build of a recipe: `build`, `run`, and as a module `native()`, `build()`, `run()`, `identity()` | — |
+
+The by-path scripts are standalone files in `producers/` (with
+`producers/initramfs.py --root DIR [--overlay DIR …] --output FILE`, which packs
+an initramfs): Python 3.11 and its standard library, no orchard package. Their
+older paths (`src/orchard/buildenv.py`, `src/orchard/image/assemble.py`,
+`cascadia.py` and `initramfs.py` there) still work, by path and as modules:
+each is a small file that runs the one in `producers/`.
 
 Changing one of these is a contract change: say so in the changelog, and
 update both distributions in the same push set.

@@ -1,5 +1,6 @@
 include README.md BUILD.md
 recursive-include docs *.md
+recursive-include producers *.py
 recursive-include tests *.py
 recursive-include tests/fixtures *.toml *.json *.txt *.tar.gz
 global-exclude __pycache__ *.py[cod] .DS_Store

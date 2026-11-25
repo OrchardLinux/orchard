@@ -19,7 +19,7 @@ class ChangedKernels(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         # A copy of what decides a kernel; the checkout is the pull request's side.
         self.base = Path(temporary.name) / 'base'
-        for name in ('kernel', 'src', 'platforms', 'devices', 'chips', 'features.toml', 'methods.toml'):
+        for name in ('kernel', 'src', 'producers', 'platforms', 'devices', 'chips', 'features.toml', 'methods.toml'):
             source = ROOT / name
             if source.is_dir():
                 shutil.copytree(source, self.base / name, ignore=shutil.ignore_patterns('__pycache__', '.work'))

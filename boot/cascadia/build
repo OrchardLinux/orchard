@@ -7,9 +7,10 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / 'src'))
-from orchard import buildenv
-from orchard.image.cascadia import digest, profile, verify_loader
+# The producers are standalone files, imported by path: no orchard package.
+sys.path.insert(0, str(ROOT / 'producers'))
+import buildenv  # noqa: E402
+from cascadia import digest, profile, verify_loader  # noqa: E402
 
 
 def main():

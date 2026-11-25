@@ -26,6 +26,20 @@ is missing or empty.
   before. Found and fixed by thisiscamk (thanks!).
 - The installer no longer stops over a missing index schema when its Python has
   the jsonschema package installed.
+- 32-bit boards: the installer carries the code that makes their payload, which
+  it was missing.
+
+### Building
+
+- The scripts recipes and distributions run by path moved to `producers/`
+  (`buildenv.py`, `initramfs.py`, `assemble.py`, `cascadia.py`). Their old paths
+  and module names still work. m1n1, the static tools and the Cascadia loader
+  are built once more, because their keys name the new paths.
+- `orchard build`, `inputs`, `devices` and the build step of `run` can go to
+  orchard2, the Rust tool: `ORCHARD2=1`, or `orchard2 = true` in
+  `~/.config/orchard/config.toml`. Off by default.
+- A distribution's build entry is told the tool that runs it as `ORCHARD_TOOL`
+  (orchard2 only), and resolves its inputs with `$ORCHARD_TOOL inputs`.
 
 ## [0.3.8] - 2026-11-25
 

@@ -10,6 +10,12 @@
 #
 #   orchard update           install the newest nightly's launcher as this one
 #   orchard python ARGS      Python in the running version's environment
+#
+# orchard2, the Rust tool, builds instead when it is switched on for this
+# computer: ORCHARD2=1 (0: off), else a line orchard2 = true in
+# ~/.config/orchard/config.toml. build, inputs, devices and the build step of
+# run then go to the orchard2 on PATH, with the same version's data; everything
+# else stays here. A checkout's bin/orchard follows the same switch.
 set -eu
 
 cache=${ORCHARD_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/orchard}
@@ -60,6 +66,45 @@ pick() {
     exit 1
 }
 
+orchard2_on() {
+    case ${ORCHARD2:-} in
+        1) return 0 ;;
+        0) return 1 ;;
+        '') grep -Eqs '^[[:space:]]*orchard2[[:space:]]*=[[:space:]]*true[[:space:]]*(#.*)?$' \
+                "${XDG_CONFIG_HOME:-${HOME:-}/.config}/orchard/config.toml" ;;
+        *) echo 'orchard: ORCHARD2 is 1 (orchard2 builds) or 0' >&2; exit 1 ;;
+    esac
+}
+
+# orchard2 COMMAND ARGS, with the recipes in $root and its Python environment.
+orchard2_command() {
+    command -v orchard2 >/dev/null 2>&1 || {
+        echo 'orchard: orchard2 is switched on (ORCHARD2 or ~/.config/orchard/config.toml) but not on PATH' >&2
+        exit 1
+    }
+    uv sync --quiet --project "$root" >&2
+    command=$1
+    shift
+    # It calls the checkout to build from --data.
+    count=$#
+    while [ "$count" -gt 0 ]; do
+        argument=$1
+        shift
+        case $argument in
+            --hardware) argument=--data ;;
+            --hardware=*) argument=--data=${argument#*=} ;;
+        esac
+        set -- "$@" "$argument"
+        count=$((count - 1))
+    done
+    ORCHARD_DATA=${ORCHARD_DATA:-$root} ORCHARD_PYTHON=${ORCHARD_PYTHON:-$root/.venv/bin/python} \
+        orchard2 "$command" "$@"
+}
+
+# A checkout's bin/orchard names itself, for its own code.
+checkout=${ORCHARD_LAUNCH_CHECKOUT:-}
+unset ORCHARD_LAUNCH_CHECKOUT
+
 # The launcher this is, through links.
 self=$0
 while [ -L "$self" ]; do
@@ -72,7 +117,7 @@ done
 
 # orchard = "PATH" in orchard.local.toml used to choose the checkout; it no longer does.
 top=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
-if [ -f "$top/orchard.local.toml" ] && grep -Eq '^orchard[[:space:]]*=' "$top/orchard.local.toml"; then
+if [ -z "$checkout" ] && [ -f "$top/orchard.local.toml" ] && grep -Eq '^orchard[[:space:]]*=' "$top/orchard.local.toml"; then
     echo "orchard: $top/orchard.local.toml names an orchard (orchard = ...); that is no longer read." >&2
     echo "  Run a checkout's bin/orchard to use it, or set ORCHARD_VERSION to pin a version; then remove the line." >&2
     exit 1
@@ -82,7 +127,7 @@ command -v uv >/dev/null 2>&1 || {
     echo 'orchard: install uv: https://docs.astral.sh/uv/getting-started/installation/' >&2
     exit 1
 }
-root=$(pick)
+root=${checkout:-$(pick)}
 export UV_PROJECT_ENVIRONMENT="$root/.venv"
 case ${1:-} in
     update)
@@ -98,9 +143,43 @@ case ${1:-} in
         fi
         exit 0 ;;
 esac
-if [ -f "$root/tools/launcher" ] && ! cmp -s "$self" "$root/tools/launcher"; then
+if [ -z "$checkout" ] && [ -f "$root/tools/launcher" ] && ! cmp -s "$self" "$root/tools/launcher"; then
     echo "orchard: a newer launcher is in $(basename "$root"); run orchard update" >&2
 fi
+case ${1:-} in
+    build|inputs|devices)
+        if orchard2_on; then
+            orchard2_command "$@"
+            exit
+        fi ;;
+    run)
+        # What run builds first; booting it stays here.
+        if orchard2_on; then
+            shift
+            build=1
+            for argument; do
+                case $argument in --no-build|-h|--help) build= ;; esac
+            done
+            if [ -n "$build" ]; then
+                (
+                    count=$#
+                    while [ "$count" -gt 0 ]; do
+                        argument=$1
+                        shift
+                        count=$((count - 1))
+                        case $argument in
+                            -y|--yes|--via=*) ;;
+                            --via) shift; count=$((count - 1)) ;;
+                            *) set -- "$@" "$argument" ;;
+                        esac
+                    done
+                    orchard2_command build "$@" >&2
+                )
+                set -- --no-build "$@"
+            fi
+            set -- run "$@"
+        fi ;;
+esac
 case ${1:-} in
     python) shift; exec uv run --quiet --project "$root" python "$@" ;;
     *) exec uv run --quiet --project "$root" orchard "$@" ;;
