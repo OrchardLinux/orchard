@@ -495,9 +495,11 @@ def new_tables(plan, block, header, entries):
 
 
 def write_at(connection, disk, block, lba, data):
-    """Write whole blocks at LBA. conv=fsync: this is what the partition table depends on."""
+    """Write whole blocks at LBA. conv=fsync: this is what the partition table depends on.
+    Ten minutes: the first write after a DFU start can wait on the storage's garbage
+    collection (186 s measured on an iPad Air J72, orchard #232); the kernel keeps waiting."""
     padded = data + bytes(-len(data) % block)
-    shell(connection, f'dd of={disk} bs={block} seek={lba} conv=notrunc,fsync 2>/dev/null', input=padded, timeout=120)
+    shell(connection, f'dd of={disk} bs={block} seek={lba} conv=notrunc,fsync 2>/dev/null', input=padded, timeout=600)
 
 
 def write_partitions(connection, plan, disk):
