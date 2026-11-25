@@ -10,6 +10,7 @@ that strongly ordered mapping and share the driver's register helpers.
 
 Link: https://github.com/OrchardLinux/orchard/issues/79
 Assisted-by: LLM
+Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
 ---
  arch/arm/mach-apple/apple.c      | 120 -------------------------------
  drivers/irqchip/irq-apple-aic1.c |  42 ++++++++++-

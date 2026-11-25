@@ -9,6 +9,7 @@ call and restore normal initcall IRQ checking after the AIC is ready.
 
 Link: https://github.com/OrchardLinux/orchard/issues/79
 Assisted-by: LLM
+Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
 ---
  arch/arm/mach-apple/apple.c | 10 ----------
  init/main.c                 | 14 +-------------

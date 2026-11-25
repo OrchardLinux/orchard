@@ -9,6 +9,7 @@ FIQ masked for every machine in a multi-platform kernel.
 
 Link: https://github.com/OrchardLinux/orchard/issues/79
 Assisted-by: LLM
+Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
 ---
  arch/arm/kernel/smp.c | 3 +--
  1 file changed, 1 insertion(+), 2 deletions(-)

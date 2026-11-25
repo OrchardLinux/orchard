@@ -10,6 +10,7 @@ setup can rely on the tick.
 
 Link: https://github.com/OrchardLinux/orchard/issues/79
 Assisted-by: LLM
+Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
 ---
  drivers/irqchip/irq-apple-aic1.c   | 120 ++++++-----------------------
  include/linux/irqchip/apple-aic1.h |  13 ++++

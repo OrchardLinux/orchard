@@ -10,6 +10,7 @@ counterpart in the handler. Remove the empty CBAR drain calls.
 
 Link: https://github.com/OrchardLinux/orchard/issues/79
 Assisted-by: LLM
+Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
 ---
  arch/arm/kernel/entry-armv.S     | 10 ----------
  arch/arm/mach-apple/apple.c      | 17 -----------------
