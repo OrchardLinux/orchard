@@ -246,4 +246,26 @@ work yet the likely failure is a reboot, or no wake, instead of a wake.
 Distributions keep the policy: when to suspend (Power key, idle) and locking
 first. omarchy-a asks logind (`CanSuspend`) before it suspends.
 
-To report a board: prove it as above, then set `suspend = "working"`.
+### Testing sleep as a tester
+
+Sleep and suspend are the same thing: in Linux, sleeping is called suspend and
+waking up is resume (`suspend` and `resume` in `device.toml`, "Sleep" in the
+compatibility table). Screen off (`screen_off`) is different: the display is
+dark, but the device keeps running.
+
+In Omarchy A, Power turns the screen off. About 10 seconds later the device
+goes to sleep, unless something is playing.
+
+1. Press Power, wait at least 45 seconds, then press Power or Home. Do it a few
+   times, and once for more than 3 minutes.
+2. Run `journalctl -b | grep sleep-ended`. `result=slept` with the time you
+   waited is a real sleep. `result=aborted` means it was still entering sleep.
+   No line since boot means it never slept, or it restarted instead of waking.
+3. Check that the screen, touch, Wi-Fi, sound and charging still work.
+
+Report the log lines and what worked after waking. That is enough for
+`suspend` and `resume`; for another system, use the checks under
+[Testing rules that mattered](#testing-rules-that-mattered).
+
+To report a board in `device.toml`: prove it as above, then set
+`suspend = "working"`, and `resume = "working"` if everything came back.

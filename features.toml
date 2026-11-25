@@ -7,7 +7,7 @@
 # A state says what's true of the feature. Don't use it to allow or block something:
 # installing follows from these states (hardware.install_blockers) and promises no working system.
 display = "Display"
-screen_off = "Screen on/off"
+screen_off = "Screen on/off" # the display goes dark, the device keeps running
 backlight = "Backlight"
 gpu_desktop = "GPU desktop" # the desktop draws through the GPU driver, not in software
 touch = "Touchscreen"
@@ -25,8 +25,8 @@ cellular = "Cellular"
 battery = "Battery status"
 charging = "Charging"
 charging_control = "Charging control"
-suspend = "Suspend"
-resume = "Resume"
+suspend = "Suspend" # sleep; how to test: docs/bring-up/suspend.md
+resume = "Resume" # waking up from sleep
 usb_serial = "USB serial"
 usb_network = "USB network"
 usb_host = "USB host"
