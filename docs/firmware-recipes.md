@@ -273,23 +273,27 @@ from `com.apple.AGXFirmwareKextG4P`, byte for byte, and
 `apple/gfx-t7000-border.bin`, the first 0x800 bytes of the border colour
 table in `com.apple.AGXG4P`'s data. The driver was written and tested
 against the iPod touch 6's iOS 12.4 (16G77) image: it relies on that
-image's segment layout and object offsets. So every A8 board's recipe
-(N102, N56, N61, J96, J97) reads the N102 kernelcache of that restore
-image (`restore` above) and pins the same two hashes:
+image's segment layout and object offsets.
 
-| File | Bytes | SHA-256 |
+The iOS 12 boards take both files from their own pinned restore image:
+
+| Board | Image | `gfx-t7000.bin` (115534 bytes) |
 |---|---|---|
-| `gfx-t7000.bin` | 115534 | `0b60def67290391b4c6aa913d9a78a8105d6d9b03738175b8e5732689db1e5ba` |
-| `gfx-t7000-border.bin` | 2048 | `233ffc1d7db27d9f16db17e23a9ce33082b5a7b72061af3da510bca3c94aff3e` |
+| N102, N56 | iOS 12.5.8 (16H88) | `5f99a8ab88ddd34f8f32c11adb21f6b2410bece3d23a9aee560ca80fe8e45f55` |
+| N61 | iOS 12.5.1 (16H22) | `36bfc905aaf41baac1748849942c4b5f796b1d293e8171045ee45cf253150c68` |
 
-The boards' own restore images, compared with it:
+Their LDR is the 12.4 one except for its build-date string and the 16-bit
+check word of the data block that holds it: the same code, size and
+layout.
 
-- iOS 12.5.8 (16H88; N102, N56) and 12.5.1 (16H22; N61): the same LDR
-  except its build-date string and the 16-bit check word of the data block
-  that holds it.
-- iPadOS 15.8.8 (19H422; J96, J97): another firmware build (114794 bytes).
-  The driver has not run it.
-- Every one of them holds the same border colour table.
+iPadOS 15.8.8 (19H422; J96, J97) has another firmware build (114794
+bytes) that the driver has not run, so the iPad mini 4 recipes read the
+N102 kernelcache of iOS 12.4 (`restore` above) and pin its LDR,
+`0b60def67290391b4c6aa913d9a78a8105d6d9b03738175b8e5732689db1e5ba`.
+
+Every one of these images holds the same border colour table,
+`gfx-t7000-border.bin` (2048 bytes,
+`233ffc1d7db27d9f16db17e23a9ce33082b5a7b72061af3da510bca3c94aff3e`).
 
 The iOS 12 kernelcaches have no per-kext load addresses in their prelink
 metadata, so both steps find their data by structure: every LDR whose

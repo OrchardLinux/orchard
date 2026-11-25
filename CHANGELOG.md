@@ -18,6 +18,10 @@ is missing or empty.
 - iPad Air (Cellular): Wi-Fi, speakers, charging with charging control, battery
   status and screen on/off work, and a normal install completes with the
   released kernel. Tested by thisiscamk (thanks!).
+- iPod touch 6, iPhone 6 and iPhone 6 Plus: the GPU firmware comes from the
+  board's own restore image (iOS 12.5.8; 12.5.1 on the iPhone 6) instead of
+  the iPod touch 6's iOS 12.4. The firmware code is the same; only its build
+  date differs.
 
 ### Install & launch
 

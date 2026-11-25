@@ -154,8 +154,15 @@ class RestoreInputs(unittest.TestCase):
 
 
 class A8Recipes(unittest.TestCase):
-    def test_every_a8_board_installs_the_tested_gpu_firmware(self):
-        hashes = set()
+    # The LDR of each board's source image: the iOS 12 boards' own; iPadOS 15's build is untested, so the
+    # iPad mini 4 takes iOS 12.4's (16G77) from the iPod touch 6.
+    LDRS = {'16H88': '5f99a8ab88ddd34f8f32c11adb21f6b2410bece3d23a9aee560ca80fe8e45f55',
+            '16H22': '36bfc905aaf41baac1748849942c4b5f796b1d293e8171045ee45cf253150c68',
+            '16G77': '0b60def67290391b4c6aa913d9a78a8105d6d9b03738175b8e5732689db1e5ba'}
+    BORDER_SHA256 = '233ffc1d7db27d9f16db17e23a9ce33082b5a7b72061af3da510bca3c94aff3e'
+    OWN_IMAGE = ('n102', 'n56', 'n61')
+
+    def test_every_a8_board_installs_the_gpu_firmware_of_its_source_image(self):
         for board in A8_BOARDS:
             with self.subTest(board=board):
                 document = recipe.check(json.loads((ROOT / f'devices/{board}/firmware.json').read_text()))
@@ -165,11 +172,15 @@ class A8Recipes(unittest.TestCase):
                     output = outputs[destination]
                     name = output['steps'][0]['input']
                     self.assertEqual(output['steps'], [{'step': step, 'input': name}])
-                    source = document['inputs'][name]
-                    self.assertEqual(source['ipsw']['kernelcache'], 'n102ap')
-                    self.assertEqual(source['ipsw']['restore']['build'], '16G77')
-                    hashes.add((destination, output['sha256'], source['sha256'], source['ipsw']['restore']['url']))
-        self.assertEqual(len(hashes), 2, 'every A8 board pins the same image')
+                    location = document['inputs'][name]['ipsw']
+                    if board in self.OWN_IMAGE:
+                        self.assertEqual(location, {'kernelcache': True})
+                        build = document['ipsw']['build']
+                    else:
+                        self.assertEqual(location['kernelcache'], 'n102ap')
+                        build = location['restore']['build']
+                    expected = self.LDRS[build] if destination == LDR else self.BORDER_SHA256
+                    self.assertEqual(output['sha256'], expected)
 
 
 if __name__ == '__main__':
