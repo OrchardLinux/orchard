@@ -20,6 +20,7 @@ board = 0x12
 
 [boot]
 methods = ["checkm8-pongo"] # history/plans-and-reports/NATIVE-CLI-BOOT-2026-11-03.md: Orchard RAM boot through checkra1n/Pongo
+entries = ["checkra1n"] # as on every other A7 iPad; J72 boots with checkra1n 0.1337.3 (docs/bring-up/j72.md)
 
 [kernel]
 platform = "apple-4k"  # kernel/series/apple-4k, kernel/configs/apple-4k: A7 has no 16 KiB pages
