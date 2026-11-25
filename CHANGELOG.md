@@ -13,6 +13,10 @@ is missing or empty.
 
 ### Devices
 
+- A8 to A11 devices with Apple's NVMe storage: storage no longer stops for
+  30 seconds when status queries (such as udisks at boot) run beside reads.
+  It stalled every few seconds under that load on an iPad 6 and could darken
+  the start before the PIN screen.
 - iPad mini 1 (Wi-Fi): verified all four ARM alignment handlers on a RAM boot
   with internal flash disabled, then removed the Cascadia alignment workaround.
 - iPad Air (Cellular): Wi-Fi, speakers, charging with charging control, battery
