@@ -45,7 +45,10 @@ class HostSetup(unittest.TestCase):
         self.assertFalse(first['device_modified'])
         self.assertEqual(first, second)
         self.assertEqual(download.call_count, 1)
-        self.assertEqual(commands.call_count, 2)  # install rules, reload; never palera/device commands.
+        # Install the rules, reload them, apply them to what is plugged in;
+        # never palera1n or device commands.
+        self.assertEqual(commands.call_count, 3)
+        self.assertEqual(commands.call_args_list[2].args[0][:4], ['sudo', 'udevadm', 'trigger', '--action=add'])
         self.assertEqual(rule.read_text().count('MODE="0660"'), 14)
         for pid in ('4142', '4144', '4145', '4146'):
             self.assertIn(f'SUBSYSTEM=="tty", ATTRS{{idVendor}}=="05ac", ATTRS{{idProduct}}=="{pid}"',

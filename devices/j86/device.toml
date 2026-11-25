@@ -26,36 +26,37 @@ recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until
 
 [support]
 status = "experimental"
+tested_by = ["perryraskin"] # #66
 
 # States: working, untested, missing, none (features.toml). Nothing here has run on
 # this board with Orchard: "untested" means a driver binds in its device tree
 # (tools/catalog/drivers.json), plus the display's boot console.
 [features]
-display = "untested"
+display = "working" # Omarchy A desktop on the panel; installed Omarchy A, perryraskin, J86 iOS 12.5.8 2026-11-26 (#66)
 screen_off = "missing"
 backlight = "untested"
 gpu_desktop = "missing"
-touch = "untested" # N1 on SPI1 as on the J85 (ADT spi1/multi-touch, multi-touch,j85), J85.mtprops firmware; not yet run on this board
+touch = "working" # N1 touch works in Omarchy A; installed Omarchy A, perryraskin, J86 iOS 12.5.8 2026-11-26 (#66)
 buttons = "untested"
 accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "untested" # CT819 on i2c3 (ADT i2c3/als) with tsl2583, calibrated by the LSCI v2 record m1n1 copies; not yet run on this board
 touch_id = "missing"
-storage_read = "untested" # ANS (iop,s5l8960x) at the same address as on the J72, whose storage reads and writes with Orchard (ADT /arm-io/ans); not yet run on this board
-storage_write = "untested" # same ANS and asp driver as the J72; not yet run on this board
-wifi = "untested" # BCM43241 on HSIC, EHCI1 port 1 as on the J85 (ADT usb-ehci1/wlan, module seyval): apple-a7-wlan + brcmfmac with this board's TRX/NVRAM recipe; not yet run on this board
+storage_read = "working" # the installed system boots and runs from storage; installed Omarchy A, perryraskin, J86 iOS 12.5.8 2026-11-26 (#66)
+storage_write = "working" # Omarchy A installed to storage; installed Omarchy A, perryraskin, J86 iOS 12.5.8 2026-11-26 (#66)
+wifi = "working" # BCM43241 connects with nmcli; installed Omarchy A, perryraskin, J86 iOS 12.5.8 2026-11-26 (#66)
 bluetooth_input = "missing"
 bluetooth_audio = "missing"
 cellular = "missing"
 battery = "untested" # BQ2754x on UART5 HDQ, as on every A7 iPad (ADT uart5/gas-gauge), with the J72 gauge profile; not yet run on this board
-charging = "untested" # the shared A7 Tristar charger on the D2089 (ADT pmu,d2089 + tristar,cbtl1610), up to 1500 mA as measured on a J85; not yet run on this board
+charging = "working" # charges; installed Omarchy A, perryraskin, J86 iOS 12.5.8 2026-11-26 (#66)
 charging_control = "untested" # as on the J72: source identified at each plug, grant ramped, back to 100 mA on unplug; not yet run on this board
-suspend = "untested"
-resume = "untested"
+suspend = "working" # sleep from Omarchy A; installed Omarchy A, perryraskin, J86 iOS 12.5.8 2026-11-26 (#66)
+resume = "working" # wakes from sleep; installed Omarchy A, perryraskin, J86 iOS 12.5.8 2026-11-26 (#66)
 usb_serial = "untested"
-usb_network = "untested"
+usb_network = "working" # orchard shell to the installed system over USB; installed Omarchy A, perryraskin, J86 iOS 12.5.8 2026-11-26 (#66)
 usb_host = "missing"
-audio_output = "untested" # two CS35L19 on I2C2 + MCA1, the same as the J85 (ADT i2c2/audio-speaker0/1, mca1); "iPad mini Speakers" card; not yet run on this board
+audio_output = "working" # speakers play; installed Omarchy A, perryraskin, J86 iOS 12.5.8 2026-11-26 (#66)
 audio_input = "missing"
 camera = "missing"
 video_decode_hevc = "missing"

@@ -18,7 +18,7 @@ Every device Orchard installs on. ✅ works · ❌ doesn't work yet · – no su
 | iPad Air (Cellular) | A7 | ✅ | ❌ | ✅ | ✅ | ❌ | ✅ | ✅ | 🤔 | ❌ | [thisiscamk](https://github.com/thisiscamk) |
 | iPad Air (China) | A7 | 🤔 | ❌ | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | ❌ | – |
 | iPad Air (Wi-Fi) | A7 | ✅ | ❌ | 🤔 | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | [ricktav](https://github.com/ricktav) |
-| iPad mini 2 (Cellular) | A7 | 🤔 | ❌ | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | ❌ | – |
+| iPad mini 2 (Cellular) | A7 | ✅ | ❌ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | [perryraskin](https://github.com/perryraskin) |
 | iPad mini 2 (China) | A7 | 🤔 | ❌ | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | ❌ | – |
 | iPad mini 2 (Wi-Fi) | A7 | ✅ | ❌ | ✅ | ✅ | ❌ | 🤔 | ✅ | ✅ | ❌ | [ricktav](https://github.com/ricktav) |
 | iPad mini 3 (Cellular) | A7 | 🤔 | ❌ | 🤔 | ❌ | ❌ | 🤔 | 🤔 | 🤔 | ❌ | – |
@@ -202,7 +202,7 @@ Boards Orchard builds for. States: working, untested, missing, none (no such har
 | `j73` | untested | missing | untested | missing | untested | untested | missing | missing | untested | missing | untested | untested | untested | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | missing | untested | missing | missing | missing |
 | `j85` | working | missing | working | missing | working | working | missing | missing | working | missing | working | working | working | missing | missing | missing | working | working | working | working | working | working | working | missing | untested | missing | missing | missing |
 | `j85m` | untested | missing | untested | missing | untested | untested | missing | missing | untested | missing | untested | untested | missing | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | missing | untested | missing | missing | missing |
-| `j86` | untested | missing | untested | missing | untested | untested | missing | missing | untested | missing | untested | untested | untested | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | missing | untested | missing | missing | missing |
+| `j86` | working | missing | untested | missing | working | untested | missing | missing | untested | missing | working | working | working | missing | missing | missing | untested | working | untested | working | working | untested | working | missing | working | missing | missing | missing |
 | `j86m` | untested | missing | untested | missing | untested | untested | missing | missing | untested | missing | untested | untested | missing | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | missing | untested | missing | missing | missing |
 | `j87` | untested | missing | untested | missing | untested | untested | missing | missing | untested | missing | untested | untested | untested | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | missing | untested | missing | missing | missing |
 | `j87m` | untested | missing | untested | missing | untested | untested | missing | missing | untested | missing | untested | untested | missing | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | missing | untested | missing | missing | missing |
@@ -313,7 +313,7 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `j72` | Wi-Fi | working, but no driver binds |
 | `j73` | Wi-Fi | untested, but no driver binds |
 | `j85` | Wi-Fi | working, but no driver binds |
-| `j86` | Wi-Fi | untested, but no driver binds |
+| `j86` | Wi-Fi | working, but no driver binds |
 | `j87` | Wi-Fi | untested, but no driver binds |
 | `n51` | Speakers | missing, but a driver binds |
 | `n53` | Speakers | missing, but a driver binds |

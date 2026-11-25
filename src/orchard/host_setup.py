@@ -132,7 +132,12 @@ def _usb_rules_step():
             path.write_text(rules)
             subprocess.run(['sudo', 'install', '-m', '644', str(path), str(USB_RULES)], check=True)
         subprocess.run(['sudo', 'udevadm', 'control', '--reload-rules'], check=True)
-    return Step('USB permissions', BOOT, False, f'install {USB_RULES} with sudo; reconnect the device afterwards', apply)
+        # A device that is plugged in already gets the new rule too: without
+        # this, palera1n waited for a DFU device it could not open (J86 on a
+        # Raspberry Pi, #66).
+        subprocess.run(['sudo', 'udevadm', 'trigger', '--action=add', '--subsystem-match=usb',
+                        '--attr-match=idVendor=05ac'], check=True)
+    return Step('USB permissions', BOOT, False, f'install {USB_RULES} with sudo', apply)
 
 
 def _tool_step(tool, needed_for):
