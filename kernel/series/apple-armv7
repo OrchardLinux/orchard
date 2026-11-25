@@ -7,3 +7,4 @@ patches/armv7/mtd
 patches/armv7/block
 patches/armv7/usb
 patches/armv7/bluetooth
+patches/armv7/boot

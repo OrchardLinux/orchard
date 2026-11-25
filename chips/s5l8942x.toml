@@ -13,6 +13,7 @@ stages = ["iBSS", "iBEC"]
 [evidence]
 firmware = "P105 recipe for iOS 8.4.1 encrypted images (docs/bring-up/p105-firmware.md)"
 platform = "P105 on a Cascadia-based build"
+armv7_boot = "The P105 issue #79 RAM boot used an AIC1 clockevent on each CPU and kept USB serial and Ethernet available (devices/p105/README.md)."
 stages = "Project Cascadia P105 boot chain"
 reference_version = "Project Cascadia builds its A5 boot chain from 8.4.1 / 12H321"
 nand_reads = "The 64 GB P105 has eight CAUs per bus, 2088 blocks per CAU and 128 normal pages per block. PR #93 matched 29 live logical pages to physical data and verified both LwVM headers. With the fusion fix, all 954 ranges of the logical disk matched an independent reconstruction from raw flash (docs/bring-up/p105-sftl-device-qualification.md)."

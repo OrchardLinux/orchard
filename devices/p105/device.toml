@@ -41,7 +41,7 @@ tested_by = ["shaynelegault"]
 
 # States: working, untested, missing, none (features.toml).
 [features]
-display = "untested"
+display = "working"
 screen_off = "untested"
 backlight = "untested"
 gpu_desktop = "missing"
@@ -68,8 +68,8 @@ charging = "untested"
 charging_control = "untested"
 suspend = "missing"
 resume = "missing"
-# The cold-handoff USB topic awaits an exact-revision boot.
-# See docs/bring-up/p105-usb-handoff.md for observations and software checks.
+# The issue #79 RAM boot verified both functions over the attached cable.
+# Cold-handoff qualification is tracked in docs/bring-up/p105-usb-handoff.md.
 usb_serial = "untested"
 usb_network = "untested"
 usb_host = "missing"
