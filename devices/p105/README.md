@@ -46,9 +46,11 @@ kernel, clockevent setup ran before CPU1 came online. The 768 by 1024
 simple framebuffer passed a full pixel readback on each kernel, and the
 iPad owner confirmed the colour bands on the LCD.
 
-Each kernel passed 256 unaligned pipe I/O round trips. The kernel alignment
-fault count stayed at zero, so the imported alignment workaround still
-needs a test that triggers a kernel-mode alignment fault.
+Each kernel passed 256 unaligned pipe I/O round trips. A later RAM test
+triggered a kernel fault in each alignment handler on kernels with and
+without Cascadia's user-address conditions. All loads returned the expected
+values. The clean fix at `f3679ef65` passed the same four probes with flash
+disabled. See [the alignment check](../../docs/bring-up/p105-alignment.md).
 
 ## Open work
 
