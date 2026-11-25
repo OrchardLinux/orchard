@@ -9,6 +9,13 @@ releasing, rename that section to the version (`## [0.3.0] - YYYY-MM-DD`). The
 release workflow uses that section as the GitHub release notes and fails if it
 is missing or empty.
 
+## [Unreleased]
+
+### Devices
+
+- iPad mini 1 (Wi-Fi): verified all four ARM alignment handlers on a RAM boot
+  with internal flash disabled, then removed the Cascadia alignment workaround.
+
 ## [0.3.8] - 2026-11-25
 
 ### Devices

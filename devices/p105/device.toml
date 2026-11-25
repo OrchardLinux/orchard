@@ -38,6 +38,8 @@ reclaims = true
 [support]
 status = "experimental"
 tested_by = ["shaynelegault"]
+# Issue #79: the four kernel alignment handlers passed fault probes on a
+# flash-disabled RAM boot (docs/bring-up/p105-alignment.md).
 
 # States: working, untested, missing, none (features.toml).
 [features]
