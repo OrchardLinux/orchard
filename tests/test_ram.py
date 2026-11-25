@@ -205,7 +205,7 @@ class RamTests(unittest.TestCase):
                 patch.object(ram, 'build_directory') as build, \
                 patch('orchard.command.operation_lock') as lock:
             main()
-            build.assert_called_once_with(self.base, hardware=None, cache=None, kernel=None,
+            build.assert_called_once_with(self.base, cache=None, kernel=None,
                                           busybox=None, loader=None, pongo=Path('local.bin'), device=None,
                                           platform=None, kernel_tree=None)
             lock.assert_not_called()
@@ -213,7 +213,7 @@ class RamTests(unittest.TestCase):
                 patch.object(boot, 'run_directory') as run:
             main()
             run.assert_called_once_with(self.base, yes=False, build=True, device=None, platform=None,
-                                        hardware=None, cache=None, kernel=None, busybox=None, loader=None,
+                                        cache=None, kernel=None, busybox=None, loader=None,
                                         pongo=None, kernel_tree=None)
 
     def test_cli_noninteractive_run_flags(self):
