@@ -38,6 +38,8 @@ is missing or empty.
 - `orchard build`, `inputs`, `devices` and the build step of `run` can go to
   orchard2, the Rust tool: `ORCHARD2=1`, or `orchard2 = true` in
   `~/.config/orchard/config.toml`. Off by default.
+- `orchard build` and `run` no longer take `--hardware`: a checkout's `bin/orchard`
+  builds with that checkout's data and recipes.
 - A distribution's build entry is told the tool that runs it as `ORCHARD_TOOL`
   (orchard2 only), and resolves its inputs with `$ORCHARD_TOOL inputs`.
 

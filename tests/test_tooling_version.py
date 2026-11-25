@@ -135,9 +135,9 @@ class Orchard2Switch(Fixture):
         self.assertEqual(self.ran('devices', ORCHARD2='0'), ['python devices'])
         self.assertEqual(self.ran('doctor'), ['python doctor'])
 
-    def test_a_checkout_is_named_as_data(self):
-        self.assertEqual(self.ran('build', '--hardware', 'a b', '--explain', ORCHARD2='1'),
-                         [f'orchard2 build --data a b --explain {self.env["data"]}'])
+    def test_arguments_are_passed_on_as_they_are(self):
+        self.assertEqual(self.ran('build', 'a b', '--explain', ORCHARD2='1'),
+                         [f'orchard2 build a b --explain {self.env["data"]}'])
 
     def test_run_builds_with_it_and_boots_here(self):
         self.assertEqual(self.ran('run', '-y', 'a', '--via', 'checkra1n', '--device', 'j71b', ORCHARD2='1'),

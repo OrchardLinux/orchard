@@ -83,22 +83,8 @@ orchard2_command() {
         exit 1
     }
     uv sync --quiet --project "$root" >&2
-    command=$1
-    shift
-    # It calls the checkout to build from --data.
-    count=$#
-    while [ "$count" -gt 0 ]; do
-        argument=$1
-        shift
-        case $argument in
-            --hardware) argument=--data ;;
-            --hardware=*) argument=--data=${argument#*=} ;;
-        esac
-        set -- "$@" "$argument"
-        count=$((count - 1))
-    done
     ORCHARD_DATA=${ORCHARD_DATA:-$root} ORCHARD_PYTHON=${ORCHARD_PYTHON:-$root/.venv/bin/python} \
-        orchard2 "$command" "$@"
+        orchard2 "$@"
 }
 
 # A checkout's bin/orchard names itself, for its own code.
