@@ -13,6 +13,8 @@ is missing or empty.
 
 ### Devices
 
+- iPhone 8 Plus: after a wake the screen is back in about 0.3 s instead of
+  8 s; the touch controller boots in the background.
 - iPad mini 2 (Cellular): display, touch, storage, Wi-Fi, speakers, charging,
   sleep and wake and USB networking work on an installed Omarchy A. Tested by
   perryraskin (thanks!).
