@@ -228,12 +228,11 @@ class Orchard2Switch(Fixture):
         self.orchard2('printf "orchard2 %s\\n" "$*" >> "$LOG"; exit 4')
         self.assertEqual(self.ran('run', 'a', ORCHARD2='1'), ['orchard2 run a'])
         self.assertEqual(self.result.returncode, 4)
-        # A distribution checkout's release is built by orchard2 and booted here.
+        # A distribution checkout's release is orchard2's to build and boot too.
         self.orchard2('printf "orchard2 %s\\n" "$*" >> "$LOG"')
         (self.root / 'work/d').mkdir()
         (self.root / 'work/d/orchard.toml').write_text('[release]\n')
-        self.assertEqual(self.ran('run', 'd', '--via', 'checkra1n', ORCHARD2='1'),
-                         ['orchard2 build d', 'python run --no-build d --via checkra1n'])
+        self.assertEqual(self.ran('run', 'd', '--via', 'checkra1n', ORCHARD2='1'), ['orchard2 run d'])
 
     def test_a_failed_build_is_not_booted_and_keeps_its_status(self):
         shutil.rmtree(self.clone, ignore_errors=True)
