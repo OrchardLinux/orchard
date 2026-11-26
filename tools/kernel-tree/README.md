@@ -1,10 +1,10 @@
 # kernel-tree
 
-Orchard's kernel and m1n1 also exist as git trees:
-[OrchardLinux/linux](https://github.com/OrchardLinux/linux) and
-[OrchardLinux/m1n1](https://github.com/OrchardLinux/m1n1). During the
-transition the patch layers here stay authoritative and `main` of both trees
-is generated from them. These tools do both directions.
+Orchard's kernel also exists as a git tree,
+[OrchardLinux/linux](https://github.com/OrchardLinux/linux). The patch layers
+here are authoritative and its branches are generated from them. These tools
+do both directions. m1n1 is past that: OrchardLinux/m1n1 is its source
+(`boot/m1n1/README.md`), and these tools no longer touch it.
 
 ## New kernel work in the tree
 
@@ -29,15 +29,14 @@ in a Linux container.
 ## Regenerating the trees (maintainers)
 
 ```sh
-orchard python tools/kernel-tree/regenerate --linux ../linux --m1n1 ../m1n1 [ORCHARD_COMMIT]
+orchard python tools/kernel-tree/regenerate --linux ../linux [ORCHARD_COMMIT]
 ```
 
 Every platform descriptor names its branch in OrchardLinux/linux (`main` for
 apple-16k and apple-4k, `armv7` for apple-armv7). For each branch it applies that
 series onto its upstream base (fetched if missing) in build order, one commit
 per patch and one merge per patch directory, adds the platforms' defconfigs
-(checked to reproduce `kernel/configs`), and moves the branch; m1n1 `main`
-likewise. It pushes nothing.
+(checked to reproduce `kernel/configs`), and moves the branch. It pushes nothing.
 
 Regeneration is stable: a commit keeps the committer and date of the orchard
 commit that last changed its patch file, and a merge cites the orchard commit

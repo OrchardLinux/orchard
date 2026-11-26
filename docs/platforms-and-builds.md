@@ -41,8 +41,9 @@ from the platform.
 
 **Done:** [OrchardLinux/linux](https://github.com/OrchardLinux/linux) (fork of
 torvalds/linux) and [OrchardLinux/m1n1](https://github.com/OrchardLinux/m1n1)
-(fork of AsahiLinux/m1n1). During the transition the patch layers here stay
-authoritative and the trees are generated from them by
+(fork of AsahiLinux/m1n1). m1n1 is built from its repository, at the commit
+in `boot/m1n1/upstream.lock`, and m1n1 work is a pull request there. For the
+kernel the patch layers here stay authoritative and the tree is generated from them by
 [tools/kernel-tree](../tools/kernel-tree/README.md): one commit per patch,
 one merge per patch directory, the defconfigs on top, one branch per
 platform base. Regeneration is stable: unchanged topics keep their SHAs.

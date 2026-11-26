@@ -26,18 +26,9 @@ if [[ ! "$device" =~ ^[a-z0-9][a-z0-9_-]*$ || -z "$output" ]]; then
   exit 2
 fi
 [[ ! -e "$output" && ! -L "$output" ]] || { echo "Output exists: $output" >&2; exit 1; }
-# The ordered patch layers in series (Hoolock, then Orchard), each in name order.
+# The source is OrchardLinux/m1n1 at the commit in upstream.lock, as it is; a
+# caller may add one patch of its own (a distribution's presentation).
 patches=()
-while read -r layer; do
-  layer=${layer%%#*}
-  layer=${layer//[[:space:]]/}
-  [[ -n "$layer" ]] || continue
-  [[ "$layer" =~ ^patches/[a-z0-9_-]+$ && -d "$here/$layer" ]] || { echo "Invalid patch layer: $layer" >&2; exit 1; }
-  for patch in "$here/$layer/"*.patch; do
-    [[ -f "$patch" ]] && patches+=("$patch")
-  done
-done < "$here/series"
-[[ ${#patches[@]} -gt 0 ]] || { echo 'No m1n1 patches' >&2; exit 1; }
 if [[ -n "$extra_patch" ]]; then
   [[ -f "$extra_patch" ]] || { echo 'Missing extra patch' >&2; exit 1; }
   patches+=("$extra_patch")
@@ -49,13 +40,11 @@ work=${work_override:-"$here/.work/$device"}
 source="$work/source"
 applied="$work/applied-patches"
 patch_list() {
-  for patch in "${patches[@]}"; do
+  for patch in ${patches[@]+"${patches[@]}"}; do
     printf '%s %s\n' "$(git hash-object "$patch")" "${patch#"$here"/}"
   done
 }
 if "$resume"; then
-  # Later patches in a layer touch the lines of earlier ones, so compare the
-  # recorded patch set instead of reverse-checking each patch on its own.
   [[ -d "$source" && $(git -C "$source" rev-parse HEAD) == "$commit" && -f "$applied" ]] || {
     echo 'No matching source to resume' >&2; exit 1;
   }
@@ -68,7 +57,7 @@ else
   git -C "$source" fetch --depth 1 origin "$commit"
   git -C "$source" checkout -q --detach FETCH_HEAD
   git -C "$source" submodule update --init --depth 1
-  for patch in "${patches[@]}"; do
+  for patch in ${patches[@]+"${patches[@]}"}; do
     git -C "$source" apply --check --whitespace=nowarn "$patch"
     git -C "$source" apply --whitespace=nowarn "$patch"
   done

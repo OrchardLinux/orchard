@@ -68,7 +68,6 @@ In your worktree:
 | `kernel/devicetree/BOARD/build` | Commands producing the final DTB. Accepts `--kernel-build`, `--headers`, `--output`. |
 | `kernel/patches/BOARD/` | Kernel patches, if needed. |
 | `kernel/modules/BOARD/` | External modules, if needed. |
-| `boot/m1n1/patches/BOARD/` | Applicable loader patches when using the m1n1 producer. |
 
 Use J71b's files as format examples, not hardware settings to copy wholesale. See the [component API](ram-development.md) to build a named recipe or assemble explicit kernel/DTB/loader inputs.
 
