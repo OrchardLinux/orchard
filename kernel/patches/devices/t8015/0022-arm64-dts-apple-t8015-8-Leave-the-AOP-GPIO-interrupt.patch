@@ -1,17 +1,17 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Dugs <dugahol@protonmail.com>
 Date: Thu, 26 Nov 2026 18:00:00 +1030
-Subject: [PATCH] arm64: dts: apple: t8015-8plus: Leave the AOP GPIO interrupts
+Subject: [PATCH 1/5] arm64: dts: apple: t8015-8: Leave the AOP GPIO interrupts
  to the AOP
 
 The AOP firmware owns the interrupts of its own GPIO block. On the
-iPhone 8 Plus the Touch ID sensor's interrupt is AOP GPIO 21 (group 0),
+iPhone 8 and 8 Plus the Touch ID sensor's interrupt is AOP GPIO 21 (group 0),
 and the AOP arms it once the AP releases the sensor (Mesa command 0x21
 after 0x20).
 
 The t8015 dtsi makes pinctrl_aop an interrupt controller with all seven
 group lines (AIC 135-141), so Linux takes them as chained handlers on
-CPU0. Nothing on the 8 Plus requests an AOP GPIO interrupt, so the pin
+CPU0. Nothing on the iPhone 8 or 8 Plus requests an AOP GPIO interrupt, so the pin
 has no mapping: apple_gpio_irq_handler() dispatches into nothing, nobody
 acks it, and the level line fires again at once. CPU0 never leaves the
 handler and stops answering IPIs; the RCU stall detector names it, and
@@ -23,21 +23,23 @@ controller on this board it ran past 80 s, the AOP kept reporting, and
 the phone stayed reachable.
 The iPhone X keeps it; its touchscreen does use an AOP GPIO interrupt.
 
-Tested on the iPhone 8 Plus (D21). D211 is the same board.
+Tested on the iPhone 8 Plus (D21). The iPhone 8 (D20, D201) shares
+t8015-8.dtsi and the same Touch ID handover, so it goes there.
 
 Assisted-by: LLM
 Signed-off-by: Dugs <dugahol@protonmail.com>
 ---
- arch/arm64/boot/dts/apple/t8015-8plus.dtsi | 13 +++++++++++++
+ arch/arm64/boot/dts/apple/t8015-8.dtsi | 13 +++++++++++++
  1 file changed, 13 insertions(+)
 
-diff --git a/arch/arm64/boot/dts/apple/t8015-8plus.dtsi b/arch/arm64/boot/dts/apple/t8015-8plus.dtsi
---- a/arch/arm64/boot/dts/apple/t8015-8plus.dtsi
-+++ b/arch/arm64/boot/dts/apple/t8015-8plus.dtsi
-@@ -7,3 +7,16 @@
- 
- /* The 8 Plus has minor differences like 1 more camera, 1 GiB of RAM more and a bigger display. */
- #include "t8015-8.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t8015-8.dtsi b/arch/arm64/boot/dts/apple/t8015-8.dtsi
+index 0300ee1a2..bf13d2866 100644
+--- a/arch/arm64/boot/dts/apple/t8015-8.dtsi
++++ b/arch/arm64/boot/dts/apple/t8015-8.dtsi
+@@ -15,3 +15,16 @@ / {
+ &dwi_bl {
+ 	status = "okay";
+ };
 +
 +/*
 + * The AOP owns the interrupts of its own GPIOs: it arms the Touch ID
@@ -52,4 +54,5 @@ diff --git a/arch/arm64/boot/dts/apple/t8015-8plus.dtsi b/arch/arm64/boot/dts/ap
 +	/delete-property/ interrupts;
 +};
 -- 
-2.47.0
+2.54.0 (Apple Git-157)
+

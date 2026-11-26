@@ -1,7 +1,7 @@
-From 9b4669788554291caefdf7829b69faad28feb1f2 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Dugs <dugahol@protonmail.com>
 Date: Thu, 26 Nov 2026 20:57:15 +1030
-Subject: [PATCH 6/6] arm64: dts: apple: t8015-8plus: Add the Touch ID sensor
+Subject: [PATCH 2/5] arm64: dts: apple: t8015-8plus: Add the Touch ID sensor
 
 Add spi3, the Touch ID sensor's bus, to the T8015, and on the iPhone 8
 Plus describe the sensor and the two SMC-switched supplies it runs from.
@@ -17,7 +17,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  2 files changed, 40 insertions(+)
 
 diff --git a/arch/arm64/boot/dts/apple/t8015-8plus.dtsi b/arch/arm64/boot/dts/apple/t8015-8plus.dtsi
-index ea291a9..6a8e76a 100644
+index ea291a95f..6a8e76a3d 100644
 --- a/arch/arm64/boot/dts/apple/t8015-8plus.dtsi
 +++ b/arch/arm64/boot/dts/apple/t8015-8plus.dtsi
 @@ -7,3 +7,31 @@
@@ -53,10 +53,10 @@ index ea291a9..6a8e76a 100644
 +	};
 +};
 diff --git a/arch/arm64/boot/dts/apple/t8015.dtsi b/arch/arm64/boot/dts/apple/t8015.dtsi
-index 861e59a..2720b8d 100644
+index 58850628a..442c246bc 100644
 --- a/arch/arm64/boot/dts/apple/t8015.dtsi
 +++ b/arch/arm64/boot/dts/apple/t8015.dtsi
-@@ -335,6 +335,18 @@
+@@ -335,6 +335,18 @@ spi1: spi@22e404000 {
  			status = "disabled";
  		};
  
@@ -76,5 +76,5 @@ index 861e59a..2720b8d 100644
  			compatible = "apple,s5l-uart";
  			reg = <0x2 0x2e600000 0x0 0x4000>;
 -- 
-2.55.0
+2.54.0 (Apple Git-157)
 

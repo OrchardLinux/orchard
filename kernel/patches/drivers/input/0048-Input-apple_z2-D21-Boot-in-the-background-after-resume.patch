@@ -7,15 +7,26 @@ The D21 boot uploads the firmware and took 7.8 s inside resume, holding
 up the whole system resume and so the screen after a wake. Start it from
 complete() on a work item, as the other controllers already do.
 
+Suspend and remove mark the controller stopping under io_lock before
+they wait for that work, so a boot still running from the last wake
+gives up at its next step instead of holding up the next sleep until
+the firmware upload finishes or reaches its 60 s deadline.
+
 On the iPhone 8 Plus the screen is back about 0.3 s after the wake press
 instead of 8 s; touch follows when the controller has booted, as before.
 
 Assisted-by: LLM
 Signed-off-by: Dugs <dugahol@protonmail.com>
 ---
---- a/drivers/input/touchscreen/apple_z2.c	2026-11-26 01:34:38.851670204 +1030
-+++ b/drivers/input/touchscreen/apple_z2.c	2026-11-26 01:34:38.890980526 +1030
-@@ -5747,8 +5747,10 @@
+ drivers/input/touchscreen/apple_z2.c     |  4 +-
+ drivers/input/touchscreen/apple_z2_d21.h | 59 +++++++++++++++++++++++-
+ 2 files changed, 60 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/input/touchscreen/apple_z2.c b/drivers/input/touchscreen/apple_z2.c
+index c5e2218d1..1c1e7bf2b 100644
+--- a/drivers/input/touchscreen/apple_z2.c
++++ b/drivers/input/touchscreen/apple_z2.c
+@@ -5747,8 +5747,10 @@ static void __maybe_unused apple_z2_complete(struct device *dev)
  {
  	struct apple_z2 *z2 = spi_get_drvdata(to_spi_device(dev));
  
@@ -27,9 +38,11 @@ Signed-off-by: Dugs <dugahol@protonmail.com>
  	if (!z2->boot_due)
  		return;
  	z2->boot_due = false;
---- a/drivers/input/touchscreen/apple_z2_d21.h	2026-11-26 01:34:38.854126276 +1030
-+++ b/drivers/input/touchscreen/apple_z2_d21.h	2026-11-26 01:34:38.890706239 +1030
-@@ -225,6 +225,9 @@
+diff --git a/drivers/input/touchscreen/apple_z2_d21.h b/drivers/input/touchscreen/apple_z2_d21.h
+index be0294cad..75a29abce 100644
+--- a/drivers/input/touchscreen/apple_z2_d21.h
++++ b/drivers/input/touchscreen/apple_z2_d21.h
+@@ -225,6 +225,9 @@ struct apple_z2_d21 {
  	/* A contact is currently reported down. */
  	bool d21_contact_down;
  	bool d21_recovering;
@@ -39,7 +52,7 @@ Signed-off-by: Dugs <dugahol@protonmail.com>
  	bool stopping;
  	bool irq_on;
  	/* Boot-edge storm guard + boot deadline (see apple_z2_d21_irq). */
-@@ -308,6 +311,7 @@
+@@ -308,6 +311,7 @@ static void apple_z2_d21_set_gpio(struct gpio_desc *gpio, int value);
  static void apple_z2_d21_z2_checksum(u8 *cmd, unsigned int len);
  static bool apple_z2_d21_z2_checksum_valid(const u8 *cmd, unsigned int len);
  static int apple_z2_d21_boot(struct apple_z2_d21 *z2);
@@ -47,7 +60,7 @@ Signed-off-by: Dugs <dugahol@protonmail.com>
  static void apple_z2_d21_platform_power_off(struct apple_z2_d21 *z2);
  static void apple_z2_d21_start_recovery(struct apple_z2_d21 *z2, int error);
  static void apple_z2_d21_irq_off_nosync(struct apple_z2_d21 *z2);
-@@ -5319,6 +5323,7 @@
+@@ -5319,6 +5323,7 @@ static int apple_z2_d21_probe(struct spi_device *spi)
  	 * because stop() unconditionally cancels them. */
  	INIT_DELAYED_WORK(&z2->d21_rearm, apple_z2_d21_rearm_work);
  	INIT_DELAYED_WORK(&z2->d21_watch, apple_z2_d21_watch_work);
@@ -55,11 +68,32 @@ Signed-off-by: Dugs <dugahol@protonmail.com>
  	spi_set_drvdata(spi, z2);
  
  	z2->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
-@@ -5525,22 +5530,57 @@
+@@ -5512,6 +5517,20 @@ static void apple_z2_d21_stop(struct apple_z2_d21 *z2)
+ 	apple_z2_d21_reset_protocol(z2);
+ }
+ 
++/*
++ * A boot started by the last resume may still be running. Mark the
++ * controller stopping first, so the boot's waits give up at once, then
++ * wait for it: otherwise a sleep right after a wake blocks until the
++ * firmware upload finishes or hits its 60 s deadline.
++ */
++static void apple_z2_d21_stop_resume_boot(struct apple_z2_d21 *z2)
++{
++	mutex_lock(&z2->io_lock);
++	z2->stopping = true;
++	mutex_unlock(&z2->io_lock);
++	cancel_work_sync(&z2->d21_resume_work);
++}
++
+ static void apple_z2_d21_remove(struct spi_device *spi)
+ {
+ 	struct apple_z2_d21 *z2 = spi_get_drvdata(spi);
+@@ -5525,22 +5544,58 @@ static void apple_z2_d21_remove(struct spi_device *spi)
  	if (d21_z2_now == z2)
  		d21_z2_now = NULL;
  	mutex_unlock(&d21_now_lock);
-+	cancel_work_sync(&z2->d21_resume_work);
++	apple_z2_d21_stop_resume_boot(z2);
  	apple_z2_d21_stop(z2);
  }
  
@@ -69,7 +103,7 @@ Signed-off-by: Dugs <dugahol@protonmail.com>
 +	struct apple_z2_d21 *z2 = spi_get_drvdata(to_spi_device(dev));
 +
 +	/* A controller still booting from the last resume stops first */
-+	cancel_work_sync(&z2->d21_resume_work);
++	apple_z2_d21_stop_resume_boot(z2);
 +	apple_z2_d21_stop(z2);
  
  	return 0;
@@ -82,7 +116,8 @@ Signed-off-by: Dugs <dugahol@protonmail.com>
 +	int error;
 +
 +	error = apple_z2_d21_boot(z2);
-+	if (error)
++	/* Sleep or removal stopping the boot is not a failure */
++	if (error && !READ_ONCE(z2->stopping))
 +		dev_err(&z2->spidev->dev,
 +			"D21: touch did not start after resume: %d\n", error);
 +}
@@ -115,3 +150,6 @@ Signed-off-by: Dugs <dugahol@protonmail.com>
  }
  
  #endif /* _APPLE_Z2_D21_H */
+-- 
+2.54.0 (Apple Git-157)
+

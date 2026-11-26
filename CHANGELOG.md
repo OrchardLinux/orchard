@@ -52,8 +52,9 @@ is missing or empty.
   (thanks!).
 - iPhone 8 Plus: the compass reads the magnetic field in microtesla, with
   the unit's factory calibration from the ADT.
-- iPhone 8 Plus: the phone no longer locks up when the AOP takes over the
-  Touch ID sensor; Linux leaves the AOP's GPIO interrupts to the AOP.
+- iPhone 8 and 8 Plus: the phone no longer locks up when the AOP takes over
+  the Touch ID sensor; Linux leaves the AOP's GPIO interrupts to the AOP.
+  Tested on the 8 Plus.
 - iPhone 8 Plus: after a wake the screen is back in about 0.3 s instead of
   8 s; the touch controller boots in the background.
 - iPhone 8 Plus: the Touch ID sensor, which Linux cannot use, is switched off

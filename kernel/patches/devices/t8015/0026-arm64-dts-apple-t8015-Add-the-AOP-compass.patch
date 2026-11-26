@@ -1,7 +1,7 @@
-From 42fc74d022ab0c58a0445a04f840a43663646a0e Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Dugs <dugahol@protonmail.com>
 Date: Fri, 27 Nov 2026 00:05:39 +1030
-Subject: [PATCH] arm64: dts: apple: t8015: Add the AOP compass
+Subject: [PATCH 5/5] arm64: dts: apple: t8015: Add the AOP compass
 
 The A11's AOP serves its magnetometer as the compass service. Its
 factory calibration puts the field on the device's axes, so the node
@@ -15,10 +15,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 10 insertions(+)
 
 diff --git a/arch/arm64/boot/dts/apple/t8015.dtsi b/arch/arm64/boot/dts/apple/t8015.dtsi
-index 0bfb33c..99c596d 100644
+index 0bfb33ccf..99c596de9 100644
 --- a/arch/arm64/boot/dts/apple/t8015.dtsi
 +++ b/arch/arm64/boot/dts/apple/t8015.dtsi
-@@ -718,6 +718,16 @@
+@@ -718,6 +718,16 @@ aop_gyro: gyro {
  			aop_pressure: pressure {
  				compatible = "apple,t8010-aop-pressure";
  			};
@@ -36,5 +36,5 @@ index 0bfb33c..99c596d 100644
  
  		aop_mbox: mbox@234808000 {
 -- 
-2.55.0
+2.54.0 (Apple Git-157)
 

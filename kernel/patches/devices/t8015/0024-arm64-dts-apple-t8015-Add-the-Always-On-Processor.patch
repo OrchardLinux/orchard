@@ -1,7 +1,7 @@
-From f24fb5eb1b4d5722966fafeac7d0622c4e25bf7c Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Dugs <dugahol@protonmail.com>
 Date: Thu, 26 Nov 2026 22:48:54 +1030
-Subject: [PATCH 3/4] arm64: dts: apple: t8015: Add the Always-On Processor
+Subject: [PATCH 3/5] arm64: dts: apple: t8015: Add the Always-On Processor
 
 Describe the A11's AOP and its mailbox from the ADT, with the
 accelerometer, gyroscope and barometer it serves. Boards enable it.
@@ -14,10 +14,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 46 insertions(+)
 
 diff --git a/arch/arm64/boot/dts/apple/t8015.dtsi b/arch/arm64/boot/dts/apple/t8015.dtsi
-index 442c246..0bfb33c 100644
+index 442c246bc..0bfb33ccf 100644
 --- a/arch/arm64/boot/dts/apple/t8015.dtsi
 +++ b/arch/arm64/boot/dts/apple/t8015.dtsi
-@@ -688,6 +688,52 @@
+@@ -688,6 +688,52 @@ pinctrl_smc: pinctrl@236024000 {
  				     <AIC_IRQ 205 IRQ_TYPE_LEVEL_HIGH>;
  		};
  
@@ -71,5 +71,5 @@ index 442c246..0bfb33c 100644
  			compatible = "apple,t8015-asc-mailbox";
  			reg = <0x2 0x36808000 0x0 0x4000>;
 -- 
-2.55.0
+2.54.0 (Apple Git-157)
 
