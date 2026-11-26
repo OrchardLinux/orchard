@@ -35,6 +35,8 @@ is missing or empty.
 - iPhone 8 Plus: the Always-On Processor starts, with its firmware from the
   recipe, and serves the accelerometer, gyroscope and barometer; the screen
   rotates with the phone.
+- iPhone 8 Plus: the compass reads the magnetic field in microtesla, with
+  the unit's factory calibration from the ADT.
 - iPhone 8 Plus: the phone no longer locks up when the AOP takes over the
   Touch ID sensor; Linux leaves the AOP's GPIO interrupts to the AOP.
 - iPad mini 2 (Cellular): display, touch, storage, Wi-Fi, speakers, charging,
