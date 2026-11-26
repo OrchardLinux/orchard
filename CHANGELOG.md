@@ -107,8 +107,8 @@ is missing or empty.
   (`buildenv.py`, `initramfs.py`, `assemble.py`, `cascadia.py`). Their old paths
   and module names still work. m1n1, the static tools and the Cascadia loader
   are built once more, because their keys name the new paths.
-- `orchard build`, `inputs`, `install`, `launch`, `devices`, `doctor`, `cache` and the build
-  step of `run` can go to orchard2, the Rust tool (docs/tooling.md says what
+- `orchard build`, `inputs`, `install`, `launch`, `devices`, `doctor`, `cache` and
+  `run` can go to orchard2, the Rust tool (docs/tooling.md says what
   differs): `ORCHARD2=1`, or `orchard2 = true` in
   `~/.config/orchard/config.toml`. Off by default.
 - `orchard build` and `run` no longer take `--hardware`: a checkout's `bin/orchard`
