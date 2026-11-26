@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 18:13:03 +0100
+Subject: [PATCH] block: asp: Ring the doorbell without sleeping in queue_rq
+
+apple_asp_submit_cmd() sends the submit doorbell with
+apple_rtkit_send_message(..., atomic = false), and the mailbox then
+takes its TX mutex. The tag set has no BLK_MQ_F_BLOCKING, so blk-mq
+calls ->queue_rq() under rcu_read_lock(), and a contended mutex sleeps
+there. On an iPod touch 6 (N102) this fired at boot, while a page fault
+read a file:
+
+  Voluntary context switch within RCU read-side critical section!
+  WARNING: kernel/rcu/tree_plugin.h:332 at rcu_note_context_switch+0x2e0/0x414, CPU#1: NetworkManager
+   __mutex_lock
+   mutex_lock
+   apple_mbox_send+0x44
+   apple_rtkit_send_message+0x60
+   apple_asp_queue_rq+0x26c/0x4f4 [asp]
+   blk_mq_dispatch_rq_list
+   __blk_mq_sched_dispatch_requests
+   blk_mq_run_hw_queue
+   blk_mq_dispatch_list
+   blk_mq_flush_plug_list
+   __blk_flush_plug
+   read_pages
+   page_cache_ra_order
+   do_sync_mmap_readahead
+   filemap_fault
+
+The warning is WARN_ONCE, so one line per boot says nothing about how
+often it happens: any two CPUs submitting at once can hit it.
+
+The doorbell is one mailbox write, so send it atomically, as macsmc
+and RTKit's own management code do from atomic context: the mailbox skips the mutex, writes
+under its spinlock and, only while the TX FIFO is full, polls for space
+for up to APPLE_MBOX_TX_TIMEOUT (500 ms) with interrupts off. Setting
+BLK_MQ_F_BLOCKING instead would keep the sleep, and with it the
+interruptible FIFO-full wait: queue_rq runs in the submitting task, so
+a pending signal would turn a read of the root file system into
+BLK_STS_IOERR.
+
+Nothing else in ->queue_rq() sleeps (the scatterlist comes from the
+mempool with GFP_ATOMIC), and completions arrive through RTKit's
+receive work, in process context. The setup messages sent from that
+work keep the sleeping send.
+
+Assisted-by: LLM
+---
+ drivers/block/asp.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/block/asp.c b/drivers/block/asp.c
+index bb757d30f..1465db3f9 100644
+--- a/drivers/block/asp.c
++++ b/drivers/block/asp.c
+@@ -584,7 +584,12 @@ static blk_status_t apple_asp_submit_cmd(struct apple_asp *asp,
+ 		      | FIELD_PREP(ASP_SUBMIT_TAG, cmd->tag)
+ 		      | FIELD_PREP(ASP_SUBMIT_OP, ASP_SUBMIT_OP_RING);
+ 
+-	ret = apple_rtkit_send_message(asp->rtk, asp->ep, rtk_msg, NULL, false);
++	/*
++	 * ->queue_rq() runs under rcu_read_lock() and must not sleep: send
++	 * the doorbell without taking the mailbox's TX mutex, polling if the
++	 * FIFO is full.
++	 */
++	ret = apple_rtkit_send_message(asp->rtk, asp->ep, rtk_msg, NULL, true);
+ 	if (ret == -ETIMEDOUT)
+ 		return BLK_STS_TIMEOUT;
+ 	else if (ret < 0)
