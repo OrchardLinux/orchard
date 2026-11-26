@@ -1,0 +1,3649 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Thu, 26 Nov 2026 10:41:48 +0800
+Subject: [PATCH] Add a 32-bit build for Apple's ARMv7 chips
+
+make M1N1_ARCH=arm builds m1n1-armv7.macho for the A5, A5X, A6 and A6X.
+The 32-bit iBoot starts it as its kernel, with XNU's boot arguments and
+the Apple device tree, so one binary serves every board as on the 64-bit
+chips; nothing in it is board specific.
+
+The processor layer is new, in src/arm32/: entry and self-relocation,
+exception vectors with the proxy's guards, an identity-mapped MMU of
+1 MiB sections (ARMv7 has no data cache without it), time from the
+interrupt controller's 24 MHz timebase (the cores have no architected
+timer), the version 1 watchdog, and the Linux hand-off: the board tree is
+filled with memory, framebuffer, serial number, addresses and seed from
+the Apple device tree, initrd and tree go above the 128 MiB the zImage
+decompressor claims, and the zImage is entered with r0 = 0, r1 = ~0,
+r2 = tree, MMU and caches off.
+
+USB is the same DWC2 controller as on A7-A10 behind the S5L PHY, which
+iBoot powers down before it starts a kernel: it is started the way the
+chip's own firmware does. These chips have no cache-coherent DMA, so the
+controller's transfer buffers come from one uncached section.
+
+The shared code is used as it is: console, framebuffer, proxy, payloads
+and the boot manager. It keeps addresses in u64; the few places that
+depend on the processor are split by __arm__, and drivers for hardware
+these chips do not have are left out of the build. u64 is unsigned long
+long here, so m1n1's printf reads %l as 64 bits on this build, which
+keeps every "%lx with a u64" caller right. The Rust core is built with
+the image's relocation model, as m1n1 is position independent and the
+target's prebuilt core is not.
+
+Main storage answers "not supported" until the next commit. The 64-bit
+build is unchanged: its C code compiles to the same instructions (line
+numbers in assertions aside).
+
+Run in QEMU (Cortex-A9, a synthetic Apple device tree): start-up, MMU,
+framebuffer console, proxy over the UART with orchard's client including
+recovery from a guarded bad read, and a payload boot into a stand-in
+zImage that got the expected registers and a filled tree. Not run on
+hardware.
+
+Assisted-by: LLM
+---
+ Makefile                      |  13 +-
+ arm32.mk                      |  98 ++++++++
+ m1n1-armv7.ld                 | 289 ++++++++++++++++++++++
+ rust/src/print.rs             |   4 +-
+ src/arm32/a32_cache_asm.S     |  86 +++++++
+ src/arm32/a32_cpu.c           | 198 +++++++++++++++
+ src/arm32/a32_exception.c     | 119 +++++++++
+ src/arm32/a32_exception_asm.S |  78 ++++++
+ src/arm32/a32_kboot.c         | 437 ++++++++++++++++++++++++++++++++++
+ src/arm32/a32_memory.c        | 282 ++++++++++++++++++++++
+ src/arm32/a32_start.S         |  63 +++++
+ src/arm32/a32_startup.c       | 153 ++++++++++++
+ src/arm32/a32_storage.c       |  36 +++
+ src/arm32/a32_time.c          |  68 ++++++
+ src/arm32/a32_usb.c           | 270 +++++++++++++++++++++
+ src/arm32/a32_utils_asm.S     |  86 +++++++
+ src/arm32/a32_wdt.c           |  51 ++++
+ src/arm32/arch.h              | 223 +++++++++++++++++
+ src/bootmgr.c                 |   5 +
+ src/exception.h               |  19 ++
+ src/heapblock.c               |   6 +-
+ src/iodev.c                   |   4 +
+ src/main.c                    |  56 +++++
+ src/memory.h                  |  12 +
+ src/payload.c                 |  62 ++++-
+ src/proxy.c                   |  33 ++-
+ src/smp.h                     |   4 +
+ src/types.h                   |   9 +
+ src/usb_dwc2.c                |  21 +-
+ src/utils.c                   |  30 ++-
+ src/utils.h                   |  14 ++
+ src/vsprintf.c                |  24 +-
+ 32 files changed, 2818 insertions(+), 35 deletions(-)
+ create mode 100644 arm32.mk
+ create mode 100644 m1n1-armv7.ld
+ create mode 100644 src/arm32/a32_cache_asm.S
+ create mode 100644 src/arm32/a32_cpu.c
+ create mode 100644 src/arm32/a32_exception.c
+ create mode 100644 src/arm32/a32_exception_asm.S
+ create mode 100644 src/arm32/a32_kboot.c
+ create mode 100644 src/arm32/a32_memory.c
+ create mode 100644 src/arm32/a32_start.S
+ create mode 100644 src/arm32/a32_startup.c
+ create mode 100644 src/arm32/a32_storage.c
+ create mode 100644 src/arm32/a32_time.c
+ create mode 100644 src/arm32/a32_usb.c
+ create mode 100644 src/arm32/a32_utils_asm.S
+ create mode 100644 src/arm32/a32_wdt.c
+ create mode 100644 src/arm32/arch.h
+
+diff --git a/Makefile b/Makefile
+index bb72266..feb9f4a 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,3 +1,6 @@
++# M1N1_ARCH=arm builds the 32-bit m1n1 for Apple's ARMv7 chips (see arm32.mk).
++M1N1_ARCH ?= aarch64
++
+ RUSTARCH ?= aarch64-unknown-none-softfloat
+ 
+ ifeq ($(shell uname),Darwin)
+@@ -207,11 +210,17 @@ TARGET := m1n1.macho
+ TARGET_IDEVICE := m1n1-idevice.macho
+ TARGET_MONITOR := monitor-stub.macho
+ TARGET_RAW := m1n1.bin
++ALL_TARGETS := build/$(TARGET) build/$(TARGET_IDEVICE) build/$(TARGET_MONITOR) build/$(TARGET_RAW)
++BIN_OBJ_FORMAT := -B aarch64 -O elf64-littleaarch64
++
++ifeq ($(M1N1_ARCH),arm)
++include arm32.mk
++endif
+ 
+ DEPDIR := build/.deps
+ 
+ .PHONY: all clean format invoke_cc always_rebuild
+-all: build/$(TARGET) build/$(TARGET_IDEVICE) build/$(TARGET_MONITOR) build/$(TARGET_RAW)
++all: $(ALL_TARGETS)
+ clean:
+ 	rm -rf build/* build/.deps
+ format:
+@@ -316,7 +325,7 @@ build/%.bin: data/%.bin
+ build/%.o: build/%.bin
+ 	$(QUIET)echo "  BIN   $@"
+ 	$(QUIET)mkdir -p "$(dir $@)"
+-	$(QUIET)$(OBJCOPY) -I binary -B aarch64 -O elf64-littleaarch64 $< $@
++	$(QUIET)$(OBJCOPY) -I binary $(BIN_OBJ_FORMAT) $< $@
+ 
+ build/%.bin: font/%.bin
+ 	$(QUIET)echo "  CP    $@"
+diff --git a/arm32.mk b/arm32.mk
+new file mode 100644
+index 0000000..c0ebe50
+--- /dev/null
++++ b/arm32.mk
+@@ -0,0 +1,98 @@
++# 32-bit m1n1 for Apple's ARMv7 chips (A5, A5X, A6, A6X), built with
++# make M1N1_ARCH=arm. One binary serves every board: what differs comes from
++# the Apple device tree iBoot hands over. clang only.
++#
++# The processor layer (start-up, exceptions, MMU, timer, Linux hand-off) is
++# src/arm32/; the rest is m1n1's shared code. Drivers for hardware these
++# chips do not have (hypervisor, NVMe, DCP, DART, ...) are left out.
++
++ifneq ($(USE_CLANG),1)
++$(error The 32-bit build needs clang: USE_CLANG=1)
++endif
++
++RUSTARCH := armv7a-none-eabi
++# m1n1 is position independent. The target's prebuilt core is not, so core and
++# alloc are built here as well, with the same relocation model (needs rust-src).
++export RUSTFLAGS := -C relocation-model=pic
++CARGO_FLAGS := -Z build-std=core,alloc -Z build-std-features=compiler-builtins-mem
++ifeq ($(CHAINLOADING),1)
++CARGO_FLAGS += --features chainload
++endif
++ASM_ARCH := armv7-a
++CC := $(TOOLCHAIN)clang --target=armv7a-none-eabi
++AS := $(TOOLCHAIN)clang --target=armv7a-none-eabi
++
++# u64 is unsigned long long here, and m1n1's printf reads %l as 64 bits on
++# this build (vsprintf.c), so its "%lx with a u64" callers stay correct;
++# -Wformat cannot express that. Addresses travel as u64 through the shared
++# code, hence the two cast warnings.
++BASE_CFLAGS := -O2 -Wall -g -Wundef -Werror=strict-prototypes -fno-common -fno-PIE \
++	-Werror=implicit-function-declaration -Werror=implicit-int \
++	-Wsign-compare -Wunused-parameter -Wno-multichar \
++	-ffreestanding -fpic -ffunction-sections -fdata-sections \
++	-nostdinc -isystem $(shell $(CC) -print-file-name=include) -isystem sysinc \
++	-Isrc \
++	-fno-stack-protector -march=armv7-a -marm -mfloat-abi=soft -mno-unaligned-access \
++	-DASM_ARCH=\"$(ASM_ARCH)\" \
++	-Wno-format -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast \
++	$(EXTRA_CFLAGS)
++
++CFLAGS := $(BASE_CFLAGS)
++
++LDFLAGS := -EL -marmelf --no-undefined -X -Bsymbolic \
++	-z notext --orphan-handling=warn \
++	-z nocopyreloc --gc-sections -pie
++
++ARM32_OBJECTS := $(patsubst %,arm32/%, \
++	a32_start.o \
++	a32_startup.o \
++	a32_exception.o a32_exception_asm.o \
++	a32_memory.o a32_cache_asm.o \
++	a32_utils_asm.o \
++	a32_cpu.o \
++	a32_time.o \
++	a32_kboot.o \
++	a32_wdt.o \
++	a32_storage.o \
++	a32_usb.o)
++
++OBJECTS := \
++	adt.o \
++	bootmgr.o \
++	bootlogo_48.o bootlogo_128.o bootlogo_256.o \
++	devicetree.o \
++	fb.o font.o font_retina.o \
++	firmware.o \
++	heapblock.o \
++	iodev.o \
++	main.o \
++	payload.o \
++	proxy.o \
++	ringbuffer.o \
++	string.o \
++	uart.o \
++	uartproxy.o \
++	usb_dwc2.o \
++	utils.o \
++	vsprintf.o \
++	$(ARM32_OBJECTS) \
++	$(MINILZLIB_OBJECTS) $(TINF_OBJECTS) $(DLMALLOC_OBJECTS) $(LIBFDT_OBJECTS)
++
++FP_OBJECTS :=
++
++BUILD_OBJS := $(patsubst %,build/%,$(OBJECTS))
++BUILD_FP_OBJS :=
++BUILD_ALL_OBJS := $(BUILD_OBJS) $(BUILD_RUST_LIB)
++
++TARGET_ARMV7 := m1n1-armv7.macho
++ALL_TARGETS := build/$(TARGET_ARMV7)
++.DEFAULT_GOAL := all
++BIN_OBJ_FORMAT := -B arm -O elf32-littlearm
++
++build/$(NAME)-armv7.elf: $(BUILD_ALL_OBJS) m1n1-armv7.ld
++	$(QUIET)echo "  LD    $@"
++	$(QUIET)$(LD) -T m1n1-armv7.ld $(LDFLAGS) -o $@ $(BUILD_ALL_OBJS)
++
++build/$(NAME)-armv7.macho: build/$(NAME)-armv7.elf
++	$(QUIET)echo "  MACHO $@"
++	$(QUIET)$(OBJCOPY) -O binary --strip-debug $< $@
+diff --git a/m1n1-armv7.ld b/m1n1-armv7.ld
+new file mode 100644
+index 0000000..d11a27a
+--- /dev/null
++++ b/m1n1-armv7.ld
+@@ -0,0 +1,289 @@
++ENTRY(_start)
++
++/*
++ * 32-bit Mach-O for the iBoot of Apple's ARMv7 chips (A5-A6X), which starts
++ * it as the kernel: boot arguments in r0, MMU and caches off.
++ */
++/* Where XNU's own text sits on these chips; iBoot maps it onto the start of RAM. */
++_va_base = 0x80001000;
++
++_stack_size = 0x20000;
++_exc_stack_size = 0x4000;
++
++_max_payload_size = 64*1024*1024;
++
++/* We are actually relocatable */
++. = 0;
++
++PHDRS
++{
++  hdr PT_LOAD;
++  text PT_LOAD;
++  rodata PT_LOAD;
++  data PT_LOAD;
++}
++
++SECTIONS {
++    _base = .;
++
++    .header : {
++        _mach_header = .;
++        /* mach-o header */
++        LONG(0xfeedface); /* magic */
++        LONG(12); /* cputype = ARM */
++        LONG(9); /* cpusubtype = ARM_V7 */
++        LONG(0x02); /* filetype */
++        LONG(7); /* ncmds */
++        LONG(_cmd_end - _cmd_start); /* sizeofcmds */
++        LONG(1); /* flags = NOUNDEFS */
++
++        _cmd_start = .;
++
++        /* unix_thread (entrypoint) */
++        LONG(0x5); /* type = UNIX_THREAD */
++        LONG(0x54); /* cmdsize */
++        LONG(1); /* ARM_THREAD_STATE */
++        LONG(17); /* length */
++        . += 15 * 4; /* r0-r12, sp, lr */
++        LONG(_start + _va_off) /* pc */
++        LONG(0xd3); /* cpsr: SVC, IRQ and FIQ masked */
++
++        ASSERT(. - _cmd_start == 0x54, "Bad unix_thread structure");
++
++        /* segment: mach-o structures */
++        LONG(0x1); /* type = SEGMENT */
++        LONG(0x38); /* cmdsize */
++        LONG(0x5244485f); /* segname = "_HDR" */
++        . += 12;
++        LONG(ADDR(.header) + _va_off); /* vmaddr */
++        LONG(SIZEOF(.header)); /* vmsize */
++        LONG(ADDR(.header) - _base); /* fileoff */
++        LONG(SIZEOF(.header)); /* filesize */
++        LONG(PROT_READ); /* maxprot */
++        LONG(PROT_READ); /* initprot */
++        LONG(0); /* nsects */
++        LONG(0); /* flags */
++
++        /* The 64-bit iBoot insists on __PRELINK_TEXT; kept here as well */
++        LONG(0x1); /* type = SEGMENT */
++        LONG(0x38); /* cmdsize */
++        LONG(0x52505f5f); /* segname = "__PR" */
++        LONG(0x4e494c45); /* segname = "ELIN" */
++        LONG(0x45545f4b); /* segname = "K_TE" */
++        LONG(0x00005458); /* segname = "XT.." */
++        LONG(ADDR(.init) + _va_off); /* vmaddr */
++        LONG(0); /* vmsize */
++        LONG(ADDR(.init) - _base); /* fileoff */
++        LONG(0); /* filesize */
++        LONG(PROT_READ | PROT_EXECUTE); /* maxprot */
++        LONG(PROT_READ | PROT_EXECUTE); /* initprot */
++        LONG(0); /* nsects */
++        LONG(0); /* flags */
++
++        /* segment: text */
++        LONG(0x1); /* type = SEGMENT */
++        LONG(0x38); /* cmdsize */
++        LONG(0x45545f5f); /* segname = "__TE  */
++        LONG(0x00005458); /*            XT.." */
++        . += 8;
++        LONG(ADDR(.init) + _va_off); /* vmaddr */
++        LONG(_text_size); /* vmsize */
++        LONG(ADDR(.init) - _base); /* fileoff */
++        LONG(_text_size); /* filesize */
++        LONG(PROT_READ | PROT_EXECUTE); /* maxprot */
++        LONG(PROT_READ | PROT_EXECUTE); /* initprot */
++        LONG(0); /* nsects */
++        LONG(0); /* flags */
++
++        /* segment: rodata */
++        LONG(0x1); /* type = SEGMENT */
++        LONG(0x38); /* cmdsize */
++        LONG(0x41444F52); /* segname = "RODA" */
++        . += 12;
++        LONG(ADDR(.rodata) + _va_off); /* vmaddr */
++        LONG(_rodata_end - ADDR(.rodata)); /* vmsize */
++        LONG(ADDR(.rodata) - _base); /* fileoff */
++        LONG(_rodata_end - ADDR(.rodata)); /* filesize */
++        LONG(PROT_READ); /* maxprot */
++        LONG(PROT_READ); /* initprot */
++        LONG(0); /* nsects */
++        LONG(0); /* flags */
++
++        /* segment: data */
++        LONG(0x1); /* type = SEGMENT */
++        LONG(0x38); /* cmdsize */
++        LONG(0x41544144); /* segmname = "DATA" */
++        . += 12;
++        LONG(ADDR(.data) + _va_off); /* vmaddr */
++        LONG(_data_size); /* vmsize */
++        LONG(ADDR(.data) - _base); /* fileoff */
++        LONG(SIZEOF(.data)); /* filesize */
++        LONG(PROT_READ | PROT_WRITE); /* maxprot */
++        LONG(PROT_READ | PROT_WRITE); /* initprot */
++        LONG(0); /* nsects */
++        LONG(0); /* flags */
++
++        /*
++         * segment: payload. Empty as built: whoever appends a payload to the
++         * file sets vmsize and filesize to its length.
++         */
++        _payload_segment = .;
++        LONG(0x1); /* type = SEGMENT */
++        LONG(0x38); /* cmdsize */
++        LONG(0x414c5f5f); /* segmname = "__LA  */
++        LONG(0x00005453); /*            "ST.." */
++        . += 8;
++        LONG(_end + _va_off); /* vmaddr */
++        LONG(0); /* vmsize */
++        LONG(_file_end - _base); /* fileoff */
++        LONG(0); /* filesize */
++        LONG(PROT_READ | PROT_WRITE); /* maxprot */
++        LONG(PROT_READ | PROT_WRITE); /* initprot */
++        LONG(0); /* nsects */
++        LONG(0); /* flags */
++
++        _cmd_end = .;
++
++        . = ALIGN(0x1000);
++        _hdr_end = .;
++    } :hdr
++    _text_start = .;
++    .init : ALIGN(0x1000) {
++        *(.init)
++        *(.init.*)
++    } :text
++    .text : ALIGN(0x1000) {
++        *(.text)
++        *(.text.*)
++        . = ALIGN(8);
++        *(.got.plt)
++        . = ALIGN(0x1000);
++    } :text
++    _text_size = . - _text_start;
++    .rodata : ALIGN(0x1000) {
++        *(.rodata)
++        *(.rodata.*)
++        . = ALIGN(8);
++    } :rodata
++    .rel.dyn : {
++        _rel_start = .;
++        *(.rel)
++        *(.rel.text)
++        *(.rel.got)
++        *(.rel.plt)
++        *(.rel.bss)
++        *(.rel.ifunc)
++        *(.rel.text.*)
++        *(.rel.data)
++        *(.rel.data.*)
++        *(.rel.rodata)
++        *(.rel.rodata*)
++        *(.rel.dyn)
++        _rel_end = .;
++        . = ALIGN(0x1000);
++    } :rodata
++    _rodata_end = .;
++    _data_start = .;
++    .data : ALIGN(0x1000) {
++        *(.data)
++        *(.data.*)
++        . = ALIGN(8);
++        _got_start = .;
++        *(.got)
++        _got_end = .;
++        . = ALIGN(0x1000);
++        _file_end = .;
++    } :data
++    .bss : ALIGN(0x1000) {
++        _bss_start = .;
++        *(.bss)
++        *(.bss.*)
++        *(.dynbss)
++        *(COMMON)
++        . = ALIGN(0x1000);
++        _bss_end = .;
++        PROVIDE(_exc_stack_top = .);
++        . += _exc_stack_size;
++        PROVIDE(_exc_stack_bot = .);
++        . = ALIGN(0x1000);
++        PROVIDE(_stack_top = .);
++        . += _stack_size;
++        PROVIDE(_stack_bot = .);
++        . = ALIGN(0x1000);
++    } :data
++    _data_size = . - _data_start;
++    _end = .;
++    _payload_start = .;
++    _payload_end = . + _max_payload_size;
++
++    .symtab 0 : { *(.symtab) }
++    .strtab 0 : { *(.strtab) }
++    .shstrtab 0 : { *(.shstrtab) }
++
++    /DISCARD/ : {
++        *(.discard)
++        *(.discard.*)
++        *(.interp .dynamic)
++        *(.dynsym .dynstr .hash .gnu.hash)
++        *(.eh_frame)
++        *(.gnu.version*)
++        *(.note*)
++        *(.comment*)
++        *(.ARM.attributes)
++        *(.ARM.exidx*)
++        *(.ARM.extab*)
++    }
++
++    .empty (NOLOAD) : {
++        *(.plt) *(.plt.*) *(.iplt) *(.igot)
++        *(.data.rel.ro)
++    }
++    ASSERT(SIZEOF(.empty) == 0, "Unexpected sections detected!")
++
++    .got.plt (NOLOAD) : {
++        *(.got.plt)
++    }
++    ASSERT(SIZEOF(.got.plt) == 0 || SIZEOF(.got.plt) == 0xc, "Unexpected GOT PLT detected!")
++
++    .stab          0 : { *(.stab) }
++    .stabstr       0 : { *(.stabstr) }
++    .stab.excl     0 : { *(.stab.excl) }
++    .stab.exclstr  0 : { *(.stab.exclstr) }
++    .stab.index    0 : { *(.stab.index) }
++    .stab.indexstr 0 : { *(.stab.indexstr) }
++    .comment       0 : { *(.comment) }
++    .debug          0 : { *(.debug) }
++    .line           0 : { *(.line) }
++    .debug_srcinfo  0 : { *(.debug_srcinfo) }
++    .debug_sfnames  0 : { *(.debug_sfnames) }
++    .debug_aranges  0 : { *(.debug_aranges) }
++    .debug_pubnames 0 : { *(.debug_pubnames) }
++    .debug_info     0 : { *(.debug_info .gnu.linkonce.wi.*) }
++    .debug_abbrev   0 : { *(.debug_abbrev) }
++    .debug_line     0 : { *(.debug_line) }
++    .debug_frame    0 : { *(.debug_frame) }
++    .debug_str      0 : { *(.debug_str) }
++    .debug_loc      0 : { *(.debug_loc) }
++    .debug_macinfo  0 : { *(.debug_macinfo) }
++    .debug_weaknames 0 : { *(.debug_weaknames) }
++    .debug_funcnames 0 : { *(.debug_funcnames) }
++    .debug_typenames 0 : { *(.debug_typenames) }
++    .debug_varnames  0 : { *(.debug_varnames) }
++    .debug_pubtypes 0 : { *(.debug_pubtypes) }
++    .debug_ranges   0 : { *(.debug_ranges) }
++    .debug_types    0 : { *(.debug_types) }
++    .debug_addr     0 : { *(.debug_addr) }
++    .debug_line_str 0 : { *(.debug_line_str) }
++    .debug_loclists 0 : { *(.debug_loclists) }
++    .debug_macro    0 : { *(.debug_macro) }
++    .debug_names    0 : { *(.debug_names) }
++    .debug_rnglists 0 : { *(.debug_rnglists) }
++    .debug_str_offsets 0 : { *(.debug_str_offsets) }
++    .debug_sup      0 : { *(.debug_sup) }
++}
++
++PROT_READ = 0x01;
++PROT_WRITE = 0x02;
++PROT_EXECUTE = 0x04;
++
++_va_off = _va_base - _base;
+diff --git a/rust/src/print.rs b/rust/src/print.rs
+index b9f0ead..5738576 100644
+--- a/rust/src/print.rs
++++ b/rust/src/print.rs
+@@ -2,7 +2,7 @@
+ use core::ffi::c_void;
+ 
+ extern "C" {
+-    fn iodev_console_write(buf: *const c_void, len: u64);
++    fn iodev_console_write(buf: *const c_void, len: usize);
+ }
+ 
+ pub struct IODevConsoleWriter;
+@@ -33,7 +33,7 @@ impl IODevConsoleWriter {
+ 
+ #[inline]
+ fn write(msg: &str) -> core::fmt::Result {
+-    unsafe { iodev_console_write(msg.as_ptr() as _, msg.len() as u64) };
++    unsafe { iodev_console_write(msg.as_ptr() as _, msg.len()) };
+     Ok(())
+ }
+ 
+diff --git a/src/arm32/a32_cache_asm.S b/src/arm32/a32_cache_asm.S
+new file mode 100644
+index 0000000..6e8e8d9
+--- /dev/null
++++ b/src/arm32/a32_cache_asm.S
+@@ -0,0 +1,86 @@
++/* SPDX-License-Identifier: MIT */
++
++/* Whole-cache operations by set and way, and turning the MMU off. */
++
++.syntax unified
++.arm
++.text
++
++/*
++ * Walk every data or unified cache level and apply one set/way operation
++ * (CRm of "mcr p15, 0, rX, c7, <CRm>, 2": c6 invalidates, c14 cleans and
++ * invalidates). Uses registers only, so it also runs with the cache off
++ * and dirty lines still in it. Clobbers r0-r5, r7, r9-r11.
++ */
++.macro dcache_all crm
++    mrc     p15, 1, r0, c0, c0, 1       @ CLIDR
++    ands    r3, r0, #0x7000000
++    mov     r3, r3, lsr #23             @ levels of cache * 2
++    beq     5f
++    mov     r10, #0
++1:  add     r2, r10, r10, lsr #1
++    mov     r1, r0, lsr r2
++    and     r1, r1, #7
++    cmp     r1, #2
++    blt     4f                          @ no data cache at this level
++    mcr     p15, 2, r10, c0, c0, 0      @ CSSELR
++    isb
++    mrc     p15, 1, r1, c0, c0, 0       @ CCSIDR
++    and     r2, r1, #7
++    add     r2, r2, #4                  @ log2(line length)
++    movw    r4, #0x3ff
++    ands    r4, r4, r1, lsr #3          @ highest way
++    clz     r5, r4
++    movw    r7, #0x7fff
++    ands    r7, r7, r1, lsr #13         @ highest set
++2:  mov     r9, r4
++3:  orr     r11, r10, r9, lsl r5
++    orr     r11, r11, r7, lsl r2
++    mcr     p15, 0, r11, c7, \crm, 2
++    subs    r9, r9, #1
++    bge     3b
++    subs    r7, r7, #1
++    bge     2b
++4:  add     r10, r10, #2
++    cmp     r3, r10
++    bgt     1b
++5:  mov     r10, #0
++    mcr     p15, 2, r10, c0, c0, 0
++    dsb
++    isb
++.endm
++
++/* void dcache_invalidate_all(void): drop everything, for a cache that is off */
++.globl dcache_invalidate_all
++.type dcache_invalidate_all, %function
++dcache_invalidate_all:
++    push    {r4-r11, lr}
++    dcache_all c6
++    pop     {r4-r11, pc}
++
++/*
++ * void mmu_off(void): data cache off, written back and emptied, then MMU and
++ * instruction cache off. Between turning the cache off and finishing the
++ * write-back nothing may read memory, the stack included.
++ */
++.globl mmu_off
++.type mmu_off, %function
++mmu_off:
++    push    {r4-r11, lr}
++    mrc     p15, 0, r0, c1, c0, 0
++    bic     r0, r0, #(1 << 2)           @ C
++    mcr     p15, 0, r0, c1, c0, 0
++    isb
++    dcache_all c14
++    mrc     p15, 0, r0, c1, c0, 0
++    bic     r0, r0, #(1 << 0)           @ M
++    bic     r0, r0, #(1 << 12)          @ I
++    mcr     p15, 0, r0, c1, c0, 0
++    isb
++    mov     r0, #0
++    mcr     p15, 0, r0, c8, c7, 0       @ TLBIALL
++    mcr     p15, 0, r0, c7, c5, 0       @ ICIALLU
++    mcr     p15, 0, r0, c7, c5, 6       @ BPIALL
++    dsb
++    isb
++    pop     {r4-r11, pc}
+diff --git a/src/arm32/a32_cpu.c b/src/arm32/a32_cpu.c
+new file mode 100644
+index 0000000..96b7148
+--- /dev/null
++++ b/src/arm32/a32_cpu.c
+@@ -0,0 +1,198 @@
++/* SPDX-License-Identifier: MIT */
++
++/*
++ * What the shared code expects of the processor on a chip where m1n1 only
++ * ever runs on the boot core: Linux starts the second core itself.
++ */
++
++#include "../adt.h"
++#include "../exception.h"
++#include "../smp.h"
++#include "../utils.h"
++
++int boot_cpu_idx = 0;
++u64 boot_cpu_mpidr = 0;
++
++u8 *secondary_stacks[MAX_CPUS];
++
++void smp_secondary_entry(void)
++{
++}
++
++void smp_start_secondaries(void)
++{
++    boot_cpu_mpidr = cp15_read(CP15_MPIDR);
++}
++
++void smp_stop_secondaries(bool deep_sleep)
++{
++    UNUSED(deep_sleep);
++}
++
++void smp_call4(int cpu, void *func, u64 arg0, u64 arg1, u64 arg2, u64 arg3)
++{
++    UNUSED(func);
++    UNUSED(arg0);
++    UNUSED(arg1);
++    UNUSED(arg2);
++    UNUSED(arg3);
++    printf("SMP: no CPU %d to call here\n", cpu);
++}
++
++u64 smp_wait(int cpu)
++{
++    UNUSED(cpu);
++    return 0;
++}
++
++bool smp_is_alive(int cpu)
++{
++    return cpu == boot_cpu_idx;
++}
++
++uint64_t smp_get_mpidr(int cpu)
++{
++    return cpu == boot_cpu_idx ? cp15_read(CP15_MPIDR) : 0;
++}
++
++u64 smp_get_release_addr(int cpu)
++{
++    UNUSED(cpu);
++    return 0;
++}
++
++void smp_set_wfe_mode(bool new_mode)
++{
++    UNUSED(new_mode);
++}
++
++void smp_send_ipi(int cpu)
++{
++    UNUSED(cpu);
++}
++
++/* One core, interrupts masked: a lock only has to count */
++void spin_init(spinlock_t *lock)
++{
++    lock->lock = -1;
++    lock->count = 0;
++}
++
++void spin_lock(spinlock_t *lock)
++{
++    lock->lock = 0;
++    lock->count++;
++}
++
++void spin_unlock(spinlock_t *lock)
++{
++    if (lock->count > 0 && !--lock->count)
++        lock->lock = -1;
++}
++
++void cpu_sleep(bool deep)
++{
++    UNUSED(deep);
++    while (1)
++        sysop("wfi");
++}
++
++void deep_wfi(void)
++{
++    sysop("wfi");
++}
++
++bool supports_arch_retention(void)
++{
++    return false;
++}
++
++bool supports_gxf(void)
++{
++    return false;
++}
++
++bool supports_pan(void)
++{
++    return false;
++}
++
++/* The 64-bit proxy calls into other exception levels; there are none here */
++uint64_t el0_call(void *func, uint64_t a, uint64_t b, uint64_t c, uint64_t d)
++{
++    UNUSED(func);
++    UNUSED(a);
++    UNUSED(b);
++    UNUSED(c);
++    UNUSED(d);
++    return -1;
++}
++
++uint64_t el1_call(void *func, uint64_t a, uint64_t b, uint64_t c, uint64_t d)
++{
++    return el0_call(func, a, b, c, d);
++}
++
++uint64_t el3_call(void *func, uint64_t a, uint64_t b, uint64_t c, uint64_t d)
++{
++    return el0_call(func, a, b, c, d);
++}
++
++/* Tuning the 64-bit chips want before Linux; nothing to do here */
++int cpufreq_init(void)
++{
++    return 0;
++}
++
++void mitigations_perform(void)
++{
++}
++
++void mitigations_configure(const char *config)
++{
++    UNUSED(config);
++}
++
++int display_configure(const char *config)
++{
++    UNUSED(config);
++    return 0;
++}
++
++/*
++ * The outer cache (PL310) of the Cortex-A9 chips. iBoot leaves it off and
++ * m1n1 never turns it on; should a boot stage have left it on, it is
++ * written back and turned off, which is the state Linux expects.
++ */
++#define L2X0_CTRL          0x100
++#define L2X0_CACHE_SYNC    0x730
++#define L2X0_CLEAN_INV_WAY 0x7fc
++
++void l2cache_shutdown(void)
++{
++    int path[8];
++    u64 base;
++
++    if (adt_path_offset_trace(adt, "/arm-io/pl310", path) < 0)
++        return;
++    if (adt_get_reg(adt, path, "reg", 0, &base, NULL))
++        return;
++    if (!(read32(base + L2X0_CTRL) & 1))
++        return;
++
++    write32(base + L2X0_CLEAN_INV_WAY, 0xffff);
++    while (read32(base + L2X0_CLEAN_INV_WAY) & 0xffff)
++        ;
++    write32(base + L2X0_CACHE_SYNC, 0);
++    write32(base + L2X0_CTRL, 0);
++}
++
++/* Starting another m1n1 from storage is the 64-bit chips' two-stage boot */
++int chainload_load(const char *spec, char **chosen, size_t chosen_cnt)
++{
++    UNUSED(spec);
++    UNUSED(chosen);
++    UNUSED(chosen_cnt);
++    printf("chainload: not available on this chip\n");
++    return -1;
++}
+diff --git a/src/arm32/a32_exception.c b/src/arm32/a32_exception.c
+new file mode 100644
+index 0000000..7ce5b29
+--- /dev/null
++++ b/src/arm32/a32_exception.c
+@@ -0,0 +1,119 @@
++/* SPDX-License-Identifier: MIT */
++
++#include "../exception.h"
++#include "../iodev.h"
++#include "../uart.h"
++#include "../utils.h"
++
++extern char _vectors_start[0];
++extern char _exc_stack_bot[0];
++
++void exc_set_stacks(void *stack_bottom);
++void exc_handler(u32 type, struct exc_info *ctx);
++
++volatile enum exc_guard_t exc_guard = GUARD_OFF;
++volatile int exc_count = 0;
++
++enum {
++    EXC_RESET = 0,
++    EXC_UNDEF = 1,
++    EXC_SVC = 2,
++    EXC_PABT = 3,
++    EXC_DABT = 4,
++    EXC_IRQ = 6,
++    EXC_FIQ = 7,
++};
++
++static const char *const exc_names[8] = {
++    "reset",          "undefined instruction", "supervisor call", "prefetch abort",
++    "data abort",     "?",                     "IRQ",             "FIQ",
++};
++
++static const char *const mode_names[32] = {
++    [0x10] = "user", [0x11] = "FIQ",        [0x12] = "IRQ",    [0x13] = "supervisor",
++    [0x17] = "abort", [0x1b] = "undefined", [0x1f] = "system",
++};
++
++void exception_initialize(void)
++{
++    exc_set_stacks(_exc_stack_bot);
++    /* Vectors at VBAR, not at the high or low fixed address */
++    cp15_write(CP15_SCTLR, cp15_read(CP15_SCTLR) & ~SCTLR_V);
++    cp15_write(CP15_VBAR, (u32)_vectors_start);
++    sysop("isb");
++}
++
++void exception_shutdown(void)
++{
++}
++
++static void print_exception(u32 type, struct exc_info *ctx, u32 fsr, u32 far)
++{
++    const char *mode = mode_names[ctx->spsr & 0x1f];
++    u32 *r = ctx->regs;
++
++    printf("Exception: %s\n", exc_names[type & 7]);
++    printf("Exception taken from %s mode\n", mode ? mode : "?");
++    printf("MPIDR: 0x%x\n", cp15_read(CP15_MPIDR));
++    printf("Registers: (@%p)\n", ctx);
++    printf("  r0-r3: %08x %08x %08x %08x\n", r[0], r[1], r[2], r[3]);
++    printf("  r4-r7: %08x %08x %08x %08x\n", r[4], r[5], r[6], r[7]);
++    printf(" r8-r11: %08x %08x %08x %08x\n", r[8], r[9], r[10], r[11]);
++    printf("    r12: %08x\n", r[12]);
++    printf("PC:       0x%x (rel: 0x%x)\n", ctx->pc, ctx->pc - (u32)_base);
++    printf("LR:       0x%x (rel: 0x%x)\n", ctx->lr, ctx->lr - (u32)_base);
++    printf("SP:       0x%x\n", ctx->sp);
++    printf("SPSR:     0x%x\n", ctx->spsr);
++    if (type == EXC_DABT || type == EXC_PABT) {
++        printf("FAR:      0x%x\n", far);
++        printf("FSR:      0x%x\n", fsr);
++    }
++}
++
++void exc_handler(u32 type, struct exc_info *ctx)
++{
++    u32 fsr = 0, far = 0;
++
++    if (type == EXC_DABT) {
++        fsr = cp15_read(CP15_DFSR);
++        far = cp15_read(CP15_DFAR);
++    } else if (type == EXC_PABT) {
++        fsr = cp15_read(CP15_IFSR);
++        far = cp15_read(CP15_IFAR);
++    }
++
++    if (!(exc_guard & GUARD_SILENT))
++        print_exception(type, ctx, fsr, far);
++
++    switch (exc_guard & GUARD_TYPE_MASK) {
++        case GUARD_SKIP:
++            ctx->pc += 4;
++            break;
++        case GUARD_MARK: {
++            /* A load that faulted returns a recognisable value in its Rt */
++            u32 insn = type == EXC_DABT ? read32(ctx->pc) : 0;
++            u32 rt = (insn >> 12) & 0xf;
++
++            if (type == EXC_DABT && rt < 13)
++                ctx->regs[rt] = 0xabad1dea;
++            ctx->pc += 4;
++            break;
++        }
++        case GUARD_RETURN:
++            /* Leave the function that faulted: a 64-bit result is r1:r0 */
++            ctx->regs[0] = 0xabad1dea;
++            ctx->regs[1] = 0xacce5515;
++            ctx->pc = ctx->lr;
++            exc_guard = GUARD_OFF;
++            break;
++        case GUARD_OFF:
++        default:
++            printf("Unhandled exception, rebooting...\n");
++            flush_and_reboot();
++    }
++
++    exc_count++;
++
++    if (!(exc_guard & GUARD_SILENT))
++        printf("Recovering from exception (PC=0x%x)\n", ctx->pc);
++}
+diff --git a/src/arm32/a32_exception_asm.S b/src/arm32/a32_exception_asm.S
+new file mode 100644
+index 0000000..1bd839b
+--- /dev/null
++++ b/src/arm32/a32_exception_asm.S
+@@ -0,0 +1,78 @@
++/* SPDX-License-Identifier: MIT */
++
++/*
++ * ARMv7 exception vectors. m1n1 runs in SVC mode with interrupts masked, so
++ * what arrives here is a fault of its own or of something the proxy was
++ * asked to poke. Every exception mode shares one stack (they do not nest
++ * usefully) and hands C a frame laid out as struct exc_info begins.
++ */
++
++.syntax unified
++.arm
++.text
++
++.align 5
++.globl _vectors_start
++_vectors_start:
++    b       v_reset
++    b       v_undef
++    b       v_svc
++    b       v_pabt
++    b       v_dabt
++    b       v_reset
++    b       v_irq
++    b       v_fiq
++
++.macro vector name, type, back
++\name:
++    sub     lr, lr, #\back      @ the instruction that faulted
++    push    {r0-r12, lr}
++    mov     r0, #\type
++    b       exc_common
++.endm
++
++vector v_reset, 0, 0
++vector v_undef, 1, 4
++vector v_svc,   2, 4
++vector v_pabt,  3, 4
++vector v_dabt,  4, 8
++vector v_irq,   6, 4
++vector v_fiq,   7, 4
++
++exc_common:
++    mrs     r1, spsr
++    push    {r1}
++    /* sp and lr of the code that was interrupted (SVC mode) */
++    mrs     r2, cpsr
++    cps     #0x13
++    mov     r3, sp
++    mov     r4, lr
++    msr     cpsr_c, r2
++    push    {r3, r4}
++
++    /* 17 words so far: one more keeps the stack 8-byte aligned for C */
++    mov     r1, sp
++    sub     sp, sp, #4
++    bl      exc_handler
++    add     sp, sp, #4
++
++    pop     {r3, r4}
++    pop     {r1}
++    msr     spsr_cxsf, r1
++    ldm     sp!, {r0-r12, pc}^
++
++/* void exc_set_stacks(void *stack_bottom): the one stack of all exception modes */
++.globl exc_set_stacks
++.type exc_set_stacks, %function
++exc_set_stacks:
++    mrs     r1, cpsr
++    cps     #0x17               @ abort
++    mov     sp, r0
++    cps     #0x1b               @ undefined
++    mov     sp, r0
++    cps     #0x12               @ IRQ
++    mov     sp, r0
++    cps     #0x11               @ FIQ
++    mov     sp, r0
++    msr     cpsr_c, r1
++    bx      lr
+diff --git a/src/arm32/a32_kboot.c b/src/arm32/a32_kboot.c
+new file mode 100644
+index 0000000..ee3bea8
+--- /dev/null
++++ b/src/arm32/a32_kboot.c
+@@ -0,0 +1,437 @@
++/* SPDX-License-Identifier: MIT */
++
++/*
++ * Starting a 32-bit Linux: fill the board's device tree with what only the
++ * unit knows (memory, framebuffer, serial number, addresses), put initrd and
++ * tree where the kernel's decompressor leaves them alone, and enter the
++ * zImage with r0 = 0, r1 = ~0, r2 = device tree, MMU and caches off.
++ */
++
++#include "../kboot.h"
++#include "../adt.h"
++#include "assert.h"
++#include "../firmware.h"
++#include "../heapblock.h"
++#include "malloc.h"
++#include "../utils.h"
++#include "../xnuboot.h"
++
++#include "../libfdt/libfdt.h"
++
++#define MAX_CHOSEN_PARAMS 16
++
++/*
++ * The decompressor finds the start of RAM by rounding its own address down
++ * to 128 MiB and unpacks the kernel there, so the zImage has to sit in the
++ * first 128 MiB and everything else at or above them.
++ */
++#define KERNEL_WINDOW (128U << 20)
++
++#define ZIMAGE_MAGIC 0x016f2818
++
++#define DT_ALIGN 4096
++#define DT_SLACK (64 * 1024)
++
++static void *dt = NULL;
++static int dt_bufsize = 0;
++static void *initrd_start = NULL;
++static size_t initrd_size = 0;
++static char *chosen_params[MAX_CHOSEN_PARAMS][2];
++
++extern const char *const m1n1_version;
++
++#define bail(...)                                                                                  \
++    do {                                                                                           \
++        printf(__VA_ARGS__);                                                                       \
++        return -1;                                                                                 \
++    } while (0)
++
++/* reg = <base size> in the cell widths of the tree's root */
++static int dt_set_reg(int node, u64 base, u64 size)
++{
++    fdt32_t cells[4];
++    int n = 0;
++    int ac = fdt_address_cells(dt, 0);
++    int sc = fdt_size_cells(dt, 0);
++
++    if (ac < 1 || ac > 2 || sc < 1 || sc > 2)
++        bail("FDT: unsupported root cell sizes %d/%d\n", ac, sc);
++
++    if (ac == 2)
++        cells[n++] = cpu_to_fdt32(base >> 32);
++    cells[n++] = cpu_to_fdt32(base);
++    if (sc == 2)
++        cells[n++] = cpu_to_fdt32(size >> 32);
++    cells[n++] = cpu_to_fdt32(size);
++
++    return fdt_setprop(dt, node, "reg", cells, n * sizeof(fdt32_t));
++}
++
++static int dt_set_cell(int node, const char *name, u64 value)
++{
++    if (fdt_address_cells(dt, 0) == 2)
++        return fdt_setprop_u64(dt, node, name, value);
++    return fdt_setprop_u32(dt, node, name, value);
++}
++
++static int dt_rename(int node, const char *base, u64 addr)
++{
++    char name[48];
++
++    snprintf(name, sizeof(name), "%s@%lx", base, addr);
++    return fdt_set_name(dt, node, name);
++}
++
++/* The simple-framebuffer over the picture iBoot left running, and its reservation */
++static int dt_set_fb(void)
++{
++    if (!cur_boot_args.video.base) {
++        printf("FDT: Framebuffer unavailable, skipping framebuffer initialization\n");
++        return 0;
++    }
++
++    int fb = fdt_node_offset_by_compatible(dt, -1, "simple-framebuffer");
++    if (fb < 0) {
++        printf("FDT: No framebuffer found\n");
++        return 0;
++    }
++
++    u64 fb_base = cur_boot_args.video.base;
++    u64 fb_size = ALIGN_UP(cur_boot_args.video.stride * cur_boot_args.video.height, SZ_4K);
++
++    /* The reserved range first: renaming nodes moves the ones after them */
++    const fdt32_t *region = fdt_getprop(dt, fb, "memory-region", NULL);
++    if (region) {
++        int rnode = fdt_node_offset_by_phandle(dt, fdt32_to_cpu(*region));
++
++        if (rnode >= 0) {
++            if (dt_set_reg(rnode, fb_base, fb_size))
++                bail("FDT: couldn't set the framebuffer reservation\n");
++            if (dt_rename(rnode, "framebuffer", fb_base))
++                bail("FDT: couldn't name the framebuffer reservation\n");
++        }
++        fb = fdt_node_offset_by_compatible(dt, -1, "simple-framebuffer");
++        if (fb < 0)
++            bail("FDT: framebuffer node lost\n");
++    }
++
++    if (dt_set_reg(fb, fb_base, fb_size))
++        bail("FDT: couldn't set framebuffer.reg property\n");
++    if (fdt_setprop_u32(dt, fb, "width", cur_boot_args.video.width))
++        bail("FDT: couldn't set framebuffer width\n");
++    if (fdt_setprop_u32(dt, fb, "height", cur_boot_args.video.height))
++        bail("FDT: couldn't set framebuffer height\n");
++    if (fdt_setprop_u32(dt, fb, "stride", cur_boot_args.video.stride))
++        bail("FDT: couldn't set framebuffer stride\n");
++
++    /* The pixel order stays the board tree's: iBoot's depth does not tell it */
++    switch (cur_boot_args.video.depth & 0xff) {
++        case 32:
++            break;
++        case 16:
++            if (fdt_setprop_string(dt, fb, "format", "r5g6b5"))
++                bail("FDT: couldn't set framebuffer format\n");
++            break;
++        default:
++            printf("FDT: unsupported fb depth %lu, not enabling\n", cur_boot_args.video.depth);
++            return 0;
++    }
++
++    fdt_delprop(dt, fb, "status");
++    if (dt_rename(fb, "framebuffer", fb_base))
++        bail("FDT: couldn't set framebuffer name\n");
++
++    printf("FDT: framebuffer base 0x%lx size 0x%lx\n", fb_base, fb_size);
++    return 0;
++}
++
++static int dt_set_rng_seed(int node)
++{
++    int anode = adt_path_offset(adt, "/chosen");
++    u32 seed_length;
++
++    if (anode < 0)
++        return 0;
++
++    const uint8_t *random_seed = adt_getprop(adt, anode, "random-seed", &seed_length);
++    if (!random_seed || !seed_length) {
++        printf("ADT: no random-seed available!\n");
++        return 0;
++    }
++
++    if (fdt_setprop(dt, node, "rng-seed", random_seed, seed_length))
++        bail("FDT: couldn't set rng-seed\n");
++    printf("FDT: Passing %d bytes of random seed\n", seed_length);
++    return 0;
++}
++
++static int dt_set_chosen(void)
++{
++    int node = fdt_path_offset(dt, "/chosen");
++    if (node < 0)
++        bail("FDT: /chosen node not found in devtree\n");
++
++    for (int i = 0; i < MAX_CHOSEN_PARAMS; i++) {
++        if (!chosen_params[i][0])
++            break;
++
++        const char *name = chosen_params[i][0];
++        const char *value = chosen_params[i][1];
++        if (!value)
++            continue;
++        if (fdt_setprop(dt, node, name, value, strlen(value) + 1) < 0)
++            bail("FDT: couldn't set chosen.%s property\n", name);
++        printf("FDT: %s = '%s'\n", name, value);
++    }
++
++    /* A board tree may carry placeholders; with no initrd they must not point anywhere */
++    u64 start = (u32)initrd_start;
++    u64 end = initrd_size ? start + initrd_size : start;
++    if (initrd_size || fdt_getprop(dt, node, "linux,initrd-start", NULL)) {
++        if (dt_set_cell(node, "linux,initrd-start", start))
++            bail("FDT: couldn't set chosen.linux,initrd-start property\n");
++        if (dt_set_cell(node, "linux,initrd-end", end))
++            bail("FDT: couldn't set chosen.linux,initrd-end property\n");
++    }
++    if (initrd_size) {
++        if (fdt_add_mem_rsv(dt, start, initrd_size))
++            bail("FDT: couldn't add reservation for the initrd\n");
++        printf("FDT: initrd at %p size 0x%zx\n", initrd_start, initrd_size);
++    }
++
++    if (fdt_setprop(dt, node, "asahi,iboot2-version", os_firmware.iboot,
++                    strlen(os_firmware.iboot) + 1))
++        bail("FDT: couldn't set asahi,iboot2-version\n");
++    if (fdt_setprop(dt, node, "asahi,os-fw-version", os_firmware.string,
++                    strlen(os_firmware.string) + 1))
++        bail("FDT: couldn't set asahi,os-fw-version\n");
++    if (fdt_setprop(dt, node, "asahi,m1n1-stage2-version", m1n1_version, strlen(m1n1_version) + 1))
++        bail("FDT: couldn't set asahi,m1n1-stage2-version\n");
++
++    return dt_set_rng_seed(node);
++}
++
++static int dt_set_memory(void)
++{
++    u64 dram_min = cur_boot_args.phys_base;
++    u64 dram_size = cur_boot_args.mem_size;
++
++    int node = fdt_path_offset(dt, "/memory");
++    if (node < 0)
++        bail("FDT: /memory node not found in devtree\n");
++
++    printf("FDT: Usable memory is 0x%lx..0x%lx (0x%lx)\n", dram_min, dram_min + dram_size,
++           dram_size);
++
++    if (dt_set_reg(node, dram_min, dram_size))
++        bail("FDT: couldn't set memory.reg property\n");
++    if (dt_rename(node, "memory", dram_min))
++        bail("FDT: couldn't set the memory node's name\n");
++
++    return 0;
++}
++
++static int dt_set_serial_number(void)
++{
++    u32 sn_len;
++    const char *serial_number = adt_getprop(adt, 0, "serial-number", &sn_len);
++
++    if (!serial_number || !sn_len || !serial_number[0]) {
++        printf("ADT: no serial number\n");
++        return 0;
++    }
++    if (fdt_setprop_string(dt, 0, "serial-number", serial_number))
++        bail("FDT: unable to set device serial number!\n");
++    printf("FDT: reporting device serial number: %s\n", serial_number);
++
++    return 0;
++}
++
++static const struct {
++    const char *alias;
++    const char *fdt_property;
++    bool swap;
++} mac_address_devices[] = {
++    {.alias = "bluetooth0", .fdt_property = "local-bd-address", .swap = true},
++    {.alias = "ethernet0", .fdt_property = "local-mac-address"},
++    {.alias = "wifi0", .fdt_property = "local-mac-address"},
++};
++
++static int dt_set_mac_addresses(void)
++{
++    int anode = adt_path_offset(adt, "/chosen");
++
++    if (anode < 0)
++        bail("ADT: /chosen not found\n");
++
++    for (size_t i = 0; i < ARRAY_SIZE(mac_address_devices); i++) {
++        char propname[32];
++        uint8_t addr[6], zero[6] = {0};
++
++        snprintf(propname, sizeof(propname), "mac-address-%s", mac_address_devices[i].alias);
++        if (ADT_GETPROP_ARRAY(adt, anode, propname, addr) < 0)
++            continue;
++        /* iBoot fills these from the unit's configuration; an unfilled one is no address */
++        if (!memcmp(addr, zero, sizeof(addr)))
++            continue;
++
++        if (mac_address_devices[i].swap) {
++            for (size_t j = 0; j < sizeof(addr) / 2; ++j) {
++                uint8_t tmp = addr[j];
++                addr[j] = addr[sizeof(addr) - j - 1];
++                addr[sizeof(addr) - j - 1] = tmp;
++            }
++        }
++
++        const char *path = fdt_get_alias(dt, mac_address_devices[i].alias);
++        if (path == NULL)
++            continue;
++
++        int node = fdt_path_offset(dt, path);
++        if (node < 0)
++            continue;
++
++        fdt_setprop(dt, node, mac_address_devices[i].fdt_property, addr, sizeof(addr));
++    }
++
++    return 0;
++}
++
++void kboot_set_initrd(void *start, size_t size)
++{
++    initrd_start = start;
++    initrd_size = size;
++}
++
++int kboot_set_chosen(const char *name, const char *value)
++{
++    int i = 0;
++
++    if (!name)
++        return -1;
++
++    for (i = 0; i < MAX_CHOSEN_PARAMS; i++) {
++        if (!chosen_params[i][0]) {
++            chosen_params[i][0] = calloc(strlen(name) + 1, 1);
++            strcpy(chosen_params[i][0], name);
++            break;
++        }
++
++        if (!strcmp(name, chosen_params[i][0])) {
++            free(chosen_params[i][1]);
++            chosen_params[i][1] = NULL;
++            break;
++        }
++    }
++
++    if (i >= MAX_CHOSEN_PARAMS)
++        return -1;
++
++    if (value) {
++        chosen_params[i][1] = calloc(strlen(value) + 1, 1);
++        strcpy(chosen_params[i][1], value);
++    }
++
++    return i;
++}
++
++int kboot_set_uboot(const char *name, const char *value)
++{
++    UNUSED(name);
++    UNUSED(value);
++    return -1;
++}
++
++/* Heap memory at or above the kernel's window, where the decompressor does not write */
++static void *alloc_above_kernel(size_t size, size_t align)
++{
++    u32 floor = (u32)cur_boot_args.phys_base + KERNEL_WINDOW;
++    u32 next = (u32)heapblock_alloc_aligned(0, align);
++
++    if (next < floor)
++        heapblock_alloc_aligned(floor - next, align);
++    return heapblock_alloc_aligned(size, align);
++}
++
++int kboot_prepare_dt(void *fdt)
++{
++    u32 floor = (u32)cur_boot_args.phys_base + KERNEL_WINDOW;
++
++    if (initrd_start && initrd_size && (u32)initrd_start < floor) {
++        void *moved = alloc_above_kernel(initrd_size, SZ_4K);
++
++        printf("FDT: moving the initrd from %p to %p\n", initrd_start, moved);
++        memcpy(moved, initrd_start, initrd_size);
++        initrd_start = moved;
++    }
++
++    dt_bufsize = fdt_totalsize(fdt);
++    assert(dt_bufsize);
++
++    dt_bufsize += DT_SLACK;
++    dt = alloc_above_kernel(dt_bufsize, DT_ALIGN);
++
++    if (fdt_open_into(fdt, dt, dt_bufsize) < 0)
++        bail("FDT: fdt_open_into() failed\n");
++
++    if (fdt_add_mem_rsv(dt, (u32)dt, dt_bufsize))
++        bail("FDT: couldn't add reservation for the devtree\n");
++
++    if (dt_set_chosen())
++        return -1;
++    if (dt_set_fb())
++        return -1;
++    if (dt_set_serial_number())
++        return -1;
++    if (dt_set_mac_addresses())
++        return -1;
++    if (dt_set_memory())
++        return -1;
++
++    if (fdt_pack(dt))
++        bail("FDT: fdt_pack() failed\n");
++
++    printf("FDT prepared at %p\n", dt);
++
++    return 0;
++}
++
++int kboot_boot(void *kernel)
++{
++    u32 base = cur_boot_args.phys_base;
++
++    if (!dt)
++        bail("kboot: no device tree prepared\n");
++    if ((u32)kernel < base || (u32)kernel >= base + KERNEL_WINDOW)
++        bail("kboot: the kernel at %p is outside the first 128 MiB of RAM\n", kernel);
++
++    u32 magic, start, end;
++    memcpy(&magic, (u8 *)kernel + 0x24, 4);
++    memcpy(&start, (u8 *)kernel + 0x28, 4);
++    memcpy(&end, (u8 *)kernel + 0x2c, 4);
++    if (magic != ZIMAGE_MAGIC)
++        bail("kboot: the kernel at %p is not a zImage\n", kernel);
++
++    /*
++     * A kernel built to accept an appended device tree looks for one behind
++     * its own end and prefers it to the one in r2. In a payload the board's
++     * tree, unfilled, can sit exactly there; it has been copied by now.
++     */
++    u8 *behind = (u8 *)kernel + (end - start);
++    if (fdt_magic(behind) == FDT_MAGIC) {
++        printf("kboot: hiding the device tree behind the kernel at %p\n", behind);
++        memset(behind, 0, 4);
++    }
++
++    printf("Preparing to boot kernel at %p with fdt at %p\n", kernel, dt);
++
++    next_stage.entry = kernel;
++    next_stage.args[0] = 0;
++    next_stage.args[1] = 0xffffffff; /* no machine number: the device tree says it all */
++    next_stage.args[2] = (u32)dt;
++    next_stage.args[3] = 0;
++    next_stage.args[4] = 0;
++    next_stage.restore_logo = false;
++
++    return 0;
++}
+diff --git a/src/arm32/a32_memory.c b/src/arm32/a32_memory.c
+new file mode 100644
+index 0000000..8b29cc5
+--- /dev/null
++++ b/src/arm32/a32_memory.c
+@@ -0,0 +1,282 @@
++/* SPDX-License-Identifier: MIT */
++
++/*
++ * MMU and caches for the 32-bit chips: one first-level table of 1 MiB
++ * sections, everything mapped onto itself. RAM is cached, the device
++ * windows the Apple device tree names are device memory, the rest faults.
++ * The MMU is only on because ARMv7 has no data cache without it.
++ *
++ * A mapping is rounded out to whole sections; where two kinds of memory
++ * share one, the later call decides.
++ */
++
++#include "../memory.h"
++#include "../adt.h"
++#include "../heapblock.h"
++#include "string.h"
++#include "../utils.h"
++#include "../xnuboot.h"
++
++#define SECTION_SHIFT 20
++#define SECTION_SIZE  (1U << SECTION_SHIFT)
++#define SECTIONS      4096
++
++#define SEC_TYPE     0x2
++#define SEC_B        (1U << 2)
++#define SEC_C        (1U << 3)
++#define SEC_XN       (1U << 4)
++#define SEC_AP_RW    (3U << 10)
++#define SEC_TEX(x)   ((u32)(x) << 12)
++#define SEC_AP_RO    (1U << 15)
++
++/* No type extension remap (SCTLR.TRE = 0): TEX, C and B say it directly */
++#define SEC_NORMAL    (SEC_C | SEC_B)
++#define SEC_NORMAL_NC SEC_TEX(1)
++#define SEC_DEVICE    SEC_B
++
++#define SCTLR_TRE (1U << 28)
++#define SCTLR_AFE (1U << 29)
++
++void dcache_invalidate_all(void);
++void mmu_off(void);
++
++uint64_t ram_base = 0;
++
++/*
++ * From the heap: the image is loaded a page into RAM, so a static table
++ * would not keep the 16 KiB alignment the hardware wants.
++ */
++static u32 *pagetable;
++#define PAGETABLE_SIZE (SECTIONS * sizeof(u32))
++
++static u32 cache_line(void)
++{
++    /* CTR.DminLine: log2 of the smallest data cache line, in words */
++    return 4U << ((cp15_read(CP15_CTR) >> 16) & 0xf);
++}
++
++#define CACHE_RANGE_OP(func, ...)                                                                 \
++    void func(void *addr, size_t length)                                                           \
++    {                                                                                              \
++        u32 line = cache_line();                                                                   \
++        u32 p = (u32)addr & ~(line - 1);                                                           \
++        u32 end = (u32)addr + length;                                                              \
++        for (; p < end; p += line)                                                                 \
++            cp15_write(__VA_ARGS__, p);                                                                 \
++        sysop("dsb");                                                                              \
++        sysop("isb");                                                                              \
++    }
++
++CACHE_RANGE_OP(ic_ivau_range, CP15_ICIMVAU)
++CACHE_RANGE_OP(dc_ivac_range, CP15_DCIMVAC)
++CACHE_RANGE_OP(dc_cvac_range, CP15_DCCMVAC)
++CACHE_RANGE_OP(dc_cvau_range, CP15_DCCMVAC)
++CACHE_RANGE_OP(dc_civac_range, CP15_DCCIMVAC)
++
++void dc_zva_range(void *addr, size_t length)
++{
++    memset(addr, 0, length);
++}
++
++void dcsw_op_all(u64 op_type)
++{
++    UNUSED(op_type);
++}
++
++/*
++ * These chips have no cache-coherent DMA. What a device reads or writes
++ * behind the processor's back lives in one uncached section.
++ */
++static u8 *dma_arena;
++static size_t dma_used;
++
++void *dma_alloc(size_t align, size_t size)
++{
++    size_t start = ALIGN_UP(dma_used, align);
++
++    if (!dma_arena || start + size > SECTION_SIZE) {
++        printf("MMU: out of uncached memory (%zu bytes wanted)\n", size);
++        return NULL;
++    }
++    dma_used = start + size;
++    return dma_arena + start;
++}
++
++void dma_release(void)
++{
++    dma_used = 0;
++}
++
++static void tlb_flush(void)
++{
++    cp15_write(CP15_TLBIALL, 0);
++    cp15_write(CP15_BPIALL, 0);
++    sysop("dsb");
++    sysop("isb");
++}
++
++static void map_sections(u64 from, u64 size, u32 attr)
++{
++    u64 end = ALIGN_UP(from + size, SECTION_SIZE);
++    bool live = mmu_active();
++
++    if (end > 0x100000000ULL)
++        end = 0x100000000ULL;
++
++    for (u64 p = ALIGN_DOWN(from, SECTION_SIZE); p < end; p += SECTION_SIZE)
++        pagetable[p >> SECTION_SHIFT] = (u32)p | attr;
++
++    if (live) {
++        /* The table itself is cached memory */
++        dc_cvac_range(pagetable, PAGETABLE_SIZE);
++        tlb_flush();
++    }
++}
++
++void mmu_add_mapping(u64 from, u64 to, size_t size, u8 attribute_index, u64 perms)
++{
++    u32 attr = SEC_TYPE | SEC_AP_RW;
++
++    if (from != to) {
++        printf("MMU: only identity mappings here (0x%lx -> 0x%lx)\n", from, to);
++        return;
++    }
++
++    switch (attribute_index) {
++        case MAIR_IDX_NORMAL:
++            attr |= SEC_NORMAL;
++            break;
++        case MAIR_IDX_NORMAL_NC:
++            attr |= SEC_NORMAL_NC | SEC_XN;
++            break;
++        default:
++            attr |= SEC_DEVICE | SEC_XN;
++            break;
++    }
++    if (perms & PTE_AP_RO)
++        attr |= SEC_AP_RO;
++
++    /* A cached range that turns uncached must not leave lines behind */
++    if (mmu_active() && attribute_index != MAIR_IDX_NORMAL)
++        dc_civac_range((void *)(u32)ALIGN_DOWN(from, SECTION_SIZE),
++                       ALIGN_UP(size + (from & (SECTION_SIZE - 1)), SECTION_SIZE));
++
++    map_sections(from, size, attr);
++}
++
++void mmu_rm_mapping(u64 from, size_t size)
++{
++    map_sections(from, size, 0);
++}
++
++void mmu_map_framebuffer(u64 addr, size_t size)
++{
++    mmu_add_mapping(addr, addr, size, MAIR_IDX_NORMAL_NC, PERM_RW);
++}
++
++/* Every "ranges" entry of /arm-io is a window of device registers */
++static void mmu_map_mmio(void)
++{
++    int node = adt_path_offset(adt, "/arm-io");
++    u32 len = 0;
++    bool mapped = false;
++
++    if (node >= 0) {
++        u32 pa_cells = 2, a_cells = 2, s_cells = 2;
++        const u32 *ranges = adt_getprop(adt, node, "ranges", &len);
++
++        ADT_GETPROP(adt, 0, "#address-cells", &pa_cells);
++        ADT_GETPROP(adt, node, "#address-cells", &a_cells);
++        ADT_GETPROP(adt, node, "#size-cells", &s_cells);
++
++        u32 entry = a_cells + pa_cells + s_cells;
++        for (u32 i = 0; ranges && pa_cells && s_cells && (i + 1) * entry * 4 <= len; i++) {
++            const u32 *r = ranges + i * entry;
++            u64 base = r[a_cells] | (pa_cells > 1 ? (u64)r[a_cells + 1] << 32 : 0);
++            u64 size = r[a_cells + pa_cells] | (s_cells > 1 ? (u64)r[a_cells + pa_cells + 1] << 32 : 0);
++
++            if (!size || base >> 32)
++                continue;
++            printf("MMU: Adding Device mapping 0x%lx (0x%lx)\n", base, size);
++            mmu_add_mapping(base, base, size, MAIR_IDX_DEVICE_nGnRnE, PERM_RW);
++            mapped = true;
++        }
++    }
++
++    if (!mapped)
++        printf("MMU: no /arm-io ranges, no device registers mapped\n");
++}
++
++static void mmu_enable(void)
++{
++    u32 sctlr = cp15_read(CP15_SCTLR);
++
++    dcache_invalidate_all();
++    cp15_write(CP15_ICIALLU, 0);
++    cp15_write(CP15_TTBCR, 0);
++    cp15_write(CP15_TTBR0, (u32)pagetable);
++    cp15_write(CP15_DACR, 1); /* domain 0: client */
++    tlb_flush();
++
++    sctlr &= ~(SCTLR_A | SCTLR_TRE | SCTLR_AFE | SCTLR_TE);
++    sctlr |= SCTLR_M | SCTLR_C | SCTLR_I | SCTLR_Z;
++    cp15_write(CP15_SCTLR, sctlr);
++    sysop("isb");
++}
++
++void mmu_init(void)
++{
++    u64 ram_size = mem_size_actual ? mem_size_actual : cur_boot_args.mem_size;
++
++    printf("MMU: Initializing...\n");
++
++    /* Whatever the boot stage left on goes off first */
++    if (cp15_read(CP15_SCTLR) & (SCTLR_M | SCTLR_C))
++        mmu_off();
++
++    ram_base = cur_boot_args.phys_base;
++    if (!pagetable)
++        pagetable = heapblock_alloc_aligned(PAGETABLE_SIZE, PAGETABLE_SIZE);
++    memset(pagetable, 0, PAGETABLE_SIZE);
++
++    printf("MMU: RAM 0x%lx (0x%lx)\n", ram_base, ram_size);
++    mmu_add_mapping(ram_base, ram_base, ram_size, MAIR_IDX_NORMAL, PERM_RWX);
++    mmu_map_mmio();
++
++    if (!dma_arena)
++        dma_arena = heapblock_alloc_aligned(SECTION_SIZE, SECTION_SIZE);
++    mmu_add_mapping((u32)dma_arena, (u32)dma_arena, SECTION_SIZE, MAIR_IDX_NORMAL_NC, PERM_RW);
++
++    mmu_enable();
++
++    printf("MMU: SCTLR=0x%x\n", cp15_read(CP15_SCTLR));
++    printf("MMU: running with MMU and caches enabled!\n");
++}
++
++void mmu_init_secondary(int cpu)
++{
++    UNUSED(cpu);
++}
++
++void mmu_shutdown(void)
++{
++    printf("MMU: shutting down...\n");
++    mmu_off();
++    printf("MMU: shutdown successful, clearing caches\n");
++}
++
++u64 mmu_disable(void)
++{
++    u32 sctlr = cp15_read(CP15_SCTLR);
++
++    if (!(sctlr & SCTLR_M))
++        return 0;
++    mmu_off();
++    return 1;
++}
++
++void mmu_restore(u64 state)
++{
++    if (state && !mmu_active())
++        mmu_enable();
++}
+diff --git a/src/arm32/a32_start.S b/src/arm32/a32_start.S
+new file mode 100644
+index 0000000..9007cc9
+--- /dev/null
++++ b/src/arm32/a32_start.S
+@@ -0,0 +1,63 @@
++/* SPDX-License-Identifier: MIT */
++
++/*
++ * Entry from the 32-bit iBoot, which starts m1n1 as its kernel: ARM state,
++ * MMU and caches off, r0 = boot arguments (physical). m1n1 is linked at 0
++ * and runs wherever iBoot put it.
++ */
++
++.syntax unified
++.arm
++
++.section .init, "ax"
++
++.globl _start
++.type _start, %function
++_start:
++    cpsid   aif, #0x13          @ SVC, IRQ/FIQ/abort masked
++    mov     r8, r0              @ boot arguments
++
++    /* A word holding a symbol reads as its link address until it is relocated */
++    adr     r4, _start
++    ldr     r5, .L_start
++    sub     r9, r4, r5          @ r9 = where the image really starts
++
++    ldr     r0, .L_stack_bot
++    add     sp, r0, r9
++
++    mov     r0, r9
++    ldr     r1, .L_rel_start
++    add     r1, r1, r9
++    ldr     r2, .L_rel_end
++    add     r2, r2, r9
++    bl      apply_rel
++
++    mov     r0, r8
++    mov     r1, r9
++    bl      _start_c
++1:  b       1b
++
++.align 2
++.L_start:       .word _start
++.L_stack_bot:   .word _stack_bot
++.L_rel_start:   .word _rel_start
++.L_rel_end:     .word _rel_end
++
++.globl reboot
++.type reboot, %function
++reboot:
++    bl      wdt_reboot
++1:  b       1b
++
++/*
++ * void next_stage_enter(void *entry, u32 r0, u32 r1, u32 r2)
++ * Jump to the next stage with the first three argument registers set.
++ */
++.globl next_stage_enter
++.type next_stage_enter, %function
++next_stage_enter:
++    mov     r12, r0
++    mov     r0, r1
++    mov     r1, r2
++    mov     r2, r3
++    bx      r12
+diff --git a/src/arm32/a32_startup.c b/src/arm32/a32_startup.c
+new file mode 100644
+index 0000000..3c6831d
+--- /dev/null
++++ b/src/arm32/a32_startup.c
+@@ -0,0 +1,153 @@
++/* SPDX-License-Identifier: MIT */
++
++#include "../adt.h"
++#include "../exception.h"
++#include "../firmware.h"
++#include "../smp.h"
++#include "string.h"
++#include "../types.h"
++#include "../uart.h"
++#include "../utils.h"
++#include "../xnuboot.h"
++
++/* What the 32-bit iBoot passes its kernel (XNU pexpert/arm/boot.h, revision 1) */
++struct boot_args32 {
++    u16 revision;
++    u16 version;
++    u32 virt_base;
++    u32 phys_base;
++    u32 mem_size;
++    u32 top_of_kernel_data;
++    struct {
++        u32 base;
++        u32 display;
++        u32 stride;
++        u32 width;
++        u32 height;
++        u32 depth;
++    } video;
++    u32 machine_type;
++    u32 devtree;
++    u32 devtree_size;
++    char cmdline[CMDLINE_LENGTH_RV1];
++    u32 boot_flags;
++    u32 mem_size_actual;
++};
++
++u64 boot_args_addr;
++struct boot_args cur_boot_args;
++void *adt;
++u64 boot_flags, mem_size_actual;
++
++struct rel_entry {
++    u32 off, info;
++};
++
++void m1n1_main(void);
++void get_device_info(void);
++void time_init(void);
++void apply_rel(u32 base, struct rel_entry *rel_start, struct rel_entry *rel_end);
++void _start_c(void *boot_args, void *base);
++
++extern char _bss_start[0];
++extern char _bss_end[0];
++
++#define R_ARM_NONE     0
++#define R_ARM_RELATIVE 23
++
++/* Runs before relocation: no globals, no calls */
++void apply_rel(u32 base, struct rel_entry *rel_start, struct rel_entry *rel_end)
++{
++    for (struct rel_entry *e = rel_start; e < rel_end; e++) {
++        u32 type = e->info & 0xff;
++
++        if (type == R_ARM_NONE)
++            continue; /* left behind by sections the linker dropped */
++        if (type != R_ARM_RELATIVE)
++            while (1)
++                ;
++        *(u32 *)(base + e->off) += base;
++    }
++}
++
++static void dump_boot_args(struct boot_args *ba)
++{
++    printf("  revision:     %d\n", ba->revision);
++    printf("  version:      %d\n", ba->version);
++    printf("  virt_base:    0x%lx\n", ba->virt_base);
++    printf("  phys_base:    0x%lx\n", ba->phys_base);
++    printf("  mem_size:     0x%lx\n", ba->mem_size);
++    printf("  top_of_kdata: 0x%lx\n", ba->top_of_kernel_data);
++    printf("  video:\n");
++    printf("    base:       0x%lx\n", ba->video.base);
++    printf("    display:    0x%lx\n", ba->video.display);
++    printf("    stride:     0x%lx\n", ba->video.stride);
++    printf("    width:      %lu\n", ba->video.width);
++    printf("    height:     %lu\n", ba->video.height);
++    printf("    depth:      %lubpp\n", ba->video.depth & 0xff);
++    printf("    density:    %lu\n", ba->video.depth >> 16);
++    printf("  machine_type: %d\n", ba->machine_type);
++    printf("  devtree:      %p\n", ba->devtree);
++    printf("  devtree_size: 0x%x\n", ba->devtree_size);
++    printf("  cmdline:      %s\n", ba->rv1.cmdline);
++    printf("  boot_flags:   0x%lx\n", ba->rv1.boot_flags);
++    printf("  mem_size_act: 0x%lx\n", ba->rv1.mem_size_actual);
++
++    boot_flags = ba->rv1.boot_flags;
++    mem_size_actual = ba->rv1.mem_size_actual;
++    if (!mem_size_actual) {
++        /* The usable size stops short of what iBoot keeps at the top (framebuffer) */
++        mem_size_actual = ALIGN_UP(ba->mem_size, BIT(26));
++        printf("Correcting mem_size_actual to 0x%lx\n", mem_size_actual);
++    }
++}
++
++void _start_c(void *boot_args, void *base)
++{
++    UNUSED(base);
++    struct boot_args32 *ba = boot_args;
++
++    memset(_bss_start, 0, _bss_end - _bss_start);
++    boot_args_addr = (u32)boot_args;
++
++    /* The shared code reads the 64-bit shape of the boot arguments */
++    cur_boot_args.revision = ba->revision;
++    cur_boot_args.version = ba->version;
++    cur_boot_args.virt_base = ba->virt_base;
++    cur_boot_args.phys_base = ba->phys_base;
++    cur_boot_args.mem_size = ba->mem_size;
++    cur_boot_args.top_of_kernel_data = ba->top_of_kernel_data;
++    cur_boot_args.video.base = ba->video.base;
++    cur_boot_args.video.display = ba->video.display;
++    cur_boot_args.video.stride = ba->video.stride;
++    cur_boot_args.video.width = ba->video.width;
++    cur_boot_args.video.height = ba->video.height;
++    cur_boot_args.video.depth = ba->video.depth;
++    cur_boot_args.machine_type = ba->machine_type;
++    cur_boot_args.devtree = (void *)ba->devtree;
++    cur_boot_args.devtree_size = ba->devtree_size;
++    memcpy(cur_boot_args.rv1.cmdline, ba->cmdline, sizeof(ba->cmdline));
++    cur_boot_args.rv1.boot_flags = ba->boot_flags;
++    cur_boot_args.rv1.mem_size_actual = ba->mem_size_actual;
++
++    adt = (void *)(ba->devtree - ba->virt_base + ba->phys_base);
++
++    cp15_write(CP15_TPIDRPRW, 0);
++
++    exception_initialize();
++
++    int ret = uart_init();
++    UNUSED(ret);
++
++    uart_puts("Initializing");
++    get_device_info();
++    time_init();
++
++    printf("CPU init (MIDR: 0x%x)...\n", cp15_read(CP15_MIDR));
++    printf("boot_args at %p\n", boot_args);
++
++    dump_boot_args(&cur_boot_args);
++    printf("\n");
++
++    m1n1_main();
++}
+diff --git a/src/arm32/a32_storage.c b/src/arm32/a32_storage.c
+new file mode 100644
+index 0000000..84213c2
+--- /dev/null
++++ b/src/arm32/a32_storage.c
+@@ -0,0 +1,36 @@
++/* SPDX-License-Identifier: MIT */
++
++/* Main storage of the 32-bit chips is raw NAND behind translation layers m1n1 cannot read yet. */
++
++#include "../adt.h"
++#include "../utils.h"
++
++bool main_storage_init(void)
++{
++    printf("Storage: storage not supported!\n");
++    return false;
++}
++
++bool main_storage_read(u64 lba, u64 *bfr)
++{
++    UNUSED(lba);
++    UNUSED(bfr);
++    return false;
++}
++
++bool main_storage_read_blocks(u64 lba, u32 count, void *bfr)
++{
++    UNUSED(lba);
++    UNUSED(count);
++    UNUSED(bfr);
++    return false;
++}
++
++void main_storage_shutdown(void)
++{
++}
++
++bool main_storage_flush(void)
++{
++    return false;
++}
+diff --git a/src/arm32/a32_time.c b/src/arm32/a32_time.c
+new file mode 100644
+index 0000000..d56eaf2
+--- /dev/null
++++ b/src/arm32/a32_time.c
+@@ -0,0 +1,68 @@
++/* SPDX-License-Identifier: MIT */
++
++/*
++ * Time on the 32-bit chips. Their cores have no architected timer; the
++ * interrupt controller carries a free-running 64-bit timebase instead
++ * (TIME_LO/TIME_HI, 24 MHz), which iBoot and iOS use as well.
++ */
++
++#include "../adt.h"
++#include "../utils.h"
++
++#define AIC_TIME_LO 0x20
++#define AIC_TIME_HI 0x28
++
++#define TIMEBASE_DEFAULT_HZ 24000000
++
++static u64 aic_base;
++static u64 timebase_hz = TIMEBASE_DEFAULT_HZ;
++static u64 fallback_ticks;
++
++void time_init(void)
++{
++    int path[8];
++    int node = adt_path_offset_trace(adt, "/arm-io/aic", path);
++
++    if (node < 0 || adt_get_reg(adt, path, "reg", 0, &aic_base, NULL)) {
++        aic_base = 0;
++        printf("time: no interrupt controller timebase, delays are approximate\n");
++        return;
++    }
++
++    int cpus = adt_path_offset(adt, "/cpus");
++    if (cpus >= 0) {
++        ADT_FOREACH_CHILD(adt, cpus)
++        {
++            u32 hz = 0;
++            if (ADT_GETPROP(adt, cpus, "timebase-frequency", &hz) >= 0 && hz) {
++                timebase_hz = hz;
++                break;
++            }
++        }
++    }
++
++    printf("time: timebase at 0x%lx, %lu Hz\n", aic_base + AIC_TIME_LO, timebase_hz);
++}
++
++u64 timer_freq(void)
++{
++    return timebase_hz;
++}
++
++u64 get_ticks(void)
++{
++    if (!aic_base) {
++        /* Nothing to read: count calls, so that every wait still ends */
++        fallback_ticks += timebase_hz / 100000;
++        return fallback_ticks;
++    }
++
++    u32 hi, lo, hi2;
++    do {
++        hi = read32(aic_base + AIC_TIME_HI);
++        lo = read32(aic_base + AIC_TIME_LO);
++        hi2 = read32(aic_base + AIC_TIME_HI);
++    } while (hi != hi2);
++
++    return ((u64)hi << 32) | lo;
++}
+diff --git a/src/arm32/a32_usb.c b/src/arm32/a32_usb.c
+new file mode 100644
+index 0000000..32eb338
+--- /dev/null
++++ b/src/arm32/a32_usb.c
+@@ -0,0 +1,270 @@
++/* SPDX-License-Identifier: MIT */
++
++/*
++ * USB on the 32-bit chips: one device-mode port, a Synopsys DWC2 controller
++ * behind Apple's S5L PHY. iBoot powers the PHY down before it starts its
++ * kernel, so it is brought up here the way the chip's own firmware does.
++ */
++
++#include "../adt.h"
++#include "../iodev.h"
++#include "../memory.h"
++#include "../usb.h"
++#include "../usb_dwc2.h"
++#include "../utils.h"
++#include "malloc.h"
++#include "string.h"
++
++#define OPHYPWR  0x00
++#define OPHYCLK  0x04
++#define ORSTCON  0x08
++#define OPHYUNK1 0x1c
++#define OPHYTUNE1 0x40
++#define OPHYTUNE2 0x44
++#define OPHYUNK4 0x60
++
++#define OPHYPWR_ACTIVE      0x6
++#define OPHYCLK_CLKSEL_MASK 0x3
++#define ORSTCON_PHYSWRESET  BIT(0)
++#define OPHYUNK1_START      0x4
++#define OPHYUNK1_OTG_ENABLE BIT(1)
++#define OPHYUNK4_START      0x200
++
++#define OPHYTUNE1_DEVICE 0x549
++#define OPHYTUNE2_DEVICE 0x2ff3
++
++/*
++ * Power-state registers of the A5 family's power manager (S5L8940X, 8942X,
++ * 8945X). Their positions come from the pmgr node's device-clocks table, not
++ * from a formula over the clock-gate ids.
++ */
++#define PMGR_UPERF   0x1080
++#define PMGR_USB_OTG 0x1084
++#define PMGR_USBREG  0x1098
++#define PMGR_GATE_ON 0xf
++
++#define DWC2_PCGCTL          0xe00
++#define DWC2_PCGCTL_STOPPCLK BIT(0)
++#define DWC2_PCGCTL_GATEHCLK BIT(1)
++
++usb_type_t usb_type;
++static bool usb_is_initialized;
++
++struct iodev iodev_usb_vuart = {
++    .usage = 0,
++    .lock = SPINLOCK_INIT,
++};
++
++#define USB_IODEV_WRAPPER(name, pipe)                                                              \
++    static ssize_t usb_##name##_can_read(void *dev)                                                \
++    {                                                                                              \
++        return usb_dwc2_can_read(dev, pipe);                                                       \
++    }                                                                                              \
++    static bool usb_##name##_can_write(void *dev)                                                  \
++    {                                                                                              \
++        return usb_dwc2_can_write(dev, pipe);                                                      \
++    }                                                                                              \
++    static ssize_t usb_##name##_read(void *dev, void *buf, size_t count)                           \
++    {                                                                                              \
++        return usb_dwc2_read(dev, pipe, buf, count);                                               \
++    }                                                                                              \
++    static ssize_t usb_##name##_write(void *dev, const void *buf, size_t count)                    \
++    {                                                                                              \
++        return usb_dwc2_write(dev, pipe, buf, count);                                              \
++    }                                                                                              \
++    static ssize_t usb_##name##_queue(void *dev, const void *buf, size_t count)                    \
++    {                                                                                              \
++        return usb_dwc2_queue(dev, pipe, buf, count);                                              \
++    }                                                                                              \
++    static void usb_##name##_handle_events(void *dev)                                              \
++    {                                                                                              \
++        usb_dwc2_handle_events(dev);                                                               \
++    }                                                                                              \
++    static void usb_##name##_flush(void *dev)                                                      \
++    {                                                                                              \
++        usb_dwc2_flush(dev, pipe);                                                                 \
++    }                                                                                              \
++    static struct iodev_ops iodev_usb_##name##_ops = {                                             \
++        .can_read = usb_##name##_can_read,                                                         \
++        .can_write = usb_##name##_can_write,                                                       \
++        .read = usb_##name##_read,                                                                 \
++        .write = usb_##name##_write,                                                               \
++        .queue = usb_##name##_queue,                                                               \
++        .flush = usb_##name##_flush,                                                               \
++        .handle_events = usb_##name##_handle_events,                                               \
++    };
++
++USB_IODEV_WRAPPER(pri, CDC_ACM_PIPE_0)
++USB_IODEV_WRAPPER(sec, CDC_ACM_PIPE_1)
++
++/* Ask for a power state in bits 3:0 and wait for bits 7:4 to follow, as XNU does */
++static int pmgr_gate_on(u64 reg)
++{
++    u32 v = read32(reg);
++
++    if ((v & 0xff) == 0xff)
++        return 0;
++
++    write32(reg, (v & ~0x10f) | PMGR_GATE_ON);
++    for (int n = 0; n < 1000; n++) {
++        v = read32(reg);
++        if (!((v ^ (v >> 4)) & 0xf))
++            return 0;
++        udelay(1);
++    }
++    printf("usb: power state at 0x%lx stuck at 0x%x\n", reg, v);
++    return -1;
++}
++
++static bool is_a5_family(void)
++{
++    return chip_id == 0x8940 || chip_id == 0x8942 || chip_id == 0x8945;
++}
++
++static bool phy_is_ready(u64 phy, u32 clksel)
++{
++    return (read32(phy + OPHYCLK) & OPHYCLK_CLKSEL_MASK) == clksel &&
++           read32(phy + OPHYPWR) == OPHYPWR_ACTIVE &&
++           !(read32(phy + ORSTCON) & ORSTCON_PHYSWRESET) &&
++           read32(phy + OPHYTUNE1) == OPHYTUNE1_DEVICE &&
++           read32(phy + OPHYTUNE2) == OPHYTUNE2_DEVICE && read32(phy + OPHYUNK4) == OPHYUNK4_START;
++}
++
++static int usb_phy_init(int phy_node, u64 phy)
++{
++    /* Reference clock select: 0 = 12 MHz, 1 = 24 MHz, 2 = 48 MHz. These boards run it at 24. */
++    u32 clksel = 1;
++    u32 tune1 = OPHYTUNE1_DEVICE, tune2 = OPHYTUNE2_DEVICE;
++
++    ADT_GETPROP(adt, phy_node, "uotgtune1-device", &tune1);
++    ADT_GETPROP(adt, phy_node, "uotgtune2-device", &tune2);
++
++    if (is_a5_family()) {
++        int path[8];
++        u64 pmgr;
++
++        if (adt_path_offset_trace(adt, "/arm-io/pmgr", path) < 0 ||
++            adt_get_reg(adt, path, "reg", 0, &pmgr, NULL)) {
++            printf("usb: no power manager\n");
++            return -1;
++        }
++        /* The chip's own firmware enables these parents in this order */
++        if (pmgr_gate_on(pmgr + PMGR_UPERF) || pmgr_gate_on(pmgr + PMGR_USB_OTG) ||
++            pmgr_gate_on(pmgr + PMGR_USBREG))
++            return -1;
++    } else {
++        printf("usb: unknown chip 0x%x, keeping the power states the boot stage left\n", chip_id);
++    }
++
++    if (!phy_is_ready(phy, clksel)) {
++        printf("usb: PHY was powered down, starting it\n");
++        write32(phy + OPHYUNK4, OPHYUNK4_START);
++        write32(phy + OPHYPWR, OPHYPWR_ACTIVE);
++        write32(phy + OPHYUNK1, OPHYUNK1_START);
++        write32(phy + OPHYTUNE1, tune1);
++        write32(phy + OPHYTUNE2, tune2);
++        udelay(10);
++        mask32(phy + OPHYCLK, OPHYCLK_CLKSEL_MASK, clksel);
++    }
++
++    set32(phy + ORSTCON, ORSTCON_PHYSWRESET);
++    udelay(20);
++    clear32(phy + ORSTCON, ORSTCON_PHYSWRESET);
++    if (poll32(phy + ORSTCON, ORSTCON_PHYSWRESET, 0, 1000)) {
++        printf("usb: PHY reset did not clear\n");
++        return -1;
++    }
++    udelay(1500);
++
++    /* The OTG side of the PHY is on before the controller connects */
++    set32(phy + OPHYUNK1, OPHYUNK1_OTG_ENABLE);
++    return 0;
++}
++
++void usb_init(void)
++{
++    int phy_path[8], dev_path[8];
++    u64 phy, regs;
++
++    if (usb_is_initialized)
++        return;
++
++    int phy_node = adt_path_offset_trace(adt, "/arm-io/otgphyctrl", phy_path);
++    if (phy_node < 0 || adt_get_reg(adt, phy_path, "reg", 0, &phy, NULL)) {
++        printf("usb: no /arm-io/otgphyctrl\n");
++        return;
++    }
++    if (adt_path_offset_trace(adt, "/arm-io/usb-complex/usb-device", dev_path) < 0 ||
++        adt_get_reg(adt, dev_path, "reg", 0, &regs, NULL)) {
++        printf("usb: no /arm-io/usb-complex/usb-device\n");
++        return;
++    }
++
++    printf("usb: PHY at 0x%lx, controller at 0x%lx\n", phy, regs);
++
++    if (usb_phy_init(phy_node, phy))
++        return;
++
++    /* The boot stage may have stopped the controller's own clocks as well */
++    if (read32(regs + DWC2_PCGCTL) & (DWC2_PCGCTL_STOPPCLK | DWC2_PCGCTL_GATEHCLK)) {
++        clear32(regs + DWC2_PCGCTL, DWC2_PCGCTL_STOPPCLK | DWC2_PCGCTL_GATEHCLK);
++        udelay(100);
++    }
++
++    usb_type = USB_TYPE_DWC2;
++
++    dwc2_dev_t *opaque = usb_dwc2_init(regs);
++    if (!opaque)
++        return;
++
++    struct iodev *usb_iodev = memalign(SPINLOCK_ALIGN, sizeof(*usb_iodev));
++    if (!usb_iodev)
++        return;
++
++    memset(usb_iodev, 0, sizeof(*usb_iodev));
++    usb_iodev->ops = &iodev_usb_pri_ops;
++    usb_iodev->opaque = opaque;
++    usb_iodev->usage = USAGE_CONSOLE | USAGE_UARTPROXY;
++    spin_init(&usb_iodev->lock);
++
++    iodev_register_device(IODEV_USB0, usb_iodev);
++    printf("USB0: initialized at %p\n", opaque);
++
++    /* The proxy also listens on the second pipe, the host's raw way in. */
++    usb_iodev_vuart_setup(IODEV_USB0);
++    iodev_usb_vuart.usage = USAGE_UARTPROXY;
++
++    usb_is_initialized = true;
++}
++
++void usb_hpm_restore_irqs(bool force)
++{
++    UNUSED(force);
++}
++
++void usb_iodev_init(void)
++{
++    /* One port: usb_init() has set it up */
++}
++
++void usb_iodev_shutdown(void)
++{
++    struct iodev *usb_iodev = iodev_unregister_device(IODEV_USB0);
++
++    if (!usb_iodev)
++        return;
++
++    printf("USB0: shutdown\n");
++    usb_dwc2_shutdown(usb_iodev->opaque);
++    dma_release();
++    usb_is_initialized = false;
++}
++
++void usb_iodev_vuart_setup(iodev_id_t iodev)
++{
++    if (iodev < IODEV_USB0 || iodev >= IODEV_USB0 + USB_IODEV_COUNT)
++        return;
++
++    iodev_usb_vuart.ops = &iodev_usb_sec_ops;
++    iodev_usb_vuart.opaque = iodev_get_opaque(iodev);
++}
+diff --git a/src/arm32/a32_utils_asm.S b/src/arm32/a32_utils_asm.S
+new file mode 100644
+index 0000000..946c41f
+--- /dev/null
++++ b/src/arm32/a32_utils_asm.S
+@@ -0,0 +1,86 @@
++/* SPDX-License-Identifier: MIT */
++
++/*
++ * Copies and fills in fixed-size units, as utils.h promises: they read from
++ * src and write to dst in <n>-bit units and leave an unaligned tail alone.
++ * The 64- and 128-bit ones move 32-bit words, the widest unit here.
++ */
++
++.syntax unified
++.arm
++.text
++
++.macro func name
++.globl \name
++.type \name, %function
++\name:
++.endm
++
++func memcpy128
++    bic     r2, r2, #15
++    b       1f
++func memcpy64
++    bic     r2, r2, #7
++    b       1f
++func memcpy32
++    bic     r2, r2, #3
++1:  cmp     r2, #0
++    bxeq    lr
++2:  ldr     r3, [r1], #4
++    str     r3, [r0], #4
++    subs    r2, r2, #4
++    bne     2b
++    bx      lr
++
++/* void memset64(void *dst, u64 value, size_t size): value in r2:r3, size on the stack */
++func memset64
++    ldr     r1, [sp]
++    bics    r1, r1, #7
++    bxeq    lr
++1:  str     r2, [r0], #4
++    str     r3, [r0], #4
++    subs    r1, r1, #8
++    bne     1b
++    bx      lr
++
++func memset32
++    bics    r2, r2, #3
++    bxeq    lr
++1:  str     r1, [r0], #4
++    subs    r2, r2, #4
++    bne     1b
++    bx      lr
++
++func memcpy16
++    bics    r2, r2, #1
++    bxeq    lr
++1:  ldrh    r3, [r1], #2
++    strh    r3, [r0], #2
++    subs    r2, r2, #2
++    bne     1b
++    bx      lr
++
++func memset16
++    bics    r2, r2, #1
++    bxeq    lr
++1:  strh    r1, [r0], #2
++    subs    r2, r2, #2
++    bne     1b
++    bx      lr
++
++func memcpy8
++    cmp     r2, #0
++    bxeq    lr
++1:  ldrb    r3, [r1], #1
++    strb    r3, [r0], #1
++    subs    r2, r2, #1
++    bne     1b
++    bx      lr
++
++func memset8
++    cmp     r2, #0
++    bxeq    lr
++1:  strb    r1, [r0], #1
++    subs    r2, r2, #1
++    bne     1b
++    bx      lr
+diff --git a/src/arm32/a32_wdt.c b/src/arm32/a32_wdt.c
+new file mode 100644
+index 0000000..2350cff
+--- /dev/null
++++ b/src/arm32/a32_wdt.c
+@@ -0,0 +1,51 @@
++/* SPDX-License-Identifier: MIT */
++
++/*
++ * The watchdog of the 32-bit chips (wdt-version 1): the whole device is
++ * four registers, a 24 MHz counter, two compare values and a control word.
++ */
++
++#include "../wdt.h"
++#include "../adt.h"
++#include "../utils.h"
++
++#define WDT_CUR_TIME  0x0
++#define WDT_BITE_TIME 0x4
++#define WDT_BARK_TIME 0x8
++#define WDT_CTRL      0xc
++
++#define WDT_CTRL_RESET_EN BIT(2)
++
++static u64 wdt_base = 0;
++
++void wdt_disable(void)
++{
++    int path[8];
++    int node = adt_path_offset_trace(adt, "/arm-io/wdt", path);
++
++    if (node < 0) {
++        printf("WDT node not found!\n");
++        return;
++    }
++
++    if (adt_get_reg(adt, path, "reg", 0, &wdt_base, NULL)) {
++        printf("Failed to get WDT reg property!\n");
++        wdt_base = 0;
++        return;
++    }
++
++    printf("WDT registers @ 0x%lx\n", wdt_base);
++    write32(wdt_base + WDT_CTRL, 0);
++    printf("WDT disabled\n");
++}
++
++void wdt_reboot(void)
++{
++    if (!wdt_base)
++        return;
++
++    write32(wdt_base + WDT_CTRL, 0);
++    write32(wdt_base + WDT_BITE_TIME, 0x100000);
++    write32(wdt_base + WDT_CUR_TIME, 0);
++    write32(wdt_base + WDT_CTRL, WDT_CTRL_RESET_EN);
++}
+diff --git a/src/arm32/arch.h b/src/arm32/arch.h
+new file mode 100644
+index 0000000..0fc1bd8
+--- /dev/null
++++ b/src/arm32/arch.h
+@@ -0,0 +1,223 @@
++/* SPDX-License-Identifier: MIT */
++
++/* The 32-bit (ARMv7) side of utils.h: MMIO, CP15 and cache primitives. */
++
++#ifndef ARM32_ARCH_H
++#define ARM32_ARCH_H
++
++#include "../types.h"
++
++/*
++ * Addresses are u64 throughout m1n1's shared code. Everything these chips
++ * have is below 4 GiB, so the accessors take the low half.
++ */
++#define _MMIO(type, addr) ((volatile type *)(uintptr_t)(addr))
++
++#define _MMIO_ACCESSORS(bits, type)                                                                \
++    static inline type read##bits(u64 addr)                                                        \
++    {                                                                                              \
++        return *_MMIO(type, addr);                                                                 \
++    }                                                                                              \
++    static inline void write##bits(u64 addr, type data)                                            \
++    {                                                                                              \
++        *_MMIO(type, addr) = data;                                                                 \
++    }                                                                                              \
++    static inline type set##bits(u64 addr, type set)                                               \
++    {                                                                                              \
++        type data = *_MMIO(type, addr) | set;                                                      \
++        *_MMIO(type, addr) = data;                                                                 \
++        return data;                                                                               \
++    }                                                                                              \
++    static inline type clear##bits(u64 addr, type clear)                                           \
++    {                                                                                              \
++        type data = *_MMIO(type, addr) & ~clear;                                                   \
++        *_MMIO(type, addr) = data;                                                                 \
++        return data;                                                                               \
++    }                                                                                              \
++    static inline type mask##bits(u64 addr, type clear, type set)                                  \
++    {                                                                                              \
++        type data = (*_MMIO(type, addr) & ~clear) | set;                                           \
++        *_MMIO(type, addr) = data;                                                                 \
++        return data;                                                                               \
++    }                                                                                              \
++    static inline type writeread##bits(u64 addr, type data)                                        \
++    {                                                                                              \
++        *_MMIO(type, addr) = data;                                                                 \
++        return *_MMIO(type, addr);                                                                 \
++    }
++
++/* A 64-bit access is two 32-bit ones, low word first; no register here is wider. */
++static inline u64 read64(u64 addr)
++{
++    u32 lo = *_MMIO(u32, addr);
++    u32 hi = *_MMIO(u32, addr + 4);
++    return lo | ((u64)hi << 32);
++}
++
++static inline void write64(u64 addr, u64 data)
++{
++    *_MMIO(u32, addr) = data;
++    *_MMIO(u32, addr + 4) = data >> 32;
++}
++
++static inline u64 set64(u64 addr, u64 set)
++{
++    u64 data = read64(addr) | set;
++    write64(addr, data);
++    return data;
++}
++
++static inline u64 clear64(u64 addr, u64 clear)
++{
++    u64 data = read64(addr) & ~clear;
++    write64(addr, data);
++    return data;
++}
++
++static inline u64 mask64(u64 addr, u64 clear, u64 set)
++{
++    u64 data = (read64(addr) & ~clear) | set;
++    write64(addr, data);
++    return data;
++}
++
++static inline u64 writeread64(u64 addr, u64 data)
++{
++    write64(addr, data);
++    return read64(addr);
++}
++
++_MMIO_ACCESSORS(32, u32)
++_MMIO_ACCESSORS(16, u16)
++_MMIO_ACCESSORS(8, u8)
++
++static inline void write64_lo_hi(u64 addr, u64 val)
++{
++    write32(addr, val);
++    write32(addr + 4, val >> 32);
++}
++
++/* CP15 registers as "op1, CRn, CRm, op2" */
++#define CP15_MIDR    0, c0, c0, 0
++#define CP15_CTR     0, c0, c0, 1
++#define CP15_MPIDR   0, c0, c0, 5
++#define CP15_CCSIDR  1, c0, c0, 0
++#define CP15_CLIDR   1, c0, c0, 1
++#define CP15_CSSELR  2, c0, c0, 0
++#define CP15_SCTLR   0, c1, c0, 0
++#define CP15_ACTLR   0, c1, c0, 1
++#define CP15_TTBR0   0, c2, c0, 0
++#define CP15_TTBCR   0, c2, c0, 2
++#define CP15_DACR    0, c3, c0, 0
++#define CP15_DFSR    0, c5, c0, 0
++#define CP15_IFSR    0, c5, c0, 1
++#define CP15_DFAR    0, c6, c0, 0
++#define CP15_IFAR    0, c6, c0, 2
++#define CP15_ICIALLU 0, c7, c5, 0
++#define CP15_ICIMVAU 0, c7, c5, 1
++#define CP15_BPIALL  0, c7, c5, 6
++#define CP15_DCIMVAC 0, c7, c6, 1
++#define CP15_DCISW   0, c7, c6, 2
++#define CP15_DCCMVAC 0, c7, c10, 1
++#define CP15_DCCSW   0, c7, c10, 2
++#define CP15_DCCIMVAC 0, c7, c14, 1
++#define CP15_DCCISW  0, c7, c14, 2
++#define CP15_TLBIALL 0, c8, c7, 0
++#define CP15_VBAR    0, c12, c0, 0
++#define CP15_TPIDRPRW 0, c13, c0, 4
++
++#define SCTLR_M  BIT(0)
++#define SCTLR_A  BIT(1)
++#define SCTLR_C  BIT(2)
++#define SCTLR_Z  BIT(11)
++#define SCTLR_I  BIT(12)
++#define SCTLR_V  BIT(13)
++#define SCTLR_TE BIT(30)
++
++#define __cp15_read(op1, crn, crm, op2)                                                            \
++    ({                                                                                             \
++        u32 __v;                                                                                   \
++        __asm__ volatile("mrc\tp15, " #op1 ", %0, " #crn ", " #crm ", " #op2 : "=r"(__v));         \
++        __v;                                                                                       \
++    })
++#define __cp15_write(val, op1, crn, crm, op2)                                                      \
++    ({                                                                                             \
++        u32 __v = (u32)(val);                                                                      \
++        __asm__ volatile("mcr\tp15, " #op1 ", %0, " #crn ", " #crm ", " #op2 : : "r"(__v)          \
++                         : "memory");                                                              \
++    })
++#define _cp15_write(op1, crn, crm, op2, val) __cp15_write(val, op1, crn, crm, op2)
++/* cp15_read(CP15_X) and cp15_write(CP15_X, value) */
++#define cp15_read(...)  __cp15_read(__VA_ARGS__)
++#define cp15_write(...) _cp15_write(__VA_ARGS__)
++
++#define sysop(op) __asm__ volatile(op ::: "memory")
++
++#define ic_ialluis() cp15_write(CP15_ICIALLU, 0)
++#define ic_iallu()   cp15_write(CP15_ICIALLU, 0)
++#define dc_isw(p)    cp15_write(CP15_DCISW, p)
++#define dc_csw(p)    cp15_write(CP15_DCCSW, p)
++#define dc_cisw(p)   cp15_write(CP15_DCCISW, p)
++
++#define dma_mb()  sysop("dmb")
++#define dma_rmb() sysop("dmb")
++#define dma_wmb() sysop("dmb")
++
++static inline u32 read_cpsr(void)
++{
++    u32 v;
++    __asm__ volatile("mrs\t%0, cpsr" : "=r"(v));
++    return v;
++}
++
++/* None of this exists on a 32-bit chip; the shared code asks anyway. */
++static inline bool is_heterogeneous(void)
++{
++    return false;
++}
++
++static inline int is_ecore(void)
++{
++    return false;
++}
++
++static inline int in_el2(void)
++{
++    return 0;
++}
++
++static inline int in_el3(void)
++{
++    return 0;
++}
++
++static inline int has_el3(void)
++{
++    return 0;
++}
++
++static inline int has_el2(void)
++{
++    return 0;
++}
++
++static inline bool is_16k(void)
++{
++    return false;
++}
++
++static inline int is_boot_cpu(void)
++{
++    return 1;
++}
++
++static inline size_t get_page_size(void)
++{
++    return 4096;
++}
++
++/* The chip's free-running timebase (arm32/a32_time.c) */
++u64 get_ticks(void);
++u64 timer_freq(void);
++
++#endif
+diff --git a/src/bootmgr.c b/src/bootmgr.c
+index e307c15..614d41a 100644
+--- a/src/bootmgr.c
++++ b/src/bootmgr.c
+@@ -79,6 +79,10 @@ static void *unpack_kernel(void *image, size_t size)
+     const u8 *p = image;
+     if (size < 2 || p[0] != 0x1f || p[1] != 0x8b)
+         return image;
++#ifdef __arm__
++    printf("bootmgr: a 32-bit kernel is a zImage, not a gzip file\n");
++    return NULL;
++#else
+ 
+     /* Nothing may allocate until the result is reserved below. */
+     void *dest = heapblock_alloc_aligned(0, KERNEL_ALIGN);
+@@ -101,6 +105,7 @@ static void *unpack_kernel(void *image, size_t size)
+     }
+     printf("bootmgr: kernel %zu bytes uncompressed to %u\n", size, dest_len);
+     return dest;
++#endif
+ }
+ 
+ /*
+diff --git a/src/exception.h b/src/exception.h
+index 49c47b3..305c0d7 100644
+--- a/src/exception.h
++++ b/src/exception.h
+@@ -21,6 +21,22 @@ enum exc_guard_t {
+     GUARD_SILENT = 0x100,
+ };
+ 
++#ifdef __arm__
++/* The first 17 words are the frame the vectors push (arm32/a32_exception_asm.S) */
++struct exc_info {
++    u32 sp;
++    u32 lr;
++    u32 spsr;
++    u32 regs[13];
++    u32 pc;
++    u32 type;
++    u32 fsr;
++    u32 far;
++    u32 cpu_id;
++    u32 mpidr;
++    void *extra;
++};
++#else
+ struct exc_info {
+     u64 regs[32];
+     u64 spsr;
+@@ -38,6 +54,7 @@ struct exc_info {
+ };
+ static_assert(sizeof(struct exc_info) <= SIZEOF_EXC_INFO, "Please increase SIZEOF_EXC_INFO");
+ static_assert((sizeof(struct exc_info) & 15) == 0, "SIZEOF_EXC_INFO must be a multiple of 16");
++#endif
+ 
+ extern volatile enum exc_guard_t exc_guard;
+ extern volatile int exc_count;
+@@ -45,7 +62,9 @@ extern volatile int exc_count;
+ void exception_initialize(void);
+ void exception_shutdown(void);
+ 
++#ifndef __arm__
+ void print_regs(u64 *regs, int el12);
++#endif
+ 
+ uint64_t el0_call(void *func, uint64_t a, uint64_t b, uint64_t c, uint64_t d);
+ uint64_t el1_call(void *func, uint64_t a, uint64_t b, uint64_t c, uint64_t d);
+diff --git a/src/heapblock.c b/src/heapblock.c
+index 9c5c3a6..3599b66 100644
+--- a/src/heapblock.c
++++ b/src/heapblock.c
+@@ -32,7 +32,8 @@ void heapblock_set_limit(void *limit)
+ {
+     heap_limit = limit;
+     if (limit)
+-        printf("Heap limit: %p (%ld MiB)\n", limit, ((u8 *)limit - (u8 *)heap_base) >> 20);
++        printf("Heap limit: %p (%ld MiB)\n", limit,
++               (s64)(((u8 *)limit - (u8 *)heap_base) >> 20));
+     else
+         printf("Heap limit: none\n");
+ }
+@@ -50,7 +51,8 @@ void *heapblock_alloc_aligned(size_t size, size_t align)
+     uintptr_t block = (((uintptr_t)heap_base) + align - 1) & ~(align - 1);
+ 
+     if (heap_limit && block + size > (uintptr_t)heap_limit)
+-        panic("heapblock: out of memory (%zu bytes at 0x%lx, limit %p)\n", size, block, heap_limit);
++        panic("heapblock: out of memory (%zu bytes at 0x%lx, limit %p)\n", size, (u64)block,
++              heap_limit);
+ 
+     heap_base = (void *)(block + size);
+ 
+diff --git a/src/iodev.c b/src/iodev.c
+index c0cc3bd..7268191 100644
+--- a/src/iodev.c
++++ b/src/iodev.c
+@@ -25,10 +25,14 @@ extern struct iodev iodev_usb_vuart;
+ /* clang-format off */
+ struct iodev *iodevs[IODEV_NUM] = {
+     [IODEV_UART] = &iodev_uart,
++#ifndef __arm__
+     [IODEV_DOCKCHANNEL_UART] = &iodev_dockchannel_uart,
++#endif
+     [IODEV_FB] = &iodev_fb,
+     [IODEV_USB_VUART] = &iodev_usb_vuart,
++#ifndef __arm__
+     [IODEV_LOG] = &iodev_log,
++#endif
+ };
+ /* clang-format on */
+ 
+diff --git a/src/main.c b/src/main.c
+index d4e828c..4121250 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -139,6 +139,61 @@ void run_actions(void)
+     uartproxy_run(NULL);
+ }
+ 
++#ifdef __arm__
++void next_stage_enter(void *entry, u32 r0, u32 r1, u32 r2);
++void l2cache_shutdown(void);
++
++/* The 32-bit chips: iBoot's picture stays up, and one core does all the work */
++void m1n1_main(void)
++{
++    printf("\n\nm1n1 %s\n", m1n1_version);
++    printf("Copyright The Asahi Linux Contributors\n");
++    printf("Licensed under the MIT license\n\n");
++
++    firmware_init();
++
++    heapblock_init();
++
++    mmu_init();
++    wdt_disable();
++
++#ifdef USE_FB
++    fb_init(true);
++    fb_display_logo();
++#ifdef FB_SILENT_MODE
++    fb_set_active(!cur_boot_args.video.display);
++#else
++    fb_set_active(true);
++#endif
++#endif
++
++    printf("Initialization complete.\n");
++
++    run_actions();
++
++    if (!next_stage.entry) {
++        panic("Nothing to do!\n");
++    }
++
++    printf("Preparing to run next stage at %p...\n", next_stage.entry);
++
++    main_storage_shutdown();
++    exception_shutdown();
++    usb_iodev_shutdown();
++#ifdef USE_FB
++    fb_shutdown(next_stage.restore_logo);
++#endif
++    printf("Vectoring to next stage...\n");
++    iodev_console_flush();
++
++    mmu_shutdown();
++    l2cache_shutdown();
++
++    next_stage_enter(next_stage.entry, next_stage.args[0], next_stage.args[1], next_stage.args[2]);
++
++    panic("Next stage returned!\n");
++}
++#else
+ void m1n1_main(void)
+ {
+     printf("\n\nm1n1 %s\n", m1n1_version);
+@@ -211,3 +266,4 @@ void m1n1_main(void)
+ 
+     panic("Next stage returned!\n");
+ }
++#endif
+diff --git a/src/memory.h b/src/memory.h
+index 247a5d3..33b0e1f 100644
+--- a/src/memory.h
++++ b/src/memory.h
+@@ -3,7 +3,9 @@
+ #ifndef MEMORY_H
+ #define MEMORY_H
+ 
++#ifndef __arm__
+ #include "cpu_regs.h"
++#endif
+ #include "types.h"
+ 
+ #define REGION_RWX_EL0 0x80000000000
+@@ -75,12 +77,22 @@ void mmu_add_mapping(u64 from, u64 to, size_t size, u8 attribute_index, u64 perm
+ void mmu_rm_mapping(u64 from, size_t size);
+ void mmu_map_framebuffer(u64 addr, size_t size);
+ 
++#ifdef __arm__
++/* Uncached memory for device DMA; dma_release() hands all of it back */
++void *dma_alloc(size_t align, size_t size);
++void dma_release(void);
++#endif
++
+ u64 mmu_disable(void);
+ void mmu_restore(u64 state);
+ 
+ static inline bool mmu_active(void)
+ {
++#ifdef __arm__
++    return cp15_read(CP15_SCTLR) & SCTLR_M;
++#else
+     return mrs(SCTLR_EL1) & SCTLR_M;
++#endif
+ }
+ 
+ #endif
+diff --git a/src/payload.c b/src/payload.c
+index cbfe145..e40585f 100644
+--- a/src/payload.c
++++ b/src/payload.c
+@@ -26,7 +26,13 @@
+ static const u8 gz_magic[] = {0x1f, 0x8b};
+ static const u8 xz_magic[] = {0xfd, '7', 'z', 'X', 'Z', 0x00};
+ static const u8 fdt_magic[] = {0xd0, 0x0d, 0xfe, 0xed};
++#ifdef __arm__
++static const u8 kernel_magic[] = {0x18, 0x28, 0x6f, 0x01}; // a zImage
++#define KERNEL_MAGIC_OFFSET 0x24
++#else
+ static const u8 kernel_magic[] = {'A', 'R', 'M', 0x64};          // at 0x38
++#define KERNEL_MAGIC_OFFSET 0x38
++#endif
+ static const u8 cpio_magic[] = {'0', '7', '0', '7', '0'};        // '1' or '2' next
+ static const u8 img4_magic[] = {0x16, 0x04, 'I', 'M', 'G', '4'}; // IA5String 'IMG4'
+ static const u8 sig_magic[] = {'m', '1', 'n', '1', '_', 's', 'i', 'g'};
+@@ -140,6 +146,28 @@ static void *load_cpio(void *p, size_t size)
+     return ((u8 *)p) + size;
+ }
+ 
++#ifdef __arm__
++/*
++ * A zImage says where it ends. It is entered where it lies, so it gets a
++ * word-aligned place of its own, with zeros behind it: a kernel built to
++ * accept an appended device tree looks there for one.
++ */
++static void *load_kernel(void *p, size_t size)
++{
++    u32 start, end;
++
++    UNUSED(size);
++    memcpy(&start, (u8 *)p + 0x28, 4);
++    memcpy(&end, (u8 *)p + 0x2c, 4);
++
++    u32 length = end - start;
++    u8 *copy = heapblock_alloc_aligned(length + 8, SZ_4K);
++    memcpy(copy, p, length);
++    memset(copy + length, 0, 8);
++    kernel = (void *)copy;
++    return ((u8 *)p) + length;
++}
++#else
+ static void *load_kernel(void *p, size_t size)
+ {
+     kernel = p;
+@@ -166,6 +194,7 @@ static void *load_kernel(void *p, size_t size)
+         return NULL;
+     }
+ }
++#endif
+ 
+ #define MAX_VAR_NAME 64
+ #define MAX_VAR_SIZE 1024
+@@ -243,7 +272,7 @@ static void *load_one_payload(void *start, size_t size)
+     } else if (!memcmp(p, cpio_magic, sizeof cpio_magic)) {
+         printf("Found a cpio initramfs at %p\n", p);
+         return load_cpio(p, size);
+-    } else if (!memcmp(p + 0x38, kernel_magic, sizeof kernel_magic)) {
++    } else if (!memcmp(p + KERNEL_MAGIC_OFFSET, kernel_magic, sizeof kernel_magic)) {
+         printf("Found a kernel at %p\n", p);
+         return load_kernel(p, size);
+     } else if (!memcmp(p, sig_magic, sizeof sig_magic)) {
+@@ -266,7 +295,7 @@ static void *load_one_payload(void *start, size_t size)
+         return p + 12 + (size_t)w * h * 4;
+     } else if (!memcmp(p, custom_logo_magic, sizeof(custom_logo_magic))) {
+         printf("Found a m1n1 custom logo payload at %p, skipping 0x%lx bytes\n", p,
+-               sizeof(custom_logo_magic) + CUSTOM_LOGO_SIZE);
++               (u64)(sizeof(custom_logo_magic) + CUSTOM_LOGO_SIZE));
+         return p + sizeof(custom_logo_magic) + CUSTOM_LOGO_SIZE;
+     } else if (check_var(&p)) {
+         return p;
+@@ -280,12 +309,14 @@ static void *load_one_payload(void *start, size_t size)
+     }
+ }
+ 
++#ifndef __arm__
+ void do_enable_tso(void)
+ {
+     u64 actlr = mrs(ACTLR_EL1);
+     actlr |= BIT(1); // Enable TSO
+     msr(ACTLR_EL1, actlr);
+ }
++#endif
+ 
+ bool payload_logo(void **custom_128, void **custom_256)
+ {
+@@ -350,6 +381,13 @@ int payload_run(void)
+         while (*target && p != expect_compatible + sizeof(expect_compatible) - 1) {
+             *p++ = tolower(*target++);
+         }
++#ifdef __arm__
++        /* The 32-bit trees name a board as iBoot does, with "ap" behind the target type */
++        if (p + 2 < expect_compatible + sizeof(expect_compatible)) {
++            *p++ = 'a';
++            *p++ = 'p';
++        }
++#endif
+         *p = 0;
+         printf("Devicetree compatible value: %s\n", expect_compatible);
+     } else {
+@@ -362,6 +400,24 @@ int payload_run(void)
+     while (p)
+         p = load_one_payload(p, 0);
+ 
++#ifdef __arm__
++    /*
++     * What does not fit into the image iBoot loads as its kernel can come as
++     * iBoot's ramdisk instead: the same payloads, where the Apple device
++     * tree says iBoot put it.
++     */
++    int memory_map = adt_path_offset(adt, "/chosen/memory-map");
++    u32 ramdisk[2];
++    if (memory_map >= 0 && ADT_GETPROP_ARRAY(adt, memory_map, "RAMDisk", ramdisk) >= 0 &&
++        ramdisk[0] && ramdisk[1]) {
++        printf("Checking the ramdisk at 0x%x (0x%x bytes) for payloads...\n", ramdisk[0],
++               ramdisk[1]);
++        p = (void *)ramdisk[0];
++        while (p)
++            p = load_one_payload(p, 0);
++    }
++#endif
++
+     if (chainload_spec) {
+         return chainload_load(chainload_spec, chosen, chosen_cnt);
+     }
+@@ -374,6 +430,7 @@ int payload_run(void)
+         cpufreq_init();
+         smp_start_secondaries();
+         mitigations_perform();
++#ifndef __arm__
+         if (enable_tso) {
+ 
+             do_enable_tso();
+@@ -387,6 +444,7 @@ int payload_run(void)
+             }
+             kboot_set_chosen("apple,tso", "");
+         }
++#endif
+ 
+         for (size_t i = 0; i < chosen_cnt; i++) {
+             char *val = memchr(chosen[i], '=', MAX_VAR_NAME + 1);
+diff --git a/src/proxy.c b/src/proxy.c
+index 57360ba..4f5bf2e 100644
+--- a/src/proxy.c
++++ b/src/proxy.c
+@@ -57,14 +57,22 @@ int proxy_process(ProxyRequest *request, ProxyReply *reply)
+                 return request->args[0];
+             return 1;
+         case P_CALL: {
++#ifdef __arm__
++            /* Arguments and result are machine words here */
++            u32 (*f)(u32, u32, u32, u32, u32) = (void *)(u32)request->args[0];
++            reply->retval = f(request->args[1], request->args[2], request->args[3],
++                              request->args[4], request->args[5]);
++#else
+             generic_func *f = (generic_func *)request->args[0];
+             reply->retval = f(request->args[1], request->args[2], request->args[3],
+                               request->args[4], request->args[5]);
++#endif
+             break;
+         }
+         case P_GET_BOOTARGS:
+             reply->retval = boot_args_addr;
+             break;
++#ifndef __arm__
+         case P_GET_CPU_FEATURES:
+             if (request->args[0] == sizeof(struct midr_part_features))
+                 reply->retval = (u64)cpu_features;
+@@ -74,6 +82,7 @@ int proxy_process(ProxyRequest *request, ProxyReply *reply)
+                 reply->retval = 0;
+             }
+             break;
++#endif
+         case P_GET_BASE:
+             reply->retval = (u64)_base;
+             break;
+@@ -117,6 +126,7 @@ int proxy_process(ProxyRequest *request, ProxyReply *reply)
+             memcpy(next_stage.args, &request->args[1], 5 * sizeof(u64));
+             next_stage.restore_logo = true;
+             return 1;
++#ifndef __arm__
+         case P_GL1_CALL:
+             reply->retval = gl1_call((void *)request->args[0], request->args[1], request->args[2],
+                                      request->args[3], request->args[4]);
+@@ -131,6 +141,7 @@ int proxy_process(ProxyRequest *request, ProxyReply *reply)
+         case P_PUT_SIMD_STATE:
+             put_simd_state((void *)request->args[0]);
+             break;
++#endif
+         case P_REBOOT:
+             reboot();
+             break;
+@@ -429,6 +440,7 @@ int proxy_process(ProxyRequest *request, ProxyReply *reply)
+             reply->retval = kboot_set_uboot((void *)request->args[0], (void *)request->args[1]);
+             break;
+ 
++#ifndef __arm__
+         case P_PMGR_POWER_ENABLE:
+             reply->retval = pmgr_power_enable(request->args[0]);
+             break;
+@@ -444,6 +456,7 @@ int proxy_process(ProxyRequest *request, ProxyReply *reply)
+         case P_PMGR_RESET:
+             reply->retval = pmgr_reset(request->args[0], (const char *)request->args[1]);
+             break;
++#endif
+ 
+         case P_IODEV_SET_USAGE:
+             iodev_set_usage(request->args[0], request->args[1]);
+@@ -470,6 +483,7 @@ int proxy_process(ProxyRequest *request, ProxyReply *reply)
+             usb_iodev_vuart_setup(request->args[0]);
+             break;
+ 
++#ifndef __arm__
+         case P_TUNABLES_APPLY_GLOBAL:
+             reply->retval = tunables_apply_global((const char *)request->args[0],
+                                                   (const char *)request->args[1]);
+@@ -552,6 +566,7 @@ int proxy_process(ProxyRequest *request, ProxyReply *reply)
+         case P_HV_ADD_TIME:
+             hv_add_time(request->args[0]);
+             break;
++#endif
+ 
+         case P_FB_INIT:
+             fb_init(request->args[0]);
+@@ -585,6 +600,7 @@ int proxy_process(ProxyRequest *request, ProxyReply *reply)
+             fb_improve_logo();
+             break;
+ 
++#ifndef __arm__
+         case P_PCIE_INIT:
+             pcie_init();
+             break;
+@@ -616,6 +632,7 @@ int proxy_process(ProxyRequest *request, ProxyReply *reply)
+         case P_ANS1_RESERVED:
+             reply->status = S_BADCMD;
+             break;
++#endif
+         case P_MAIN_STORAGE_INIT:
+             reply->retval = main_storage_init();
+             break;
+@@ -634,6 +651,7 @@ int proxy_process(ProxyRequest *request, ProxyReply *reply)
+             reply->retval = main_storage_flush();
+             break;
+ 
++#ifndef __arm__
+         case P_MCC_GET_CARVEOUTS:
+             reply->retval = (u64)mcc_carveouts;
+             break;
+@@ -660,25 +678,28 @@ int proxy_process(ProxyRequest *request, ProxyReply *reply)
+         case P_DAPF_INIT:
+             reply->retval = dapf_init((const char *)request->args[0], 1);
+             break;
++#endif
+ 
+         case P_CPUFREQ_INIT:
+             reply->retval = cpufreq_init();
+             break;
++#ifndef __arm__
+         case P_CPUFREQ_UNRESTRICT_BOOST:
+             cpufreq_unrestrict_boost();
+             break;
++#endif
+ 
+         case P_READ_GIGALOCKER: {
+             size_t size = 0;
+             void *data = rust_read_gigalocker(&size);
+-            size_t *cmd_buf = (size_t *)request->args[0];
+-            cmd_buf[0] = (size_t)data;
++            u64 *cmd_buf = (u64 *)request->args[0];
++            cmd_buf[0] = (u64)data;
+             cmd_buf[1] = size;
+             reply->retval = size == 0 ? -1 : 0;
+             break;
+         }
+         case P_FREE_GIGALOCKER: {
+-            size_t *cmd_buf = (size_t *)request->args[0];
++            u64 *cmd_buf = (u64 *)request->args[0];
+             rust_free_gigalocker((void *)cmd_buf[0], cmd_buf[1]);
+             break;
+         }
+@@ -688,14 +709,14 @@ int proxy_process(ProxyRequest *request, ProxyReply *reply)
+         case P_BOOT_ENTRIES: {
+             size_t size = 0;
+             void *text = rust_boot_entries((const char *)request->args[1], &size);
+-            size_t *cmd_buf = (size_t *)request->args[0];
+-            cmd_buf[0] = (size_t)text;
++            u64 *cmd_buf = (u64 *)request->args[0];
++            cmd_buf[0] = (u64)text;
+             cmd_buf[1] = size;
+             reply->retval = text ? 0 : -1;
+             break;
+         }
+         case P_BOOT_ENTRIES_FREE: {
+-            size_t *cmd_buf = (size_t *)request->args[0];
++            u64 *cmd_buf = (u64 *)request->args[0];
+             rust_free_boot_entries((void *)cmd_buf[0], cmd_buf[1]);
+             break;
+         }
+diff --git a/src/smp.h b/src/smp.h
+index 0296978..80528fe 100644
+--- a/src/smp.h
++++ b/src/smp.h
+@@ -36,12 +36,16 @@ void smp_send_ipi(int cpu);
+ 
+ static inline int smp_id(void)
+ {
++#ifdef __arm__
++    return 0;
++#else
+     if (in_el3())
+         return mrs(TPIDR_EL3);
+     else if (in_el2())
+         return mrs(TPIDR_EL2);
+     else
+         return mrs(TPIDR_EL1);
++#endif
+ }
+ 
+ extern int boot_cpu_idx;
+diff --git a/src/types.h b/src/types.h
+index 6e991e2..d68d6df 100644
+--- a/src/types.h
++++ b/src/types.h
+@@ -20,10 +20,15 @@ typedef int16_t s16;
+ typedef int32_t s32;
+ typedef int64_t s64;
+ 
++#ifdef __arm__
++/* 32-bit: uintptr_t and ptrdiff_t are the compiler's */
++typedef s32 ssize_t;
++#else
+ typedef u64 uintptr_t;
+ typedef s64 ptrdiff_t;
+ 
+ typedef s64 ssize_t;
++#endif
+ 
+ #endif
+ 
+@@ -49,7 +54,11 @@ typedef s64 ssize_t;
+ #define SZ_1M  (1 << 20)
+ #define SZ_32M (1 << 25)
+ 
++#ifdef __arm__
++#define BIT(x)                 (1ULL << (x))
++#else
+ #define BIT(x)                 (1UL << (x))
++#endif
+ #define MASK(x)                (BIT(x) - 1)
+ #define GENMASK(msb, lsb)      ((BIT((msb + 1) - (lsb)) - 1) << (lsb))
+ #define _FIELD_LSB(field)      ((field) & ~(field - 1))
+diff --git a/src/usb_dwc2.c b/src/usb_dwc2.c
+index c5511bf..115d8d2 100644
+--- a/src/usb_dwc2.c
++++ b/src/usb_dwc2.c
+@@ -65,6 +65,15 @@
+ /* One bulk OUT transfer: many packets, with no software between them. */
+ #define BULK_OUT_XFER_SIZE (1 << 17)
+ 
++#ifdef __arm__
++/* No cache-coherent DMA on the 32-bit chips: transfer buffers are uncached memory */
++#define dma_memalign(align, size) dma_alloc(align, size)
++#define dma_buf_free(p)           ((void)(p))
++#else
++#define dma_memalign(align, size) memalign(align, size)
++#define dma_buf_free(p)           free(p)
++#endif
++
+ #define SCRATCHPAD_IOVA   0xbeef0000
+ #define EVENT_BUFFER_IOVA 0xdead0000
+ #define XFER_BUFFER_IOVA  0xbabe0000
+@@ -1101,7 +1110,7 @@ static void usb_dwc2_cdc_bulk_out_poll(dwc2_dev_t *dev, u8 ep)
+     if (received != endpoint->out_seen) {
+         endpoint->out_seen = received;
+         endpoint->out_seen_ticks = now;
+-    } else if (now - endpoint->out_seen_ticks > mrs(CNTFRQ_EL0) / 20000) {
++    } else if (now - endpoint->out_seen_ticks > timer_freq() / 20000) {
+         usb_dwc2_cdc_bulk_out_take(dev, ep, received);
+     }
+ }
+@@ -1467,7 +1476,7 @@ dwc2_dev_t *usb_dwc2_init(u64 regs)
+     debug_reg_base = regs;
+ #endif
+ 
+-    dev->dma_page_p = memalign(SZ_16K, max(DMA_BUFFER_SIZE * MAX_ENDPOINTS, SZ_16K));
++    dev->dma_page_p = dma_memalign(SZ_16K, max(DMA_BUFFER_SIZE * MAX_ENDPOINTS, SZ_16K));
+     if (!dev->dma_page_p)
+         goto error;
+ 
+@@ -1485,7 +1494,7 @@ dwc2_dev_t *usb_dwc2_init(u64 regs)
+ 
+     /* A bulk OUT transfer does not fit an endpoint's share of the DMA page. */
+     for (int i = 0; i < 2; i++) {
+-        dev->bulk_out_buffer[i] = memalign(SZ_16K, BULK_OUT_XFER_SIZE);
++        dev->bulk_out_buffer[i] = dma_memalign(SZ_16K, BULK_OUT_XFER_SIZE);
+         if (!dev->bulk_out_buffer[i])
+             goto error;
+     }
+@@ -1585,9 +1594,9 @@ void usb_dwc2_shutdown(dwc2_dev_t *dev)
+         ringbuffer_free(dev->pipe[i].host2device);
+     }
+ 
+-    free(dev->bulk_out_buffer[0]);
+-    free(dev->bulk_out_buffer[1]);
+-    free(dev->dma_page_p);
++    dma_buf_free(dev->bulk_out_buffer[0]);
++    dma_buf_free(dev->bulk_out_buffer[1]);
++    dma_buf_free(dev->dma_page_p);
+     free(dev);
+ }
+ 
+diff --git a/src/utils.c b/src/utils.c
+index ffb2fa6..d05be3c 100644
+--- a/src/utils.c
++++ b/src/utils.c
+@@ -4,11 +4,13 @@
+ #include <stdarg.h>
+ 
+ #include "adt.h"
++#ifndef __arm__
+ #include "ans1.h"
+ #include "apcie_nvme.h"
+ #include "cpu_regs.h"
+-#include "iodev.h"
+ #include "nvme.h"
++#endif
++#include "iodev.h"
+ #include "smp.h"
+ #include "types.h"
+ #include "utils.h"
+@@ -22,7 +24,9 @@ enum storage_type {
+ };
+ 
+ bool is_mac;
++#ifndef __arm__
+ static enum storage_type storage_type;
++#endif
+ 
+ static char ascii(char s)
+ {
+@@ -39,7 +43,7 @@ void hexdump(const void *d, size_t len)
+     size_t i, off;
+     data = (u8 *)d;
+     for (off = 0; off < len; off += 16) {
+-        printf("%08lx  ", off);
++        printf("%08lx  ", (u64)off);
+         for (i = 0; i < 16; i++) {
+             if ((i + off) >= len)
+                 printf("   ");
+@@ -104,9 +108,9 @@ void __assert_fail(const char *assertion, const char *file, unsigned int line, c
+ 
+ void udelay(u32 d)
+ {
+-    u64 delay = ((u64)d) * mrs(CNTFRQ_EL0) / 1000000;
+-    u64 val = mrs(CNTPCT_EL0);
+-    while ((mrs(CNTPCT_EL0) - val) < delay)
++    u64 delay = ((u64)d) * timer_freq() / 1000000;
++    u64 val = get_ticks();
++    while ((get_ticks() - val) < delay)
+         ;
+     sysop("isb");
+ }
+@@ -114,24 +118,24 @@ void udelay(u32 d)
+ u64 ticks_to_msecs(u64 ticks)
+ {
+     // NOTE: only accurate if freq is even kHz
+-    return ticks / (mrs(CNTFRQ_EL0) / 1000);
++    return ticks / (timer_freq() / 1000);
+ }
+ 
+ u64 ticks_to_usecs(u64 ticks)
+ {
+     // NOTE: only accurate if freq is even MHz
+-    return ticks / (mrs(CNTFRQ_EL0) / 1000000);
++    return ticks / (timer_freq() / 1000000);
+ }
+ 
+ u64 timeout_calculate(u32 usec)
+ {
+-    u64 delay = ((u64)usec) * mrs(CNTFRQ_EL0) / 1000000;
+-    return mrs(CNTPCT_EL0) + delay;
++    u64 delay = ((u64)usec) * timer_freq() / 1000000;
++    return get_ticks() + delay;
+ }
+ 
+ bool timeout_expired(u64 timeout)
+ {
+-    bool expired = mrs(CNTPCT_EL0) > timeout;
++    bool expired = get_ticks() > timeout;
+     sysop("isb");
+     return expired;
+ }
+@@ -142,6 +146,7 @@ void flush_and_reboot(void)
+     reboot();
+ }
+ 
++#ifndef __arm__
+ void spin_init(spinlock_t *lock)
+ {
+     lock->lock = -1;
+@@ -187,6 +192,7 @@ void spin_unlock(spinlock_t *lock)
+     if (!--lock->count)
+         __atomic_store_n(&lock->lock, -1L, __ATOMIC_RELEASE);
+ }
++#endif
+ 
+ bool is_heap(void *addr)
+ {
+@@ -197,6 +203,7 @@ bool is_heap(void *addr)
+     return p > top_of_kernel_data && p < top_of_ram;
+ }
+ 
++#ifndef __arm__
+ bool supports_arch_retention(void)
+ {
+     return mrs(AIDR_EL1) & AIDR_EL1_ARCH_RETENTION;
+@@ -211,6 +218,7 @@ bool supports_pan(void)
+ {
+     return (mrs(ID_AA64MMFR1_EL1) >> 20) & 0xf;
+ }
++#endif
+ 
+ // TODO: update mapping?
+ u64 top_of_memory_alloc(size_t size)
+@@ -232,6 +240,7 @@ u64 top_of_memory_alloc(size_t size)
+     return ret;
+ }
+ 
++#ifndef __arm__
+ extern void _deep_wfi_helper(void);
+ void deep_wfi(void)
+ {
+@@ -419,3 +428,4 @@ bool main_storage_flush(void)
+             __builtin_unreachable();
+     }
+ }
++#endif
+diff --git a/src/utils.h b/src/utils.h
+index 9a11918..fab0b6a 100644
+--- a/src/utils.h
++++ b/src/utils.h
+@@ -3,8 +3,10 @@
+ #ifndef UTILS_H
+ #define UTILS_H
+ 
++#ifndef __arm__
+ #include "cpu_regs.h"
+ #include "midr.h"
++#endif
+ #include "soc.h"
+ #include "types.h"
+ 
+@@ -28,6 +30,10 @@
+ 
+ #define USEC_PER_SEC 1000000L
+ 
++#ifdef __arm__
++#include "arm32/arch.h"
++extern u32 board_id, chip_id;
++#else
+ static inline u64 read64(u64 addr)
+ {
+     u64 data;
+@@ -382,6 +388,7 @@ static inline size_t get_page_size(void)
+ {
+     return is_16k() ? 16384 : 4096;
+ }
++#endif
+ 
+ extern char _base[];
+ extern char _rodata_end[];
+@@ -412,10 +419,17 @@ int snprintf(char *str, size_t size, const char *fmt, ...);
+ int debug_printf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+ void udelay(u32 d);
+ 
++#ifndef __arm__
+ static inline u64 get_ticks(void)
+ {
+     return mrs(CNTPCT_EL0);
+ }
++
++static inline u64 timer_freq(void)
++{
++    return mrs(CNTFRQ_EL0);
++}
++#endif
+ u64 ticks_to_msecs(u64 ticks);
+ u64 ticks_to_usecs(u64 ticks);
+ 
+diff --git a/src/vsprintf.c b/src/vsprintf.c
+index daa5d29..fdee4bf 100644
+--- a/src/vsprintf.c
++++ b/src/vsprintf.c
+@@ -101,9 +101,23 @@
+ #define VA_SHIFT(ap, value, type) /* No-op for ANSI C. */
+ 
+ #define ULLONG    unsigned long long
+-#define UINTMAX_T unsigned long
+-#define LLONG     long
+-#define INTMAX_T  long
++#ifdef __arm__
++/*
++ * 32-bit build. m1n1 prints its u64 values with %lx, so %l reads 64 bits
++ * here; a real long or size_t has to go through %z or a cast to u64.
++ */
++#define UINTMAX_T    unsigned long long
++#define LLONG        long long
++#define INTMAX_T     long long
++#define PRINTF_LONG  long long
++#define PRINTF_ULONG unsigned long long
++#else
++#define UINTMAX_T    unsigned long
++#define LLONG        long
++#define INTMAX_T     long
++#define PRINTF_LONG  long int
++#define PRINTF_ULONG unsigned long int
++#endif
+ 
+ /* Support for uintptr_t. */
+ #ifndef UINTPTR_T
+@@ -379,7 +393,7 @@ int vsnprintf(char *str, size_t size, const char *format, va_list args)
+                                 value = (short int)va_arg(args, int);
+                                 break;
+                             case PRINT_C_LONG:
+-                                value = va_arg(args, long int);
++                                value = va_arg(args, PRINTF_LONG);
+                                 break;
+                             case PRINT_C_LLONG:
+                                 value = va_arg(args, LLONG);
+@@ -421,7 +435,7 @@ int vsnprintf(char *str, size_t size, const char *format, va_list args)
+                                 value = (unsigned short int)va_arg(args, unsigned int);
+                                 break;
+                             case PRINT_C_LONG:
+-                                value = va_arg(args, unsigned long int);
++                                value = va_arg(args, PRINTF_ULONG);
+                                 break;
+                             case PRINT_C_LLONG:
+                                 value = va_arg(args, ULLONG);

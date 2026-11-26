@@ -5,6 +5,12 @@ ordered patch layers in `series` and compiles `m1n1.bin` with chainloading
 enabled. Next to it go the same build as `m1n1-idevice.macho` (started by iBoot
 as the kernelcache) and `monitor-stub.macho` (the monitor A7-A9 iBoot expects). Git and Podman are required.
 
+It also builds the 32-bit m1n1 for Apple's ARMv7 chips (A5-A6X) from the same
+source, `m1n1-armv7.macho`: one file for every 32-bit board, as `m1n1.bin` is for
+the 64-bit ones. Their iBoot starts it as its kernel;
+`producers/m1n1_armv7.py` puts it and a payload into the image iBoot takes
+([bring-up notes](../../docs/bring-up/armv7-m1n1.md)).
+
 `orchard build` and `orchard run` run it with their cache directories; don't
 call it directly (see [AGENTS.md](../../AGENTS.md)).
 

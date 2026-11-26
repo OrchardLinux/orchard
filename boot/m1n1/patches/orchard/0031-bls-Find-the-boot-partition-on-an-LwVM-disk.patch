@@ -1,0 +1,455 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Thu, 26 Nov 2026 10:41:48 +0800
+Subject: [PATCH] bls: Find the boot partition on an LwVM disk
+
+iOS partitions the flash of the 32-bit devices with LwVM, not GPT. On the
+32-bit build the boot manager falls back to that table: partitions whose
+chunks are stored in order are listed as one range each, with their type
+and identity in network byte order as LwVM keeps them. The boot partition
+is the XBOOTLDR one, as on a GPT disk; a root may be the Discoverable
+Partitions ARM root or plain Linux filesystem data, which is how Orchard's
+installer marks its LwVM partition.
+
+A 32-bit entry's kernel is a zImage: it is checked by its magic and loaded
+with a zero word behind it, so that a kernel built to accept an appended
+device tree does not take what follows for one.
+
+On the 64-bit build only the GPT is read, as before.
+
+Assisted-by: LLM
+---
+ rust/src/bls.rs  | 178 ++++++++++++++++++++++++++++++++++++++++++++---
+ rust/src/lib.rs  |   2 +
+ rust/src/lwvm.rs | 157 +++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 328 insertions(+), 9 deletions(-)
+ create mode 100644 rust/src/lwvm.rs
+
+diff --git a/rust/src/bls.rs b/rust/src/bls.rs
+index f5a6b77..9cb2a64 100644
+--- a/rust/src/bls.rs
++++ b/rust/src/bls.rs
+@@ -1,7 +1,8 @@
+ // SPDX-License-Identifier: MIT
+ //! Boot Loader Specification Type #1 entries on the XBOOTLDR partition.
+ //!
+-//! Finds the one XBOOTLDR partition in the GPT, reads its FAT file system,
++//! Finds the one XBOOTLDR partition in the GPT (or, on the 32-bit devices, in
++//! Apple's LwVM table), reads its FAT file system,
+ //! parses `/loader/entries/*.conf`, checks every entry against the disk and
+ //! sorts them in BLS order (as systemd-boot does). The default entry follows
+ //! the `default` pattern of `/loader/loader.conf`, as in systemd-boot.
+@@ -10,6 +11,8 @@
+ 
+ use crate::c_size_t;
+ use crate::gpt;
++#[cfg(any(target_arch = "arm", test))]
++use crate::lwvm;
+ use crate::println;
+ use crate::storage;
+ use alloc::string::{String, ToString};
+@@ -22,6 +25,15 @@ use uuid::{uuid, Uuid};
+ 
+ pub const XBOOTLDR: Uuid = uuid!("bc13c2ff-59e6-4262-a352-b275fd6f7172");
+ pub const ROOT_ARM64: Uuid = uuid!("b921b045-1df0-41c3-af44-4c6f280d3fae");
++/// Roots of the 32-bit devices: the Discoverable Partitions type, and plain
++/// "Linux filesystem data" as Orchard's installer marks its LwVM partition.
++#[cfg(any(target_arch = "arm", test))]
++pub const ROOT_ARM: Uuid = uuid!("69dad710-2ce4-4e3c-b16c-21a1d49abed3");
++#[cfg(any(target_arch = "arm", test))]
++pub const LINUX_DATA: Uuid = uuid!("0fc63daf-8483-4772-8e79-3d69d8477de4");
++/// A 32-bit ARM zImage, at offset 36
++#[cfg(target_arch = "arm")]
++const ZIMAGE_MAGIC: [u8; 4] = [0x18, 0x28, 0x6f, 0x01];
+ 
+ const ENTRIES_DIR: &str = "/loader/entries";
+ const MAX_ENTRIES: usize = 64;
+@@ -365,6 +377,43 @@ where
+     with_entries(open, devicetree, |_, listing| Ok(listing))
+ }
+ 
++/// Type, identity and first 4 KiB block of every partition: from the GPT, or
++/// from the LwVM table Apple's 32-bit devices have in its place.
++fn disk_partitions<IO, F>(open: &F) -> Result<Vec<(Uuid, Uuid, u64)>, String>
++where
++    IO: ReadWriteSeek,
++    IO::Error: core::fmt::Debug,
++    F: Fn(u64) -> IO,
++{
++    let mut found = Vec::new();
++    if let Ok(mut table) = gpt::GPT::new(open(0)) {
++        for i in 0..table.count().min(1024) {
++            let part = table
++                .index(i)
++                .map_err(|_| "Partition table read error".to_string())?;
++            found.push((
++                part.get_type_guid(),
++                part.get_partition_guid(),
++                part.get_starting_lba(),
++            ));
++        }
++        return Ok(found);
++    }
++    // Only the 32-bit devices have LwVM disks
++    #[cfg(any(target_arch = "arm", test))]
++    match lwvm::partitions(&mut open(0)) {
++        Ok(Some(parts)) => {
++            return Ok(parts
++                .into_iter()
++                .map(|p| (p.kind, p.id, p.first_block))
++                .collect())
++        }
++        Ok(None) => {}
++        Err(()) => return Err("Partition table read error".to_string()),
++    }
++    Err("No GPT on this disk".to_string())
++}
++
+ /// Opens the boot partition, reads and checks its entries in BLS order, picks
+ /// the default and hands the listing to `then` along with the partition's root
+ /// directory.
+@@ -378,20 +427,19 @@ where
+     IO::Error: core::fmt::Debug,
+     F: Fn(u64) -> IO,
+ {
+-    let mut table = gpt::GPT::new(open(0)).map_err(|_| "No GPT on this disk".to_string())?;
+     let mut boot = None;
+     let mut boots = 0;
+     let mut roots = Vec::new();
+-    for i in 0..table.count().min(1024) {
+-        let part = table
+-            .index(i)
+-            .map_err(|_| "Partition table read error".to_string())?;
+-        let kind = part.get_type_guid();
++    for (kind, id, first) in disk_partitions(&open)? {
+         if kind == XBOOTLDR {
+             boots += 1;
+-            boot = Some(part.get_starting_lba());
++            boot = Some(first);
+         } else if kind == ROOT_ARM64 {
+-            roots.push(part.get_partition_guid());
++            roots.push(id);
++        }
++        #[cfg(any(target_arch = "arm", test))]
++        if kind == ROOT_ARM || kind == LINUX_DATA {
++            roots.push(id);
+         }
+     }
+     let boot = match (boots, boot) {
+@@ -576,12 +624,22 @@ where
+         }
+         let (size, head) = probe(dir, path)?;
+         let size = size as usize;
++        #[cfg(not(target_arch = "arm"))]
+         let linux = if head[..2] == [0x1f, 0x8b] {
+             alloc_slice(size, 64)?
+         } else {
+             let image_size = u64::from_le_bytes(head[16..24].try_into().unwrap()) as usize;
+             &mut alloc_slice(size.max(image_size), KERNEL_ALIGN)?[..size]
+         };
++        // A zImage unpacks itself. The word behind it stays zero, so that its
++        // decompressor does not take whatever follows for an appended tree.
++        #[cfg(target_arch = "arm")]
++        let linux = {
++            let _ = (KERNEL_ALIGN, &head);
++            let buf = alloc_slice(size + 8, 64)?;
++            buf[size..].fill(0);
++            &mut buf[..size]
++        };
+         read_into(dir, path, linux)?;
+         let linux = (linux.as_mut_ptr(), size);
+ 
+@@ -661,8 +719,14 @@ fn check<IO: ReadWriteSeek>(entry: &mut Entry, dir: &Dir<IO>, roots: &[Uuid], de
+     }
+     if let Some(path) = entry.get("linux") {
+         match probe(dir, path) {
++            #[cfg(not(target_arch = "arm"))]
+             Ok((_, head)) if head[..2] == [0x1f, 0x8b] || head[56..60] == *b"ARM\x64" => {}
++            #[cfg(not(target_arch = "arm"))]
+             Ok(_) => problems.push(format!("{}: not an arm64 Image", path)),
++            #[cfg(target_arch = "arm")]
++            Ok((_, head)) if head[36..40] == ZIMAGE_MAGIC => {}
++            #[cfg(target_arch = "arm")]
++            Ok(_) => problems.push(format!("{}: not a 32-bit zImage", path)),
+             Err(problem) => problems.push(problem),
+         }
+     }
+@@ -1429,6 +1493,102 @@ mod tests {
+         assert_eq!(err, "No default boot entry");
+     }
+ 
++    /// The same disk partitioned the way iOS does on the 32-bit devices: no
++    /// GPT, an LwVM header naming the boot partition and a Linux root.
++    fn lwvm_disk(files: &[(&str, &[u8])], scattered: bool) -> Rc<RefCell<Vec<u8>>> {
++        let d = disk(files, false);
++        {
++            let mut raw = d.borrow_mut();
++            let media = raw.len() as u64;
++            let chunk = media.div_ceil(1024).next_power_of_two();
++            assert_eq!(chunk, 16 * BLOCK);
++            raw[BLOCK as usize..2 * BLOCK as usize].fill(0);
++            let mut h = vec![0u8; BLOCK as usize];
++            h[..16].copy_from_slice(&[
++                0x6a, 0x90, 0x88, 0xcf, 0x8a, 0xfd, 0x63, 0x0a, 0xe3, 0x51, 0xe2, 0x48, 0x87, 0xe0,
++                0xb9, 0x8b,
++            ]);
++            h[0x20..0x28].copy_from_slice(&media.to_le_bytes());
++            h[0x28..0x2c].copy_from_slice(&2u32.to_le_bytes());
++            let mut part = |index: usize, kind: Uuid, id: Uuid, blocks: u64| {
++                let at = 0x200 + index * 0x80;
++                h[at..at + 16].copy_from_slice(kind.as_bytes());
++                h[at + 16..at + 32].copy_from_slice(id.as_bytes());
++                h[at + 40..at + 48].copy_from_slice(&(blocks * BLOCK).to_le_bytes());
++            };
++            part(
++                0,
++                XBOOTLDR,
++                uuid!("11111111-2222-4333-8444-555555555555"),
++                BOOT_BLOCKS,
++            );
++            part(1, LINUX_DATA, Uuid::parse_str(ROOT).unwrap(), 16);
++            let boot_chunks = (BOOT_BLOCKS / 16) as usize;
++            for i in 0..1024usize {
++                let entry: u16 = if i >= 1 && i <= boot_chunks {
++                    (i - 1) as u16
++                } else if i == boot_chunks + 1 {
++                    1 << 12
++                } else {
++                    0xf000
++                };
++                h[0x800 + i * 2..0x802 + i * 2].copy_from_slice(&entry.to_le_bytes());
++            }
++            if scattered {
++                // The boot partition's second chunk says it is its third
++                h[0x804..0x806].copy_from_slice(&2u16.to_le_bytes());
++            }
++            let mut crc = !0u32;
++            for byte in h.iter() {
++                crc ^= *byte as u32;
++                for _ in 0..8 {
++                    crc = (crc >> 1) ^ (0xedb88320 & 0u32.wrapping_sub(crc & 1));
++                }
++            }
++            h[0x2c..0x30].copy_from_slice(&(!crc).to_le_bytes());
++            raw[..BLOCK as usize].copy_from_slice(&h);
++        }
++        d
++    }
++
++    #[test]
++    fn lwvm_disks() {
++        let img = image();
++        let a = entry_text("Omarchy", "6.18.2-orchard");
++        let files: Vec<(&str, &[u8])> = vec![
++            (
++                "/loader/entries/omarchy-4d6c1a2b-6.18.2-orchard.conf",
++                a.as_bytes(),
++            ),
++            ("/tok/6.18.2-orchard/linux", &img),
++            ("/tok/6.18.2-orchard/initrd", b"070701"),
++            ("/tok/6.18.2-orchard/t8010-j71b.dtb", DTB),
++        ];
++        let d = lwvm_disk(&files, false);
++        let listing = list(&d, Wanted::File("t8010-j71b.dtb")).unwrap();
++        let [good] = &listing.entries[..] else {
++            panic!()
++        };
++        // The root is found by the identity its LwVM entry carries
++        assert!(good.bootable(), "{:?}", good.problems);
++        assert_eq!(good.root(), Uuid::try_parse(ROOT).ok());
++
++        // A boot partition scattered over the disk is not one range: not listed
++        let scattered = lwvm_disk(&files, true);
++        assert_eq!(
++            list(&scattered, Wanted::Any).err().unwrap(),
++            "Expected exactly one XBOOTLDR boot partition, found 0"
++        );
++
++        // A header that fails its checksum, with no good copy, is no table
++        let damaged = lwvm_disk(&files, false);
++        damaged.borrow_mut()[0x30] ^= 1;
++        assert_eq!(
++            list(&damaged, Wanted::Any).err().unwrap(),
++            "No GPT on this disk"
++        );
++    }
++
+     #[test]
+     fn disk_errors() {
+         let empty = disk(&[], false);
+diff --git a/rust/src/lib.rs b/rust/src/lib.rs
+index 4049540..db4f518 100644
+--- a/rust/src/lib.rs
++++ b/rust/src/lib.rs
+@@ -23,6 +23,8 @@ pub mod float;
+ #[cfg(feature = "chainload")]
+ pub mod gpt;
+ pub mod gpu;
++#[cfg(all(feature = "chainload", any(target_arch = "arm", test)))]
++pub mod lwvm;
+ pub mod print;
+ #[cfg(feature = "chainload")]
+ pub mod storage;
+diff --git a/rust/src/lwvm.rs b/rust/src/lwvm.rs
+new file mode 100644
+index 0000000..57f5702
+--- /dev/null
++++ b/rust/src/lwvm.rs
+@@ -0,0 +1,157 @@
++// SPDX-License-Identifier: MIT
++//! Apple's Lightweight Volume Manager (LwVM) partition table, as iOS keeps
++//! it on the flash of the 32-bit devices.
++//!
++//! The first 4 KiB of the disk hold the header: a signature, the media UUID
++//! and size, a CRC32 of the header, up to eight partition descriptors and a
++//! map of 1024 chunks. The disk is split into 1024 equal power-of-two
++//! chunks; each map entry names the partition and the partition-relative
++//! chunk stored there. A copy of the header ends the first chunk.
++//!
++//! Only partitions whose chunks are stored in order and back to back are
++//! listed, each as one range of the disk. UUIDs are in network byte order.
++//! Read-only.
++
++use alloc::vec::Vec;
++use fatfs::{Read, Seek, SeekFrom};
++use uuid::Uuid;
++
++const HEADER_SIZE: usize = 4096;
++const BLOCK: u64 = 4096;
++const CRC_OFFSET: usize = 0x2c;
++const PARTS_OFFSET: usize = 0x200;
++const PART_SIZE: usize = 0x80;
++const MAX_PARTS: usize = 8;
++const MAP_OFFSET: usize = 0x800;
++const CHUNKS: usize = 1024;
++const CHUNK_FREE: u16 = 0xf;
++
++/// The CRC-protected variant; the older one without a CRC is not handled.
++const SIGNATURE: [u8; 16] = [
++    0x6a, 0x90, 0x88, 0xcf, 0x8a, 0xfd, 0x63, 0x0a, 0xe3, 0x51, 0xe2, 0x48, 0x87, 0xe0, 0xb9, 0x8b,
++];
++
++pub struct Partition {
++    pub kind: Uuid,
++    pub id: Uuid,
++    /// First 4 KiB block on the disk
++    pub first_block: u64,
++    pub blocks: u64,
++}
++
++fn crc32(data: &[u8], skip: core::ops::Range<usize>) -> u32 {
++    let mut crc = !0u32;
++    for (i, byte) in data.iter().enumerate() {
++        let byte = if skip.contains(&i) { 0 } else { *byte };
++        crc ^= byte as u32;
++        for _ in 0..8 {
++            crc = (crc >> 1) ^ (0xedb88320 & (0u32.wrapping_sub(crc & 1)));
++        }
++    }
++    !crc
++}
++
++fn le16(b: &[u8], at: usize) -> u16 {
++    u16::from_le_bytes(b[at..at + 2].try_into().unwrap())
++}
++
++fn le32(b: &[u8], at: usize) -> u32 {
++    u32::from_le_bytes(b[at..at + 4].try_into().unwrap())
++}
++
++fn le64(b: &[u8], at: usize) -> u64 {
++    u64::from_le_bytes(b[at..at + 8].try_into().unwrap())
++}
++
++/// The chunk is the smallest power of two that splits the disk in 1024.
++fn chunk_size(media: u64) -> Option<u64> {
++    if media < 2 * (HEADER_SIZE * CHUNKS) as u64 {
++        return None;
++    }
++    Some((media.div_ceil(CHUNKS as u64)).next_power_of_two())
++}
++
++fn valid(header: &[u8]) -> bool {
++    if header[..16] != SIGNATURE {
++        return false;
++    }
++    let count = le32(header, 0x28) as usize;
++    crc32(header, CRC_OFFSET..CRC_OFFSET + 4) == le32(header, CRC_OFFSET)
++        && (1..=MAX_PARTS).contains(&count)
++        && chunk_size(le64(header, 0x20)).is_some()
++}
++
++fn read_at<R: Read + Seek>(disk: &mut R, at: u64, out: &mut [u8]) -> Result<(), ()> {
++    disk.seek(SeekFrom::Start(at)).map_err(|_| ())?;
++    disk.read_exact(out).map_err(|_| ())
++}
++
++/// The contiguous partitions of an LwVM disk; `Ok(None)` if the disk has no
++/// LwVM header, `Err` if it could not be read.
++pub fn partitions<R: Read + Seek>(disk: &mut R) -> Result<Option<Vec<Partition>>, ()> {
++    let mut header = alloc::vec![0u8; HEADER_SIZE];
++    read_at(disk, 0, &mut header)?;
++    if header[..16] != SIGNATURE {
++        return Ok(None);
++    }
++    if !valid(&header) {
++        // A damaged header: its copy ends the first chunk, where the size says
++        let Some(chunk) = chunk_size(le64(&header, 0x20)) else {
++            return Ok(None);
++        };
++        if read_at(disk, chunk - HEADER_SIZE as u64, &mut header).is_err() || !valid(&header) {
++            return Ok(None);
++        }
++    }
++
++    let media = le64(&header, 0x20);
++    let chunk = chunk_size(media).ok_or(())?;
++    let chunks = (media / chunk) as usize;
++    let count = le32(&header, 0x28) as usize;
++
++    // Each partition's first chunk, and how many chunks follow it in order
++    let mut first = [0xffffu16; MAX_PARTS];
++    let mut seen = [0u16; MAX_PARTS];
++    for i in 0..CHUNKS {
++        let entry = le16(&header, MAP_OFFSET + i * 2);
++        let (owner, index) = ((entry >> 12) as usize, entry & 0xfff);
++        if entry >> 12 == CHUNK_FREE {
++            continue;
++        }
++        if i == 0 || i >= chunks || owner >= count {
++            return Ok(None);
++        }
++        if index == 0 {
++            first[owner] = i as u16;
++        }
++        if first[owner] != 0xffff && (i as u16 - first[owner]) == index && seen[owner] == index {
++            seen[owner] += 1;
++        } else {
++            seen[owner] = 0xffff;
++        }
++    }
++
++    let mut out = Vec::new();
++    for i in 0..count {
++        let at = PARTS_OFFSET + i * PART_SIZE;
++        let (begin, end) = (le64(&header, at + 32), le64(&header, at + 40));
++        if end <= begin || (begin | end) % BLOCK != 0 {
++            continue;
++        }
++        let size = end - begin;
++        if seen[i] == 0xffff
++            || seen[i] == 0
++            || (seen[i] as u64) * chunk < size
++            || (seen[i] as u64 - 1) * chunk >= size
++        {
++            continue; // scattered over the disk: not one range
++        }
++        out.push(Partition {
++            kind: Uuid::from_bytes(header[at..at + 16].try_into().unwrap()),
++            id: Uuid::from_bytes(header[at + 16..at + 32].try_into().unwrap()),
++            first_block: first[i] as u64 * (chunk / BLOCK),
++            blocks: size / BLOCK,
++        });
++    }
++    Ok(Some(out))
++}

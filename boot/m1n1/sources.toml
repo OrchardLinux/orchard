@@ -17,3 +17,14 @@ license = "MIT"
 patches = "patches/hoolock"
 status = "integrated"
 notes = "Staging tree for upstream. The 47 commits after the base, exported verbatim with git format-patch; the CI-only [DOWNSTREAM] commit d5a10ac is left out. Tree hash-verified: base + patches == d5a10ac^ (0efc898b)."
+
+[[source]]
+name = "orchard-linux-flash"
+url = "https://github.com/OrchardLinux/linux.git"
+branch = "armv7"
+contributors = ["Shayne Legault", "rzxvx"]
+devices = ["Apple A5 flash: H2FMI controller, VFL and SwissPPNFTL reader"]
+license = "GPL-2.0-only"
+patches = "patches/orchard"
+status = "imported"
+notes = "The read half of Orchard's own Linux drivers (kernel/patches/import/cascadia 0016, kernel/patches/armv7/mtd), copied unchanged into src/arm32/sftl of the 32-bit build by patch 0030; src/arm32/sftl/README lists the files and ranges. Linux v6.12 lib/rbtree.c comes with it (GPL-2.0-or-later). To follow a driver change, copy the same ranges again. Only the 32-bit m1n1 contains this code."
