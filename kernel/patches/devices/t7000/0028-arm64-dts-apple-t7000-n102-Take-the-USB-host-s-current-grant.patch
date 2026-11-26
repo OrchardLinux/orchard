@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 18:56:55 +0100
+Subject: [PATCH] arm64: dts: apple: t7000-n102: Take the USB host's current
+ grant
+
+Name the D2186 USB input supply as the device controller's usb-psy-name
+and give the board maximum: 1500 mA, the 500 mA of USB 2.0 plus the
+1000 mA an Apple host grants this iPod.
+
+Assisted-by: LLM
+---
+ arch/arm64/boot/dts/apple/t7000-n102.dts | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t7000-n102.dts b/arch/arm64/boot/dts/apple/t7000-n102.dts
+index aa8aa2b..b06c623 100644
+--- a/arch/arm64/boot/dts/apple/t7000-n102.dts
++++ b/arch/arm64/boot/dts/apple/t7000-n102.dts
+@@ -185,6 +185,11 @@
+ 	status = "okay";
+ };
+ 
++/* Tell the USB input supply what the USB host allows. */
++&usbdev {
++	usb-psy-name = "apple-d2186-usb";
++};
++
+ &spi2 {
+ 	cs-gpios = <&pinctrl 185 GPIO_ACTIVE_LOW>;
+ 	status = "okay";
+@@ -267,6 +272,8 @@
+ 					   "tbat",
+ 					   "vbus",
+ 					   "ibus";
++			/* The most an Apple host has granted this iPod: 500 + 1000 mA. */
++			input-current-limit-microamp = <1500000>;
+ 		};
+ 
+ 		rtc@5c0 {
+-- 
+2.49.0
+
