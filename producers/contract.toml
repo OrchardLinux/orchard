@@ -17,7 +17,7 @@ kernel-producer = 3  # 3: strip module debug sections from staged outputs
 # hashed.
 [inputs]
 # orchard's m1n1, the quiet one every device boots.
-m1n1 = ["boot/m1n1", "boot/quiet/m1n1.patch", "producers/buildenv.py"]
+m1n1 = ["boot/m1n1", "producers/buildenv.py"]
 # The static tools; the rest of the recovery directory is recovery runtime.
 tools = [
     "boot/initramfs/recovery/build-tools",

@@ -259,8 +259,6 @@ class N61TouchPolicy(unittest.TestCase):
             self.assertIn('        - ' + supply, binding)
         self.assertNotIn('apple,boot-power-preserved', binding)
         self.assertIn('maxItems: 1024', binding)
-        patch = (ROOT / 'boot/m1n1/patches/orchard/0003-Forward-touchscreen-proximity-calibration.patch').read_text()
-        self.assertIn('{"prox-calibration", "apple,z2-prox-cal-blob"}', patch)
 
     def test_n61_framing_preserves_j71b_irq_policy_and_each_boards_timing(self):
         compiler = shutil.which('cc') or shutil.which('clang')

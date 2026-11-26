@@ -86,7 +86,9 @@ existing patches.
 A driver patch filed under `devices/` hides that it changes behaviour on other
 devices, which is why the split matters.
 
-m1n1 patches go in `boot/m1n1/patches/orchard/`, the same way.
+m1n1 is different: its source is [OrchardLinux/m1n1](https://github.com/OrchardLinux/m1n1),
+and m1n1 work is a pull request there. `boot/m1n1/upstream.lock` names the
+commit orchard builds; see `boot/m1n1/README.md`.
 
 ## Writing patches
 

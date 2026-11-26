@@ -133,7 +133,7 @@ class ComponentCacheTests(unittest.TestCase):
     def test_recipe_work_lives_in_the_cache_per_input_set(self):
         hardware = self.cache / 'hardware'
         (hardware / 'boot/m1n1').mkdir(parents=True)
-        (hardware / 'boot/m1n1/series').write_text('patches/orchard\n')
+        (hardware / 'boot/m1n1/upstream.lock').write_text('commit=one\n')
         (hardware / 'producers').mkdir(parents=True, exist_ok=True); (hardware / 'producers/buildenv.py').write_text('')
         calls = []
 
@@ -148,12 +148,12 @@ class ComponentCacheTests(unittest.TestCase):
         with patch.object(build, 'command', fake_build), contextlib.redirect_stdout(io.StringIO()):
             series = 'one'
             first = build._prepare_m1n1(hardware, self.parent, 'j71b')
-            (hardware / 'boot/m1n1/series').write_text('patches/orchard\npatches/extra\n')
+            (hardware / 'boot/m1n1/upstream.lock').write_text('commit=two\n')
             series = 'two'
             build._prepare_m1n1(hardware, self.parent, 'j71b')
         works = [Path(argv[argv.index('--work-dir') + 1]) for argv in calls]
         self.assertEqual([w.parent for w in works], [self.cache / 'work/m1n1-j71b'] * 2)
-        self.assertNotEqual(works[0], works[1])  # a changed series gets a fresh tree, never a refused resume
+        self.assertNotEqual(works[0], works[1])  # a moved m1n1 commit gets a fresh tree, never a refused resume
         self.assertNotIn('--resume', calls[1])
         self.assertTrue(all(argv[argv.index('--cargo-dir') + 1] == str(self.cache / 'work/.cargo-m1n1')
                             for argv in calls))

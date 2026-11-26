@@ -46,7 +46,7 @@ def package(directory, output, device='j71b', platform=None):
                  'files': {role: receipt(directory / 'quiet' / name)
                            for role, name in (('loader', 'm1n1.bin'), ('pongo', 'pongo.bin'))},
                  'patches': {name: receipt(here / 'boot/quiet' / name)['sha256']
-                             for name in ('pongo.patch', 'm1n1.patch')}}
+                             for name in ('pongo.patch',)}}
         (directory / 'quiet/quiet-boot.json').write_text(json.dumps(quiet, indent=2) + '\n')
     files = {}
     for path in sorted(directory.rglob('*')):

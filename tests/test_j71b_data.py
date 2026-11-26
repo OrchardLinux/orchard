@@ -28,12 +28,9 @@ class J71bData(unittest.TestCase):
 
     def test_upstream_source_pins(self):
         for relative, url, commit in (
-                # Asahi m1n1 at Hoolock's merge base; Hoolock and Orchard are patch layers.
-                ('boot/m1n1/upstream.lock', 'https://github.com/AsahiLinux/m1n1.git',
-                 'c9ef56f7356e93e6f6cac116c529d31c277ef6a6'),
                 # torvalds v7.3-rc1; Hoolock and contributors are patch layers.
                 ('kernel/upstream.lock', 'https://github.com/torvalds/linux.git',
-                 'cee9395acd8043be0644b25c34bfa86623f2b935')):
+                 'cee9395acd8043be0644b25c34bfa86623f2b935'),):
             lock = dict(line.split('=', 1) for line in (HARDWARE / relative).read_text().splitlines() if '=' in line)
             self.assertEqual(lock['url'], url)
             self.assertEqual(lock['commit'], commit)

@@ -57,8 +57,9 @@ class ReleasedPongo(unittest.TestCase):
             build._prepare_pongo(self.hardware, self.root / 'components')
         self.assertEqual(self.fetched, [])
 
-    def test_a_changed_m1n1_patch_still_uses_the_released_pongo(self):
-        (self.hardware / 'boot/quiet/m1n1.patch').write_text('m1n1 only\n')
+    def test_a_changed_m1n1_recipe_still_uses_the_released_pongo(self):
+        (self.hardware / 'boot/m1n1').mkdir(parents=True)
+        (self.hardware / 'boot/m1n1/upstream.lock').write_text('commit=moved\n')
         with patch.object(http, 'open_url', side_effect=self.open_url):
             self.assertEqual(build.released_pongo(self.hardware), ('v1.0.0', hashlib.sha256(PONGO).hexdigest()))
 

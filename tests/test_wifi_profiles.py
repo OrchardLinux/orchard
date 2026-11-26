@@ -134,16 +134,6 @@ int main(void) {
                             str(source), '-o', str(binary)], check=True, capture_output=True)
             subprocess.run([str(binary)], check=True, capture_output=True)
 
-    def test_loader_patches_are_device_generic(self):
-        patches = sorted((ROOT / 'boot/m1n1/patches/orchard').glob('*.patch'))
-        self.assertTrue(patches)
-        for path in patches:
-            added = [line for line in path.read_text().splitlines()
-                     if line.startswith('+') and not line.startswith('+++')]
-            # Board data comes from the ADT and DT aliases, never board compatibles.
-            self.assertFalse([line for line in added if 'check_compatible' in line], path.name)
-            self.assertFalse([line for line in added if 'cal_len !=' in line], path.name)
-
     def test_existing_device_match_names_not_removed(self):
         for path in series_patches('j71b'):
             before, after = [], []

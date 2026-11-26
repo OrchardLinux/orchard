@@ -101,14 +101,14 @@ class BuildConfigTests(unittest.TestCase):
                 boot.assert_not_called()
 
 
-class LoaderPatchLayout(unittest.TestCase):
-    def test_layered_m1n1_patches_count(self):
+class LoaderRecipe(unittest.TestCase):
+    def test_the_lock_naming_the_m1n1_commit_is_the_recipe(self):
         with tempfile.TemporaryDirectory() as directory:
             hardware = Path(directory)
-            (hardware / 'boot/m1n1/patches/orchard').mkdir(parents=True)
-            self.assertFalse(build.has_loader_patches(hardware))
-            (hardware / 'boot/m1n1/patches/orchard/0001-fill-in.patch').write_text('')
-            self.assertTrue(build.has_loader_patches(hardware))
+            (hardware / 'boot/m1n1').mkdir(parents=True)
+            self.assertFalse(build.has_loader_recipe(hardware))
+            (hardware / 'boot/m1n1/upstream.lock').write_text('url=u\ncommit=c\n')
+            self.assertTrue(build.has_loader_recipe(hardware))
 
 
 class RecipeInterpreter(unittest.TestCase):
