@@ -32,7 +32,7 @@ status = "experimental"
 # (tools/catalog/drivers.json), plus the display's boot console.
 [features]
 display = "untested"
-screen_off = "missing"
+screen_off = "untested" # backlight off through apple_pmic_bl (PMIC 0x600, mini2.dtsi), as on the J72 (#232)
 backlight = "untested"
 gpu_desktop = "missing"
 touch = "untested" # N1 on SPI1 as on the J85 (ADT spi1/multi-touch, multi-touch,j85), J85.mtprops firmware; not yet run on this board

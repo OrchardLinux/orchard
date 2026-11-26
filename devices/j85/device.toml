@@ -33,7 +33,7 @@ tested_by = ["ricktav"]
 # plus the display's boot console.
 [features]
 display = "working" # simple framebuffer 1536x2048, console and Omarchy; J85 2026-11-23, main 5d0c610 RAM boot and installed Omarchy
-screen_off = "missing"
+screen_off = "untested" # Omarchy A darkens it by brightness 0 (omarchy-powerd), the RAM payloads by bl_power 4; both reach apple_pmic_bl at PMIC 0x600 (mini2.dtsi), the Anya register pair the J72 (#232) and J81 darken. Not yet seen on this board
 backlight = "working" # PMIC backlight, brightness control in Omarchy; installed Omarchy J85 2026-11-23
 gpu_desktop = "missing"
 touch = "working" # apple_z2 N1 (C1F14,3) on SPI1: boots at every boot and reports contacts, RAM boot and installed Omarchy; J85 2026-11-22; main 5d0c610 RAM boot 2026-11-23
