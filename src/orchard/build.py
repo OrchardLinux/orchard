@@ -510,15 +510,15 @@ def prepare_kernel(hardware=None, cache=None, *, device, kernel_tree=None):
         return _prepare_kernel(hardware, cache, device, tree)
 
 
-def has_loader_patches(hardware):
-    """Hardware keeps its m1n1 patches in ordered layers under boot/m1n1/patches/."""
-    return any((Path(hardware) / 'boot/m1n1/patches').rglob('*.patch'))
+def has_loader_recipe(hardware):
+    """Hardware builds m1n1 itself: boot/m1n1 names the commit of OrchardLinux/m1n1 to build."""
+    return (Path(hardware) / 'boot/m1n1/upstream.lock').is_file()
 
 
 # What the static tools are built from; the rest of the recovery directory is
 # recovery runtime and doesn't change them.
 # What orchard's m1n1 (the quiet one every device boots) is built from.
-M1N1_INPUTS = ['boot/m1n1', 'boot/quiet/m1n1.patch', 'producers/buildenv.py']
+M1N1_INPUTS = ['boot/m1n1', 'producers/buildenv.py']
 TOOL_INPUTS = ['boot/initramfs/recovery/' + name for name in
                ('build-tools', 'build-tools-in-container', 'Containerfile', 'Containerfile.arm',
                 'install-toolchain', 'upstream.lock', 'check-tools.py', 'orchard-write.c',
@@ -602,7 +602,7 @@ def prepare_payload_loader(hardware=None, cache=None, *, device):
 
 
 RELEASES = 'https://github.com/OrchardLinux/orchard/releases/download'
-# What Pongo is built from; boot/quiet/m1n1.patch is m1n1's, not Pongo's.
+# What Pongo is built from.
 PONGO_RECIPE = ['boot/quiet/build-pongo.py', 'boot/quiet/pongo.patch']
 
 
@@ -667,13 +667,13 @@ def _prepare_m1n1(hardware, components, device):
         return recipe_key(hardware, M1N1_INPUTS)
 
     def produce(stage):
-        # One tree per patch set: a changed series starts a fresh tree instead
-        # of resuming one the recipe would refuse. Crates are shared.
+        # One tree per m1n1 commit: a moved upstream.lock starts a fresh tree
+        # instead of resuming one the recipe would refuse. Crates are shared.
         work = recipe_work(components, 'm1n1-' + device, key())
         # Quiet, as CI builds it: black, no m1n1 logo, until m1n1 paints the system's splash.
         argv = [hardware / 'boot/m1n1/build', device, '--output', stage / 'm1n1.bin',
                 '--work-dir', work, '--cargo-dir', components.parent / 'work/.cargo-m1n1',
-                '--extra-patch', hardware / 'boot/quiet/m1n1.patch', '--extra-cflags', '-DQUIET_BOOT']
+                '--extra-cflags', '-DQUIET_BOOT']
         if (work / 'applied-patches').exists():
             argv.append('--resume')
         elif work.exists():
@@ -702,8 +702,8 @@ def prepare_components(hardware=None, cache=None, *, device, kernel=None,
         raise ValueError('Cascadia payloads use recovery-autogo firmware stages')
     if loader is None and described['loader'] == 'cascadia':
         loader = prepare_payload_loader(hardware, cache, device=device)
-    if loader is None and not has_loader_patches(hardware):
-        raise ValueError(f'Missing loader patches for {device}; add a loader recipe or supply --loader FILE')
+    if loader is None and not has_loader_recipe(hardware):
+        raise ValueError(f'No m1n1 recipe (boot/m1n1/upstream.lock) for {device}; supply --loader FILE')
     with component_lock(cache):
         if pongo is None and described['loader'] == 'm1n1':
             pongo = _prepare_pongo(hardware, components)
@@ -740,8 +740,8 @@ def prepare_shared(hardware=None, cache=None):
 def prepare_loader(hardware=None, cache=None, *, device):
     """Pongo and the storage-capable m1n1 that orchard launch needs, built or reused from the cache."""
     hardware, cache = _build_context(hardware, cache, device)
-    if not has_loader_patches(hardware):
-        raise ValueError(f'Missing loader patches for {device}')
+    if not has_loader_recipe(hardware):
+        raise ValueError(f'No m1n1 recipe (boot/m1n1/upstream.lock) for {device}')
     components = cache / 'components-v2'
     with component_lock(cache):
         return {'pongo': _prepare_pongo(hardware, components).resolve(),

@@ -228,7 +228,7 @@ With a kernel in the payload (RAM boots) it changes nothing.
 m1n1 does the storage boot and the host only starts m1n1 and, when asked,
 chooses (bootloader decision of 2026-10-29; autoboot 2026-11-17). This section is the interface between them; the Rust launcher and
 `transports/m1n1.py` implement the host side against it. Status per item:
-**done** (in `boot/m1n1/patches/orchard`) or **open**.
+**done** (in OrchardLinux/m1n1) or **open**.
 
 ### Transport
 

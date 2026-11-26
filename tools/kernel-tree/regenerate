@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""Regenerate the branches of the linux tree and main of m1n1 from an orchard commit.
+"""Regenerate the branches of the linux tree from an orchard commit.
 
-  orchard python tools/kernel-tree/regenerate --linux DIR --m1n1 DIR [ORCHARD_COMMIT]
+  orchard python tools/kernel-tree/regenerate --linux DIR [ORCHARD_COMMIT]
 
 Every platform descriptor (platforms/<name>.toml) names its branch in
 OrchardLinux/linux; platforms on one branch share their upstream lock and
 series. For each branch this converts the series onto its upstream base
 (fetched into the clone if missing), adds the platforms' defconfigs, made
 with savedefconfig in the kernel toolchain container and checked to
-reproduce kernel/configs byte for byte, and moves the branch. m1n1 has one
-series, which becomes its main. Everything is read from ORCHARD_COMMIT
+reproduce kernel/configs byte for byte, and moves the branch. Everything is read from ORCHARD_COMMIT
 (default: HEAD of this checkout), not from the working tree. Nothing is
 pushed.
 
@@ -36,7 +35,6 @@ IMAGE = 'localhost/orchard-hardware-kernel-toolchain:bookworm'
 
 parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
 parser.add_argument('--linux', required=True, type=Path, help='clone of OrchardLinux/linux')
-parser.add_argument('--m1n1', required=True, type=Path, help='clone of OrchardLinux/m1n1')
 parser.add_argument('commit', nargs='?', default='HEAD', help='orchard commit (default HEAD)')
 args = parser.parse_args()
 
@@ -183,31 +181,6 @@ try:
             git(args.linux, 'update-ref', f'refs/heads/{branch}', merged)
         git(args.linux, 'update-ref', f'refs/orchard/generated/{branch}', merged)
         print(f'linux {branch} {merged[:12]} tree {git(args.linux, "rev-parse", merged + "^{tree}")[:12]}')
-
-    # m1n1: one series, one main.
-    generated = subprocess.run(['git', '-C', args.m1n1, 'rev-parse', '-q', '--verify', 'refs/orchard/generated/main'],
-                               capture_output=True, text=True).stdout.strip()
-    tip = subprocess.run(['git', '-C', args.m1n1, 'rev-parse', '-q', '--verify', 'refs/heads/main'],
-                         capture_output=True, text=True).stdout.strip()
-    if generated and tip and tip != generated:
-        sys.exit(f'm1n1 main has {git(args.m1n1, "rev-list", "--count", f"{generated}..{tip}")} commit(s) regenerate '
-                 'did not make; export them to orchard first, or reset main to refs/orchard/generated/main')
-    m1n1_base = dict(l.split('=', 1) for l in git(ORCHARD, 'show', f'{commit}:boot/m1n1/upstream.lock')
-                     .splitlines() if '=' in l)['commit']
-    subprocess.run([sys.executable, '-I', HERE / 'convert.py', '--orchard', ORCHARD, '--commit', commit,
-                    '--layers', 'boot/m1n1', '--refs', 'main', '--target', args.m1n1,
-                    '--base', m1n1_base, '--map', args.m1n1 / '.git/orchard-patch-map-main'], check=True)
-    converted = git(args.m1n1, 'rev-parse', 'refs/orchard/converted')
-    current = subprocess.run(['git', '-C', args.m1n1, 'symbolic-ref', '-q', '--short', 'HEAD'],
-                             capture_output=True, text=True).stdout.strip()
-    if current == 'main':
-        if git(args.m1n1, 'status', '--porcelain'):
-            sys.exit(f'{args.m1n1}: main has local changes; not moved')
-        git(args.m1n1, 'reset', '-q', '--hard', converted)
-    else:
-        git(args.m1n1, 'update-ref', 'refs/heads/main', converted)
-    git(args.m1n1, 'update-ref', 'refs/orchard/generated/main', converted)
-    print(f'm1n1 main {converted[:12]}')
 finally:
     import shutil
     shutil.rmtree(work, ignore_errors=True)

@@ -1,8 +1,7 @@
 """Test-side boot contract reader: GPT, the XBOOTLDR FAT32 partition and BLS entries.
 
 Not part of orchard: on a device m1n1 reads and checks the entries itself
-and picks the default (boot/m1n1/patches/orchard/0008, 0017,
-docs/boot-contract.md). The tests use this
+and picks the default (OrchardLinux/m1n1, docs/boot-contract.md). The tests use this
 as an independent reading of the contract: to check what the installer
 writes (tests/linux/install_vm.py) and to model m1n1's listing in the launch
 tests. Everything goes through a block-read callable; nothing here writes.

@@ -33,7 +33,11 @@ catalog marks the other boards `untested`, and their owners find out.
 
 ## Kernel and m1n1 changes
 
-- Work on a branch of OrchardLinux/linux (or m1n1) in a worktree under
+- m1n1: OrchardLinux/m1n1 is the source. Work on a branch there, open the
+  pull request there, and never add m1n1 patch files to orchard. Orchard
+  builds the commit in `boot/m1n1/upstream.lock`; move it in the orchard
+  pull request that needs the new m1n1 (`boot/m1n1/README.md`).
+- Kernel: work on a branch of OrchardLinux/linux in a worktree under
   `~/projects/OrchardLinux/trees/` (a case-sensitive volume), as ordinary
   source. Build it with `orchard build … --kernel-tree DIR`; its build output
   stays inside the tree, in `.orchard-out/` (git ignores it there).
@@ -43,8 +47,8 @@ catalog marks the other boards `untested`, and their owners find out.
   into orchard's patch files (defconfig changes become orchard's config).
   Don't pick or reserve patch numbers: a branch needs none, and export
   numbers its patches after those already in each directory.
-  Until the switch, orchard's patch files are the source of truth: the
-  `main` branches of OrchardLinux/linux and m1n1 are generated from them by
+  For the kernel, orchard's patch files are the source of truth: the
+  branches of OrchardLinux/linux are generated from them by
   `tools/kernel-tree/regenerate` (which refuses a branch with commits it did
   not make); never commit to those branches by hand.
 

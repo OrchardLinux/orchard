@@ -85,6 +85,12 @@ is missing or empty.
 
 ### Building
 
+- m1n1 is built from its own repository,
+  [OrchardLinux/m1n1](https://github.com/OrchardLinux/m1n1), instead of from
+  patch files in orchard. m1n1 changes are pull requests there, against the
+  real source; orchard names the commit it builds in `boot/m1n1/upstream.lock`.
+  The quiet boot screen is part of that m1n1 now. Kernel changes still go into
+  orchard as patch files.
 - The scripts recipes and distributions run by path moved to `producers/`
   (`buildenv.py`, `initramfs.py`, `assemble.py`, `cascadia.py`). Their old paths
   and module names still work. m1n1, the static tools and the Cascadia loader
