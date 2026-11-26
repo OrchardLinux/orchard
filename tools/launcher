@@ -14,7 +14,7 @@
 # orchard2, the Rust tool, builds instead when it is switched on for this
 # computer: ORCHARD2=1 (0: off), else a line orchard2 = true in
 # ~/.config/orchard/config.toml. build, inputs, install, launch, devices, doctor,
-# cache and the build step of run then go to the orchard2 on PATH, with the same
+# cache and run then go to the orchard2 on PATH, with the same
 # version's data; everything else stays here. A checkout's bin/orchard follows the same switch.
 set -eu
 
@@ -218,12 +218,12 @@ case ${1:-} in
             exit 2
         fi ;;
     run)
-        # orchard2 builds and boots a payload project. A distribution
-        # checkout's release, and a device orchard2 has no boot route for,
-        # are booted here after orchard2 built them.
+        # orchard2 builds and boots a payload project, or a distribution
+        # checkout's installer system. A device orchard2 has no boot route
+        # for is booted here after orchard2 built for it.
         if orchard2_on; then
             shift
-            build=1 help='' directory=. value=''
+            build=1 help='' value=''
             route=${ORCHARD_BOOT:-${ORCHARD_VIA:-}}
             for argument; do
                 case $value in
@@ -236,8 +236,6 @@ case ${1:-} in
                     --via) value=via ;;
                     --via=*) route=${argument#*=} ;;
                     --version|--device|--platform|--cache|--kernel-dir|--kernel-tree|--packages|--pongo|--busybox|--loader) value=other ;;
-                    -*) ;;
-                    *) directory=$argument ;;
                 esac
             done
             # orchard2's own arguments: without -y (it does not ask) and
@@ -260,11 +258,6 @@ case ${1:-} in
             }
             if [ -n "$help" ]; then
                 :
-            elif grep -Eqs '^\[release\]' "$directory/orchard.toml"; then
-                if [ -n "$build" ]; then
-                    mine orchard2_command build "$@" >&2
-                    set -- --no-build "$@"
-                fi
             else
                 needs_orchard2
                 uv sync --quiet --project "$root" >&2
