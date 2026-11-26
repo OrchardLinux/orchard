@@ -93,9 +93,11 @@
       "wifi"
     ],
     "d21": [
+      "accelerometer",
       "backlight",
       "battery",
       "buttons",
+      "gyroscope",
       "storage_read",
       "storage_write",
       "touch",

@@ -1,0 +1,33 @@
+From bd1e4dd4048161c657d029a801ea1bf32cbac824 Mon Sep 17 00:00:00 2001
+From: Dugs <dugahol@protonmail.com>
+Date: Thu, 26 Nov 2026 22:48:54 +1030
+Subject: [PATCH 2/4] soc: apple: aop: Add the T8015
+
+The A11's AOP firmware boots with the A10's loader and speaks the same
+interface: on the iPhone 8 Plus it announces its services, and the
+accelerometer, gyroscope and barometer report through the A10's sensor
+drivers. Add the apple,t8015-aop compatible with the T8010's data.
+
+Assisted-by: LLM
+Signed-off-by: Dugs <dugahol@protonmail.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/soc/apple/aop.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/soc/apple/aop.c b/drivers/soc/apple/aop.c
+index bd917d2..658feb2 100644
+--- a/drivers/soc/apple/aop.c
++++ b/drivers/soc/apple/aop.c
+@@ -1175,6 +1175,8 @@ static const struct of_device_id apple_aop_of_match[] = {
+ 	{ .compatible = "apple,s8000-aop", .data = &apple_aop_s8000_hw },
+ 	{ .compatible = "apple,t8010-aop", .data = &apple_aop_t8010_hw },
+ 	{ .compatible = "apple,t8011-aop", .data = &apple_aop_t8011_hw },
++	/* The A11's AOP takes the A10's loader and interface. */
++	{ .compatible = "apple,t8015-aop", .data = &apple_aop_t8010_hw },
+ 	{}
+ };
+ MODULE_DEVICE_TABLE(of, apple_aop_of_match);
+-- 
+2.55.0
+
