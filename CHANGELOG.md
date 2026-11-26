@@ -34,7 +34,8 @@ is missing or empty.
   programs read at once. Found and fixed by brkosebay (thanks!).
 - iPhone 8 Plus: the Always-On Processor starts, with its firmware from the
   recipe, and serves the accelerometer, gyroscope and barometer; the screen
-  rotates with the phone.
+  rotates with the phone. Both models; tested on the Global one by ryzensnyper
+  (thanks!).
 - iPhone 8 Plus: the compass reads the magnetic field in microtesla, with
   the unit's factory calibration from the ADT.
 - iPhone 8 Plus: the phone no longer locks up when the AOP takes over the

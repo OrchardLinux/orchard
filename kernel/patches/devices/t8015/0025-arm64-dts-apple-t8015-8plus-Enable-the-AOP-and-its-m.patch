@@ -1,11 +1,12 @@
-From f381574c55109ed4e8a521054ca40dd648500451 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Dugs <dugahol@protonmail.com>
 Date: Thu, 26 Nov 2026 22:48:54 +1030
-Subject: [PATCH 4/4] arm64: dts: apple: t8015-d21: Enable the AOP and its
- motion sensors
+Subject: [PATCH] arm64: dts: apple: t8015-8plus: Enable the AOP and its motion
+ sensors
 
 Start the AOP with the IPSW's firmware and give the accelerometer and
-gyroscope their mount matrices, measured on the phone.
+gyroscope their mount matrices, measured on the phone. Both iPhone 8 Plus
+models (D21, D211) are the same board, so this goes in their shared file.
 
 Tested on an iPhone 8 Plus (D21): the accelerometer, gyroscope and
 barometer bind with the unit's factory calibration, and iio-sensor-proxy
@@ -14,18 +15,17 @@ correctly.
 
 Assisted-by: LLM
 Signed-off-by: Dugs <dugahol@protonmail.com>
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- arch/arm64/boot/dts/apple/t8015-d21.dts | 35 +++++++++++++++++++++++++
+ arch/arm64/boot/dts/apple/t8015-8plus.dtsi | 35 ++++++++++++++++++++++
  1 file changed, 35 insertions(+)
 
-diff --git a/arch/arm64/boot/dts/apple/t8015-d21.dts b/arch/arm64/boot/dts/apple/t8015-d21.dts
-index e83c2d3..4e95d1d 100644
---- a/arch/arm64/boot/dts/apple/t8015-d21.dts
-+++ b/arch/arm64/boot/dts/apple/t8015-d21.dts
-@@ -69,3 +69,38 @@
- &touchclk {
- 	clock-frequency = <32768>;
+diff --git a/arch/arm64/boot/dts/apple/t8015-8plus.dtsi b/arch/arm64/boot/dts/apple/t8015-8plus.dtsi
+index 5406ee47a..5a1d49ddd 100644
+--- a/arch/arm64/boot/dts/apple/t8015-8plus.dtsi
++++ b/arch/arm64/boot/dts/apple/t8015-8plus.dtsi
+@@ -20,3 +20,38 @@ &pinctrl_aop {
+ 	/delete-property/ #interrupt-cells;
+ 	/delete-property/ interrupts;
  };
 +
 +/ {
@@ -63,5 +63,5 @@ index e83c2d3..4e95d1d 100644
 +		       "0", "0", "1";
 +};
 -- 
-2.55.0
+2.54.0 (Apple Git-157)
 

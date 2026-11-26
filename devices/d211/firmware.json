@@ -56,6 +56,12 @@
         "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/pegasusk.txcb"
       },
       "sha256": "10b93452603130fd56a741b76e7375db741eecbfd7341fd6d5d5b9b64191edbc"
+    },
+    "aop.im4p": {
+      "ipsw": {
+        "zip": "Firmware/AOP/aopfw-iphone10aop.im4p"
+      },
+      "sha256": "46e0a6b6ca0b6910e81989ed51c22cdbb8848d7682a53518dd5afdd02e3f2e22"
     }
   },
   "outputs": [
@@ -126,6 +132,34 @@
         {
           "step": "copy@1",
           "input": "pegasusk.txcb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/aop-t8015.bin",
+      "sha256": "76a3cafc2eb9657392697731325583b7ef6fcef3a7d74fc0a7e5bc4842ef741e",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "aop.im4p"
+        },
+        {
+          "step": "aop-image@1",
+          "coprocessor": "AOP"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/aop-t8015-ext.bin",
+      "sha256": "5a3a860ee77251a7538376b3724c5e46badb23f2442cb557644e51e366ceaf60",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "aop.im4p"
+        },
+        {
+          "step": "aop-image@1",
+          "coprocessor": "AOP_ext"
         }
       ]
     }

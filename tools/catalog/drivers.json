@@ -106,9 +106,11 @@
       "wifi"
     ],
     "d211": [
+      "accelerometer",
       "backlight",
       "battery",
       "buttons",
+      "gyroscope",
       "storage_read",
       "storage_write",
       "usb_network",
