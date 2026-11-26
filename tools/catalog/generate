@@ -183,6 +183,18 @@ def display_name(name, chip, boards):
     return f'{name} ({chip["soc"].upper()})' if boards > 1 else name
 
 
+def public_keys(previous, current):
+    """The public keys of a firmware entry, kept only for the same archive and members."""
+    keys = previous.get('keys', {})
+    if keys:
+        if previous['ipsw']['sha256'] != current['ipsw']['sha256']:
+            raise ValueError('firmware changed; review its public keys')
+        members = {i['ipsw']['zip'] for i in current['inputs'].values()}
+        if not set(keys) <= members:
+            raise ValueError('a public key names a member that is no longer an input')
+    return keys
+
+
 def generate(item, known, trees, tree):
     """What public sources say about one board: its facts and its boot.json."""
     product, name, board, boards = item
@@ -205,6 +217,11 @@ def generate(item, known, trees, tree):
     for build in sorted(pins):
         pinned = next(firmware for firmware in firmwares if firmware['buildid'] == build)
         entries.append(read_firmware(pinned, model, 'method')[0])
+    # Public firmware keys come from people, and stay with their firmware.
+    before = {old['ipsw']['build']: old for old in existing.get('firmware', [])}
+    for current in entries:
+        if keys := public_keys(before.get(current['ipsw']['build'], {}), current):
+            current['keys'] = keys
     dtb = f'{chip["soc"]}-{profile}'
     return {'profile': profile, 'product': product, 'name': display_name(name, chip, boards),
             'chip': chip_id, 'board': board_id, 'platform': chip.get('platform'),

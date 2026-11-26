@@ -81,6 +81,30 @@ class Catalog(unittest.TestCase):
                     if 'build' in data:
                         self.assertIn(data['build'], builds)
 
+    def test_public_keys_name_exact_members_and_have_public_sources(self):
+        for path in sorted(ROOT.glob('devices/*/boot.json')):
+            for firmware in json.loads(path.read_text())['firmware']:
+                members = {i['ipsw']['zip'] for i in firmware['inputs'].values()}
+                for member, key in firmware.get('keys', {}).items():
+                    with self.subTest(board=path.parent.name, member=member):
+                        self.assertIn(member, members)
+                        self.assertIn(key['kind'], ('img3', 'im4p'))
+                        self.assertEqual(len(bytes.fromhex(key['iv'])), 16)
+                        self.assertIn(len(bytes.fromhex(key['key'])), (16, 24, 32))
+                        self.assertTrue(key['source'].strip())
+
+    def test_generation_keeps_public_keys_only_for_the_same_firmware(self):
+        generate = tool()
+        keys = {'Firmware/ibss': {'kind': 'im4p', 'iv': '00' * 16, 'key': '01' * 32, 'source': 'a test'}}
+        previous = {'ipsw': {'sha256': 'abc'}, 'keys': keys}
+        current = {'ipsw': {'sha256': 'abc'}, 'inputs': {'iBSS': {'ipsw': {'zip': 'Firmware/ibss'}}}}
+        self.assertEqual(generate.public_keys(previous, current), keys)
+        self.assertEqual(generate.public_keys({}, current), {})
+        with self.assertRaisesRegex(ValueError, 'firmware changed'):
+            generate.public_keys(previous, dict(current, ipsw={'sha256': 'other'}))
+        with self.assertRaisesRegex(ValueError, 'no longer an input'):
+            generate.public_keys(previous, dict(current, inputs={}))
+
     def test_files_validate_against_their_schemas(self):
         try:
             from jsonschema import Draft202012Validator

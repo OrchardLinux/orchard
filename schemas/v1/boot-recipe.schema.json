@@ -25,6 +25,21 @@
             "additionalProperties": false
           },
           "selected_by": { "enum": ["chip-reference", "chip-reference-major", "firmware-recipe", "newest", "method"] },
+          "keys": {
+            "description": "Public firmware keys by archive member, where the firmware's are published: a boot build then needs no device to unwrap them.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "kind": { "enum": ["img3", "im4p"] },
+                "iv": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+                "key": { "type": "string", "pattern": "^([0-9a-f]{32}|[0-9a-f]{48}|[0-9a-f]{64})$" },
+                "source": { "type": "string", "minLength": 1 }
+              },
+              "required": ["kind", "iv", "key", "source"],
+              "additionalProperties": false
+            }
+          },
           "inputs": {
             "type": "object",
             "properties": {

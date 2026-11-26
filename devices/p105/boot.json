@@ -11,6 +11,20 @@
         "sha256": "ce6cd59a4a3271eccb93b31c8d40e94ad966112999576663b3ab235196154756"
       },
       "selected_by": "chip-reference",
+      "keys": {
+        "Firmware/dfu/iBSS.p105.RELEASE.dfu": {
+          "kind": "img3",
+          "iv": "b21abc8689b0dea8f6e613f9f970e241",
+          "key": "b9ed63e4a31f5d9d4d7dddc527e65fd31d1ea48c70204e6b44551c1e6dfc52b5",
+          "source": "rzxvx/Project-Cascadia@091d441f19e101699f7e1835a80ccb48d6e54eec devices/a5/scripts/build-firmware.sh (public community firmware keys)"
+        },
+        "Firmware/dfu/iBEC.p105.RELEASE.dfu": {
+          "kind": "img3",
+          "iv": "8460cab6348e74ba7134ba0f9462b632",
+          "key": "485ddb5f7e70cecfc25c036f812641b9e55bd97783de1488306e3a80abf6950b",
+          "source": "rzxvx/Project-Cascadia@091d441f19e101699f7e1835a80ccb48d6e54eec devices/a5/scripts/build-firmware.sh (public community firmware keys)"
+        }
+      },
       "inputs": {
         "BuildManifest.plist": {
           "ipsw": {

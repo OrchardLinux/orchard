@@ -11,6 +11,20 @@
         "sha256": "bc890d8f49b4c30855f2b67862b97b84b4c4a0f98539f814262ad737a7acb0e3"
       },
       "selected_by": "chip-reference",
+      "keys": {
+        "Firmware/dfu/iBSS.k93.RELEASE.dfu": {
+          "kind": "img3",
+          "iv": "781b9672a86ba1b41f8b7fa0af714c94",
+          "key": "bbd7bf676dbcc6ba93c76d496b7af39ae7772eaaad2ec9fb71dc1fd004827784",
+          "source": "rzxvx/Project-Cascadia@091d441f19e101699f7e1835a80ccb48d6e54eec devices/a5/tools/k93-extract-firmware.py (public firmware keys)"
+        },
+        "Firmware/dfu/iBEC.k93.RELEASE.dfu": {
+          "kind": "img3",
+          "iv": "83220a369c9525f3febb3edd331c65fb",
+          "key": "179027ef30b5008882d6dbd723ceb50c39cba40bb33ba620b71bcbc53ff2d424",
+          "source": "rzxvx/Project-Cascadia@091d441f19e101699f7e1835a80ccb48d6e54eec devices/a5/tools/k93-extract-firmware.py (public firmware keys)"
+        }
+      },
       "inputs": {
         "BuildManifest.plist": {
           "ipsw": {
