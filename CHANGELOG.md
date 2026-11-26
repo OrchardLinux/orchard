@@ -56,6 +56,9 @@ is missing or empty.
   Touch ID sensor; Linux leaves the AOP's GPIO interrupts to the AOP.
 - iPhone 8 Plus: after a wake the screen is back in about 0.3 s instead of
   8 s; the touch controller boots in the background.
+- iPhone 8 Plus: the Touch ID sensor, which Linux cannot use, is switched off
+  at boot instead of staying powered the whole time. New drivers for the
+  SMC's power switches and the sensor (SPI mode 2) do it.
 - iPad mini 2 (Cellular): display, touch, storage, Wi-Fi, speakers, charging,
   sleep and wake and USB networking work on an installed Omarchy A. Tested by
   perryraskin (thanks!).
