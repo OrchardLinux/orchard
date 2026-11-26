@@ -13,6 +13,9 @@ is missing or empty.
 
 ### Devices
 
+- iPhone 8 Plus: the Touch ID sensor, which Linux cannot use, is switched off
+  at boot instead of staying powered the whole time. New drivers for the
+  SMC's power switches and the sensor (SPI mode 2) do it.
 - iPad mini 2 (Cellular): display, touch, storage, Wi-Fi, speakers, charging,
   sleep and wake and USB networking work on an installed Omarchy A. Tested by
   perryraskin (thanks!).
