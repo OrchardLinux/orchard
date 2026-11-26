@@ -1,0 +1,83 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dugs <dugahol@protonmail.com>
+Date: Thu, 26 Nov 2026 00:00:00 +0000
+Subject: [PATCH] wifi: brcmfmac: pcie: Add BCM4357 support
+
+Add the BCM4357 (14e4:440a) found in the A11 iPhones: chip ID 0x4357,
+RAM base 0x170000, the WCC seed and firmware name brcmfmac4357-pcie.
+
+Reading its ChipCommon OTP shadow at 0x8c0 takes the whole SoC down, and
+where else its OTP sits is not known, so skip the OTP read for this chip
+and let the board-type firmware names select the files.
+
+Assisted-by: LLM
+Signed-off-by: Dugs <dugahol@protonmail.com>
+---
+--- a/drivers/net/wireless/broadcom/brcm80211/include/brcm_hw_ids.h	2026-11-26 00:29:38.365349902 +1030
++++ b/drivers/net/wireless/broadcom/brcm80211/include/brcm_hw_ids.h	2026-11-26 00:29:51.659936653 +1030
+@@ -38,6 +38,7 @@
+ #define BRCM_CC_43525_CHIP_ID		43525
+ #define BRCM_CC_4354_CHIP_ID		0x4354
+ #define BRCM_CC_4355_CHIP_ID		0x4355
++#define BRCM_CC_4357_CHIP_ID		0x4357
+ #define BRCM_CC_4356_CHIP_ID		0x4356
+ #define BRCM_CC_43566_CHIP_ID		43566
+ #define BRCM_CC_43567_CHIP_ID		43567
+@@ -77,6 +78,7 @@
+ #define BRCM_PCIE_4354_DEVICE_ID	0x43df
+ #define BRCM_PCIE_4354_RAW_DEVICE_ID	0x4354
+ #define BRCM_PCIE_4355_DEVICE_ID	0x43dc
++#define BRCM_PCIE_4357_DEVICE_ID	0x440a
+ #define BRCM_PCIE_4356_DEVICE_ID	0x43ec
+ #define BRCM_PCIE_43567_DEVICE_ID	0x43d3
+ #define BRCM_PCIE_43570_DEVICE_ID	0x43d9
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/chip.c	2026-11-26 00:29:38.360892312 +1030
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/chip.c	2026-11-26 00:29:51.660084341 +1030
+@@ -741,6 +741,7 @@
+ 		return 0x160000;
+ 	case BRCM_CC_43751_CHIP_ID:
+ 	case BRCM_CC_43752_CHIP_ID:
++	case BRCM_CC_4357_CHIP_ID:
+ 	case BRCM_CC_4377_CHIP_ID:
+ 		return 0x170000;
+ 	case BRCM_CC_4378_CHIP_ID:
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c	2026-11-26 00:29:38.355788051 +1030
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c	2026-11-26 00:47:14.579293162 +1030
+@@ -56,6 +56,7 @@
+ BRCMF_FW_DEF(4350C, "brcmfmac4350c2-pcie");
+ BRCMF_FW_CLM_DEF(4355, "brcmfmac4355-pcie");
+ BRCMF_FW_CLM_DEF(4355C1, "brcmfmac4355c1-pcie");
++BRCMF_FW_CLM_DEF(4357, "brcmfmac4357-pcie");
+ BRCMF_FW_CLM_DEF(4356, "brcmfmac4356-pcie");
+ BRCMF_FW_CLM_DEF(43570, "brcmfmac43570-pcie");
+ BRCMF_FW_DEF(4358, "brcmfmac4358-pcie");
+@@ -94,6 +95,7 @@
+ 	BRCMF_FW_ENTRY(BRCM_CC_4355_CHIP_ID, 0x000007FF, 4355),
+ 	BRCMF_FW_ENTRY(BRCM_CC_4355_CHIP_ID, 0x00002000, 54591),
+ 	BRCMF_FW_ENTRY(BRCM_CC_4355_CHIP_ID, 0xFFFFF800, 4355C1), /* rev ID 12/C2 seen */
++	BRCMF_FW_ENTRY(BRCM_CC_4357_CHIP_ID, 0xFFFFFFFF, 4357),
+ 	BRCMF_FW_ENTRY(BRCM_CC_4356_CHIP_ID, 0xFFFFFFFF, 4356),
+ 	BRCMF_FW_ENTRY(BRCM_CC_43567_CHIP_ID, 0xFFFFFFFF, 43570),
+ 	BRCMF_FW_ENTRY(BRCM_CC_43569_CHIP_ID, 0xFFFFFFFF, 43570),
+@@ -2126,6 +2128,13 @@
+ 		base = 0x8c0;
+ 		words = 0xb2;
+ 		break;
++	case BRCM_CC_4357_CHIP_ID:
++		/*
++		 * The A11 iPhones' BCM4357: reading the ChipCommon OTP shadow
++		 * at 0x8c0 takes the SoC down, and where else its OTP sits is
++		 * not known. Use the board-type firmware names.
++		 */
++		return 0;
+ 	case BRCM_CC_4364_CHIP_ID:
+ 		coreid = BCMA_CORE_CHIPCOMMON;
+ 		base = 0x8c0;
+@@ -2828,6 +2837,7 @@
+ 	BRCMF_PCIE_DEVICE_SUB(0x4355, BRCM_PCIE_VENDOR_ID_BROADCOM, 0x4355, WCC),
+ 	BRCMF_PCIE_DEVICE(BRCM_PCIE_4354_RAW_DEVICE_ID, WCC),
+ 	BRCMF_PCIE_DEVICE(BRCM_PCIE_4355_DEVICE_ID, WCC_SEED),
++	BRCMF_PCIE_DEVICE(BRCM_PCIE_4357_DEVICE_ID, WCC_SEED),
+ 	BRCMF_PCIE_DEVICE(BRCM_PCIE_4356_DEVICE_ID, WCC),
+ 	BRCMF_PCIE_DEVICE(BRCM_PCIE_43567_DEVICE_ID, WCC),
+ 	BRCMF_PCIE_DEVICE(BRCM_PCIE_43570_DEVICE_ID, WCC),
