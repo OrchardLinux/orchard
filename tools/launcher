@@ -14,7 +14,7 @@
 # orchard2, the Rust tool, builds instead when it is switched on for this
 # computer: ORCHARD2=1 (0: off), else a line orchard2 = true in
 # ~/.config/orchard/config.toml. build, inputs, install, launch, devices, doctor,
-# cache and run then go to the orchard2 on PATH, with the same
+# shell, exec, ssh-access, cache and run then go to the orchard2 on PATH, with the same
 # version's data; everything else stays here. A checkout's bin/orchard follows the same switch.
 set -eu
 
@@ -203,7 +203,7 @@ if [ -z "$checkout" ] && [ -f "$root/tools/launcher" ] && ! cmp -s "$self" "$roo
     echo "orchard: a newer launcher is in $(basename "$root"); run orchard update" >&2
 fi
 case ${1:-} in
-    build|inputs|devices|doctor)
+    build|inputs|devices|doctor|shell|exec|ssh-access)
         if orchard2_on; then
             orchard2_command "$@"
             exit

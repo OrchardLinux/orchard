@@ -137,6 +137,9 @@ class Orchard2Switch(Fixture):
         self.assertEqual(self.ran('doctor'), [f'orchard2 doctor {self.env["data"]}'])
         self.assertEqual(self.ran('doctor', ORCHARD2='0'), ['python doctor'])
         self.assertEqual(self.ran('setup'), ['python setup'])
+        self.assertEqual(self.ran('exec', '--', 'uname', '-a'), [f'orchard2 exec -- uname -a {self.env["data"]}'])
+        self.assertEqual(self.ran('shell', ORCHARD2='0'), ['python shell'])
+        self.assertEqual(self.ran('ssh-access', '--user', 'u'), [f'orchard2 ssh-access --user u {self.env["data"]}'])
 
     def test_arguments_are_passed_on_as_they_are(self):
         self.assertEqual(self.ran('build', 'a b', '--explain', ORCHARD2='1'),
