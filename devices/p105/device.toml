@@ -15,7 +15,8 @@ board = 0x0a
 [boot]
 methods = ["jailbreak-kdfu", "recovery-autogo"]
 entries = ["pico-checkm8", "kdfu"]
-# The CLI consumes an owner-private boot manifest. Public launch assets await release integration.
+# Python's CLI consumes an owner-private boot manifest. orchard2 starts the board by its ibss boot
+# route (routes.toml) with the public firmware keys in boot.json.
 
 [kernel]
 platform = "apple-armv7"  # kernel/series/apple-armv7, kernel/configs/apple-armv7
