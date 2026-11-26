@@ -35,7 +35,7 @@ class PublishedKernel(unittest.TestCase):
         loader = keys['shared']['m1n1']
         self.assertEqual(loader['asset'], 'm1n1.bin')
         self.assertEqual(loader['files'],
-                         ['m1n1.bin', 'm1n1-idevice.macho', 'monitor-stub.macho'])
+                         ['m1n1.bin', 'm1n1-idevice.macho', 'monitor-stub.macho', 'm1n1-armv7.macho'])
 
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()

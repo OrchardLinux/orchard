@@ -97,6 +97,8 @@ is missing or empty.
 
 ### Building
 
+- The nightly publishes `m1n1-armv7.macho`, the 32-bit m1n1 for the A5 to
+  A6X chips, built from the same source as the others. Not run on a device.
 - m1n1 is built from its own repository,
   [OrchardLinux/m1n1](https://github.com/OrchardLinux/m1n1), instead of from
   patch files in orchard. m1n1 changes are pull requests there, against the
