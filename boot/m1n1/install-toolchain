@@ -20,3 +20,7 @@ printf '%s  %s\n' "$(awk '{print $1}' "$work/rustup-init.sha256")" "$work/rustup
 chmod +x "$work/rustup-init"
 "$work/rustup-init" -y --profile minimal --default-toolchain 1.90.0 --no-modify-path
 "${CARGO_HOME:-$HOME/.cargo}/bin/rustup" target add --toolchain 1.90.0 aarch64-unknown-none-softfloat
+# The 32-bit m1n1 is position independent, which the ARMv7 target's prebuilt
+# core is not: it builds core and alloc itself, from rust-src.
+"${CARGO_HOME:-$HOME/.cargo}/bin/rustup" target add --toolchain 1.90.0 armv7a-none-eabi
+"${CARGO_HOME:-$HOME/.cargo}/bin/rustup" component add --toolchain 1.90.0 rust-src

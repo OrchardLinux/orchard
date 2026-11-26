@@ -473,7 +473,8 @@ jobs:
           # orchard launch starts any device with only Pongo and the storage-capable
           # m1n1 (orchard.hardware.loader); they are release assets of their own.
           cp out/components/quiet/m1n1.bin out/components/quiet/m1n1-idevice.macho \
-            out/components/quiet/monitor-stub.macho out/components/quiet/pongo.bin out/publication/
+            out/components/quiet/monitor-stub.macho out/components/quiet/m1n1-armv7.macho \
+            out/components/quiet/pongo.bin out/publication/
           # orchard update fetches the core with every device and both loaders.
           python -m pip install -e .
           python -m orchard.installer core out/publication/orchard-core.pyz \

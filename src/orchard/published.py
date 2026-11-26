@@ -72,7 +72,7 @@ def write_keys(hardware, platforms, output):
             'platforms': {platform: {'key': source_key(hardware, platform),
                                      'asset': f'{platform}-components.tar.gz'} for platform in platforms},
             'shared': {'m1n1': {'key': shared['m1n1'], 'asset': 'm1n1.bin',
-                                 'files': ['m1n1.bin', 'm1n1-idevice.macho', 'monitor-stub.macho']},
+                                 'files': ['m1n1.bin', 'm1n1-idevice.macho', 'monitor-stub.macho', 'm1n1-armv7.macho']},
                        'tools': {'key': shared['tools'], 'asset': 'tool-components.tar.gz'}}}
     Path(output).write_text(json.dumps(keys, indent=2, sort_keys=True) + '\n')
     return keys

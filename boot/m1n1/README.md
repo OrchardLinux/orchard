@@ -7,8 +7,10 @@ m1n1 work is a pull request there.
 
 `build` fetches the commit of that repository named in `upstream.lock` and
 compiles `m1n1.bin` with chainloading enabled. Next to it go the same build as
-`m1n1-idevice.macho` (started by iBoot as the kernelcache) and
-`monitor-stub.macho` (the monitor A7-A9 iBoot expects). Git and Podman are
+`m1n1-idevice.macho` (started by iBoot as the kernelcache),
+`monitor-stub.macho` (the monitor A7-A9 iBoot expects) and `m1n1-armv7.macho`
+(the 32-bit build for the A5 to A6X chips, which their iBoot starts as its
+kernel). Git and Podman are
 required.
 
 `orchard build` and `orchard run` run it with their cache directories; don't

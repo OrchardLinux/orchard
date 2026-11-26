@@ -73,9 +73,15 @@ fi
 # Crates are the same for every patch set, so callers may share one Cargo home.
 cargo=${cargo_override:-"$work/cargo"}
 mkdir -p "$cargo"
-"$python" "$here/../../producers/buildenv.py" run --network \
-  --bind "$source:/src:rw" --bind "$cargo:/cache:rw" --env CARGO_HOME=/cache \
-  --cwd /src --image localhost/orchard-hardware-m1n1:bookworm -- make -j2 USE_CLANG=1 ARCH=aarch64-linux-gnu \
+in_builder() {
+  "$python" "$here/../../producers/buildenv.py" run --network \
+    --bind "$source:/src:rw" --bind "$cargo:/cache:rw" --env CARGO_HOME=/cache \
+    --cwd /src --image localhost/orchard-hardware-m1n1:bookworm -- "$@"
+}
+# Both architectures build in the same directory, one after the other; a
+# resumed source still holds the 32-bit objects of its last build.
+if [[ -d "$source/build/arm32" ]]; then in_builder make clean; fi
+in_builder make -j2 USE_CLANG=1 ARCH=aarch64-linux-gnu \
     TOOLCHAIN=/usr/lib/llvm-19/bin/ LLDDIR=/usr/lib/llvm-19/bin/ CHAINLOADING=1 \
     EXTRA_CFLAGS="$extra_cflags"
 mkdir -p "$(dirname "$output")"
@@ -83,5 +89,12 @@ cp "$source/build/m1n1.bin" "$output"
 # The same build as Mach-O, for a chain that starts m1n1 from iBoot as the
 # kernelcache, plus the stub monitor A7-A9 iBoot expects next to it.
 cp "$source/build/m1n1-idevice.macho" "$source/build/monitor-stub.macho" "$(dirname "$output")/"
+# The 32-bit m1n1 for the ARMv7 chips (A5-A6X), from the same source: the
+# Mach-O their iBoot starts as its kernel.
+in_builder make clean
+in_builder make -j2 M1N1_ARCH=arm USE_CLANG=1 \
+    TOOLCHAIN=/usr/lib/llvm-19/bin/ LLDDIR=/usr/lib/llvm-19/bin/ CHAINLOADING=1 \
+    EXTRA_CFLAGS="$extra_cflags"
+cp "$source/build/m1n1-armv7.macho" "$(dirname "$output")/"
 sha256sum "$output" 2>/dev/null || shasum -a 256 "$output"
 echo "Loader: $output"
