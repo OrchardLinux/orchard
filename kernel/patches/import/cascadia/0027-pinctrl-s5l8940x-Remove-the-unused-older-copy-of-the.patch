@@ -1,8 +1,8 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Henrik Klee <henrik@goat-code.com>
 Date: Mon, 2 Nov 2026 05:16:22 +0800
-Subject: [PATCH 22/22] pinctrl: s5l8940x: Remove the unused older copy of the
- GPIO driver
+Subject: [PATCH] pinctrl: s5l8940x: Remove the unused older copy of the GPIO
+ driver
 
 drivers/pinctrl/pinctrl-new/pinctrl-s5l8940x-gpio.c is an earlier copy of
 pinctrl-s5l8940x-gpio.c that came along from Cascadia's
@@ -16,7 +16,7 @@ Assisted-by: LLM
 
 diff --git a/drivers/pinctrl/pinctrl-new/pinctrl-s5l8940x-gpio.c b/drivers/pinctrl/pinctrl-new/pinctrl-s5l8940x-gpio.c
 deleted file mode 100644
-index e4d46cfea..000000000
+index e4d46cfea4d8..000000000000
 --- a/drivers/pinctrl/pinctrl-new/pinctrl-s5l8940x-gpio.c
 +++ /dev/null
 @@ -1,541 +0,0 @@

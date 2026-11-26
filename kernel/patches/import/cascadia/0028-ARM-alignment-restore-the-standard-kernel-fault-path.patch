@@ -17,7 +17,7 @@ Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
  1 file changed, 4 insertions(+), 5 deletions(-)
 
 diff --git a/arch/arm/mm/alignment.c b/arch/arm/mm/alignment.c
-index c9e36089c..3c6ddb1af 100644
+index c9e36089c35d..3c6ddb1afdc4 100644
 --- a/arch/arm/mm/alignment.c
 +++ b/arch/arm/mm/alignment.c
 @@ -343,7 +343,7 @@ do_alignment_ldrhstrh(unsigned long addr, u32 instr, struct pt_regs *regs)

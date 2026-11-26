@@ -3,7 +3,7 @@ From: rzxvx <rrzxznewid@gmail.com>
 Date: Fri, 23 Oct 2026 17:08:08 +0300
 Subject: [PATCH] i2c: Add the Apple S5L8940X I2C controller
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at d92da7d:
   devices/a5/patches/files-sandcastle-port/drivers/i2c/busses/i2c-s5l8940x.c
   devices/a5/patches/tree/0001-cascadia.patch
 
@@ -24,7 +24,7 @@ drivers they were based on.
  create mode 100644 drivers/i2c/busses/i2c-s5l8940x.c
 
 diff --git a/drivers/i2c/busses/Kconfig b/drivers/i2c/busses/Kconfig
-index 6b3ba7e57..df0338882 100644
+index 6b3ba7e5723a..df0338882e0d 100644
 --- a/drivers/i2c/busses/Kconfig
 +++ b/drivers/i2c/busses/Kconfig
 @@ -1530,4 +1530,8 @@ config I2C_VIRTIO
@@ -37,7 +37,7 @@ index 6b3ba7e57..df0338882 100644
 +	default y
  endmenu
 diff --git a/drivers/i2c/busses/Makefile b/drivers/i2c/busses/Makefile
-index ecc07c50f..5f2327a8e 100644
+index ecc07c50f2a0..5f2327a8e391 100644
 --- a/drivers/i2c/busses/Makefile
 +++ b/drivers/i2c/busses/Makefile
 @@ -160,3 +160,4 @@ obj-$(CONFIG_I2C_FSI)		+= i2c-fsi.o
@@ -46,7 +46,7 @@ index ecc07c50f..5f2327a8e 100644
  ccflags-$(CONFIG_I2C_DEBUG_BUS) := -DDEBUG
 +obj-$(CONFIG_I2C_S5L8940X)    += i2c-s5l8940x.o
 diff --git a/drivers/i2c/busses/i2c-s3c2410.c b/drivers/i2c/busses/i2c-s3c2410.c
-index 7698d9d59..dc856943c 100644
+index 7698d9d59744..dc856943cdcb 100644
 --- a/drivers/i2c/busses/i2c-s3c2410.c
 +++ b/drivers/i2c/busses/i2c-s3c2410.c
 @@ -139,6 +139,7 @@ static void i2c_s3c_irq_nextbyte(struct s3c24xx_i2c *i2c, unsigned long iicstat)
@@ -116,7 +116,7 @@ index 7698d9d59..dc856943c 100644
  	ret = i2c->msg_idx;
 diff --git a/drivers/i2c/busses/i2c-s5l8940x.c b/drivers/i2c/busses/i2c-s5l8940x.c
 new file mode 100644
-index 000000000..4ea49d8f0
+index 000000000000..4ea49d8f0ccb
 --- /dev/null
 +++ b/drivers/i2c/busses/i2c-s5l8940x.c
 @@ -0,0 +1,557 @@

@@ -8,6 +8,9 @@ alternate stack experiment and the trace calls in core boot and fork code.
 Preserve the framebuffer reservation and the AIC register readback because
 the event read can consume a pending interrupt.
 
+[Orchard: rebased onto Cascadia d92da7d, whose kernel_init now starts the
+ AIC1 clockevent itself]
+
 Link: https://github.com/OrchardLinux/orchard/issues/79
 Assisted-by: LLM
 Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
@@ -299,7 +302,7 @@ index e4aaa6c00..19e4fb048 100644
  /*
   * The L2's other half.  The ADT's pl310 node has two register blocks: the
   * PL310 itself and Apple's CIF at 0x3fd00000.  iOS 6.1's AppleS5L8940XPL310,
-@@ -390,9 +238,7 @@ out:
+@@ -390,9 +238,7 @@ static void __init apple_s5l_cif_l2_on(void)
  
  static void __init apple_s5l_init_irq(void)
  {
@@ -583,7 +586,7 @@ index 1880315dc..000000000
 -
 -#endif
 diff --git a/init/main.c b/init/main.c
-index 296545649..4cb431401 100644
+index 4008812d0..2955edc90 100644
 --- a/init/main.c
 +++ b/init/main.c
 @@ -699,7 +699,6 @@ static void __init setup_command_line(char *command_line)
@@ -603,7 +606,7 @@ index 296545649..4cb431401 100644
  	pid = apple_s5l_rest_spawn_init(kernel_init, NULL, CLONE_FS);
  #else
  	pid = user_mode_thread(kernel_init, NULL, CLONE_FS);
-@@ -1487,57 +1484,39 @@ static int __ref kernel_init(void *unused)
+@@ -1487,63 +1484,45 @@ static int __ref kernel_init(void *unused)
  #ifdef CONFIG_ARCH_APPLE_S5L
  	{
  		void apple_aic1_quiesce(void);
@@ -641,6 +644,7 @@ index 296545649..4cb431401 100644
 -		void apple_aic1_hw_quiesce_quiet(void);
 +		void apple_aic1_hw_quiesce(bool read_back);
  		void apple_aic1_rearm(void);
+ 		int apple_aic1_timer_start(void);
  
 -		p105_fb_dbg("init_go");
  		apple_aic1_quiesce();
@@ -658,6 +662,11 @@ index 296545649..4cb431401 100644
 -		p105_fb_dbg("thaw_on");
  		apple_aic1_release_escape();
 -		p105_fb_dbg("esc_off");
+ 		/* The tick, before workqueue_init() makes the first kernel
+ 		 * threads: kthread_bind() can sleep one tick in
+ 		 * wait_task_inactive(), and with no clockevent yet that sleep
+ 		 * never ends (irq-apple-aic1.c, apple_aic1_timer_start). */
+ 		apple_aic1_timer_start();
  	}
 -#endif
 -#ifdef CONFIG_ARCH_APPLE_S5L
@@ -665,7 +674,7 @@ index 296545649..4cb431401 100644
  #endif
  	kernel_init_freeable();
  	/* need to finish all async __init code before freeing the memory */
-@@ -1548,13 +1527,6 @@ static int __ref kernel_init(void *unused)
+@@ -1554,13 +1533,6 @@ static int __ref kernel_init(void *unused)
  	ftrace_free_init_mem();
  	kgdb_free_init_mem();
  	exit_boot_config();
@@ -679,7 +688,7 @@ index 296545649..4cb431401 100644
  	free_initmem();
  	mark_readonly();
  
-@@ -1572,10 +1544,7 @@ static int __ref kernel_init(void *unused)
+@@ -1578,10 +1550,7 @@ static int __ref kernel_init(void *unused)
  	do_sysctl_args();
  
  	if (ramdisk_execute_command) {

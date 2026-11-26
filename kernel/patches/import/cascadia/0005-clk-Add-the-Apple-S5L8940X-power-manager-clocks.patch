@@ -3,7 +3,7 @@ From: rzxvx <rrzxznewid@gmail.com>
 Date: Sat, 19 Sep 2026 12:19:56 +0000
 Subject: [PATCH] clk: Add the Apple S5L8940X power manager clocks
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at d92da7d:
   devices/a5/patches/files-sandcastle-port/drivers/clk/clk-s5l8940x-pmgr.c
   devices/a5/patches/tree/0001-cascadia.patch
 
@@ -23,7 +23,7 @@ drivers they were based on.
  create mode 100644 drivers/clk/clk-s5l8940x-pmgr.c
 
 diff --git a/drivers/clk/Kconfig b/drivers/clk/Kconfig
-index 299bc678e..d67b9f1d5 100644
+index 299bc678ed1b..d67b9f1d52c6 100644
 --- a/drivers/clk/Kconfig
 +++ b/drivers/clk/Kconfig
 @@ -546,4 +546,12 @@ config CLK_FD_KUNIT_TEST
@@ -40,7 +40,7 @@ index 299bc678e..d67b9f1d5 100644
 +
  endif
 diff --git a/drivers/clk/Makefile b/drivers/clk/Makefile
-index fb8878a5d..929d531e1 100644
+index fb8878a5d7d9..929d531e1777 100644
 --- a/drivers/clk/Makefile
 +++ b/drivers/clk/Makefile
 @@ -149,3 +149,4 @@ endif
@@ -50,7 +50,7 @@ index fb8878a5d..929d531e1 100644
 +obj-$(CONFIG_S5L8940X_PMGR_CLK)   += clk-s5l8940x-pmgr.o
 diff --git a/drivers/clk/clk-s5l8940x-pmgr.c b/drivers/clk/clk-s5l8940x-pmgr.c
 new file mode 100644
-index 000000000..d9e6942da
+index 000000000000..d9e6942da727
 --- /dev/null
 +++ b/drivers/clk/clk-s5l8940x-pmgr.c
 @@ -0,0 +1,514 @@

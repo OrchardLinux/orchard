@@ -3,7 +3,7 @@ From: rzxvx <rrzxznewid@gmail.com>
 Date: Sat, 3 Oct 2026 03:21:53 +0300
 Subject: [PATCH] tty: serial: samsung: Support the Apple S5L UART
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at d92da7d:
   devices/a5/patches/tree/0001-cascadia.patch
 
 Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (2 commits).
@@ -15,7 +15,7 @@ Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (2 commits).
  2 files changed, 44 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/tty/serial/Kconfig b/drivers/tty/serial/Kconfig
-index 28e4beeab..25e0c13e1 100644
+index 28e4beeabf8f..25e0c13e1436 100644
 --- a/drivers/tty/serial/Kconfig
 +++ b/drivers/tty/serial/Kconfig
 @@ -238,7 +238,7 @@ config SERIAL_CLPS711X_CONSOLE
@@ -28,7 +28,7 @@ index 28e4beeab..25e0c13e1 100644
  	help
  	  Support for the on-chip UARTs on the Samsung
 diff --git a/drivers/tty/serial/samsung_tty.c b/drivers/tty/serial/samsung_tty.c
-index 0d184ee2f..1e7a227b4 100644
+index 0d184ee2f9ce..1e7a227b441b 100644
 --- a/drivers/tty/serial/samsung_tty.c
 +++ b/drivers/tty/serial/samsung_tty.c
 @@ -1896,6 +1896,8 @@ static int s3c24xx_serial_init_port(struct s3c24xx_uart_port *ourport,

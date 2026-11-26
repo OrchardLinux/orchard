@@ -2,7 +2,7 @@
 
 The first A5X (S5L8945X) board of the apple-armv7 platform. It runs Project
 Cascadia's A5 port with the iPad mini 1's drivers, plus a few J1 changes. The
-device tree is `s5l8945x-j1.dts` (kernel/patches/import/cascadia/0023), from
+device tree is `s5l8945x-j1.dts` (kernel/patches/import/cascadia/0025), from
 Cascadia's `devices/a5/dts/j1ap.dts`. Cascadia's
 [j1-a5x.md](https://github.com/rzxvx/Project-Cascadia/blob/main/devices/a5/docs/research/j1-a5x.md)
 records the bring-up: addresses, the boot chain, the PMU, touch and Wi-Fi.
@@ -75,14 +75,15 @@ Wi-Fi MAC address that goes into the nvram.
 
 - Boot orchard's clang build on the J1: find the loader's decompressor hooks
   for a clang zImage.
-- Upstream to Cascadia first, then import here. Open as Cascadia
-  [PR #35](https://github.com/rzxvx/Project-Cascadia/pull/35): CPU ids
-  `0x900`/`0x901` and both cores, the battery gauge (HDQ, UART5 powered), the
-  backlight node, a portrait boot console, a PHY driver for the second USB
-  complex (Wi-Fi at boot without the userspace bring-up) and Bluetooth.
-  `import-cascadia.py` regenerates only 0001–0020: like the P105's 0021, 0023
-  is refreshed by hand from Cascadia's `devices/a5/dts/j1ap.dts`.
-- Known faults in this tree (only the first is fixed upstream so far):
+- Cascadia [PR #35](https://github.com/rzxvx/Project-Cascadia/pull/35) and
+  [PR #36](https://github.com/rzxvx/Project-Cascadia/pull/36) are merged and
+  imported (Cascadia d92da7d): CPU ids `0x900`/`0x901` and both cores, the
+  battery gauge (HDQ, UART5 powered), the backlight node, a portrait boot
+  console, a PHY driver for the second USB complex (Wi-Fi at boot without the
+  userspace bring-up), Bluetooth and the speaker (I2S0 + CS42L63). None of it
+  has run on orchard's build yet. `import-cascadia.py` writes the device tree
+  with the rest of the layer.
+- Known faults in this tree (the import of PR #35 fixed the first):
   - The CPU nodes are `0xa00`/`0xa01`, the iPad mini's, but the A5X boots with
     MPIDR `0x900`. Linux finds no node for the boot CPU and falls back to one
     possible CPU (`maxcpus=1` in the bootargs hides this). PR #35 fixes it.

@@ -3,7 +3,7 @@ From: rzxvx <rrzxznewid@gmail.com>
 Date: Fri, 23 Oct 2026 16:54:03 +0300
 Subject: [PATCH] iio: accel: st_accel: Add the LIS3DSH
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at d92da7d:
   devices/a5/patches/tree/0002-st_accel-lis3dsh.patch
 
 Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (1 commit).
@@ -18,7 +18,7 @@ Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (1 commit).
  5 files changed, 103 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/iio/accel/Kconfig b/drivers/iio/accel/Kconfig
-index 8c3f7cf55..979259b39 100644
+index 8c3f7cf55d5f..979259b39f90 100644
 --- a/drivers/iio/accel/Kconfig
 +++ b/drivers/iio/accel/Kconfig
 @@ -418,7 +418,7 @@ config IIO_ST_ACCEL_3AXIS
@@ -31,7 +31,7 @@ index 8c3f7cf55..979259b39 100644
  	  Also need to enable at least one of I2C and SPI interface drivers
  	  below.
 diff --git a/drivers/iio/accel/st_accel.h b/drivers/iio/accel/st_accel.h
-index 2659f536c..51277e9fa 100644
+index 2659f536cef6..51277e9faadc 100644
 --- a/drivers/iio/accel/st_accel.h
 +++ b/drivers/iio/accel/st_accel.h
 @@ -27,6 +27,7 @@
@@ -43,7 +43,7 @@ index 2659f536c..51277e9fa 100644
  #define LIS2DH12_ACCEL_DEV_NAME		"lis2dh12_accel"
  #define LIS3L02DQ_ACCEL_DEV_NAME	"lis3l02dq"
 diff --git a/drivers/iio/accel/st_accel_core.c b/drivers/iio/accel/st_accel_core.c
-index 0e371efbd..2f7b311b7 100644
+index 0e371efbda70..2f7b311b77c3 100644
 --- a/drivers/iio/accel/st_accel_core.c
 +++ b/drivers/iio/accel/st_accel_core.c
 @@ -367,6 +367,97 @@ static const struct st_sensor_settings st_accel_sensors_settings[] = {
@@ -145,7 +145,7 @@ index 0e371efbd..2f7b311b7 100644
  		.wai = 0x3a,
  		.wai_addr = ST_SENSORS_DEFAULT_WAI_ADDRESS,
 diff --git a/drivers/iio/accel/st_accel_i2c.c b/drivers/iio/accel/st_accel_i2c.c
-index 329a4d6fb..c7c237506 100644
+index 329a4d6fb2ec..c7c2375063af 100644
 --- a/drivers/iio/accel/st_accel_i2c.c
 +++ b/drivers/iio/accel/st_accel_i2c.c
 @@ -126,6 +126,10 @@ static const struct of_device_id st_accel_of_match[] = {
@@ -168,7 +168,7 @@ index 329a4d6fb..c7c237506 100644
  };
  MODULE_DEVICE_TABLE(i2c, st_accel_id_table);
 diff --git a/drivers/iio/accel/st_accel_spi.c b/drivers/iio/accel/st_accel_spi.c
-index 825adab37..774c63ace 100644
+index 825adab37105..774c63acef1f 100644
 --- a/drivers/iio/accel/st_accel_spi.c
 +++ b/drivers/iio/accel/st_accel_spi.c
 @@ -108,6 +108,10 @@ static const struct of_device_id st_accel_of_match[] = {

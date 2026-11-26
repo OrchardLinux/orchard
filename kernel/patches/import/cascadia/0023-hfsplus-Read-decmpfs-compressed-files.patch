@@ -3,7 +3,7 @@ From: rzxvx <rrzxznewid@gmail.com>
 Date: Sun, 27 Sep 2026 18:27:09 +0300
 Subject: [PATCH] hfsplus: Read decmpfs-compressed files
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at d92da7d:
   devices/a5/patches/files/fs/hfsplus/decmpfs.c
   devices/a5/patches/tree/0001-cascadia.patch
 
@@ -20,7 +20,7 @@ Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (1 commit).
  create mode 100644 fs/hfsplus/decmpfs.c
 
 diff --git a/fs/hfsplus/Kconfig b/fs/hfsplus/Kconfig
-index 8ce4a33a9..f6666bb90 100644
+index 8ce4a33a9ac7..f6666bb900a1 100644
 --- a/fs/hfsplus/Kconfig
 +++ b/fs/hfsplus/Kconfig
 @@ -6,6 +6,7 @@ config HFSPLUS_FS
@@ -32,7 +32,7 @@ index 8ce4a33a9..f6666bb90 100644
  	  If you say Y here, you will be able to mount extended format
  	  Macintosh-formatted hard drive partitions with full read-write access.
 diff --git a/fs/hfsplus/Makefile b/fs/hfsplus/Makefile
-index 9ed20e64b..76acd4da9 100644
+index 9ed20e64b983..76acd4da9854 100644
 --- a/fs/hfsplus/Makefile
 +++ b/fs/hfsplus/Makefile
 @@ -7,4 +7,5 @@ obj-$(CONFIG_HFSPLUS_FS) += hfsplus.o
@@ -44,7 +44,7 @@ index 9ed20e64b..76acd4da9 100644
 +		decmpfs.o
 diff --git a/fs/hfsplus/decmpfs.c b/fs/hfsplus/decmpfs.c
 new file mode 100644
-index 000000000..b1d1ad89c
+index 000000000000..b1d1ad89ca9b
 --- /dev/null
 +++ b/fs/hfsplus/decmpfs.c
 @@ -0,0 +1,366 @@
@@ -415,7 +415,7 @@ index 000000000..b1d1ad89c
 +	}
 +}
 diff --git a/fs/hfsplus/hfsplus_fs.h b/fs/hfsplus/hfsplus_fs.h
-index 59ce81dca..01964008d 100644
+index 59ce81dca73f..01964008dfcc 100644
 --- a/fs/hfsplus/hfsplus_fs.h
 +++ b/fs/hfsplus/hfsplus_fs.h
 @@ -250,6 +250,8 @@ struct hfsplus_inode_info {
@@ -440,7 +440,7 @@ index 59ce81dca..01964008d 100644
  extern const struct dentry_operations hfsplus_dentry_operations;
  
 diff --git a/fs/hfsplus/super.c b/fs/hfsplus/super.c
-index 979202027..13d139468 100644
+index 97920202790f..13d139468fde 100644
 --- a/fs/hfsplus/super.c
 +++ b/fs/hfsplus/super.c
 @@ -92,6 +92,8 @@ struct inode *hfsplus_iget(struct super_block *sb, unsigned long ino)

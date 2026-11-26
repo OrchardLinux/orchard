@@ -1,9 +1,9 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: rzxvx <rrzxznewid@gmail.com>
-Date: Wed, 4 Nov 2026 06:40:30 +0100
+Date: Thu, 5 Nov 2026 19:38:58 +1300
 Subject: [PATCH] power: supply: Add the Apple PMU charger and HDQ battery
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at d92da7d:
   devices/a5/patches/files/drivers/power/supply/apple-hdq-battery.c
   devices/a5/patches/files/drivers/power/supply/apple-pmu-charger.c
   devices/a5/patches/tree/0001-cascadia.patch
@@ -11,19 +11,20 @@ Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Casca
 Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (4 commits);
   Marcolist <marco@neuraliquid.dev> (057baf1, 8fa828f)
   liquidmetal-Hg <liquidmetal-Hg@users.noreply.github.com> (0a4002d)
+  Stephen Cox <stephencoxmail@gmail.com> (ae44fdc)
 
 [Orchard: imported for the apple-armv7 platform; see kernel/sources.toml]
 ---
  drivers/power/supply/Kconfig             |  16 +
  drivers/power/supply/Makefile            |   2 +
- drivers/power/supply/apple-hdq-battery.c | 276 ++++++++++++++++
+ drivers/power/supply/apple-hdq-battery.c | 286 +++++++++++++++++
  drivers/power/supply/apple-pmu-charger.c | 392 +++++++++++++++++++++++
- 4 files changed, 686 insertions(+)
+ 4 files changed, 696 insertions(+)
  create mode 100644 drivers/power/supply/apple-hdq-battery.c
  create mode 100644 drivers/power/supply/apple-pmu-charger.c
 
 diff --git a/drivers/power/supply/Kconfig b/drivers/power/supply/Kconfig
-index bcfa63fb9..c7d7849c2 100644
+index bcfa63fb9f1e..c7d7849c207b 100644
 --- a/drivers/power/supply/Kconfig
 +++ b/drivers/power/supply/Kconfig
 @@ -263,6 +263,22 @@ config MANAGER_SBS
@@ -50,7 +51,7 @@ index bcfa63fb9..c7d7849c2 100644
  	tristate "BQ27xxx battery driver"
  	help
 diff --git a/drivers/power/supply/Makefile b/drivers/power/supply/Makefile
-index 8dcb41545..e3c9ca945 100644
+index 8dcb41545317..e3c9ca945b30 100644
 --- a/drivers/power/supply/Makefile
 +++ b/drivers/power/supply/Makefile
 @@ -44,6 +44,8 @@ obj-$(CONFIG_BATTERY_WM97XX)	+= wm97xx_battery.o
@@ -64,10 +65,10 @@ index 8dcb41545..e3c9ca945 100644
  obj-$(CONFIG_BATTERY_BQ27XXX_HDQ) += bq27xxx_battery_hdq.o
 diff --git a/drivers/power/supply/apple-hdq-battery.c b/drivers/power/supply/apple-hdq-battery.c
 new file mode 100644
-index 000000000..79efdfade
+index 000000000000..785bc0072f11
 --- /dev/null
 +++ b/drivers/power/supply/apple-hdq-battery.c
-@@ -0,0 +1,276 @@
+@@ -0,0 +1,286 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * The iPad mini 1's battery gauge: a TI bq27540 on HDQ, its one-wire bus,
@@ -83,10 +84,14 @@ index 000000000..79efdfade
 + * leaves bit 2 of the received byte set for a 1 and clear for a 0.
 + * A transaction starts with a break (UCON bit 4: one frame low).
 + *
++ * On the iPad 3 (J1) iBoot leaves UART5's power state off, with its registers
++ * already set; the node's optional clock is that PMGR switch.
++ *
 + * Only reads (command bit 7 clear) are ever sent: register numbers are the
 + * bq27541 family's standard commands, 16 bits as two 8-bit reads.
 + * README ("Battery gauge") has the summary.
 + */
++#include <linux/clk.h>
 +#include <linux/delay.h>
 +#include <linux/io.h>
 +#include <linux/jiffies.h>
@@ -295,6 +300,7 @@ index 000000000..79efdfade
 +{
 +	struct power_supply_config cfg = {};
 +	struct hdq_battery *b;
++	struct clk *clk;
 +	int soc;
 +
 +	b = devm_kzalloc(&pdev->dev, sizeof(*b), GFP_KERNEL);
@@ -305,6 +311,11 @@ index 000000000..79efdfade
 +	b->base = devm_platform_ioremap_resource(pdev, 0);
 +	if (IS_ERR(b->base))
 +		return PTR_ERR(b->base);
++
++	/* UART5's power state, where iBoot does not leave it on */
++	clk = devm_clk_get_optional_enabled(&pdev->dev, NULL);
++	if (IS_ERR(clk))
++		return dev_err_probe(&pdev->dev, PTR_ERR(clk), "UART5 power\n");
 +
 +	writel(HDQ_ULCON, b->base + ULCON);
 +	writel(HDQ_UFCON, b->base + UFCON);
@@ -346,7 +357,7 @@ index 000000000..79efdfade
 +MODULE_LICENSE("GPL");
 diff --git a/drivers/power/supply/apple-pmu-charger.c b/drivers/power/supply/apple-pmu-charger.c
 new file mode 100644
-index 000000000..132aa7071
+index 000000000000..132aa70719ba
 --- /dev/null
 +++ b/drivers/power/supply/apple-pmu-charger.c
 @@ -0,0 +1,392 @@

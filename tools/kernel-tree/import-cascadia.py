@@ -13,7 +13,15 @@ author and co-contributors come from Cascadia's history for exactly its files;
 its date is that of the last Cascadia change to them. The commits, applied to
 v6.12, reproduce Cascadia's tree; the tool checks that before writing.
 
+Cascadia compiles its boards' device trees (dts/*.dts) with dtc outside the
+kernel. One commit per board in BOARDS adds its tree to arch/arm/boot/dts/apple/,
+named like the arm64 Apple trees and built by make dtbs, content unchanged.
+Orchard's own commits on top of the import (--then, patch files as
+format-patch writes them) are applied last with their author and message.
+The patch files in OUT are replaced.
+
 usage: import-cascadia.py --cascadia DIR --commit REV --linux DIR --base REV --out DIR
+                          [--then PATCH ...]
 """
 import argparse
 import atexit
@@ -33,7 +41,10 @@ parser.add_argument('--commit', required=True, help='Cascadia commit to import')
 parser.add_argument('--linux', required=True, type=Path, help='linux repository holding BASE')
 parser.add_argument('--base', required=True, help='v6.12 in the linux repository')
 parser.add_argument('--out', required=True, type=Path, help='directory for the patch files')
+parser.add_argument('--then', nargs='*', default=[], type=Path,
+                    help="orchard's own patches on top of the import, applied last in this order")
 args = parser.parse_args()
+args.out = args.out.resolve()  # git writes the files from inside the linux repository
 URL = 'https://github.com/rzxvx/Project-Cascadia'
 SANDCASTLE = 'https://github.com/corellium/linux-sandcastle'
 
@@ -57,13 +68,36 @@ GROUPS = [
     ('usb: phy: Support the Apple S5L USB PHY, dwc2 and EHCI', ['drivers/phy/', 'drivers/usb/']),
     ('power: supply: Add the Apple PMU charger and HDQ battery', ['drivers/power/']),
     ('backlight: Add the Apple PMU WLED backlight', ['drivers/video/']),
-    ('wifi: brcmfmac: Support the iPad mini 1 USB Wi-Fi', ['drivers/net/wireless/']),
-    ('Bluetooth: Support the iPad mini 1 Bluetooth', ['drivers/bluetooth/', 'net/bluetooth/']),
-    ('mtd: Add the Apple H2FMI NAND controller', ['drivers/mtd/']),
+    ('wifi: brcmfmac: Support the Wi-Fi of the A5 and A5X iPads', ['drivers/net/wireless/']),
+    ('Bluetooth: Support the Bluetooth of the A5 and A5X iPads', ['drivers/bluetooth/', 'net/bluetooth/']),
+    ('mmc: sdhci: Add the Apple S5L SDIO host', ['drivers/mmc/']),
+    ('mtd: Add the Apple H2FMI NAND controller', ['drivers/mtd/devices/']),
+    # The PPN controller and FTL of drivers/mtd/nand/apple drive the same flash
+    # as H2FMI and as Orchard's patches/armv7/mtd; kernel/sources.toml says
+    # which of them the platform config builds.
+    ('mtd: nand: Add the Apple PPN controller and Swiss FTL', ['drivers/mtd/nand/']),
     ('drm: Add the apple-sgx driver for the A5 PowerVR SGX543', ['drivers/gpu/drm/', 'include/uapi/drm/']),
-    ('ASoC: Add the Apple S5L audio and the CS35L19 codec', ['sound/']),
+    ('media: Add the Apple A5 H4 camera ISP', ['drivers/media/']),
+    ('ASoC: Add the Apple S5L audio and the CS35L19 and CS42L63 codecs', ['sound/']),
     ('iio: accel: st_accel: Add the LIS3DSH', ['drivers/iio/']),
     ('hfsplus: Read decmpfs-compressed files', ['fs/hfsplus/']),
+]
+
+# Boards whose Cascadia device tree joins arch/arm/boot/dts/apple/:
+# (Cascadia path below the A5 root, kernel name, subject, what the board is).
+BOARDS = [
+    ('dts/p105ap.dts', 's5l8942x-p105', 'ARM: dts: apple: Add the iPad mini 1 (P105)',
+     'The iPad mini 1 Wi-Fi (iPad2,5, P105AP) on the A5 (S5L8942X), Cascadia\'s '
+     'first board.'),
+    ('dts/j1ap.dts', 's5l8945x-j1', 'ARM: dts: apple: Add the iPad 3 (J1)',
+     'The iPad 3 Wi-Fi (iPad3,1, J1AP) on the A5X (S5L8945X). The tree\'s comments '
+     'say where it differs from the P105 and why; Cascadia\'s '
+     'devices/a5/docs/research/j1-a5x.md records the bring-up.'),
+    ('dts/k93ap.dts', 's5l8940x-k93', 'ARM: dts: apple: Add the iPad 2 (K93)',
+     'The iPad 2 Wi-Fi (iPad2,1, K93AP) on the original A5 (S5L8940X), with its '
+     'BCM4329 Wi-Fi on SDIO, CS42L63 audio and H4 ISP cameras. The tree\'s '
+     'comments say where it differs from the P105; Cascadia\'s '
+     'devices/a5/docs/k93-bringup.md records what works.'),
 ]
 
 
@@ -127,12 +161,29 @@ def origin(path):
     sys.exit(f'{path}: not found in Cascadia\'s sources')
 
 
+def origins(path):
+    """Every Cascadia source of path: its file, or each patches/tree patch that changes it."""
+    kind, source = origin(path)
+    if kind != 'tree':
+        return [source]
+    return [f'{ROOT}patches/tree/{p.name}' for p in tree_patches
+            if path in sections(p.read_text(errors='replace'))]
+
+
 def sections(text):
-    """Per-file sections of a patch: {path: section text}."""
-    result, current = {}, None
-    for line in text.splitlines(keepends=True):
+    """Per-file sections of a patch: {path: section text}. A section starts at
+    a git header (diff --git) or, in a plain unified diff, at its ---/+++ pair."""
+    result, current, in_header = {}, None, False
+    lines = text.splitlines(keepends=True)
+    for i, line in enumerate(lines):
         if line.startswith('diff --git a/'):
-            current = line.split(' b/', 1)[1].strip()
+            current, in_header = line.split(' b/', 1)[1].strip(), True
+            result[current] = ''
+        elif line.startswith('+++ '):
+            in_header = False
+        elif (not in_header and line.startswith(('--- a/', '--- /dev/null')) and i + 1 < len(lines)
+              and lines[i + 1].startswith('+++ b/')):
+            current = lines[i + 1][len('+++ b/'):].split('\t')[0].strip()
             result[current] = ''
         if current:
             result[current] += line
@@ -185,6 +236,11 @@ def history(path):
     kind, source = origin(path)
     if kind == 'tree':
         return kind, tree_history(path)
+    return kind, file_history(source)
+
+
+def file_history(source):
+    """Cascadia commits that changed the file source, followed across renames."""
     # A commit that only renamed the file (the move to devices/a5/) changed none of it.
     log = cgit('log', '--follow', '--name-status', '--format=%x00%H\t%an\t%ae\t%aD', commit, '--', source)
     entries = []
@@ -192,7 +248,7 @@ def history(path):
         header, *status = record.strip().split('\n')
         if not any(l.startswith('R100\t') for l in status):
             entries.append(tuple(header.split('\t')))
-    return kind, entries
+    return entries
 
 
 grouped = collections.OrderedDict((subject, []) for subject, _ in GROUPS)
@@ -204,11 +260,49 @@ for path in changed:
     else:
         sys.exit(f'No group for {path}; add it to GROUPS')
 
+# --then patches are read before OUT's patch files are replaced: they may be among them.
+then = [(p.name, p.read_bytes()) for p in args.then]
+args.out.mkdir(parents=True, exist_ok=True)
+for old in args.out.glob('*.patch'):
+    old.unlink()
 parent = lgit('rev-parse', args.base + '^{commit}')
 lgit('read-tree', args.base)
 written = []
-args.out.mkdir(parents=True, exist_ok=True)
-for number, (subject, paths) in enumerate(((s, p) for s, p in grouped.items() if p), 1):
+
+
+def credits(commits):
+    """Author, email, date and the body lines naming everyone, from {sha: (name, email, date)}."""
+    count = collections.Counter((n, e) for n, e, _ in commits.values())
+    (author, email), _ = count.most_common(1)[0]
+    newest = max(commits, key=lambda s: int(cgit('log', '-1', '--format=%at', s)))
+    others = []
+    for (name, mail), n in count.most_common():
+        if (name, mail) == (author, email):
+            continue
+        ids = ', '.join(cgit('rev-parse', '--short', s) for s, v in commits.items() if v[:2] == (name, mail))
+        others.append(f'{name} <{mail}> ({ids})')
+    n = count[(author, email)]
+    return author, email, commits[newest][2], n, others
+
+
+def commit_index(message, author, email, date, committer=None):
+    """Commit the index on parent and write it as the next patch file."""
+    global parent
+    cname, cmail, cdate = committer or (author, email, date)
+    tree = lgit('write-tree')
+    parent = lgit('commit-tree', tree, '-p', parent, input=message.encode(),
+                  extra={'GIT_AUTHOR_NAME': author, 'GIT_AUTHOR_EMAIL': email, 'GIT_AUTHOR_DATE': date,
+                         'GIT_COMMITTER_NAME': cname, 'GIT_COMMITTER_EMAIL': cmail,
+                         'GIT_COMMITTER_DATE': cdate})
+    number = len(written) + 1
+    # A fixed abbreviation, so the files do not depend on the repository's size.
+    name = lgit('format-patch', '--zero-commit', '--no-signature', '--abbrev=12', '--start-number', str(number),
+                '-o', str(args.out), '-1', parent)
+    written.append(Path(name).name)
+    return number
+
+
+for subject, paths in ((s, p) for s, p in grouped.items() if p):
     commits = {}
     kinds = set()
     for path in paths:
@@ -218,22 +312,12 @@ for number, (subject, paths) in enumerate(((s, p) for s, p in grouped.items() if
             commits[sha] = (name, email, date)
     if not commits:
         sys.exit(f'No Cascadia history for {subject}')
-    count = collections.Counter((n, e) for n, e, _ in commits.values())
-    (author, email), _ = count.most_common(1)[0]
-    newest = max(commits, key=lambda s: int(cgit('log', '-1', '--format=%at', s)))
-    date = commits[newest][2]
-    others = []
-    for (name, mail), n in count.most_common():
-        if (name, mail) == (author, email):
-            continue
-        ids = ', '.join(cgit('rev-parse', '--short', s) for s, v in commits.items() if v[:2] == (name, mail))
-        others.append(f'{name} <{mail}> ({ids})')
-    sources = sorted({origin(p)[1] for p in paths})
+    author, email, date, n, others = credits(commits)
+    sources = sorted({s for p in paths for s in origins(p)})
     body = [f'Imported unchanged from Project Cascadia ({URL}) at {commit}:'] + \
            [f'  {s}' for s in sources] + ['']
     body.append(f'Cascadia history of these files: {author} <{email}> '
-                f'({count[(author, email)]} commit{"s" if count[(author, email)] != 1 else ""})'
-                + (';' if others else '.'))
+                f'({n} commit{"s" if n != 1 else ""})' + (';' if others else '.'))
     body += [f'  {o}' for o in others]
     if 'sandcastle' in kinds:
         body += [''] + textwrap.wrap(
@@ -244,18 +328,73 @@ for number, (subject, paths) in enumerate(((s, p) for s, p in grouped.items() if
     for path in paths:
         mode, kind_, sha, _ = (lgit('ls-tree', assembled, '--', path) + '\t').split(None, 3)
         lgit('update-index', '--add', '--cacheinfo', f'{mode},{sha},{path}')
-    tree = lgit('write-tree')
-    parent = lgit('commit-tree', tree, '-p', parent, input=('\n'.join([subject, ''] + body) + '\n').encode(),
-                  extra={'GIT_AUTHOR_NAME': author, 'GIT_AUTHOR_EMAIL': email, 'GIT_AUTHOR_DATE': date,
-                         'GIT_COMMITTER_NAME': author, 'GIT_COMMITTER_EMAIL': email,
-                         'GIT_COMMITTER_DATE': date})
-    name = lgit('format-patch', '--zero-commit', '--no-signature', '--start-number', str(number),
-                '-o', str(args.out), '-1', parent)
-    written.append(Path(name).name)
+    number = commit_index('\n'.join([subject, ''] + body) + '\n', author, email, date)
     print(f'{number:04d} {author:<16} {len(paths):3} files  {subject}')
 
 if lgit('rev-parse', parent + '^{tree}') != assembled:
     sys.exit('Check failed: the commits do not reproduce the assembled Cascadia tree')
+imported = len(written)
+
+
+def blob(text):
+    return lgit('hash-object', '-w', '--stdin', input=text.encode())
+
+
+def read(path):
+    r = subprocess.run(['git', '-C', args.linux, 'show', f':{path}'], capture_output=True, env=env)
+    return r.stdout.decode() if r.returncode == 0 else None
+
+
+# The boards' device trees, in arch/arm/boot/dts/apple/.
+for source, name, subject, about in BOARDS:
+    source = ROOT + source
+    text = show(commit, source)
+    if not text:
+        sys.exit(f'{source}: not in Cascadia {commit}')
+    commits = {sha: (n, e, d) for sha, n, e, d in file_history(source)}
+    author, email, date, n, others = credits(commits)
+    dts = f'arch/arm/boot/dts/apple/{name}.dts'
+    makefile = read('arch/arm/boot/dts/apple/Makefile')
+    note = (f'Cascadia compiles this file with dtc outside the kernel. Added to '
+            f'arch/arm/boot/dts/apple/ as {name}.dts, named like the arm64 Apple device trees, '
+            'and built from there by make dtbs; content unchanged.')
+    if makefile is None:
+        # The first board: the apple/ directory, in place of the dtb that
+        # Cascadia's 0001-cascadia.patch names in arch/arm/boot/dts/Makefile
+        # and does not build.
+        top = read('arch/arm/boot/dts/Makefile').splitlines(keepends=True)
+        top = [l for l in top if 'ipad-mini1.dtb' not in l]
+        subdirs = [i for i, l in enumerate(top) if l.startswith('subdir-y += ')]
+        at = next((i for i in subdirs if top[i] > 'subdir-y += apple\n'), subdirs[-1] + 1)
+        top.insert(at, 'subdir-y += apple\n')
+        lgit('update-index', '--add', '--cacheinfo', f'100644,{blob("".join(top))},arch/arm/boot/dts/Makefile')
+        makefile = '# SPDX-License-Identifier: GPL-2.0\n'
+        note += (' The directory replaces the ipad-mini1.dtb that Cascadia\'s tree patch adds to '
+                 'arch/arm/boot/dts/Makefile, a file no rule builds.')
+    makefile += f'dtb-$(CONFIG_ARCH_APPLE_S5L) += {name}.dtb\n'
+    lgit('update-index', '--add', '--cacheinfo', f'100644,{blob(makefile)},arch/arm/boot/dts/apple/Makefile')
+    lgit('update-index', '--add', '--cacheinfo', f'100644,{blob(text)},{dts}')
+    body = textwrap.wrap(f'Imported from Project Cascadia ({URL}) at {commit}: {source}.', 72,
+                         break_long_words=False, break_on_hyphens=False) + ['']
+    body.append(f'Cascadia history of this file: {author} <{email}> '
+                f'({n} commit{"s" if n != 1 else ""})' + (';' if others else '.'))
+    body += [f'  {o}' for o in others]
+    body += [''] + textwrap.wrap(about, 72, break_long_words=False, break_on_hyphens=False)
+    body += [''] + textwrap.wrap(f'[Orchard: {note}]', 72, break_long_words=False, break_on_hyphens=False)
+    body += ['', 'Assisted-by: LLM']
+    number = commit_index('\n'.join([subject, ''] + body) + '\n', author, email, date)
+    print(f'{number:04d} {author:<16}   1 board  {subject}')
+
+# Orchard's own commits on top, as git am would apply them.
+for filename, data in then:
+    with tempfile.TemporaryDirectory() as t:
+        info = run('git', 'mailinfo', f'{t}/msg', f'{t}/patch', input=data)
+        fields = dict(l.split(': ', 1) for l in info.splitlines() if ': ' in l)
+        message = fields['Subject'] + '\n\n' + Path(f'{t}/msg').read_text().strip() + '\n'
+        lgit('apply', '--cached', f'{t}/patch')
+    number = commit_index(message, fields['Author'], fields['Email'], fields['Date'])
+    print(f'{number:04d} {fields["Author"]:<16}          {fields["Subject"]} (from {filename})')
+
 lgit('update-ref', 'refs/orchard/cascadia-import', parent)
-print(f'{len(written)} patches in {args.out}; applied to {args.base} they give Cascadia {commit} exactly '
-      f'(tree {assembled[:12]}).')
+print(f'{len(written)} patches in {args.out}; applied to {args.base}, the first {imported} give Cascadia '
+      f'{commit} exactly (tree {assembled[:12]}).')

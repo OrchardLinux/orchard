@@ -3,7 +3,7 @@ From: rzxvx <rrzxznewid@gmail.com>
 Date: Wed, 14 Oct 2026 08:46:01 +0200
 Subject: [PATCH] mtd: Add the Apple H2FMI NAND controller
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at d92da7d:
   devices/a5/patches/files/drivers/mtd/devices/mtd-apple-h2fmi.c
   devices/a5/patches/tree/0001-cascadia.patch
 
@@ -19,7 +19,7 @@ Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (3 commits);
  create mode 100644 drivers/mtd/devices/mtd-apple-h2fmi.c
 
 diff --git a/drivers/mtd/devices/Kconfig b/drivers/mtd/devices/Kconfig
-index ff2f9e55e..e73b65842 100644
+index ff2f9e55ef28..e73b658429ad 100644
 --- a/drivers/mtd/devices/Kconfig
 +++ b/drivers/mtd/devices/Kconfig
 @@ -206,6 +206,24 @@ config MTD_ST_SPI_FSM
@@ -48,7 +48,7 @@ index ff2f9e55e..e73b65842 100644
  config BCH_CONST_M
  	default 14
 diff --git a/drivers/mtd/devices/Makefile b/drivers/mtd/devices/Makefile
-index d11eb2b8b..8135496fe 100644
+index d11eb2b8b6f8..8135496fe44a 100644
 --- a/drivers/mtd/devices/Makefile
 +++ b/drivers/mtd/devices/Makefile
 @@ -18,6 +18,7 @@ obj-$(CONFIG_MTD_SST25L)	+= sst25l.o
@@ -61,7 +61,7 @@ index d11eb2b8b..8135496fe 100644
  CFLAGS_docg3.o			+= -I$(src)
 diff --git a/drivers/mtd/devices/mtd-apple-h2fmi.c b/drivers/mtd/devices/mtd-apple-h2fmi.c
 new file mode 100644
-index 000000000..bdb89a700
+index 000000000000..bdb89a700ba5
 --- /dev/null
 +++ b/drivers/mtd/devices/mtd-apple-h2fmi.c
 @@ -0,0 +1,656 @@
