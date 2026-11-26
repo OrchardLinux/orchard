@@ -19,6 +19,12 @@ is missing or empty.
   which it ignores. Needed for Wi-Fi on the iPhone 8 Plus; tested there only.
 - iPhone 8 Plus: the battery's remaining charge and energy read correctly
   (they were about 13 times too high).
+- iPod touch 6: charges at the current the USB host grants (500 mA by
+  default, more when the host allows it) instead of the boot loader's 100 mA,
+  so it no longer drains while plugged in. Tested by brkosebay (thanks!).
+- A7, A8 and A8X devices: the storage driver no longer sleeps while it hands a
+  request to the storage controller, which could warn at boot or stall when two
+  programs read at once. Found and fixed by brkosebay (thanks!).
 - iPad mini 2 (Cellular): display, touch, storage, Wi-Fi, speakers, charging,
   sleep and wake and USB networking work on an installed Omarchy A. Tested by
   perryraskin (thanks!).
