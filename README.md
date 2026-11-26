@@ -2,7 +2,7 @@
 
 Linux on Apple devices. This repository holds everything a device needs and the
 `orchard` tool that builds, boots and installs it: device descriptions, kernel
-patches and configuration, m1n1 and Pongo patches, firmware recipes, the recovery
+patches and configuration, Pongo patches, firmware recipes, the recovery
 and device runtime, and the host side (USB transports, firmware conversion,
 installation, launch). Distributions such as
 [omarchy-a](https://github.com/OrchardLinux/omarchy-a) and
