@@ -45,7 +45,7 @@ def data_root():
 
 
 # What a release ships for installers that read only the release (board-data.tar.gz).
-BOARD_DATA = ('devices', 'chips', 'platforms', 'features.toml')
+BOARD_DATA = ('devices', 'chips', 'platforms', 'features.toml', 'routes.toml')
 
 
 def board_data_files(root=None):

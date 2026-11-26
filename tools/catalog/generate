@@ -597,7 +597,7 @@ def matrix(verify):
 
 def catalog_members():
     """{name in the archive: file}: what a CLI reads, without docs or tools."""
-    members = {name: ROOT / name for name in ('features.toml', 'methods.toml')}
+    members = {name: ROOT / name for name in ('features.toml', 'methods.toml', 'routes.toml')}
     members['drivers.json'] = DRIVERS
     members.update({f'chips/{path.name}': path for path in (ROOT / 'chips').glob('*.toml')})
     for path in DEVICES.glob('*/*'):
