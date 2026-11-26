@@ -2,15 +2,14 @@ From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ricktav <82380971+ricktav@users.noreply.github.com>
 Date: Thu, 26 Nov 2026 12:30:58 +0100
 Subject: [PATCH] kboot: Copy the light sensor calibration to a second
- candidate node
+ sensor
 
-The iPad Air 2's device tree (J81, J82) lists its CT819 light sensor
-twice on i2c2, as als1 at 0x49 and als2 at 0x29, both with
-"probe-for-hardware" and the same syscfg/LSCI reference: iOS uses the
-one that answers. Linux describes both, and binds only the one that is
-fitted, so the calibration has to reach both nodes.
+The iPad Air 2's device tree (J81, J82) has two CT819 light sensors on
+i2c2, als1 at 0x49 and als2 at 0x29, and both name the same
+syscfg/LSCI calibration: one record set with a record per sensor. Both
+are fitted on a J81, so the set has to reach both nodes.
 
-Copy the record to the node behind als1 as well as als0. Boards with
+Copy the set to the node behind als1 as well as als0. Boards with
 only als0 behave as before.
 
 Assisted-by: LLM
@@ -28,11 +27,11 @@ index 52737e0..caf403a 100644
   * "syscfg/LSCI" reference into the unit's record before m1n1 runs; the
   * sensor sits below an I2C bus (e.g. /arm-io/i2c2/als1).
 + *
-+ * Some boards list the sensor at two addresses with "probe-for-hardware"
-+ * (the iPad Air 2: i2c2/als1 at 0x49 and i2c2/als2 at 0x29, both naming the
-+ * same syscfg/LSCI record) and iOS uses the one that answers. Their nodes
-+ * are named by als0 and als1; each gets the record, and the kernel binds
-+ * only the fitted one.
++ * Some boards have two sensors (the iPad Air 2: i2c2/als1 at 0x49 and
++ * i2c2/als2 at 0x29), both naming the same syscfg/LSCI record set, which
++ * holds one record per sensor. Their nodes are named by als0 and als1;
++ * each gets the whole set, and the kernel picks the sensor's record by
++ * its placement and orientation.
   */
 -static int dt_set_als(void)
 +static const u8 *adt_get_als_calibration(u32 *len)
