@@ -155,7 +155,7 @@ class Orchard2Switch(Fixture):
         python.chmod(0o755)
 
     def test_install_and_launch_run_with_the_lock_and_their_entry(self):
-        self.orchard2('printf "orchard2 %s entry=%s data=%s\\n" "$*" "${ORCHARD_ENTRY:-}" "$ORCHARD_DATA" >> "$LOG"; [ -e /dev/fd/3 ] && echo locked >> "$LOG"; exit 4')
+        self.orchard2('printf "orchard2 %s entry=%s data=%s\\n" "$*" "${ORCHARD_BOOT:-}" "$ORCHARD_DATA" >> "$LOG"; [ -e /dev/fd/3 ] && echo locked >> "$LOG"; exit 4')
         shutil.rmtree(self.clone, ignore_errors=True)
         self.fake_python()
         data = f'data={self.clone}'
@@ -168,7 +168,9 @@ class Orchard2Switch(Fixture):
             self.assertEqual(self.ran(*arguments, ORCHARD2='1'), [expected, 'locked'], self.result.stderr)
             self.assertEqual(self.result.returncode, 4)
         self.assertEqual(self.ran('launch', ORCHARD2='1', ORCHARD_VIA='checkra1n')[0], f'orchard2 launch entry=checkra1n {data}')
-        self.assertEqual(self.ran('launch', '--via', 'other', ORCHARD2='1'), [])
+        # orchard2 knows the routes: any name is passed on for it to refuse.
+        self.assertEqual(self.ran('launch', '--via', 'ibss', ORCHARD2='1')[0], f'orchard2 launch entry=ibss {data}')
+        self.assertEqual(self.ran('launch', '--via', ORCHARD2='1'), [])
         self.assertEqual(self.result.returncode, 2)
         self.assertEqual(self.ran('launch', '--list'), ['python launch --list'])
 
