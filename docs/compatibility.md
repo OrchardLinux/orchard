@@ -92,12 +92,12 @@ Which A9 do I have? iOS doesn't show it. In DFU mode, `orchard install` names th
 
 | Chip | Device | Board | Product | Status | Install | Methods | Firmware | Device tree | boot.json build |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A5 | iPad 2 (Wi-Fi) | `k93` | iPad2,1 | known | – | recovery-autogo | – | – | 12H321 |
+| A5 | iPad 2 (Wi-Fi) | `k93` | iPad2,1 | known | – | recovery-autogo, recovery-bootx | – | – | 12H321 |
 | A5 | iPad 2 (GSM) | `k94` | iPad2,2 | known | – | – | – | – | 12H321 |
 | A5 | iPad 2 (CDMA) | `k95` | iPad2,3 | known | – | – | – | – | 12H321 |
 | A5 | iPhone 4s | `n94` | iPhone4,1 | known | – | – | – | – | 12H321 |
 | A5 | iPad 2 (Mid 2012) | `k93a` | iPad2,4 | known | – | – | – | – | 12H321 |
-| A5 | iPad mini 1 (Wi-Fi) | `p105` | iPad2,5 | experimental | – | jailbreak-kdfu, recovery-autogo | yes | yes | 12H321 |
+| A5 | iPad mini 1 (Wi-Fi) | `p105` | iPad2,5 | experimental | – | jailbreak-kdfu, recovery-autogo, recovery-bootx | yes | yes | 12H321 |
 | A5 | iPad mini (GSM) | `p106` | iPad2,6 | known | – | – | – | – | 12H321 |
 | A5 | iPad mini (Global) | `p107` | iPad2,7 | known | – | – | – | – | 12H321 |
 | A5X | iPad 3 (Wi-Fi) | `j1` | iPad3,1 | experimental | – | jailbreak-kdfu | yes | yes | 13G36 |

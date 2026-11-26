@@ -30,8 +30,9 @@ and caches, but has no platform layer until a root of its architecture exists.
 
 **Done:** `loader`, the payload format of the platform (validated and printed; nothing uses it yet): `m1n1` (m1n1 +
 `Image.gz` + DTBs + initramfs) or `cascadia` (trampoline + `zImage` with
-appended DTB + built-in root). It follows from the kernel: m1n1 cannot run
-32-bit code. How a board reaches that loader (checkm8 and Pongo, an iBoot
+appended DTB + built-in root). m1n1 has a 32-bit build as well
+([bring-up notes](bring-up/armv7-m1n1.md)); apple-armv7 keeps `cascadia` until
+that build has started Linux on a tablet. How a board reaches that loader (checkm8 and Pongo, an iBoot
 chain, kDFU from a jailbroken iOS) is device data and stays in
 `device.toml` `[boot] methods`; whether a unit is jailbroken is detected at
 runtime. The launcher takes the chain from the device and the payload format

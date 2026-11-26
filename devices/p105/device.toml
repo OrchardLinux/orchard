@@ -13,7 +13,7 @@ chip = 0x8942
 board = 0x0a
 
 [boot]
-methods = ["jailbreak-kdfu", "recovery-autogo"]
+methods = ["jailbreak-kdfu", "recovery-autogo", "recovery-bootx"]
 entries = ["pico-checkm8", "kdfu"]
 # The CLI consumes an owner-private boot manifest. Public launch assets await release integration.
 

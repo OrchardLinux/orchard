@@ -25,6 +25,13 @@ boot_json = true
 stages = ["iBSS", "iBEC"]
 loader = "arm32-staging"
 
+["recovery-bootx"]
+entries = ["pico-checkm8", "kdfu"]
+description = "Patched iBSS and iBEC, which starts the 32-bit m1n1 as its kernel (devicetree, kernel image, bootx)"
+boot_json = true
+stages = ["iBSS", "iBEC"]
+loader = "m1n1"
+
 ["custom-dfu-recovery"]
 entries = ["usbliter8"]
 description = "A patched iBSS, optionally iBEC, entered through an external custom DFU, then m1n1"

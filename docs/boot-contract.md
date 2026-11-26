@@ -119,6 +119,12 @@ which one and opens a shell on the console.
 
 ## Partitions (LwVM, 32-bit boards, interim)
 
+The 32-bit m1n1 reads this table as well and applies the same rules as on a GPT
+disk: the boot partition is the one XBOOTLDR entry (FAT32), and an entry's
+`root=PARTUUID=` has to name a Linux entry (`0fc63daf-…`, or the DPS ARM root
+`69dad710-2ce4-4e3c-b16c-21a1d49abed3`). A partition whose chunks are scattered
+over the disk is not seen. No installer creates that boot partition yet.
+
 The iOS disk of 32-bit boards is partitioned with LwVM, which the kernel reads
 (`kernel/patches/armv7/block`): partitions keep their LwVM entry number, and the
 entry's GUID is their PARTUUID. Until the iOS resize step creates the Linux

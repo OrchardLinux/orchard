@@ -13,5 +13,5 @@ chip = 0x8940
 board = 0x04
 
 [boot]
-methods = ["recovery-autogo"]
+methods = ["recovery-autogo", "recovery-bootx"]
 entries = ["kdfu"]

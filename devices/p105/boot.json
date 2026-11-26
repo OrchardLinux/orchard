@@ -50,6 +50,12 @@
       "done_flag": "0x9ff48bb0",
       "usb_continue": "0x9ff201a4",
       "source": "rzxvx/Project-Cascadia@091d441 devices/a5/scripts/patch-ibec-autogo.py"
+    },
+    "recovery-bootx": {
+      "build": "12H321",
+      "iboot_patcher": "iBoot32Patcher",
+      "devicetree": "DeviceTree",
+      "source": "boot/m1n1 (32-bit build), producers/m1n1_armv7.py; iBEC accepts devicetree, kernel image and bootx (Project Cascadia, devices/a5/docs/research/boot-strategy.md)"
     }
   }
 }
