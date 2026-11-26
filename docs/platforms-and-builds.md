@@ -74,8 +74,9 @@ Project Cascadia's A5 port is the first import from a build project rather
 than a kernel tree: `tools/kernel-tree/import-cascadia.py` rebuilds the tree
 its build assembles and splits it into commits whose authors come from
 Cascadia's history per file. Bring-up safeguards stay out of the kernel:
-storage protection is the installer's job (`runtime/recovery/storage-fence`),
-and Cascadia's NAND driver is read-only by construction.
+storage protection is the installer's job (`runtime/recovery/storage-fence`).
+Cascadia's PPN NAND driver is imported but not configured: the platform builds
+Orchard's own NAND stack (`docs/bring-up/p105-nand-merge-proposal.md`).
 
 ## Build arguments (done)
 

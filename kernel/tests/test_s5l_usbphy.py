@@ -62,6 +62,7 @@ typedef uint32_t u32;
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #define dev_err(...) ((void)0)
 #define dev_warn(...) ((void)0)
+#define dev_info(...) ((void)0)
 #define dev_dbg(...) ((void)0)
 #define EPROBE_DEFER 517
 #define PTR_ERR(p) ((long)(intptr_t)(p))
@@ -199,15 +200,29 @@ int main(void) {
     setup(&p, &clock, &otg, &host); CHECK(s5l_usbphy_init(&otg) == 0);
     ignored_write = &phy_regs[OPHYUNK1/4]; CHECK(s5l_usbphy_power_on(&otg) == -EIO);
     ignored_write = NULL; CHECK(s5l_usbphy_exit(&otg) == 0);
+    /* Legacy compatibles: the parents for every board, firmware's tuning kept
+     * while the PHY is powered, and a parent other than OTG not fatal. */
     setup(&p, &clock, &otg, &host); p.data = NULL;
-    phy_regs[OPHYPWR/4] = 0x22; phy_regs[OPHY_UOTGTUNE1/4] = 0x1234;
+    phy_regs[OPHYPWR/4] = OPHYPWR_ACTIVE; phy_regs[OPHY_UOTGTUNE1/4] = 0x1234;
+    blocked_gate = &pmgr_regs[PMGR_UPERF/4];
     CHECK(s5l_hostphy_init(&host) == 0); CHECK(writes == 0);
     CHECK(s5l_usbphy_init(&otg) == 0); CHECK(clock.enabled == 0);
-    CHECK(pmgr_writes == 1); CHECK(parent_order[0] == PMGR_USB_OTG);
-    CHECK(phy_regs[OPHYPWR/4] == 0x22); CHECK(phy_regs[OPHY_UOTGTUNE1/4] == 0x1234);
+    CHECK(pmgr_writes == 3); CHECK(parent_order[0] == PMGR_UPERF);
+    CHECK(parent_order[1] == PMGR_USB_OTG); CHECK(parent_order[2] == PMGR_USBREG);
+    CHECK(phy_regs[OPHYPWR/4] == OPHYPWR_ACTIVE); CHECK(phy_regs[OPHY_UOTGTUNE1/4] == 0x1234);
     unsigned legacy_writes = writes; CHECK(s5l_usbphy_power_on(&otg) == 0);
     CHECK(s5l_usbphy_power_off(&otg) == 0); CHECK(writes == legacy_writes);
     CHECK(s5l_usbphy_exit(&otg) == 0); CHECK(s5l_hostphy_exit(&host) == 0);
+    /* ... and a PHY the boot loader powered down gets the values a DFU boot leaves. */
+    setup(&p, &clock, &otg, &host); p.data = NULL;
+    CHECK(s5l_usbphy_init(&otg) == 0);
+    CHECK(phy_regs[OPHYPWR/4] == OPHYPWR_ACTIVE); CHECK(phy_regs[OPHYCLK/4] == OPHYCLK_CLKSEL_24MHZ);
+    CHECK(phy_regs[OPHYUNK1/4] == 6); CHECK(phy_regs[OPHY_UOTGTUNE1/4] == OPHY_UOTGTUNE1_DEVICE);
+    CHECK(phy_regs[OPHY_UOTGTUNE2/4] == OPHY_UOTGTUNE2_DEVICE); CHECK(phy_regs[OPHYUNK4/4] == OPHYUNK4_START);
+    CHECK(s5l_usbphy_exit(&otg) == 0);
+    /* OTG's own gate stays fatal. */
+    setup(&p, &clock, &otg, &host); p.data = NULL; blocked_gate = &pmgr_regs[PMGR_USB_OTG/4];
+    CHECK(s5l_usbphy_init(&otg) == -ETIMEDOUT); CHECK(p.init_users == 0);
     for (unsigned fault = 0; fault < 6; fault++) {
         setup(&p, &clock, &otg, &host);
         if (fault == 0) lpo_lookup_error = -EPROBE_DEFER;

@@ -3,7 +3,7 @@ From: rzxvx <rrzxznewid@gmail.com>
 Date: Sat, 3 Oct 2026 00:20:15 +0300
 Subject: [PATCH] backlight: Add the Apple PMU WLED backlight
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at d92da7d:
   devices/a5/patches/files/drivers/video/backlight/apple-pmu-wled.c
   devices/a5/patches/tree/0001-cascadia.patch
 
@@ -18,7 +18,7 @@ Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (2 commits).
  create mode 100644 drivers/video/backlight/apple-pmu-wled.c
 
 diff --git a/drivers/video/backlight/Kconfig b/drivers/video/backlight/Kconfig
-index 3614a5d29..361b50ea2 100644
+index 3614a5d29c71..361b50ea226e 100644
 --- a/drivers/video/backlight/Kconfig
 +++ b/drivers/video/backlight/Kconfig
 @@ -451,6 +451,13 @@ config BACKLIGHT_AS3711
@@ -36,7 +36,7 @@ index 3614a5d29..361b50ea2 100644
  	tristate "Generic GPIO based Backlight Driver"
  	depends on GPIOLIB || COMPILE_TEST
 diff --git a/drivers/video/backlight/Makefile b/drivers/video/backlight/Makefile
-index 8fc98f760..050be5fca 100644
+index 8fc98f760a8a..050be5fcab7d 100644
 --- a/drivers/video/backlight/Makefile
 +++ b/drivers/video/backlight/Makefile
 @@ -29,6 +29,7 @@ obj-$(CONFIG_BACKLIGHT_CLASS_DEVICE)	+= backlight.o
@@ -49,7 +49,7 @@ index 8fc98f760..050be5fca 100644
  obj-$(CONFIG_BACKLIGHT_HP700)		+= jornada720_bl.o
 diff --git a/drivers/video/backlight/apple-pmu-wled.c b/drivers/video/backlight/apple-pmu-wled.c
 new file mode 100644
-index 000000000..1ee5ab3cc
+index 000000000000..1ee5ab3cc747
 --- /dev/null
 +++ b/drivers/video/backlight/apple-pmu-wled.c
 @@ -0,0 +1,117 @@

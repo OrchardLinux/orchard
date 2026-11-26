@@ -44,6 +44,7 @@ parser.add_argument('--out', required=True, type=Path, help='directory for the p
 parser.add_argument('--then', nargs='*', default=[], type=Path,
                     help="orchard's own patches on top of the import, applied last in this order")
 args = parser.parse_args()
+args.out = args.out.resolve()  # git writes the files from inside the linux repository
 URL = 'https://github.com/rzxvx/Project-Cascadia'
 SANDCASTLE = 'https://github.com/corellium/linux-sandcastle'
 

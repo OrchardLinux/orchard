@@ -8,6 +8,9 @@ flag while its IRQ controller is initialized, before any ordinary IRQ
 entry can observe it. Drop the assembly escape and its redundant
 counterpart in the handler. Remove the empty CBAR drain calls.
 
+[Orchard: rebased onto Cascadia d92da7d, whose kernel_init now starts the
+ AIC1 clockevent itself]
+
 Link: https://github.com/OrchardLinux/orchard/issues/79
 Assisted-by: LLM
 Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
@@ -82,7 +85,7 @@ index 8c81318c8..4b33c6c2c 100644
  				       unsigned long flags)
  {
 diff --git a/drivers/irqchip/irq-apple-aic1.c b/drivers/irqchip/irq-apple-aic1.c
-index eaa6cf85b..347efc49d 100644
+index d7317e94b..4d1493139 100644
 --- a/drivers/irqchip/irq-apple-aic1.c
 +++ b/drivers/irqchip/irq-apple-aic1.c
 @@ -131,11 +131,9 @@ static struct apple_aic1 *apple_aic1;
@@ -150,7 +153,7 @@ index eaa6cf85b..347efc49d 100644
  	/* DIAG-2 (2026-09-13): bulk unmask ALL IRQs — MASK register semantics
  	 * are set/clr write-only (reading returns 0xffffffff on this HW),
 diff --git a/init/main.c b/init/main.c
-index c56cc011e..b9c43ed81 100644
+index 2955edc90..1e28a8883 100644
 --- a/init/main.c
 +++ b/init/main.c
 @@ -1490,7 +1490,7 @@ static int __ref kernel_init(void *unused)
@@ -175,6 +178,6 @@ index c56cc011e..b9c43ed81 100644
  		early_boot_irqs_disabled = false;
  		local_irq_enable();
 -		apple_aic1_release_escape();
- 		apple_aic1_timer_start();
- 	}
- #endif
+ 		/* The tick, before workqueue_init() makes the first kernel
+ 		 * threads: kthread_bind() can sleep one tick in
+ 		 * wait_task_inactive(), and with no clockevent yet that sleep

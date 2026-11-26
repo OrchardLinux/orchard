@@ -3,7 +3,7 @@ From: rzxvx <rrzxznewid@gmail.com>
 Date: Sun, 20 Sep 2026 02:21:32 +0000
 Subject: [PATCH] pinctrl: Add the Apple S5L8940X GPIO controller
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at d92da7d:
   devices/a5/patches/files-sandcastle-port/drivers/pinctrl/pinctrl-new/pinctrl-s5l8940x-gpio.c
   devices/a5/patches/files-sandcastle-port/drivers/pinctrl/pinctrl-s5l8940x-gpio.c
   devices/a5/patches/tree/0001-cascadia.patch
@@ -26,7 +26,7 @@ drivers they were based on.
  create mode 100644 drivers/pinctrl/pinctrl-s5l8940x-gpio.c
 
 diff --git a/drivers/pinctrl/Kconfig b/drivers/pinctrl/Kconfig
-index 354536de5..acf77c49d 100644
+index 354536de564b..acf77c49debc 100644
 --- a/drivers/pinctrl/Kconfig
 +++ b/drivers/pinctrl/Kconfig
 @@ -618,4 +618,11 @@ source "drivers/pinctrl/uniphier/Kconfig"
@@ -42,7 +42,7 @@ index 354536de5..acf77c49d 100644
 +	default y
  endif
 diff --git a/drivers/pinctrl/Makefile b/drivers/pinctrl/Makefile
-index 97823f52b..c7ef983ad 100644
+index 97823f52b972..c7ef983ade78 100644
 --- a/drivers/pinctrl/Makefile
 +++ b/drivers/pinctrl/Makefile
 @@ -87,3 +87,4 @@ obj-y				+= ti/
@@ -52,7 +52,7 @@ index 97823f52b..c7ef983ad 100644
 +obj-$(CONFIG_PINCTRL_S5L8940X_GPIO)  += pinctrl-s5l8940x-gpio.o
 diff --git a/drivers/pinctrl/pinctrl-new/pinctrl-s5l8940x-gpio.c b/drivers/pinctrl/pinctrl-new/pinctrl-s5l8940x-gpio.c
 new file mode 100644
-index 000000000..e4d46cfea
+index 000000000000..e4d46cfea4d8
 --- /dev/null
 +++ b/drivers/pinctrl/pinctrl-new/pinctrl-s5l8940x-gpio.c
 @@ -0,0 +1,541 @@
@@ -599,7 +599,7 @@ index 000000000..e4d46cfea
 +arch_initcall(hx_gpio_pinctrl_register);
 diff --git a/drivers/pinctrl/pinctrl-s5l8940x-gpio.c b/drivers/pinctrl/pinctrl-s5l8940x-gpio.c
 new file mode 100644
-index 000000000..b38607939
+index 000000000000..b38607939ad5
 --- /dev/null
 +++ b/drivers/pinctrl/pinctrl-s5l8940x-gpio.c
 @@ -0,0 +1,629 @@

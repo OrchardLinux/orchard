@@ -1,31 +1,32 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: rzxvx <rrzxznewid@gmail.com>
-Date: Sat, 24 Oct 2026 14:32:42 +0300
+Date: Sun, 8 Nov 2026 19:10:16 +0300
 Subject: [PATCH] usb: phy: Support the Apple S5L USB PHY, dwc2 and EHCI
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at d92da7d:
   devices/a5/patches/files/drivers/phy/phy-apple-s5l-usb.c
   devices/a5/patches/tree/0001-cascadia.patch
 
-Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (16 commits).
+Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (17 commits);
+  Stephen Cox <stephencoxmail@gmail.com> (a96b41c)
 
 [Orchard: imported for the apple-armv7 platform; see kernel/sources.toml]
 ---
  drivers/phy/Kconfig              |   8 +
  drivers/phy/Makefile             |   1 +
- drivers/phy/phy-apple-s5l-usb.c  | 409 +++++++++++++++++++++++++++++++
+ drivers/phy/phy-apple-s5l-usb.c  | 559 +++++++++++++++++++++++++++++++
  drivers/usb/dwc2/core.c          |  15 +-
- drivers/usb/dwc2/core_intr.c     |  14 ++
- drivers/usb/dwc2/gadget.c        |  75 ++++++
- drivers/usb/dwc2/params.c        |  18 ++
+ drivers/usb/dwc2/core_intr.c     |  14 +
+ drivers/usb/dwc2/gadget.c        |  75 +++++
+ drivers/usb/dwc2/params.c        |  18 +
  drivers/usb/host/ehci-hub.c      |  11 +-
  drivers/usb/host/ehci-platform.c |   2 +
  drivers/usb/host/ehci.h          |   3 +
- 10 files changed, 554 insertions(+), 2 deletions(-)
+ 10 files changed, 704 insertions(+), 2 deletions(-)
  create mode 100644 drivers/phy/phy-apple-s5l-usb.c
 
 diff --git a/drivers/phy/Kconfig b/drivers/phy/Kconfig
-index f73abff41..eee847c7e 100644
+index f73abff416be..eee847c7e91b 100644
 --- a/drivers/phy/Kconfig
 +++ b/drivers/phy/Kconfig
 @@ -112,3 +112,11 @@ source "drivers/phy/intel/Kconfig"
@@ -41,7 +42,7 @@ index f73abff41..eee847c7e 100644
 +	  USB PHY driver for Apple S5L SoCs (A4/A5).
 +
 diff --git a/drivers/phy/Makefile b/drivers/phy/Makefile
-index ebc399560..5c89aacbb 100644
+index ebc399560da4..5c89aacbbafb 100644
 --- a/drivers/phy/Makefile
 +++ b/drivers/phy/Makefile
 @@ -39,3 +39,4 @@ obj-y					+= allwinner/	\
@@ -51,19 +52,20 @@ index ebc399560..5c89aacbb 100644
 +obj-$(CONFIG_PHY_APPLE_S5L_USB)	+= phy-apple-s5l-usb.o
 diff --git a/drivers/phy/phy-apple-s5l-usb.c b/drivers/phy/phy-apple-s5l-usb.c
 new file mode 100644
-index 000000000..378ac6beb
+index 000000000000..ad89c1d025ea
 --- /dev/null
 +++ b/drivers/phy/phy-apple-s5l-usb.c
-@@ -0,0 +1,409 @@
+@@ -0,0 +1,559 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Apple S5L USB PHY driver (otgphyctrl,s5l8940x)
 + * Register values taken from a live iBoot/DFU PHY dump on real hardware
-+ * (see docs/PHY-DUMP.md): OPHYPWR=0x6 OPHYCLK=0x1 UNK1_1C=0x6 UNK2_44=0xF8
++ * (see docs/PHY-DUMP.md): OPHYPWR=0x6 OPHYCLK=0x1 UNK1_1C=0x6 UNK2_44=0x2FF3
 + * UNK4_60=0x200 ORSTCON=0x0 -- these are the exact bits iBoot leaves set
 + * while its own USB (DFU) is actively enumerated, i.e. known-working state.
 + */
 +
++#include <linux/clk.h>
 +#include <linux/delay.h>
 +#include <linux/io.h>
 +#include <linux/module.h>
@@ -88,7 +90,8 @@ index 000000000..378ac6beb
 +/* Values as observed live from iBoot's working PHY state */
 +#define OPHYUNK4_START			0x200
 +#define OPHYUNK1_START			0x6
-+#define OPHYUNK2_START			0xF8
++#define OPHYPWR_ON			0x6
++#define OPHYUNK2_START			0x2FF3
 +
 +#define PMGR_BASE		0x3F100000
 +#define PMGR_GATE_ON		0xF
@@ -123,6 +126,11 @@ index 000000000..378ac6beb
 + * is not a device-clocks entry at all.  Writing a gate value at `base + 5 * 4`
 + * and `base + 292 * 4`, as this driver did, hit PERFCNT's gate and an empty
 + * address respectively.  Neither has anything to do with USB. */
++/* Two more of the block's power states.  iBoot's DFU leaves all three of these
++ * on, its jump to a kernel turns them off (docs/research/p105-pcless-boot.md).
++ * Which device each one is has not been established. */
++#define PMGR_USB_AUX0		0x1080
++#define PMGR_USB_AUX1		0x1098
 +#define PMGR_USB_OTG		0x1084
 +#define PMGR_USB_EHCI		0x1088
 +#define PMGR_USB_OHCI0		0x1090
@@ -241,6 +249,8 @@ index 000000000..378ac6beb
 +		 readl(p->pmgr + PMGR_USB_OTG), readl(p->pmgr + PMGR_USB_EHCI),
 +		 readl(p->pmgr + PMGR_USB_OHCI0), readl(p->pmgr + PMGR_USB_OHCI1));
 +
++	s5l_pmgr_on(p, PMGR_USB_AUX0);
++	s5l_pmgr_on(p, PMGR_USB_AUX1);
 +	s5l_pmgr_on(p, PMGR_USB_OTG);
 +
 +	dev_info(p->dev, "usb-complex OTG(88) now 0x%08x\n",
@@ -268,7 +278,23 @@ index 000000000..378ac6beb
 +	 * problem is easy to spot in the UART log.
 +	 *
 +	 * Old comment claimed "OPHYUNK2=0xF8 is what iBoot's DFU state
-+	 * leaves set". That was wrong; the correct DFU state is 0x2ff3. */
++	 * leaves set". That was wrong; the correct DFU state is 0x2ff3.
++	 *
++	 * The exception: booted from the NAND, iBEC's jump to the kernel has
++	 * powered the PHY down and left none of this set.  OPHYPWR tells the
++	 * two apart, and then this writes the values a DFU boot leaves. */
++	if (readl(p->base + OPHYPWR) != OPHYPWR_ON) {
++		dev_info(p->dev, "PHY left off by the boot loader: programming it\n");
++		writel(OPHYCLK_CLKSEL_24MHZ, p->base + OPHYCLK);
++		writel(0xc, p->base + 0x14);
++		writel(OPHYUNK1_START, p->base + OPHYUNK1);
++		writel(0xc00, p->base + 0x20);
++		writel(0x549, p->base + 0x40);
++		writel(OPHYUNK2_START, p->base + OPHYUNK2);
++		writel(OPHYUNK4_START, p->base + OPHYUNK4);
++		writel(OPHYPWR_ON, p->base + OPHYPWR);
++		udelay(100);
++	}
 +
 +	udelay(10);
 +
@@ -375,6 +401,127 @@ index 000000000..378ac6beb
 +	.owner     = THIS_MODULE,
 +};
 +
++/*
++ * The A5X's second USB complex (iPad3,1: the Wi-Fi's HSIC port), a PHY of
++ * its own -- ADT otgphyctrl1 at 0x36800000 -- that iBoot leaves off, with
++ * its EHCI at 0x36c00000.  This is what iOS's setPower(1) does, measured on
++ * the J1 (docs/research/j1-a5x.md, "Wi-Fi"):
++ *
++ *   clocks       the PMGR power states USB1-REG (0x3f1010b4, the PHY's
++ *                parent: without it the PHY reads bus junk) and USB1-EHCI
++ *                (0x3f1010a4), in that order
++ *   reg 1        usb1-complex USB_CTL (0x3f109000) = 0x84: HSIC on, no
++ *                automatic clock gating
++ *   reg 0        the PHY: all resets asserted, the 24 MHz reference and
++ *                tuning, then reset bit 1 released and, 1 ms later, bit 3
++ *                (port 2)
++ *   hsic-supply  the BCM4330's REG_ON (PMU GPIO 3), last; its boot ROM then
++ *                connects on port 2 as 0a5c:bd19
++ *
++ * EHCI's +0xb0, which the hand bring-up also wrote (0x2), is not needed:
++ * with it at 0 the chip enumerates and its firmware comes up the same.
++ */
++#define USB1_CTL_HSIC_ON	0x84
++#define USB1_RST_ALL		0x3f
++#define USB1_RST_PHY		BIT(1)
++#define USB1_RST_PORT2		BIT(3)
++
++struct s5l_usb1phy {
++	void __iomem *base;
++	void __iomem *ctl;
++	struct clk_bulk_data *clks;
++	int num_clks;
++	struct regulator *hsic_supply;
++	bool on;
++};
++
++static int s5l_usb1phy_power_on(struct phy *phy)
++{
++	struct s5l_usb1phy *p = phy_get_drvdata(phy);
++	int ret;
++
++	if (p->on)
++		return 0;
++	ret = clk_bulk_prepare_enable(p->num_clks, p->clks);
++	if (ret)
++		return ret;
++
++	writel(USB1_CTL_HSIC_ON, p->ctl);
++	writel(readl(p->base + ORSTCON) | USB1_RST_ALL, p->base + ORSTCON);
++	writel(0x2e0, p->base + OPHYUNK4);
++	writel(0x0f, p->base + OPHYPWR);
++	writel(0x11, p->base + OPHYCLK);	/* 24 MHz reference */
++	writel(0x349, p->base + 0x40);
++	writel(0x733, p->base + OPHYUNK2);
++	udelay(20);
++	writel(readl(p->base + ORSTCON) & ~USB1_RST_PHY, p->base + ORSTCON);
++	usleep_range(1000, 1500);
++	writel(readl(p->base + ORSTCON) & ~USB1_RST_PORT2, p->base + ORSTCON);
++
++	ret = regulator_enable(p->hsic_supply);
++	if (ret) {
++		writel(readl(p->base + ORSTCON) | USB1_RST_ALL, p->base + ORSTCON);
++		clk_bulk_disable_unprepare(p->num_clks, p->clks);
++		return ret;
++	}
++	p->on = true;
++	dev_info(&phy->dev, "usb1 PHY on: PWR=0x%x CLK=0x%x RST=0x%x USB_CTL=0x%x\n",
++		 readl(p->base + OPHYPWR), readl(p->base + OPHYCLK),
++		 readl(p->base + ORSTCON), readl(p->ctl));
++	return 0;
++}
++
++static int s5l_usb1phy_power_off(struct phy *phy)
++{
++	struct s5l_usb1phy *p = phy_get_drvdata(phy);
++
++	if (!p->on)
++		return 0;
++	regulator_disable(p->hsic_supply);
++	writel(readl(p->base + ORSTCON) | USB1_RST_ALL, p->base + ORSTCON);
++	clk_bulk_disable_unprepare(p->num_clks, p->clks);
++	p->on = false;
++	return 0;
++}
++
++static const struct phy_ops s5l_usb1phy_ops = {
++	.power_on  = s5l_usb1phy_power_on,
++	.power_off = s5l_usb1phy_power_off,
++	.owner     = THIS_MODULE,
++};
++
++static int s5l_usb1phy_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct phy_provider *provider;
++	struct s5l_usb1phy *p;
++	struct phy *phy;
++
++	p = devm_kzalloc(dev, sizeof(*p), GFP_KERNEL);
++	if (!p)
++		return -ENOMEM;
++	p->base = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(p->base))
++		return PTR_ERR(p->base);
++	p->ctl = devm_platform_ioremap_resource(pdev, 1);
++	if (IS_ERR(p->ctl))
++		return PTR_ERR(p->ctl);
++	p->num_clks = devm_clk_bulk_get_all(dev, &p->clks);
++	if (p->num_clks < 0)
++		return dev_err_probe(dev, p->num_clks, "power states\n");
++	/* The PMU is behind I2C: wait for it.  EHCI waits for this PHY. */
++	p->hsic_supply = devm_regulator_get(dev, "hsic");
++	if (IS_ERR(p->hsic_supply))
++		return dev_err_probe(dev, PTR_ERR(p->hsic_supply), "hsic-supply\n");
++
++	phy = devm_phy_create(dev, NULL, &s5l_usb1phy_ops);
++	if (IS_ERR(phy))
++		return PTR_ERR(phy);
++	phy_set_drvdata(phy, p);
++	provider = devm_of_phy_provider_register(dev, of_phy_simple_xlate);
++	return PTR_ERR_OR_ZERO(provider);
++}
++
 +/* <&otgphy 0> is the OTG PHY dwc2 has always had, <&otgphy 1> the host
 + * side.  With #phy-cells = <0> there are no args, and that is the OTG PHY. */
 +static struct phy *s5l_usbphy_xlate(struct device *dev,
@@ -393,6 +540,9 @@ index 000000000..378ac6beb
 +	struct s5l_usbphy *p;
 +	struct phy *phy;
 +	struct phy_provider *provider;
++
++	if (of_device_is_compatible(pdev->dev.of_node, "apple,s5l8945x-usb1-phy"))
++		return s5l_usb1phy_probe(pdev);
 +
 +	dev_info(&pdev->dev, "Apple S5L USB PHY probe\n");
 +
@@ -449,6 +599,7 @@ index 000000000..378ac6beb
 +static const struct of_device_id s5l_usbphy_of_match[] = {
 +	{ .compatible = "apple,s5l8940x-otgphy" },
 +	{ .compatible = "apple,s5l8930x-otgphy" },
++	{ .compatible = "apple,s5l8945x-usb1-phy" },
 +	{ },
 +};
 +MODULE_DEVICE_TABLE(of, s5l_usbphy_of_match);
@@ -465,7 +616,7 @@ index 000000000..378ac6beb
 +MODULE_DESCRIPTION("Apple S5L USB PHY driver");
 +MODULE_LICENSE("GPL v2");
 diff --git a/drivers/usb/dwc2/core.c b/drivers/usb/dwc2/core.c
-index 9919ab725..f0c547b78 100644
+index 9919ab725d54..f0c547b78ae7 100644
 --- a/drivers/usb/dwc2/core.c
 +++ b/drivers/usb/dwc2/core.c
 @@ -318,7 +318,20 @@ static void dwc2_wait_for_mode(struct dwc2_hsotg *hsotg,
@@ -491,7 +642,7 @@ index 9919ab725..f0c547b78 100644
  }
  
 diff --git a/drivers/usb/dwc2/core_intr.c b/drivers/usb/dwc2/core_intr.c
-index 7d3e64180..e84cad0a1 100644
+index 7d3e641806f8..e84cad0a18d4 100644
 --- a/drivers/usb/dwc2/core_intr.c
 +++ b/drivers/usb/dwc2/core_intr.c
 @@ -301,6 +301,9 @@ static void dwc2_handle_session_req_intr(struct dwc2_hsotg *hsotg)
@@ -523,7 +674,7 @@ index 7d3e64180..e84cad0a1 100644
  		/* Turn on the port power bit. */
  		hprt0 = dwc2_read_hprt0(hsotg);
 diff --git a/drivers/usb/dwc2/gadget.c b/drivers/usb/dwc2/gadget.c
-index e7bf9cc63..f3a0a0b78 100644
+index e7bf9cc635be..f3a0a0b781c1 100644
 --- a/drivers/usb/dwc2/gadget.c
 +++ b/drivers/usb/dwc2/gadget.c
 @@ -3463,6 +3463,19 @@ void dwc2_hsotg_core_init_disconnected(struct dwc2_hsotg *hsotg,
@@ -630,7 +781,7 @@ index e7bf9cc63..f3a0a0b78 100644
  		dev_dbg(hsotg->dev, "GNPTXSTS=%08x\n",
  			dwc2_readl(hsotg, GNPTXSTS));
 diff --git a/drivers/usb/dwc2/params.c b/drivers/usb/dwc2/params.c
-index 4d73fae80..97d1d24ff 100644
+index 4d73fae80b12..97d1d24ff501 100644
 --- a/drivers/usb/dwc2/params.c
 +++ b/drivers/usb/dwc2/params.c
 @@ -106,6 +106,23 @@ static void dwc2_set_s3c6400_params(struct dwc2_hsotg *hsotg)
@@ -666,7 +817,7 @@ index 4d73fae80..97d1d24ff 100644
  	{ .compatible = "samsung,s3c6400-hsotg",
  	  .data = dwc2_set_s3c6400_params },
 diff --git a/drivers/usb/host/ehci-hub.c b/drivers/usb/host/ehci-hub.c
-index 1aee392e8..51ef91773 100644
+index 1aee392e8492..51ef91773fb5 100644
 --- a/drivers/usb/host/ehci-hub.c
 +++ b/drivers/usb/host/ehci-hub.c
 @@ -952,8 +952,17 @@ int ehci_hub_control(
@@ -689,7 +840,7 @@ index 1aee392e8..51ef91773 100644
  				ehci_err (ehci, "port %d reset error %d\n",
  					wIndex + 1, retval);
 diff --git a/drivers/usb/host/ehci-platform.c b/drivers/usb/host/ehci-platform.c
-index 98b073185..ff0a009f9 100644
+index 98b073185e1c..ff0a009f9017 100644
 --- a/drivers/usb/host/ehci-platform.c
 +++ b/drivers/usb/host/ehci-platform.c
 @@ -290,6 +290,8 @@ static int ehci_platform_probe(struct platform_device *dev)
@@ -702,7 +853,7 @@ index 98b073185..ff0a009f9 100644
  					  "has-transaction-translator"))
  			hcd->has_tt = 1;
 diff --git a/drivers/usb/host/ehci.h b/drivers/usb/host/ehci.h
-index d7a3c8d13..f12b1f57c 100644
+index d7a3c8d13f6b..f12b1f57cd5c 100644
 --- a/drivers/usb/host/ehci.h
 +++ b/drivers/usb/host/ehci.h
 @@ -216,6 +216,9 @@ struct ehci_hcd {			/* one per controller */

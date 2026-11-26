@@ -1,29 +1,30 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: rzxvx <rrzxznewid@gmail.com>
-Date: Sun, 27 Sep 2026 14:33:19 +0300
+Date: Fri, 6 Nov 2026 17:03:34 +1300
 Subject: [PATCH] irqchip: Add the Apple AIC1 interrupt controller
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at d92da7d:
   devices/a5/patches/files/Documentation/devicetree/bindings/interrupt-controller/apple,aic1.yaml
   devices/a5/patches/files/drivers/irqchip/irq-apple-aic1.c
   devices/a5/patches/tree/0001-cascadia.patch
 
 Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (10 commits);
+  Stephen Cox <stephencoxmail@gmail.com> (9412e3c, 7d956cd)
   K <k@Ks-MacBook-Pro-4.local> (3dc80cf)
 
 [Orchard: imported for the apple-armv7 platform; see kernel/sources.toml]
 ---
- .../interrupt-controller/apple,aic1.yaml      |   67 ++
+ .../interrupt-controller/apple,aic1.yaml      |   67 +
  drivers/irqchip/Kconfig                       |   13 +
  drivers/irqchip/Makefile                      |    1 +
- drivers/irqchip/irq-apple-aic1.c              | 1059 +++++++++++++++++
- 4 files changed, 1140 insertions(+)
+ drivers/irqchip/irq-apple-aic1.c              | 1078 +++++++++++++++++
+ 4 files changed, 1159 insertions(+)
  create mode 100644 Documentation/devicetree/bindings/interrupt-controller/apple,aic1.yaml
  create mode 100644 drivers/irqchip/irq-apple-aic1.c
 
 diff --git a/Documentation/devicetree/bindings/interrupt-controller/apple,aic1.yaml b/Documentation/devicetree/bindings/interrupt-controller/apple,aic1.yaml
 new file mode 100644
-index 000000000..12bd136f9
+index 000000000000..12bd136f93b5
 --- /dev/null
 +++ b/Documentation/devicetree/bindings/interrupt-controller/apple,aic1.yaml
 @@ -0,0 +1,67 @@
@@ -95,7 +96,7 @@ index 000000000..12bd136f9
 +        };
 +    };
 diff --git a/drivers/irqchip/Kconfig b/drivers/irqchip/Kconfig
-index d82bcab23..dc5ef3b6b 100644
+index d82bcab233a1..dc5ef3b6b006 100644
 --- a/drivers/irqchip/Kconfig
 +++ b/drivers/irqchip/Kconfig
 @@ -739,3 +739,16 @@ config SUNPLUS_SP7021_INTC
@@ -116,7 +117,7 @@ index d82bcab23..dc5ef3b6b 100644
 +	  from APPLE_AIC (arm64 Apple Silicon): different DT binding, EVENT format,
 +	  and no integrated FIQ/IPI support.  Required to boot Linux on A5 devices.
 diff --git a/drivers/irqchip/Makefile b/drivers/irqchip/Makefile
-index e3679ec2b..6a91a4940 100644
+index e3679ec2b9f7..6a91a4940969 100644
 --- a/drivers/irqchip/Makefile
 +++ b/drivers/irqchip/Makefile
 @@ -8,6 +8,7 @@ obj-$(CONFIG_ATH79)			+= irq-ath79-misc.o
@@ -129,10 +130,10 @@ index e3679ec2b..6a91a4940 100644
  obj-$(CONFIG_FARADAY_FTINTC010)		+= irq-ftintc010.o
 diff --git a/drivers/irqchip/irq-apple-aic1.c b/drivers/irqchip/irq-apple-aic1.c
 new file mode 100644
-index 000000000..f1387fe30
+index 000000000000..c2eba37f8339
 --- /dev/null
 +++ b/drivers/irqchip/irq-apple-aic1.c
-@@ -0,0 +1,1059 @@
+@@ -0,0 +1,1078 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Apple Interrupt Controller revision 1 ("aic,1") — 32-bit S5L89xx (A4–A6).
@@ -1138,6 +1139,17 @@ index 000000000..f1387fe30
 + * Register only on a timer seen to fire.  Failing leaves the system exactly as
 + * it was -- the SOF tick carries on -- so this cannot cost a boot.
 + *
++ * kernel_init() calls apple_aic1_timer_start() as soon as the AIC is re-armed
++ * and interrupts are on (init/main.c, in patches/tree/0001), before
++ * workqueue_init() makes the first kernel threads.  That is required, not
++ * tidy: kthread_bind() waits in wait_task_inactive(), and if the scheduler
++ * has preempted the new thread before it slept, the wait is a one-tick
++ * hrtimer sleep.  With no clockevent that sleep never ends.  Whether the
++ * thread is preempted depends on timing, so on the J1 the boot hung or not
++ * with how slow the early console was (a 2 ms delay per message was enough
++ * to pass; earlycon=j1fb's drawing too).  The early_initcall below is the
++ * fallback for a kernel without that call.
++ *
 + * early_initcall: dwc2 decides whether to take Start-of-Frame interrupts
 + * when it first initialises the core, at device_initcall, and it asks whether
 + * this timer is live; and it must come before smp_init().  Until it runs there
@@ -1148,12 +1160,15 @@ index 000000000..f1387fe30
 + * hand.  The AIC is re-armed and interrupts are on before any initcall runs
 + * (init/main.c), so the probe below still sees the timer fire.
 + */
-+static int __init aic1_timer_init(void)
++static bool aic1_tmr_tried __initdata;
++
++int __init apple_aic1_timer_start(void)
 +{
 +	struct apple_aic1 *aic = apple_aic1;
 +
-+	if (!aic)
++	if (!aic || aic1_tmr_tried)
 +		return 0;
++	aic1_tmr_tried = true;
 +
 +	pr_err("AIC-TIMER: timebase at %#llx; trying the AIC's own timer (recipe from iBEC 12H321)\n",
 +	       aic1_time(aic));
@@ -1187,6 +1202,11 @@ index 000000000..f1387fe30
 +	pr_err("AIC-TIMER: PASS -- clockevent registered at 24 MHz, %s. The tick no longer needs a USB host.\n",
 +	       aic1_tmr_percpu ? "one per CPU" : "CPU0 only");
 +	return 0;
++}
++
++static int __init aic1_timer_init(void)
++{
++	return apple_aic1_timer_start();
 +}
 +early_initcall(aic1_timer_init);
 +

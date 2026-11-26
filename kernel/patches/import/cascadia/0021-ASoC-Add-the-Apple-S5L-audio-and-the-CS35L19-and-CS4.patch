@@ -1,0 +1,3208 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Stephen Cox <stephencoxmail@gmail.com>
+Date: Sat, 21 Nov 2026 15:03:12 +1300
+Subject: [PATCH] ASoC: Add the Apple S5L audio and the CS35L19 and CS42L63
+ codecs
+
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at d92da7d:
+  devices/a5/patches/files/sound/soc/apple/s5l-audio.c
+  devices/a5/patches/files/sound/soc/codecs/cs35l19.c
+  devices/a5/patches/files/sound/soc/codecs/cs42l63-seq.h
+  devices/a5/patches/files/sound/soc/codecs/cs42l63.c
+  devices/a5/patches/tree/0001-cascadia.patch
+
+Cascadia history of these files: Stephen Cox <stephencoxmail@gmail.com> (3 commits);
+  rzxvx <rrzxznewid@gmail.com> (ace34e4, 66ff330)
+  Simone99 <simone060699@gmail.com> (228a8a8)
+
+[Orchard: imported for the apple-armv7 platform; see kernel/sources.toml]
+---
+ sound/soc/apple/Kconfig        |   14 +
+ sound/soc/apple/Makefile       |    3 +
+ sound/soc/apple/s5l-audio.c    | 1046 +++++++++++++++++++++++++++
+ sound/soc/codecs/Kconfig       |   17 +
+ sound/soc/codecs/Makefile      |    4 +
+ sound/soc/codecs/cs35l19.c     |  408 +++++++++++
+ sound/soc/codecs/cs42l63-seq.h |  394 +++++++++++
+ sound/soc/codecs/cs42l63.c     | 1220 ++++++++++++++++++++++++++++++++
+ 8 files changed, 3106 insertions(+)
+ create mode 100644 sound/soc/apple/s5l-audio.c
+ create mode 100644 sound/soc/codecs/cs35l19.c
+ create mode 100644 sound/soc/codecs/cs42l63-seq.h
+ create mode 100644 sound/soc/codecs/cs42l63.c
+
+diff --git a/sound/soc/apple/Kconfig b/sound/soc/apple/Kconfig
+index 793f7782e0d7..be3395161ae7 100644
+--- a/sound/soc/apple/Kconfig
++++ b/sound/soc/apple/Kconfig
+@@ -6,3 +6,17 @@ config SND_SOC_APPLE_MCA
+ 	help
+ 	  This option enables an ASoC platform driver for MCA peripherals found
+ 	  on Apple Silicon SoCs.
++
++config SND_SOC_APPLE_S5L_AUDIO
++	tristate "iPad mini 1, iPad 2 and iPad 3 audio (Apple A5/A5X, CDMA)"
++	depends on ARCH_APPLE_S5L || COMPILE_TEST
++	depends on COMMON_CLK && I2C
++	select SND_SOC_CS35L19
++	select SND_SOC_CS42L63
++	default ARCH_APPLE_S5L
++	help
++	  The iPad mini 1 (A5, S5L8942X) speakers: the MCA audio port, its
++	  CDMA channel and the clocks and pin routing they need, as an ALSA
++	  card with the two CS35L19 amplifiers.  The iPad 3 (A5X, S5L8945X)
++	  speaker, and the iPad 2's (A5, S5L8940X) with its headphones and
++	  microphones: the I2S0 port, its CDMA channels and the CS42L63 codec.
+diff --git a/sound/soc/apple/Makefile b/sound/soc/apple/Makefile
+index 1eb8fbef60c6..75185dfb58ed 100644
+--- a/sound/soc/apple/Makefile
++++ b/sound/soc/apple/Makefile
+@@ -1,3 +1,6 @@
+ snd-soc-apple-mca-y	:= mca.o
+ 
+ obj-$(CONFIG_SND_SOC_APPLE_MCA)	+= snd-soc-apple-mca.o
++
++snd-soc-apple-s5l-audio-y	:= s5l-audio.o
++obj-$(CONFIG_SND_SOC_APPLE_S5L_AUDIO)	+= snd-soc-apple-s5l-audio.o
+diff --git a/sound/soc/apple/s5l-audio.c b/sound/soc/apple/s5l-audio.c
+new file mode 100644
+index 000000000000..09d15977409e
+--- /dev/null
++++ b/sound/soc/apple/s5l-audio.c
+@@ -0,0 +1,1046 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * The iPad mini 1's speakers: A5 (S5L8942X) MCA0 + CDMA + two CS35L19 amps.
++ *
++ * Everything here was worked out for this port and is written down in
++ * docs/research/p105-audio.md; in short:
++ *
++ *   MCA0 (0x34196000)   the audio port the speakers' data come from: clock
++ *                       master, 2 x 32-bit slots, registers as iOS's
++ *                       AppleAE2MCA writes them (computed by running iOS's
++ *                       own code, tools/audio/mca-emu.py)
++ *   NCOs (PMGR +0x110)  the MCLK generators, 342 MHz reference; MCA0 runs
++ *                       from NCO 6 at 128 fs
++ *   AE2 MCS/ACS         per-port kernel-clock source and register-clock gate
++ *   i2s-switch          routes MCA0's clocks and data to pin group 1, and
++ *                       I2S1's MCK to the amps
++ *   I2S1 (0x34191000)   used only for its MCK: the amps need 12.000 MHz
++ *                       before they power up.  Offered as a clock ("mclk")
++ *                       for the amp driver.
++ *   CDMA (0x37000000)   feeds MCA0's TX FIFO from a ring of commands; the
++ *                       channel gives no interrupt while it runs, so the
++ *                       period clock is an hrtimer reading MAR.
++ *
++ * This driver is also the machine driver: its card links MCA0 to the amps
++ * named in "apple,speaker-amps", one 32-bit TDM slot each.  The card lives
++ * on a child device: the amps take their MCLK from this device, so it has to
++ * finish probing before they can, and the card has to wait for them.
++ *
++ * The iPad 3 (A5X, S5L8945X; "apple,s5l8945x-audio") is simpler: one port,
++ * I2S0 (0x34190000), is both the clock master and the data port of the
++ * CS42L63 codec named in "apple,audio-codec" -- 2 x 16-bit slots, BCLK =
++ * NCO 0 = 32 fs, and the codec's 6 MHz MCLK from the port's own nclk / 4
++ * (CLKCON 0x181), offered as this node's clock.  Measured on the device
++ * (docs/research/j1-a5x.md): the NCO reference is 342 MHz as on the A5; the
++ * AE2 MCS lanes select an NCO (lane i = i at reset) and are left alone; the
++ * i2s-switch needs reg 0 = 0x44 (pin 0's clocks and data from I2S0) and
++ * reg 12 = 1 (pin 0's MCK), or the codec gets no MCLK.
++ *
++ * The iPad 2 (A5, S5L8940X; "apple,s5l8940x-audio") has the iPad 3's port:
++ * I2S0 at 0x34190000 as clock master, the same CS42L63 codec and its MCLK,
++ * nclk / 4 -- its iOS's AppleSamsungI2SController (8.4.1's, run in an
++ * emulator: docs/research/k93-audio.md) writes the same values -- with the
++ * A5's NCOs (the "nco" window at PMGR + 0x110).  And it records: I2S0's RX FIFO (+0x38), out of which a
++ * second CDMA channel ("apple,capture-dma-channel": 0x20, request line 0)
++ * reads, RXCOM started and stopped as TXCOM is; capture and playback share
++ * the port's clocks, so they share its rate.  Each direction has its own
++ * channel, command ring and period clock (struct s5l_dir).
++ */
++
++#include <linux/clk.h>
++#include <linux/clk-provider.h>
++#include <linux/delay.h>
++#include <linux/dma-mapping.h>
++#include <linux/hrtimer.h>
++#include <linux/io.h>
++#include <linux/iopoll.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/property.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++
++/* MCA (AppleAE2MCA) */
++#define MCA_FMT			0x08	/* 32 - sample bits, TX | RX << 8 */
++#define MCA_FRAME		0x0c
++#define MCA_CTL			0x10
++#define MCA_TX_MODE		0x14
++#define MCA_TX_CFG		0x18	/* bit 0: TX on */
++#define MCA_TX_C1		0x1c
++#define MCA_TX_FIFO_CFG		0x20
++#define MCA_TX_SLOTS		0x24
++#define MCA_TX_FIFO		0x28
++#define MCA_RX_CFG		0x2c
++#define MCA_RX_C1		0x30
++#define MCA_RX_FIFO_CFG		0x34
++#define MCA_RX_SLOTS		0x38
++#define MCA_STATUS		0x40
++#define MCA_RESET		0x44
++
++/* I2S (S5L8900 heritage, version 3) */
++#define I2S_CLKCON		0x00
++#define I2S_TXCON		0x04
++#define I2S_TXCOM		0x08
++#define I2S_TXFIFO		0x10
++#define I2S_RXCON		0x30
++#define I2S_RXCOM		0x34
++#define I2S_RXFIFO		0x38
++#define I2S_STATUS		0x3c
++/* what iOS writes (AppleSamsungI2SController configure and start, 48 kHz) */
++#define I2S_TXCON_IOS		0x03000081	/* bit 7: MCLK/BCLK ratio 1 */
++#define I2S_RXCON_IOS		0x1000
++#define I2S_CLKCON_STOP		0x34
++#define I2S_CLKCON_MCK4		0x181		/* run, MCK = nclk / 4 */
++#define I2S_TXCOM_START		0x01feca06	/* DMA requests, TX on */
++#define I2S_TXCOM_IDLE		0x01feca04	/* TX on, no DMA requests */
++#define I2S_RXCOM_START		0x01feca06	/* iOS's start(RX): DMA requests, RX on */
++
++/* AE2 */
++#define AE2_LANE(i)		(0x10 + 4 * (i))	/* MCS: 1 = own NCO; ACS: 1 = gated */
++#define AE2_I2S1		1
++#define AE2_MCA0		5
++
++/* i2s-switch: AppleAE2I2SSwitch2 on the A5, Switch1 on the A5X */
++#define SW_PIN1			0x04
++#define SW_PIN1_MCK		0x44
++#define SW1_PIN0		0x00
++#define SW1_PIN0_I2S0		0x44		/* clocks and data from I2S0 */
++#define SW1_PIN0_MCK		0x30		/* reg 12: pin 0's MCK on */
++
++/* CDMA channel */
++#define CDMA_CLK_ON(ch)		(4 * ((ch) / 32))
++#define CDMA_CH(ch)		(0x1000 * (ch))
++#define CDMA_CSR		0x00
++#define CDMA_DCR		0x04
++#define CDMA_DAR		0x08
++#define CDMA_DBR		0x0c
++#define CDMA_MAR		0x10
++#define CDMA_CAR		0x14
++#define CDMA_ERR		0x18
++#define CDMA_CSR_ABORT		BIT(1)
++#define CDMA_CSR_RUNNING	BIT(16)
++#define CDMA_CSR_CLEAR		(BIT(18) | BIT(19) | BIT(20))
++#define CDMA_CSR_START		(0x02000000 | CDMA_CSR_CLEAR | BIT(3) | BIT(0))
++#define CDMA_DCR_TO_DEV		BIT(1)		/* memory to device; clear: device to memory */
++#define CDMA_CMD_DATA		0x02000103
++#define CDMA_DBR_MAX		0x7ffffff0
++#define CDMA_MAX_CMDS		64
++
++#define S5L_NCO_MCA0		6
++#define S5L_NCO_I2S1		1
++#define S5L_MCLK_HZ		12000000
++
++#define S5X_NCO_I2S0		0
++#define S5X_AE2_I2S0		0
++#define S5X_MCLK_HZ		6000000
++
++struct s5l_audio;
++
++/* what differs between the A5's MCA0 + I2S1 (the mini) and I2S0 alone (the
++ * A5X's, the S5L8940X's) */
++struct s5l_variant {
++	bool mca;			/* data through MCA0, else through I2S0 */
++	const char *port_clk;		/* power state held while the PCM is open */
++	const char *mclk_name;
++	const struct clk_ops *mclk_ops;
++	u64 formats;
++	const char *dai_name;
++	const char *stream_name;
++	const char *codecs_prop;	/* phandles of the codec(s) */
++	const char *codec_dai;
++	const char *card_name, *card_long_name;
++	unsigned int dai_fmt;
++	int (*card_init)(struct snd_soc_pcm_runtime *rtd);
++	int (*port_prepare)(struct s5l_audio *a);
++	/* a direction's half of the port on and off: TX, or RX (I2S0 only) */
++	void (*port_start)(struct s5l_audio *a, bool capture);
++	void (*port_stop)(struct s5l_audio *a, bool capture);
++	void (*port_close)(struct s5l_audio *a);	/* optional */
++};
++
++/* one direction: its CDMA channel and command ring, its period clock */
++struct s5l_dir {
++	struct s5l_audio *a;
++	bool capture;
++	unsigned int ch, req;
++	u32 fifo;			/* the port's TX or RX FIFO, physical */
++	struct snd_pcm_substream *substream;
++	__le32 *cmds;
++	dma_addr_t cmds_dma;
++	dma_addr_t buf_dma;
++	unsigned int buf_bytes, period_bytes, periods;
++	unsigned int last_period;
++	struct hrtimer timer;
++	ktime_t tick;
++	bool running;
++};
++
++struct s5l_audio {
++	struct device *dev;
++	const struct s5l_variant *v;
++	void __iomem *mca, *i2s, *mcs, *acs, *sw, *nco, *cdma;
++	struct clk *port_clk;
++	struct clk_hw mclk;
++	u32 nco_ref;
++
++	struct s5l_dir dir[2];		/* SNDRV_PCM_STREAM_PLAYBACK, _CAPTURE */
++	bool has_capture;		/* I2S0 with apple,capture-dma-channel */
++	unsigned int width;		/* bytes per sample */
++	unsigned int rate;
++	unsigned int port_rate;		/* I2S0: the rate it runs at, 0 = stopped */
++	bool mclk_on;			/* I2S0: the codec has MCLK */
++	spinlock_t lock;
++
++	struct platform_device *card_pdev;
++	struct snd_soc_card card;
++	struct snd_soc_dai_link link;
++	struct snd_soc_dai_link_component cpu, platform, *codecs;
++};
++
++static int s5l_nco_set(struct s5l_audio *a, int n, u32 hz)
++{
++	void __iomem *r = a->nco + 16 * n;
++	u32 v;
++	int ret;
++
++	writel(hz ? 0x90000000 : 0, r);
++	ret = readl_poll_timeout_atomic(r, v, !(v & BIT(30)), 1, 1000);
++	if (ret || !hz)
++		return ret;
++	writel(2 * hz, r + 4);
++	ret = readl_poll_timeout_atomic(r, v, !(v & BIT(9)), 1, 1000);
++	writel(2 * hz - a->nco_ref, r + 8);
++	ret |= readl_poll_timeout_atomic(r, v, !(v & BIT(9)), 1, 1000);
++	writel(0x90000400, r);
++	ret |= readl_poll_timeout_atomic(r, v, !(v & BIT(9)), 1, 1000);
++	writel(0x90000c00, r);
++	ret |= readl_poll_timeout_atomic(r, v, !(v & BIT(9)), 1, 1000);
++	return ret ? -ETIMEDOUT : 0;
++}
++
++/* --- the amps' MCLK: I2S1 as clock master, its MCK on pin1 ------------- */
++
++static struct s5l_audio *mclk_to_audio(struct clk_hw *hw)
++{
++	return container_of(hw, struct s5l_audio, mclk);
++}
++
++static int s5l_mclk_enable(struct clk_hw *hw)
++{
++	struct s5l_audio *a = mclk_to_audio(hw);
++	int ret;
++
++	ret = s5l_nco_set(a, S5L_NCO_I2S1, S5L_MCLK_HZ);
++	if (ret)
++		return ret;
++	writel(0, a->acs + AE2_LANE(AE2_I2S1));
++	writel(1, a->mcs + AE2_LANE(AE2_I2S1));
++	/* what iOS's configure writes: TXCON bit 7 = MCLK/BCLK ratio 1 */
++	writel(1, a->i2s + I2S_STATUS);
++	writel(0x03000081, a->i2s + I2S_TXCON);
++	writel(0x1000, a->i2s + I2S_RXCON);
++	writel(0, a->i2s + I2S_TXCOM);
++	writel(0, a->i2s + I2S_RXCOM);
++	writel(1, a->i2s + I2S_CLKCON);
++	writel(1, a->sw + SW_PIN1_MCK);
++	return 0;
++}
++
++static void s5l_mclk_disable(struct clk_hw *hw)
++{
++	struct s5l_audio *a = mclk_to_audio(hw);
++
++	writel(0, a->sw + SW_PIN1_MCK);
++	writel(0x34, a->i2s + I2S_CLKCON);
++	s5l_nco_set(a, S5L_NCO_I2S1, 0);
++}
++
++static unsigned long s5l_mclk_recalc_rate(struct clk_hw *hw, unsigned long parent)
++{
++	return S5L_MCLK_HZ;
++}
++
++static const struct clk_ops s5l_mclk_ops = {
++	.enable = s5l_mclk_enable,
++	.disable = s5l_mclk_disable,
++	.recalc_rate = s5l_mclk_recalc_rate,
++};
++
++/* --- the A5X codec's MCLK: I2S0 as clock master, its MCK on pin0 ------- */
++
++/*
++ * I2S0 configured as iOS's configure writes it, but with TX left on and no
++ * DMA requests: BCLK and LRCK run only while TX is on, and a codec whose
++ * frame clocks stop under a live output ticks.  So the bus runs, carrying
++ * silence, for as long as the codec has MCLK, and is configured again only
++ * when it is stopped or the rate changes.
++ */
++static void s5x_i2s_configure(struct s5l_audio *a)
++{
++	writel(0, a->i2s + I2S_TXCOM);
++	writel(1, a->i2s + I2S_STATUS);			/* flush the FIFOs */
++	writel(I2S_TXCON_IOS, a->i2s + I2S_TXCON);
++	writel(I2S_RXCON_IOS, a->i2s + I2S_RXCON);
++	writel(0, a->i2s + I2S_RXCOM);
++	writel(I2S_CLKCON_MCK4, a->i2s + I2S_CLKCON);
++	writel(SW1_PIN0_I2S0, a->sw + SW1_PIN0);
++	writel(I2S_TXCOM_IDLE, a->i2s + I2S_TXCOM);
++}
++
++/* 2 x 16-bit slots: BCLK = 32 fs, straight from NCO 0 */
++static int s5x_port_run(struct s5l_audio *a, unsigned int rate)
++{
++	int ret;
++
++	if (a->port_rate == rate)
++		return 0;
++	writel(0, a->acs + AE2_LANE(S5X_AE2_I2S0));	/* registers ungated */
++	ret = s5l_nco_set(a, S5X_NCO_I2S0, 32 * rate);
++	if (ret)
++		return ret;
++	s5x_i2s_configure(a);
++	a->port_rate = rate;
++	return 0;
++}
++
++static int s5x_mclk_enable(struct clk_hw *hw)
++{
++	struct s5l_audio *a = mclk_to_audio(hw);
++	int ret;
++
++	/* already running if the stream's prepare came first */
++	ret = s5x_port_run(a, a->rate ?: 48000);
++	if (ret)
++		return ret;
++	writel(1, a->sw + SW1_PIN0_MCK);
++	a->mclk_on = true;
++	return 0;
++}
++
++static void s5x_mclk_disable(struct clk_hw *hw)
++{
++	struct s5l_audio *a = mclk_to_audio(hw);
++
++	a->mclk_on = false;
++	a->port_rate = 0;
++	writel(0, a->i2s + I2S_TXCOM);
++	writel(0, a->sw + SW1_PIN0_MCK);
++	writel(0, a->sw + SW1_PIN0);
++	writel(I2S_CLKCON_STOP, a->i2s + I2S_CLKCON);
++	s5l_nco_set(a, S5X_NCO_I2S0, 0);
++}
++
++static unsigned long s5x_mclk_recalc_rate(struct clk_hw *hw, unsigned long parent)
++{
++	return S5X_MCLK_HZ;
++}
++
++static const struct clk_ops s5x_mclk_ops = {
++	.enable = s5x_mclk_enable,
++	.disable = s5x_mclk_disable,
++	.recalc_rate = s5x_mclk_recalc_rate,
++};
++
++/* --- I2S0 as the A5X's data port ----------------------------------------- */
++
++/*
++ * A stream that follows another within the codec's pmdown time finds the
++ * port running, with the codec and its amplifier on: leave it running.
++ * Only a rate change reconfigures it (and briefly stops its clocks).
++ */
++static int s5x_port_prepare(struct s5l_audio *a)
++{
++	return s5x_port_run(a, a->rate);
++}
++
++/* the TX FIFO takes words only while TXCOM is on; the DMA is already
++ * running.  RX: the port fills its FIFO, the DMA drains it. */
++static void s5x_port_start(struct s5l_audio *a, bool capture)
++{
++	if (capture)
++		writel(I2S_RXCOM_START, a->i2s + I2S_RXCOM);
++	else
++		writel(I2S_TXCOM_START, a->i2s + I2S_TXCOM);
++}
++
++/* DMA requests off; the bus keeps running (s5x_i2s_configure) */
++static void s5x_port_stop(struct s5l_audio *a, bool capture)
++{
++	if (capture)
++		writel(0, a->i2s + I2S_RXCOM);
++	else
++		writel(I2S_TXCOM_IDLE, a->i2s + I2S_TXCOM);
++}
++
++/* without MCLK, I2S0's power state goes off with the PCM's */
++static void s5x_port_close(struct s5l_audio *a)
++{
++	if (!a->mclk_on)
++		a->port_rate = 0;
++}
++
++/* --- MCA0 ----------------------------------------------------------------- */
++
++/*
++ * AppleAE2MCA's configure for: clock master, 2 x 32-bit slots, the speakers'
++ * format flags (0x12), 48 kHz class rates; 16-bit samples sit in the top of
++ * their slots.  The reset at +0x44 returns every register to its default.
++ */
++static int s5l_mca_configure(struct s5l_audio *a)
++{
++	u32 v;
++	int ret;
++
++	writel(0, a->mca + MCA_TX_CFG);
++	writel(0x301, a->mca + MCA_RESET);
++	ret = readl_poll_timeout(a->mca + MCA_RESET, v, !v, 10, 10000);
++	if (ret)
++		return ret;
++	writel(0, a->mca + MCA_CTL);
++	writel(0xd, a->mca + MCA_TX_C1);
++	writel(0xd, a->mca + MCA_RX_C1);
++	writel(a->width == 2 ? 0x1010 : 0, a->mca + MCA_FMT);
++	/*
++	 * iOS asks for DMA at 4 words left (the low byte); 16 gives the
++	 * CDMA ~170 us instead of ~40 to answer, and costs nothing
++	 */
++	writel(0x002f0010, a->mca + MCA_TX_FIFO_CFG);
++	writel(0x002f0004, a->mca + MCA_RX_FIFO_CFG);
++	writel(0, a->mca + MCA_TX_MODE);
++	writel(3, a->mca + MCA_TX_SLOTS);
++	writel(3, a->mca + MCA_RX_SLOTS);
++	writel(0x208, a->mca + MCA_TX_CFG);
++	writel(0x10a, a->mca + MCA_RX_CFG);
++	writel(1, a->mca + MCA_CTL);
++	writel(0xb0003000, a->mca + MCA_STATUS);
++	writel(0x0f401007, a->mca + MCA_FRAME);
++	return 0;
++}
++
++static int s5l_port_prepare(struct s5l_audio *a)
++{
++	int ret;
++
++	/* MCA0 from its own NCO at 128 fs (MCLK = 2 x BCLK, 64 BCLKs a frame) */
++	writel(0, a->acs + AE2_LANE(AE2_MCA0));
++	writel(1, a->mcs + AE2_LANE(AE2_MCA0));
++	ret = s5l_nco_set(a, S5L_NCO_MCA0, 128 * a->rate);
++	if (ret)
++		return ret;
++	ret = s5l_mca_configure(a);
++	if (ret)
++		return ret;
++	/* pin1: MCA0's frame clocks and data */
++	writel(0xf014, a->sw + SW_PIN1);
++	return 0;
++}
++
++/* the DMA fills the FIFO, then the port starts (playback only here) */
++static void s5l_port_start(struct s5l_audio *a, bool capture)
++{
++	writel(readl(a->mca + MCA_TX_CFG) | 1, a->mca + MCA_TX_CFG);
++}
++
++static void s5l_port_stop(struct s5l_audio *a, bool capture)
++{
++	writel(readl(a->mca + MCA_TX_CFG) & ~1, a->mca + MCA_TX_CFG);
++}
++
++/* --- CDMA ----------------------------------------------------------------- */
++
++static void __iomem *s5l_ch(struct s5l_dir *d)
++{
++	return d->a->cdma + CDMA_CH(d->ch);
++}
++
++static void s5l_dma_stop(struct s5l_dir *d)
++{
++	void __iomem *ch = s5l_ch(d);
++
++	writel(CDMA_CSR_ABORT, ch + CDMA_CSR);
++	udelay(10);
++	writel(CDMA_CSR_CLEAR, ch + CDMA_CSR);
++}
++
++/* start (or restart) the ring at command @first */
++static int s5l_dma_start(struct s5l_dir *d, unsigned int first)
++{
++	struct s5l_audio *a = d->a;
++	void __iomem *ch = s5l_ch(d);
++	u32 dcr;
++
++	/* width (2 or 4 bytes), burst 4, the port's request line; towards
++	 * the FIFO for playback, out of it for capture */
++	dcr = (d->req << 16) | 0x20 | (a->width == 2 ? 0x04 : 0x08) |
++	      (d->capture ? 0 : CDMA_DCR_TO_DEV);
++
++	writel(BIT(d->ch % 32), a->cdma + CDMA_CLK_ON(d->ch));
++	writel(CDMA_CSR_CLEAR, ch + CDMA_CSR);
++	writel(CDMA_CSR_ABORT, ch + CDMA_CSR);
++	udelay(10);
++	writel(dcr, ch + CDMA_DCR);
++	writel(d->fifo & 0xffffff, ch + CDMA_DAR);
++	writel(CDMA_DBR_MAX, ch + CDMA_DBR);
++	writel(d->cmds_dma + 32 * first, ch + CDMA_CAR);
++	if ((readl(ch + CDMA_DCR) & 0x003f00fe) != dcr) {
++		dev_err(a->dev, "CDMA channel %u is locked (DCR %08x)\n",
++			d->ch, readl(ch + CDMA_DCR));
++		return -EBUSY;
++	}
++	writel(CDMA_CSR_START, ch + CDMA_CSR);
++	return 0;
++}
++
++static void s5l_build_ring(struct s5l_dir *d)
++{
++	unsigned int i;
++
++	for (i = 0; i < d->periods; i++) {
++		__le32 *c = d->cmds + 8 * i;
++
++		c[0] = cpu_to_le32(d->cmds_dma + 32 * ((i + 1) % d->periods));
++		c[1] = cpu_to_le32(CDMA_CMD_DATA);
++		c[2] = cpu_to_le32(d->buf_dma + i * d->period_bytes);
++		c[3] = cpu_to_le32(d->period_bytes);
++	}
++	wmb();
++}
++
++/* MAR: the memory address being read (playback) or written (capture) */
++static unsigned int s5l_dma_pos(struct s5l_dir *d)
++{
++	u32 mar = readl(s5l_ch(d) + CDMA_MAR);
++
++	if (mar < d->buf_dma || mar >= d->buf_dma + d->buf_bytes)
++		return 0;
++	return mar - d->buf_dma;
++}
++
++static enum hrtimer_restart s5l_tick(struct hrtimer *t)
++{
++	struct s5l_dir *d = container_of(t, struct s5l_dir, timer);
++	struct s5l_audio *a = d->a;
++	struct snd_pcm_substream *ss;
++	unsigned int period;
++	unsigned long flags;
++	u32 csr;
++
++	spin_lock_irqsave(&a->lock, flags);
++	if (!d->running) {
++		spin_unlock_irqrestore(&a->lock, flags);
++		return HRTIMER_NORESTART;
++	}
++	ss = d->substream;
++	period = s5l_dma_pos(d) / d->period_bytes;
++	csr = readl(s5l_ch(d) + CDMA_CSR);
++	if (!(csr & CDMA_CSR_RUNNING)) {
++		/* the byte count ran out (2 GB, ~90 minutes) or it hit an error */
++		dev_dbg(a->dev, "CDMA %u stopped (CSR %08x ERR %08x), restarting\n",
++			d->ch, csr, readl(s5l_ch(d) + CDMA_ERR));
++		s5l_dma_start(d, (period + 1) % d->periods);
++	}
++	spin_unlock_irqrestore(&a->lock, flags);
++
++	if (period != d->last_period) {
++		d->last_period = period;
++		snd_pcm_period_elapsed(ss);
++	}
++	hrtimer_forward_now(t, d->tick);
++	return HRTIMER_RESTART;
++}
++
++/* --- PCM ------------------------------------------------------------------ */
++
++static const struct snd_pcm_hardware s5l_pcm_hw = {
++	.info = SNDRV_PCM_INFO_INTERLEAVED | SNDRV_PCM_INFO_MMAP |
++		SNDRV_PCM_INFO_MMAP_VALID | SNDRV_PCM_INFO_BLOCK_TRANSFER,
++	.formats = SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S32_LE,
++	.rates = SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_44100 |
++		 SNDRV_PCM_RATE_48000,
++	.rate_min = 32000,
++	.rate_max = 48000,
++	.channels_min = 2,
++	.channels_max = 2,
++	.buffer_bytes_max = 512 * 1024,
++	.period_bytes_min = 256,
++	.period_bytes_max = 64 * 1024,
++	.periods_min = 2,
++	.periods_max = CDMA_MAX_CMDS,
++};
++
++static struct s5l_dir *s5l_dir_of(struct snd_soc_component *component,
++				  struct snd_pcm_substream *substream)
++{
++	struct s5l_audio *a = snd_soc_component_get_drvdata(component);
++
++	return &a->dir[substream->stream];
++}
++
++static int s5l_pcm_open(struct snd_soc_component *component,
++			struct snd_pcm_substream *substream)
++{
++	struct s5l_audio *a = snd_soc_component_get_drvdata(component);
++	struct s5l_dir *d = s5l_dir_of(component, substream);
++	struct snd_pcm_runtime *rt = substream->runtime;
++	int ret;
++
++	if (d->capture && !a->has_capture)
++		return -ENODEV;
++	snd_soc_set_runtime_hwparams(substream, &s5l_pcm_hw);
++	/* a burst is 4 transfers of up to 4 bytes */
++	ret = snd_pcm_hw_constraint_step(rt, 0, SNDRV_PCM_HW_PARAM_PERIOD_BYTES, 16);
++	if (ret)
++		return ret;
++	ret = snd_pcm_hw_constraint_integer(rt, SNDRV_PCM_HW_PARAM_PERIODS);
++	if (ret < 0)
++		return ret;
++	ret = snd_pcm_hw_constraint_mask64(rt, SNDRV_PCM_HW_PARAM_FORMAT, a->v->formats);
++	if (ret < 0)
++		return ret;
++	ret = clk_prepare_enable(a->port_clk);
++	if (ret)
++		return ret;
++	d->substream = substream;
++	return 0;
++}
++
++static int s5l_pcm_close(struct snd_soc_component *component,
++			 struct snd_pcm_substream *substream)
++{
++	struct s5l_audio *a = snd_soc_component_get_drvdata(component);
++	struct s5l_dir *d = s5l_dir_of(component, substream);
++
++	hrtimer_cancel(&d->timer);
++	if (a->v->port_close)
++		a->v->port_close(a);
++	clk_disable_unprepare(a->port_clk);
++	d->substream = NULL;
++	return 0;
++}
++
++static int s5l_pcm_hw_params(struct snd_soc_component *component,
++			     struct snd_pcm_substream *substream,
++			     struct snd_pcm_hw_params *params)
++{
++	struct s5l_audio *a = snd_soc_component_get_drvdata(component);
++	struct s5l_dir *d = s5l_dir_of(component, substream);
++
++	/* the port's: the same for both directions (symmetric_rate) */
++	a->width = params_width(params) / 8;
++	a->rate = params_rate(params);
++	d->period_bytes = params_period_bytes(params);
++	d->periods = params_periods(params);
++	return 0;
++}
++
++static int s5l_pcm_hw_free(struct snd_soc_component *component,
++			   struct snd_pcm_substream *substream)
++{
++	hrtimer_cancel(&s5l_dir_of(component, substream)->timer);
++	return 0;
++}
++
++static int s5l_pcm_prepare(struct snd_soc_component *component,
++			   struct snd_pcm_substream *substream)
++{
++	struct s5l_audio *a = snd_soc_component_get_drvdata(component);
++	struct s5l_dir *d = s5l_dir_of(component, substream);
++	struct snd_pcm_runtime *rt = substream->runtime;
++	int ret;
++
++	hrtimer_cancel(&d->timer);
++	s5l_dma_stop(d);
++	d->buf_dma = rt->dma_addr;
++	d->buf_bytes = snd_pcm_lib_buffer_bytes(substream);
++	d->last_period = 0;
++
++	ret = a->v->port_prepare(a);
++	if (ret)
++		return ret;
++	s5l_build_ring(d);
++
++	/* twice a period, at least once every 10 ms */
++	d->tick = ns_to_ktime(min_t(u64, div_u64((u64)NSEC_PER_SEC *
++				   bytes_to_frames(rt, d->period_bytes), 2 * a->rate),
++				   10 * NSEC_PER_MSEC));
++	return 0;
++}
++
++static int s5l_pcm_trigger(struct snd_soc_component *component,
++			   struct snd_pcm_substream *substream, int cmd)
++{
++	struct s5l_audio *a = snd_soc_component_get_drvdata(component);
++	struct s5l_dir *d = s5l_dir_of(component, substream);
++	unsigned long flags;
++	int ret = 0;
++
++	switch (cmd) {
++	case SNDRV_PCM_TRIGGER_START:
++	case SNDRV_PCM_TRIGGER_RESUME:
++	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
++		spin_lock_irqsave(&a->lock, flags);
++		ret = s5l_dma_start(d, d->last_period);
++		if (!ret) {
++			a->v->port_start(a, d->capture);
++			d->running = true;
++		}
++		spin_unlock_irqrestore(&a->lock, flags);
++		if (!ret)
++			hrtimer_start(&d->timer, d->tick, HRTIMER_MODE_REL);
++		return ret;
++	case SNDRV_PCM_TRIGGER_STOP:
++	case SNDRV_PCM_TRIGGER_SUSPEND:
++	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
++		spin_lock_irqsave(&a->lock, flags);
++		d->running = false;
++		a->v->port_stop(a, d->capture);
++		s5l_dma_stop(d);
++		spin_unlock_irqrestore(&a->lock, flags);
++		/* may be called from the timer itself (an xrun): don't wait */
++		hrtimer_try_to_cancel(&d->timer);
++		return 0;
++	}
++	return -EINVAL;
++}
++
++static snd_pcm_uframes_t s5l_pcm_pointer(struct snd_soc_component *component,
++					 struct snd_pcm_substream *substream)
++{
++	return bytes_to_frames(substream->runtime,
++			       s5l_dma_pos(s5l_dir_of(component, substream)));
++}
++
++static int s5l_pcm_construct(struct snd_soc_component *component,
++			     struct snd_soc_pcm_runtime *rtd)
++{
++	return snd_pcm_set_managed_buffer_all(rtd->pcm, SNDRV_DMA_TYPE_DEV,
++					      component->dev, 128 * 1024,
++					      s5l_pcm_hw.buffer_bytes_max);
++}
++
++static const struct snd_soc_component_driver s5l_component = {
++	.name = "s5l-audio",
++	.open = s5l_pcm_open,
++	.close = s5l_pcm_close,
++	.hw_params = s5l_pcm_hw_params,
++	.hw_free = s5l_pcm_hw_free,
++	.prepare = s5l_pcm_prepare,
++	.trigger = s5l_pcm_trigger,
++	.pointer = s5l_pcm_pointer,
++	.pcm_construct = s5l_pcm_construct,
++};
++
++static struct snd_soc_dai_driver s5l_dai = {
++	.name = "s5l-mca0",
++	.playback = {
++		.stream_name = "MCA0 Playback",
++		.channels_min = 2,
++		.channels_max = 2,
++		.rates = SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_44100 |
++			 SNDRV_PCM_RATE_48000,
++		.formats = SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S32_LE,
++	},
++};
++
++/* I2S0 (the A5X's, the S5L8940X's): 16-bit samples, one a FIFO word.  A
++ * card records only where the device tree gives a capture channel. */
++static struct snd_soc_dai_driver s5x_dai = {
++	.name = "s5l-i2s0",
++	.playback = {
++		.stream_name = "I2S0 Playback",
++		.channels_min = 2,
++		.channels_max = 2,
++		.rates = SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_44100 |
++			 SNDRV_PCM_RATE_48000,
++		.formats = SNDRV_PCM_FMTBIT_S16_LE,
++	},
++	.capture = {
++		.stream_name = "I2S0 Capture",
++		.channels_min = 2,
++		.channels_max = 2,
++		.rates = SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_44100 |
++			 SNDRV_PCM_RATE_48000,
++		.formats = SNDRV_PCM_FMTBIT_S16_LE,
++	},
++	.symmetric_rate = 1,		/* one port, one BCLK for both */
++};
++
++/* --- the card --------------------------------------------------------------- */
++
++static int s5l_card_init(struct snd_soc_pcm_runtime *rtd)
++{
++	struct snd_soc_dai *codec_dai;
++	int i, ret;
++
++	/* amp n takes 32-bit slot n */
++	for_each_rtd_codec_dais(rtd, i, codec_dai) {
++		ret = snd_soc_dai_set_tdm_slot(codec_dai, 0, BIT(i), 2, 32);
++		if (ret)
++			return ret;
++	}
++	return 0;
++}
++
++static int s5l_card_setup(struct s5l_audio *a, struct device *dev)
++{
++	struct device_node *np = a->dev->of_node;
++	struct snd_soc_dai_link *l = &a->link;
++	int n, i;
++
++	n = of_count_phandle_with_args(np, a->v->codecs_prop, NULL);
++	if (n <= 0)
++		return dev_err_probe(a->dev, -EINVAL, "no %s\n", a->v->codecs_prop);
++	a->codecs = devm_kcalloc(a->dev, n, sizeof(*a->codecs), GFP_KERNEL);
++	if (!a->codecs)
++		return -ENOMEM;
++	for (i = 0; i < n; i++) {
++		a->codecs[i].of_node = of_parse_phandle(np, a->v->codecs_prop, i);
++		a->codecs[i].dai_name = a->v->codec_dai;
++	}
++
++	a->cpu.of_node = np;
++	a->cpu.dai_name = a->v->dai_name;
++	a->platform.of_node = np;
++	l->name = a->v->stream_name;
++	l->stream_name = a->v->stream_name;
++	l->cpus = &a->cpu;
++	l->num_cpus = 1;
++	l->codecs = a->codecs;
++	l->num_codecs = n;
++	l->platforms = &a->platform;
++	l->num_platforms = 1;
++	l->init = a->v->card_init;
++	l->dai_fmt = a->v->dai_fmt;
++	l->playback_only = !a->has_capture;
++
++	a->card.dev = dev;
++	a->card.owner = THIS_MODULE;
++	a->card.name = a->v->card_name;
++	a->card.long_name = a->v->card_long_name;
++	a->card.driver_name = "s5l-audio";
++	a->card.dai_link = l;
++	a->card.num_links = 1;
++	return devm_snd_soc_register_card(dev, &a->card);
++}
++
++static int s5l_card_probe(struct platform_device *pdev)
++{
++	struct s5l_audio *a = *(struct s5l_audio **)dev_get_platdata(&pdev->dev);
++
++	return s5l_card_setup(a, &pdev->dev);
++}
++
++static struct platform_driver s5l_card_driver = {
++	.driver = {
++		.name = "s5l-audio-card",
++	},
++	.probe = s5l_card_probe,
++};
++
++static void s5l_card_unregister(void *data)
++{
++	platform_device_unregister(data);
++}
++
++static void s5l_put_codecs(void *data)
++{
++	struct s5l_audio *a = data;
++	unsigned int i;
++
++	for (i = 0; a->codecs && i < a->link.num_codecs; i++)
++		of_node_put(a->codecs[i].of_node);
++}
++
++static int s5l_audio_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct clk_init_data init = {};
++	struct clk_parent_data parent = { .fw_name = "i2s" };
++	struct resource *res;
++	struct s5l_audio *a;
++	int ret;
++
++	a = devm_kzalloc(dev, sizeof(*a), GFP_KERNEL);
++	if (!a)
++		return -ENOMEM;
++	a->dev = dev;
++	a->v = device_get_match_data(dev);
++	spin_lock_init(&a->lock);
++	platform_set_drvdata(pdev, a);
++
++	/* devm_ioremap, not _resource: the windows sit inside other blocks */
++#define MAP(field, name) do {							\
++		res = platform_get_resource_byname(pdev, IORESOURCE_MEM, name);	\
++		if (!res)							\
++			return dev_err_probe(dev, -EINVAL, "no %s window\n", name); \
++		a->field = devm_ioremap(dev, res->start, resource_size(res));	\
++		if (!a->field)							\
++			return -ENOMEM;						\
++	} while (0)
++	if (a->v->mca)
++		MAP(mca, "mca");
++	MAP(i2s, "i2s");
++	MAP(mcs, "mcs");
++	MAP(acs, "acs");
++	MAP(sw, "switch");
++	MAP(nco, "nco");
++	MAP(cdma, "cdma");
++#undef MAP
++	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, a->v->mca ? "mca" : "i2s");
++	a->dir[SNDRV_PCM_STREAM_PLAYBACK].fifo = res->start + (a->v->mca ? MCA_TX_FIFO : I2S_TXFIFO);
++	a->dir[SNDRV_PCM_STREAM_CAPTURE].fifo = res->start + I2S_RXFIFO;
++	a->dir[SNDRV_PCM_STREAM_CAPTURE].capture = true;
++
++	if (of_property_read_u32(dev->of_node, "apple,nco-reference-hz", &a->nco_ref))
++		a->nco_ref = 342000000;
++	if (of_property_read_u32_index(dev->of_node, "apple,dma-channel", 0,
++				       &a->dir[SNDRV_PCM_STREAM_PLAYBACK].ch) ||
++	    of_property_read_u32_index(dev->of_node, "apple,dma-channel", 1,
++				       &a->dir[SNDRV_PCM_STREAM_PLAYBACK].req))
++		return dev_err_probe(dev, -EINVAL, "no apple,dma-channel\n");
++	/* I2S0's RX side, where the board records (the iPad 2) */
++	a->has_capture = !a->v->mca &&
++		!of_property_read_u32_index(dev->of_node, "apple,capture-dma-channel", 0,
++					    &a->dir[SNDRV_PCM_STREAM_CAPTURE].ch) &&
++		!of_property_read_u32_index(dev->of_node, "apple,capture-dma-channel", 1,
++					    &a->dir[SNDRV_PCM_STREAM_CAPTURE].req);
++
++	a->port_clk = devm_clk_get(dev, a->v->port_clk);
++	if (IS_ERR(a->port_clk))
++		return dev_err_probe(dev, PTR_ERR(a->port_clk), "no %s power state\n",
++				     a->v->port_clk);
++
++	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
++	if (ret)
++		return ret;
++	for (int i = 0; i < 2; i++) {
++		struct s5l_dir *d = &a->dir[i];
++
++		d->a = a;
++		if (d->capture && !a->has_capture)
++			continue;
++		d->cmds = dmam_alloc_coherent(dev, 32 * CDMA_MAX_CMDS, &d->cmds_dma, GFP_KERNEL);
++		if (!d->cmds)
++			return -ENOMEM;
++		hrtimer_init(&d->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
++		d->timer.function = s5l_tick;
++	}
++
++	init.name = a->v->mclk_name;
++	init.ops = a->v->mclk_ops;
++	init.parent_data = &parent;
++	init.num_parents = 1;
++	a->mclk.init = &init;
++	ret = devm_clk_hw_register(dev, &a->mclk);
++	if (ret)
++		return ret;
++	ret = devm_of_clk_add_hw_provider(dev, of_clk_hw_simple_get, &a->mclk);
++	if (ret)
++		return ret;
++
++	ret = devm_snd_soc_register_component(dev, &s5l_component,
++					      a->v->mca ? &s5l_dai : &s5x_dai, 1);
++	if (ret)
++		return ret;
++	ret = devm_add_action(dev, s5l_put_codecs, a);
++	if (ret)
++		return ret;
++
++	a->card_pdev = platform_device_register_data(dev, "s5l-audio-card",
++						     PLATFORM_DEVID_AUTO, &a, sizeof(a));
++	if (IS_ERR(a->card_pdev))
++		return PTR_ERR(a->card_pdev);
++	return devm_add_action_or_reset(dev, s5l_card_unregister, a->card_pdev);
++}
++
++static const struct s5l_variant s5l8942x_variant = {
++	.mca = true,
++	.port_clk = "mca",
++	.mclk_name = "s5l-spk-mclk",
++	.mclk_ops = &s5l_mclk_ops,
++	.formats = SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S32_LE,
++	.dai_name = "s5l-mca0",
++	.stream_name = "Speakers",
++	.codecs_prop = "apple,speaker-amps",
++	.codec_dai = "cs35l19",
++	.card_name = "iPadMini",
++	.card_long_name = "iPad mini 1 speakers",
++	.card_init = s5l_card_init,
++	.port_prepare = s5l_port_prepare,
++	.port_start = s5l_port_start,
++	.port_stop = s5l_port_stop,
++};
++
++static const struct s5l_variant s5l8945x_variant = {
++	.port_clk = "i2s",
++	.mclk_name = "s5x-codec-mclk",
++	.mclk_ops = &s5x_mclk_ops,
++	.formats = SNDRV_PCM_FMTBIT_S16_LE,
++	.dai_name = "s5l-i2s0",
++	.stream_name = "CS42L63",
++	.codecs_prop = "apple,audio-codec",
++	.codec_dai = "cs42l63-asp",
++	.card_name = "iPad3",
++	.card_long_name = "iPad 3 speaker, headphones and microphones",
++	/* the codec is the bit and frame clocks' consumer */
++	.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_CBC_CFC,
++	.port_prepare = s5x_port_prepare,
++	.port_start = s5x_port_start,
++	.port_stop = s5x_port_stop,
++	.port_close = s5x_port_close,
++};
++
++/* the iPad 2: the iPad 3's I2S0 and codec, and their capture side */
++static const struct s5l_variant s5l8940x_variant = {
++	.port_clk = "i2s",
++	.mclk_name = "s5l-codec-mclk",
++	.mclk_ops = &s5x_mclk_ops,
++	.formats = SNDRV_PCM_FMTBIT_S16_LE,
++	.dai_name = "s5l-i2s0",
++	.stream_name = "CS42L63",
++	.codecs_prop = "apple,audio-codec",
++	.codec_dai = "cs42l63-asp",
++	.card_name = "iPad2",
++	.card_long_name = "iPad 2 speaker, headphones and microphones",
++	.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_CBC_CFC,
++	.port_prepare = s5x_port_prepare,
++	.port_start = s5x_port_start,
++	.port_stop = s5x_port_stop,
++	.port_close = s5x_port_close,
++};
++
++static const struct of_device_id s5l_audio_of_match[] = {
++	{ .compatible = "apple,s5l8942x-audio", .data = &s5l8942x_variant },
++	{ .compatible = "apple,s5l8945x-audio", .data = &s5l8945x_variant },
++	{ .compatible = "apple,s5l8940x-audio", .data = &s5l8940x_variant },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, s5l_audio_of_match);
++
++static struct platform_driver s5l_audio_driver = {
++	.driver = {
++		.name = "s5l-audio",
++		.of_match_table = s5l_audio_of_match,
++	},
++	.probe = s5l_audio_probe,
++};
++static struct platform_driver * const s5l_drivers[] = {
++	&s5l_audio_driver,
++	&s5l_card_driver,
++};
++
++static int __init s5l_audio_init(void)
++{
++	return platform_register_drivers(s5l_drivers, ARRAY_SIZE(s5l_drivers));
++}
++module_init(s5l_audio_init);
++
++static void __exit s5l_audio_exit(void)
++{
++	platform_unregister_drivers(s5l_drivers, ARRAY_SIZE(s5l_drivers));
++}
++module_exit(s5l_audio_exit);
++
++MODULE_DESCRIPTION("Apple A5/A5X audio: MCA0 or I2S0, CDMA both ways, and the card");
++MODULE_LICENSE("GPL");
+diff --git a/sound/soc/codecs/Kconfig b/sound/soc/codecs/Kconfig
+index 7092842480ef..185bba58cd68 100644
+--- a/sound/soc/codecs/Kconfig
++++ b/sound/soc/codecs/Kconfig
+@@ -762,6 +762,23 @@ config SND_SOC_CS35L32
+ 	tristate "Cirrus Logic CS35L32 CODEC"
+ 	depends on I2C
+ 
++config SND_SOC_CS35L19
++	tristate "Cirrus Logic CS35L19 speaker amplifier"
++	depends on I2C
++	select REGMAP_I2C
++	help
++	  The boosted class-D speaker amplifier of the iPad mini 1, a
++	  sibling of the CS35L33, with Apple's power-on sequence.
++
++config SND_SOC_CS42L63
++	tristate "Cirrus Logic CS42L63 codec (iPad 2, iPad 3)"
++	depends on I2C
++	select REGMAP_I2C
++	help
++	  The A5 and A5X iPads' audio codec, a sibling of the CS42L73, driven
++	  with the register sequences iOS uses: the speaker, and where the
++	  board has them (the iPad 2) the headphones, microphones and jack.
++
+ config SND_SOC_CS35L33
+ 	tristate "Cirrus Logic CS35L33 CODEC"
+ 	depends on I2C
+diff --git a/sound/soc/codecs/Makefile b/sound/soc/codecs/Makefile
+index 54cbc3feae32..ba88cb8fcd1c 100644
+--- a/sound/soc/codecs/Makefile
++++ b/sound/soc/codecs/Makefile
+@@ -63,6 +63,8 @@ snd-soc-cros-ec-codec-y := cros_ec_codec.o
+ snd-soc-cs-amp-lib-y := cs-amp-lib.o
+ snd-soc-cs-amp-lib-test-y := cs-amp-lib-test.o
+ snd-soc-cs35l32-y := cs35l32.o
++snd-soc-cs35l19-y := cs35l19.o
++snd-soc-cs42l63-y := cs42l63.o
+ snd-soc-cs35l33-y := cs35l33.o
+ snd-soc-cs35l34-y := cs35l34.o
+ snd-soc-cs35l35-y := cs35l35.o
+@@ -470,6 +472,8 @@ obj-$(CONFIG_SND_SOC_CROS_EC_CODEC)	+= snd-soc-cros-ec-codec.o
+ obj-$(CONFIG_SND_SOC_CS_AMP_LIB)	+= snd-soc-cs-amp-lib.o
+ obj-$(CONFIG_SND_SOC_CS_AMP_LIB_TEST)	+= snd-soc-cs-amp-lib-test.o
+ obj-$(CONFIG_SND_SOC_CS35L32)	+= snd-soc-cs35l32.o
++obj-$(CONFIG_SND_SOC_CS35L19)	+= snd-soc-cs35l19.o
++obj-$(CONFIG_SND_SOC_CS42L63)	+= snd-soc-cs42l63.o
+ obj-$(CONFIG_SND_SOC_CS35L33)	+= snd-soc-cs35l33.o
+ obj-$(CONFIG_SND_SOC_CS35L34)	+= snd-soc-cs35l34.o
+ obj-$(CONFIG_SND_SOC_CS35L35)	+= snd-soc-cs35l35.o
+diff --git a/sound/soc/codecs/cs35l19.c b/sound/soc/codecs/cs35l19.c
+new file mode 100644
+index 000000000000..af83a78bcce2
+--- /dev/null
++++ b/sound/soc/codecs/cs35l19.c
+@@ -0,0 +1,408 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Cirrus Logic CS35L19 boosted class-D speaker amplifier (iPad mini 1).
++ *
++ * The CS35L19 is the CS35L33's sibling -- the register map matches it reset
++ * value for reset value -- with Apple's power-on sequence, which is what this
++ * driver runs, taken from iOS 8.4.1's AppleCS35L19Amp (12H321, text
++ * 0x80af4de0; docs/research/p105-audio.md):
++ *
++ *   - the amp needs MCLK (12.000 MHz) before it leaves power-down: without it
++ *     INT_STATUS_2 keeps PDN_DONE whatever else is right;
++ *   - it watches a KEEPALIVE input and stops when nobody toggles it; iOS
++ *     flips the pin every 20 ms, and so does this driver;
++ *   - its serial port is a TDM receiver: the audio slot's byte offset and
++ *     depth go in RX_AUD (0x36), the sense outputs (0x2d..0x35) stay off.
++ *
++ * Both amps of the iPad share one reset line and one keep-alive line; the
++ * reset is requested non-exclusively, and only the node that carries the
++ * keep-alive GPIO toggles it.
++ */
++
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/i2c.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/regmap.h>
++#include <linux/workqueue.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++#include <sound/tlv.h>
++
++#define CS35L19_DEVID_AB	0x01
++#define CS35L19_REV_ID		0x05
++#define CS35L19_PWRCTL1		0x06
++#define CS35L19_PWRCTL2		0x07
++#define CS35L19_CLK_CTL		0x08
++#define CS35L19_BST_PEAK	0x09
++#define CS35L19_BST_CTL1	0x0b
++#define CS35L19_BST_CTL2	0x0c
++#define CS35L19_ADSP_CTL	0x0d
++#define CS35L19_ADC_CTL		0x0e
++#define CS35L19_DAC_CTL		0x0f
++#define CS35L19_DIG_VOL		0x10
++#define CS35L19_CLASSD_CTL	0x11
++#define CS35L19_AMP_CTL		0x12
++#define CS35L19_INT_STATUS_1	0x15
++#define CS35L19_INT_STATUS_2	0x16
++#define CS35L19_TX_VMON		0x2d	/* .. 0x31: V, I, VP, VBST, FLAG */
++#define CS35L19_TX_EN1		0x32	/* .. 0x35 */
++#define CS35L19_RX_AUD		0x36
++#define CS35L19_RX_SPLY		0x37
++#define CS35L19_RX_ALIVE	0x38
++#define CS35L19_MAX_REG		0x7f
++
++#define CS35L19_VOL_MUTE	0x19	/* what iOS writes to mute */
++#define CS35L19_CFG_LEN		20
++
++/* The ADT's speaker-config for P105AP, the same for both amps. */
++static const u8 cs35l19_default_cfg[CS35L19_CFG_LEN] = {
++	0xff, 0x26, 0x02, 0x70, 0x6a, 0x80, 0x30, 0x1e, 0x02, 0x04,
++	0x0c, 0x8a, 0x8a, 0x10, 0x74, 0x03, 0x05, 0x00, 0x00, 0x00,
++};
++
++struct cs35l19 {
++	struct device *dev;
++	struct regmap *regmap;
++	struct clk *mclk;
++	struct gpio_desc *reset;
++	struct gpio_desc *keepalive;
++	struct delayed_work alive_work;
++	bool alive_level;
++	u8 cfg[CS35L19_CFG_LEN];
++	unsigned int rev;
++	unsigned int rate_code;
++	unsigned int slot;		/* TDM slot index (slots are 32 bits) */
++};
++
++static void cs35l19_alive(struct work_struct *work)
++{
++	struct cs35l19 *cs = container_of(to_delayed_work(work), struct cs35l19,
++					  alive_work);
++
++	cs->alive_level = !cs->alive_level;
++	gpiod_set_value_cansleep(cs->keepalive, cs->alive_level);
++	schedule_delayed_work(&cs->alive_work, msecs_to_jiffies(20));
++}
++
++static void cs35l19_alive_start(struct cs35l19 *cs)
++{
++	if (cs->keepalive)
++		schedule_delayed_work(&cs->alive_work, 0);
++}
++
++static void cs35l19_alive_stop(struct cs35l19 *cs)
++{
++	if (cs->keepalive)
++		cancel_delayed_work_sync(&cs->alive_work);
++}
++
++/* AppleCS35L19Amp's power-on (0x80af55d4) and serial port (0x80af5be0). */
++static int cs35l19_power_on(struct cs35l19 *cs)
++{
++	struct regmap *map = cs->regmap;
++	const u8 *cfg = cs->cfg;
++	unsigned int vol, st1, st2, i;
++	int ret;
++
++	ret = regmap_read(map, CS35L19_DIG_VOL, &vol);
++	if (ret)
++		return ret;
++
++	if (cs->rev >= 0xb0) {
++		regmap_write(map, 0x00, 0x99);
++		regmap_write(map, 0x45, 0x3f);
++		regmap_write(map, 0x46, cfg[16]);
++		regmap_write(map, 0x51, 0xff);
++		regmap_write(map, 0x59, 0x0a);
++		regmap_write(map, 0x6b, 0x20);
++		if (cfg[18])
++			regmap_write(map, 0x54, cfg[18]);
++		regmap_write(map, 0x00, 0x00);
++	}
++	if (cfg[17]) {
++		regmap_write(map, 0x00, 0x99);
++		regmap_write(map, 0x66, cfg[17]);
++		regmap_write(map, 0x00, 0x00);
++	}
++	regmap_write(map, CS35L19_BST_CTL1, cfg[1] & 0x3f);
++	regmap_update_bits(map, CS35L19_BST_CTL2, 0x03, cfg[2] & 0x03);
++
++	regmap_write(map, CS35L19_PWRCTL1, 0x80);	/* all on but the amp */
++	regmap_write(map, CS35L19_PWRCTL2, 0xf8);	/* no V/I/VP/VBST sense, TDM */
++	regmap_update_bits(map, CS35L19_CLK_CTL, 0xc0, 0x40);	/* MCLK / 2 */
++	regmap_write(map, CS35L19_BST_PEAK, cfg[0]);
++	regmap_write(map, CS35L19_DIG_VOL, CS35L19_VOL_MUTE);
++	regmap_update_bits(map, CS35L19_DAC_CTL, 0x10, 0);
++	regmap_write(map, CS35L19_CLASSD_CTL, 0x1c);	/* calibrate */
++	regmap_update_bits(map, CS35L19_ADC_CTL, 0xcf, 0xc4);
++	regmap_update_bits(map, CS35L19_AMP_CTL, 0xf0, cfg[3] & 0xf0);
++	for (i = 0; i < 4; i++)
++		regmap_write(map, 0x3a + i, cfg[12 + i]);
++	usleep_range(10000, 11000);
++	regmap_write(map, CS35L19_PWRCTL1, 0x00);
++	usleep_range(8000, 9000);
++
++	regmap_read(map, CS35L19_INT_STATUS_1, &st1);
++	regmap_read(map, CS35L19_INT_STATUS_1, &st1);
++	regmap_read(map, CS35L19_INT_STATUS_2, &st2);
++	regmap_read(map, CS35L19_INT_STATUS_2, &st2);
++	if (st2 & 0x01)
++		dev_warn(cs->dev, "still powered down after power-up (status %02x %02x): no MCLK?\n",
++			 st1, st2);
++
++	for (i = 0; i < 8; i++)
++		regmap_write(map, 0x23 + i, cfg[4 + i]);
++	regmap_update_bits(map, 0x29, 0x7f, 0x14);
++	regmap_write(map, CS35L19_CLASSD_CTL, 0x14);	/* calibration done */
++
++	/* the serial port: the audio slot only, nothing sent back */
++	for (i = 0; i < 5; i++)
++		regmap_write(map, CS35L19_TX_VMON + i, 0x80);
++	for (i = 0; i < 4; i++)
++		regmap_write(map, CS35L19_TX_EN1 + i, 0);
++	regmap_write(map, CS35L19_ADSP_CTL, 3);
++	regmap_write(map, CS35L19_CLK_CTL, cs->rate_code);
++	regmap_write(map, CS35L19_RX_AUD, (cs->slot * 4) | (3 << 5));
++	regmap_write(map, CS35L19_RX_SPLY, 0x80);
++	regmap_write(map, CS35L19_RX_ALIVE, 0x80);
++
++	return regmap_write(map, CS35L19_DIG_VOL, vol);
++}
++
++static void cs35l19_power_off(struct cs35l19 *cs)
++{
++	struct regmap *map = cs->regmap;
++	unsigned int vol;
++
++	if (regmap_read(map, CS35L19_DIG_VOL, &vol))
++		return;
++	regmap_write(map, CS35L19_DIG_VOL, CS35L19_VOL_MUTE);
++	regmap_update_bits(map, CS35L19_PWRCTL1, 0x80, 0x80);
++	regmap_write(map, CS35L19_PWRCTL2, 0xfe);
++	usleep_range(1000, 2000);
++	regmap_write(map, CS35L19_PWRCTL1, 0x87);
++	usleep_range(4000, 5000);
++	regmap_write(map, CS35L19_DIG_VOL, vol);
++}
++
++static int cs35l19_amp_event(struct snd_soc_dapm_widget *w,
++			     struct snd_kcontrol *kcontrol, int event)
++{
++	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
++	struct cs35l19 *cs = snd_soc_component_get_drvdata(component);
++	int ret;
++
++	switch (event) {
++	case SND_SOC_DAPM_PRE_PMU:
++		/*
++		 * Looked up here, not at probe: MCLK's provider is the sound
++		 * card's own driver, which waits for this one to probe.
++		 */
++		if (!cs->mclk) {
++			struct clk *mclk = devm_clk_get(cs->dev, "mclk");
++
++			if (IS_ERR(mclk))
++				return dev_err_probe(cs->dev, PTR_ERR(mclk), "no MCLK\n");
++			cs->mclk = mclk;
++		}
++		ret = clk_prepare_enable(cs->mclk);
++		if (ret)
++			return ret;
++		cs35l19_alive_start(cs);
++		ret = cs35l19_power_on(cs);
++		if (ret) {
++			cs35l19_alive_stop(cs);
++			clk_disable_unprepare(cs->mclk);
++		}
++		return ret;
++	case SND_SOC_DAPM_POST_PMD:
++		cs35l19_power_off(cs);
++		cs35l19_alive_stop(cs);
++		clk_disable_unprepare(cs->mclk);
++		return 0;
++	}
++	return 0;
++}
++
++/* 0.5 dB steps around 0 dB: 0x34 is -102 dB, 0x00 0 dB, 0x18 +12 dB */
++static const DECLARE_TLV_DB_SCALE(cs35l19_vol_tlv, -10200, 50, 0);
++
++static const struct snd_kcontrol_new cs35l19_controls[] = {
++	SOC_SINGLE_SX_TLV("Speaker Volume", CS35L19_DIG_VOL, 0, 0x34, 0xe4,
++			  cs35l19_vol_tlv),
++};
++
++static const struct snd_soc_dapm_widget cs35l19_widgets[] = {
++	SND_SOC_DAPM_AIF_IN("SDIN", "Playback", 0, SND_SOC_NOPM, 0, 0),
++	SND_SOC_DAPM_OUT_DRV_E("AMP", SND_SOC_NOPM, 0, 0, NULL, 0,
++			       cs35l19_amp_event,
++			       SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
++	SND_SOC_DAPM_OUTPUT("SPK"),
++};
++
++static const struct snd_soc_dapm_route cs35l19_routes[] = {
++	{ "AMP", NULL, "SDIN" },
++	{ "SPK", NULL, "AMP" },
++};
++
++static int cs35l19_hw_params(struct snd_pcm_substream *substream,
++			     struct snd_pcm_hw_params *params,
++			     struct snd_soc_dai *dai)
++{
++	struct cs35l19 *cs = snd_soc_component_get_drvdata(dai->component);
++
++	/* the rate codes iOS writes to CLK_CTL, with MCLK = 12 MHz */
++	switch (params_rate(params)) {
++	case 48000:
++		cs->rate_code = 0x49;
++		break;
++	case 44100:
++		cs->rate_code = 0x4b;
++		break;
++	case 32000:
++		cs->rate_code = 0x4d;
++		break;
++	default:
++		return -EINVAL;
++	}
++	return 0;
++}
++
++static int cs35l19_set_tdm_slot(struct snd_soc_dai *dai, unsigned int tx_mask,
++				unsigned int rx_mask, int slots, int slot_width)
++{
++	struct cs35l19 *cs = snd_soc_component_get_drvdata(dai->component);
++
++	if (slot_width != 32 || !rx_mask)
++		return -EINVAL;
++	cs->slot = __ffs(rx_mask);
++	return 0;
++}
++
++static const struct snd_soc_dai_ops cs35l19_dai_ops = {
++	.hw_params = cs35l19_hw_params,
++	.set_tdm_slot = cs35l19_set_tdm_slot,
++};
++
++static struct snd_soc_dai_driver cs35l19_dai = {
++	.name = "cs35l19",
++	.playback = {
++		.stream_name = "Playback",
++		.channels_min = 1,
++		.channels_max = 2,
++		.rates = SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_44100 |
++			 SNDRV_PCM_RATE_48000,
++		.formats = SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S32_LE,
++	},
++	.ops = &cs35l19_dai_ops,
++};
++
++static const struct snd_soc_component_driver cs35l19_component = {
++	.controls = cs35l19_controls,
++	.num_controls = ARRAY_SIZE(cs35l19_controls),
++	.dapm_widgets = cs35l19_widgets,
++	.num_dapm_widgets = ARRAY_SIZE(cs35l19_widgets),
++	.dapm_routes = cs35l19_routes,
++	.num_dapm_routes = ARRAY_SIZE(cs35l19_routes),
++	.use_pmdown_time = 1,
++	.endianness = 1,
++};
++
++static const struct regmap_config cs35l19_regmap = {
++	.reg_bits = 8,
++	.val_bits = 8,
++	.max_register = CS35L19_MAX_REG,
++	.cache_type = REGCACHE_NONE,
++	/* the amp does not step the register address within a transfer */
++	.use_single_read = true,
++	.use_single_write = true,
++};
++
++static int cs35l19_i2c_probe(struct i2c_client *client)
++{
++	struct device *dev = &client->dev;
++	struct cs35l19 *cs;
++	u8 id[3];
++	int ret, n;
++
++	cs = devm_kzalloc(dev, sizeof(*cs), GFP_KERNEL);
++	if (!cs)
++		return -ENOMEM;
++	cs->dev = dev;
++	cs->rate_code = 0x49;
++	cs->slot = client->addr & 1;
++	INIT_DELAYED_WORK(&cs->alive_work, cs35l19_alive);
++	i2c_set_clientdata(client, cs);
++
++	cs->regmap = devm_regmap_init_i2c(client, &cs35l19_regmap);
++	if (IS_ERR(cs->regmap))
++		return PTR_ERR(cs->regmap);
++
++	/* shared by both amps: out of reset, and left there */
++	cs->reset = devm_gpiod_get_optional(dev, "reset",
++					    GPIOD_OUT_LOW | GPIOD_FLAGS_BIT_NONEXCLUSIVE);
++	if (IS_ERR(cs->reset))
++		return dev_err_probe(dev, PTR_ERR(cs->reset), "reset GPIO\n");
++	cs->keepalive = devm_gpiod_get_optional(dev, "cirrus,keepalive",
++						GPIOD_OUT_LOW);
++	if (IS_ERR(cs->keepalive))
++		return dev_err_probe(dev, PTR_ERR(cs->keepalive), "keep-alive GPIO\n");
++	if (cs->reset)
++		usleep_range(2000, 3000);
++
++	memcpy(cs->cfg, cs35l19_default_cfg, sizeof(cs->cfg));
++	n = of_property_count_u8_elems(dev->of_node, "apple,speaker-config");
++	if (n == CS35L19_CFG_LEN)
++		of_property_read_u8_array(dev->of_node, "apple,speaker-config",
++					  cs->cfg, CS35L19_CFG_LEN);
++
++	ret = regmap_bulk_read(cs->regmap, CS35L19_DEVID_AB, id, 3);
++	if (ret)
++		return dev_err_probe(dev, ret, "no answer\n");
++	if (id[0] != 0x35 || id[1] != 0xa1 || (id[2] & 0xf0) != 0x90)
++		return dev_err_probe(dev, -ENODEV, "device ID %02x%02x%02x, not a CS35L19\n",
++				     id[0], id[1], id[2]);
++	ret = regmap_read(cs->regmap, CS35L19_REV_ID, &cs->rev);
++	if (ret)
++		return ret;
++	dev_info(dev, "CS35L19 revision %02x\n", cs->rev);
++
++	return devm_snd_soc_register_component(dev, &cs35l19_component,
++					       &cs35l19_dai, 1);
++}
++
++static void cs35l19_i2c_remove(struct i2c_client *client)
++{
++	struct cs35l19 *cs = i2c_get_clientdata(client);
++
++	cancel_delayed_work_sync(&cs->alive_work);
++}
++
++static const struct of_device_id cs35l19_of_match[] = {
++	{ .compatible = "cirrus,cs35l19" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, cs35l19_of_match);
++
++static const struct i2c_device_id cs35l19_id[] = {
++	{ "cs35l19" },
++	{ }
++};
++MODULE_DEVICE_TABLE(i2c, cs35l19_id);
++
++static struct i2c_driver cs35l19_i2c_driver = {
++	.driver = {
++		.name = "cs35l19",
++		.of_match_table = cs35l19_of_match,
++	},
++	.id_table = cs35l19_id,
++	.probe = cs35l19_i2c_probe,
++	.remove = cs35l19_i2c_remove,
++};
++module_i2c_driver(cs35l19_i2c_driver);
++
++MODULE_DESCRIPTION("Cirrus Logic CS35L19 speaker amplifier (iPad mini 1)");
++MODULE_LICENSE("GPL");
+diff --git a/sound/soc/codecs/cs42l63-seq.h b/sound/soc/codecs/cs42l63-seq.h
+new file mode 100644
+index 000000000000..71fae98964ee
+--- /dev/null
++++ b/sound/soc/codecs/cs42l63-seq.h
+@@ -0,0 +1,394 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Generated by tools/audio/k93-seq2c.py from k93-cs42l63-sequences.py:
++ * what iOS's AppleCS42L63Audio does, run in an emulator
++ * (docs/research/k93-audio.md).  Do not edit; regenerate.
++ */
++
++/* power_up_seq: out of power-down, every block configured (after the control key; J1 and K93 alike); init_cold steps 9-26 */
++static const struct cs42l63_step cs42l63_power_up_seq[] = {
++	CS42L63_W(0x00, 0x99),
++	CS42L63_W(0x7e, 0x83),
++	CS42L63_W(0x7f, 0xf0),
++	CS42L63_W(0x00, 0x00),
++	CS42L63_U(0x0a, 0x8f, 0x00),
++	CS42L63_W(0x0c, 0x11),
++	CS42L63_W(0x0e, 0x11),
++	CS42L63_W(0x10, 0x91),
++	CS42L63_U(0x0f, 0x10, 0x00),
++	CS42L63_W(0x1c, 0x82),
++	CS42L63_W(0x27, 0x0c),
++	CS42L63_U(0x09, 0x07, 0x00),
++	CS42L63_U(0x75, 0xc0, 0x80),
++	CS42L63_W(0x73, 0xc0),
++	CS42L63_U(0x71, 0x21, 0x20),
++	CS42L63_W(0x76, 0x8f),
++	CS42L63_U(0x06, 0x01, 0x00),
++	CS42L63_W(0x12, 0xc9),
++};
++
++/* outputs_idle: every output off and muted, what iOS leaves between streams (J1 and K93 alike); init_cold steps 28-46 */
++static const struct cs42l63_step cs42l63_outputs_idle[] = {
++	CS42L63_W(0x1d, 0x19),
++	CS42L63_W(0x3d, 0x3f),
++	CS42L63_W(0x3e, 0x3f),
++	CS42L63_W(0x41, 0x7f),
++	CS42L63_W(0x42, 0x3f),
++	CS42L63_W(0x45, 0x3f),
++	CS42L63_W(0x46, 0x3f),
++	CS42L63_W(0x49, 0x7f),
++	CS42L63_W(0x4a, 0x3f),
++	CS42L63_U(0x3b, 0x07, 0x03),
++	CS42L63_U(0x66, 0x03, 0x00),
++	CS42L63_U(0x08, 0xac, 0xac),
++	CS42L63_W(0x23, 0x40),
++	CS42L63_W(0x25, 0x40),
++	CS42L63_W(0x21, 0x40),
++	CS42L63_W(0x22, 0x40),
++	CS42L63_W(0x1f, 0x19),
++	CS42L63_W(0x20, 0x19),
++	CS42L63_U(0x07, 0x7c, 0x7c),
++};
++
++/* inputs_idle: the input path configured and off (the K93's cold init; boards that record); init_cold steps 47-76 */
++static const struct cs42l63_step cs42l63_inputs_idle[] = {
++	CS42L63_U(0x14, 0x07, 0x00),
++	CS42L63_W(0x16, 0x00),
++	CS42L63_W(0x17, 0x00),
++	CS42L63_W(0x18, 0x00),
++	CS42L63_W(0x19, 0xa0),
++	CS42L63_W(0x1a, 0xa0),
++	CS42L63_W(0x1b, 0xa0),
++	CS42L63_W(0x5e, 0x00),
++	CS42L63_U(0x14, 0x10, 0x00),
++	CS42L63_U(0x15, 0xe0, 0x00),
++	CS42L63_U(0x06, 0x1e, 0x1e),
++	CS42L63_W(0x5f, 0x88),
++	CS42L63_W(0x3c, 0x3f),
++	CS42L63_W(0x3f, 0x3f),
++	CS42L63_W(0x40, 0x7f),
++	CS42L63_W(0x43, 0x3f),
++	CS42L63_W(0x44, 0x3f),
++	CS42L63_W(0x47, 0x3f),
++	CS42L63_W(0x48, 0x7f),
++	CS42L63_W(0x4b, 0x3f),
++	CS42L63_W(0x4c, 0x3f),
++	CS42L63_W(0x4f, 0x3f),
++	CS42L63_W(0x50, 0x7f),
++	CS42L63_W(0x53, 0x3f),
++	CS42L63_W(0x54, 0x3f),
++	CS42L63_W(0x57, 0x3f),
++	CS42L63_W(0x58, 0x7f),
++	CS42L63_W(0x5b, 0x3f),
++	CS42L63_U(0x0d, 0x80, 0x80),
++	CS42L63_U(0x08, 0x50, 0x50),
++};
++
++/* power_down_outputs: power-down's first part: the outputs muted and off (J1 and K93 alike); power_down steps 0-8 */
++static const struct cs42l63_step cs42l63_power_down_outputs[] = {
++	CS42L63_U(0x12, 0xc0, 0x00),
++	CS42L63_W(0x23, 0x40),
++	CS42L63_W(0x25, 0x40),
++	CS42L63_W(0x21, 0x40),
++	CS42L63_W(0x22, 0x40),
++	CS42L63_W(0x1d, 0x19),
++	CS42L63_W(0x1f, 0x19),
++	CS42L63_W(0x20, 0x19),
++	CS42L63_W(0x07, 0x7f),
++};
++
++/* mikey_off: power-down's headset (Mikey) part (the K93's; boards with a headset jack); power_down steps 9-23 */
++static const struct cs42l63_step cs42l63_mikey_off[] = {
++	CS42L63_W(0x70, 0x01),
++	CS42L63_U(0x71, 0xc0, 0xc0),
++	CS42L63_U(0x74, 0xff, 0x03),
++	CS42L63_SLEEP(10),
++	CS42L63_W(0x79, 0xff),
++	CS42L63_W(0x7a, 0xff),
++	CS42L63_W(0x70, 0x01),
++	CS42L63_U(0x71, 0xc0, 0x00),
++	CS42L63_U(0x74, 0xff, 0x0d),
++	CS42L63_SLEEP(35),
++	CS42L63_W(0x79, 0xff),
++	CS42L63_W(0x7a, 0xfe),
++	CS42L63_R(0x7b),
++	CS42L63_R(0x7c),
++	CS42L63_R(0x7c),
++};
++
++/* speaker_start: output stream starts, speaker selected (0x13a = 0, 0x139 = 0x3e, 0x131 = 0x3e) */
++static const struct cs42l63_step cs42l63_speaker_start[] = {
++	CS42L63_W(0x1d, 0x19),
++	CS42L63_W(0x3d, 0x3f),
++	CS42L63_W(0x3e, 0x3f),
++	CS42L63_W(0x41, 0x7f),
++	CS42L63_W(0x42, 0x3f),
++	CS42L63_W(0x45, 0x00),
++	CS42L63_W(0x46, 0x3f),
++	CS42L63_W(0x49, 0x40),
++	CS42L63_W(0x4a, 0x3f),
++	CS42L63_U(0x3b, 0x07, 0x01),
++	CS42L63_U(0x66, 0x0f, 0x00),
++	CS42L63_U(0x08, 0xac, 0x2c),
++	CS42L63_W(0x23, 0x40),
++	CS42L63_W(0x25, 0x40),
++	CS42L63_W(0x21, 0x7f),
++	CS42L63_W(0x22, 0x7f),
++	CS42L63_W(0x1f, 0x00),
++	CS42L63_W(0x20, 0x00),
++	CS42L63_U(0x07, 0x7c, 0x64),
++	CS42L63_SPK(1),
++	CS42L63_SLEEP(50),
++};
++
++/* speaker_stop: output stream stops (speaker selected) */
++static const struct cs42l63_step cs42l63_speaker_stop[] = {
++	CS42L63_SPK(0),
++	CS42L63_W(0x1d, 0x19),
++	CS42L63_W(0x3d, 0x3f),
++	CS42L63_W(0x3e, 0x3f),
++	CS42L63_W(0x41, 0x7f),
++	CS42L63_W(0x42, 0x3f),
++	CS42L63_W(0x45, 0x3f),
++	CS42L63_W(0x46, 0x3f),
++	CS42L63_W(0x49, 0x7f),
++	CS42L63_W(0x4a, 0x3f),
++	CS42L63_U(0x3b, 0x07, 0x03),
++	CS42L63_U(0x66, 0x03, 0x00),
++	CS42L63_U(0x08, 0xac, 0xac),
++	CS42L63_W(0x23, 0x40),
++	CS42L63_W(0x25, 0x40),
++	CS42L63_W(0x21, 0x40),
++	CS42L63_W(0x22, 0x40),
++	CS42L63_W(0x1f, 0x19),
++	CS42L63_W(0x20, 0x19),
++	CS42L63_U(0x07, 0x7c, 0x7c),
++};
++
++/* hp_start: output stream starts, headphones selected (0x133 = 0x135 = 0, 0x13a = 1, HP volumes 0x3e) */
++static const struct cs42l63_step cs42l63_hp_start[] = {
++	CS42L63_SPK(0),
++	CS42L63_W(0x1d, 0x00),
++	CS42L63_W(0x3d, 0x00),
++	CS42L63_W(0x3e, 0x3f),
++	CS42L63_W(0x41, 0x40),
++	CS42L63_W(0x42, 0x3f),
++	CS42L63_W(0x45, 0x3f),
++	CS42L63_W(0x46, 0x3f),
++	CS42L63_W(0x49, 0x7f),
++	CS42L63_W(0x4a, 0x3f),
++	CS42L63_U(0x3b, 0x07, 0x00),
++	CS42L63_U(0x66, 0x03, 0x00),
++	CS42L63_U(0x08, 0xac, 0x2c),
++	CS42L63_W(0x23, 0x7f),
++	CS42L63_W(0x25, 0x7f),
++	CS42L63_W(0x21, 0x40),
++	CS42L63_W(0x22, 0x40),
++	CS42L63_W(0x1f, 0x19),
++	CS42L63_W(0x20, 0x19),
++	CS42L63_U(0x07, 0x7c, 0x1c),
++};
++
++/* hp_stop: output stream stops (headphones selected) */
++static const struct cs42l63_step cs42l63_hp_stop[] = {
++	CS42L63_SPK(0),
++	CS42L63_W(0x1d, 0x19),
++	CS42L63_W(0x3d, 0x3f),
++	CS42L63_W(0x3e, 0x3f),
++	CS42L63_W(0x41, 0x7f),
++	CS42L63_W(0x42, 0x3f),
++	CS42L63_W(0x45, 0x3f),
++	CS42L63_W(0x46, 0x3f),
++	CS42L63_W(0x49, 0x7f),
++	CS42L63_W(0x4a, 0x3f),
++	CS42L63_U(0x3b, 0x07, 0x03),
++	CS42L63_U(0x66, 0x03, 0x00),
++	CS42L63_U(0x08, 0xac, 0xac),
++	CS42L63_W(0x23, 0x40),
++	CS42L63_W(0x25, 0x40),
++	CS42L63_W(0x21, 0x40),
++	CS42L63_W(0x22, 0x40),
++	CS42L63_W(0x1f, 0x19),
++	CS42L63_W(0x20, 0x19),
++	CS42L63_U(0x07, 0x7c, 0x7c),
++};
++
++/* input_internal_mic: input stream started, internal mic (DMIC B) */
++static const struct cs42l63_step cs42l63_input_internal_mic[] = {
++	CS42L63_U(0x14, 0x07, 0x00),
++	CS42L63_W(0x16, 0x00),
++	CS42L63_W(0x17, 0x00),
++	CS42L63_W(0x18, 0x00),
++	CS42L63_W(0x19, 0xa0),
++	CS42L63_W(0x1a, 0xa0),
++	CS42L63_W(0x1b, 0xa0),
++	CS42L63_W(0x5e, 0x20),
++	CS42L63_SLEEP(20),
++	CS42L63_U(0x14, 0x10, 0x10),
++	CS42L63_U(0x15, 0xe0, 0xc0),
++	CS42L63_U(0x06, 0x1e, 0x0e),
++	CS42L63_W(0x5f, 0x88),
++	CS42L63_SLEEP(50),
++	CS42L63_W(0x3c, 0x3f),
++	CS42L63_W(0x3f, 0x3f),
++	CS42L63_W(0x40, 0x3f),
++	CS42L63_W(0x43, 0x3f),
++	CS42L63_W(0x44, 0x3f),
++	CS42L63_W(0x47, 0x3f),
++	CS42L63_W(0x48, 0x3f),
++	CS42L63_W(0x4b, 0x3f),
++	CS42L63_W(0x4c, 0x3f),
++	CS42L63_W(0x4f, 0x3f),
++	CS42L63_W(0x50, 0x3f),
++	CS42L63_W(0x53, 0x3f),
++	CS42L63_W(0x54, 0x00),
++	CS42L63_W(0x57, 0x3f),
++	CS42L63_W(0x58, 0x3f),
++	CS42L63_W(0x5b, 0x3f),
++	CS42L63_U(0x0d, 0x80, 0x80),
++	CS42L63_U(0x08, 0x50, 0x10),
++};
++
++/* input_headset_mic: input stream, headset mic (0x170 = emic) */
++static const struct cs42l63_step cs42l63_input_headset_mic[] = {
++	CS42L63_U(0x14, 0x07, 0x00),
++	CS42L63_W(0x16, 0x34),
++	CS42L63_W(0x17, 0x34),
++	CS42L63_W(0x18, 0x34),
++	CS42L63_W(0x19, 0xa0),
++	CS42L63_W(0x1a, 0xa0),
++	CS42L63_W(0x1b, 0xa0),
++	CS42L63_W(0x5e, 0x00),
++	CS42L63_U(0x14, 0x10, 0x00),
++	CS42L63_U(0x15, 0xe0, 0x20),
++	CS42L63_U(0x06, 0x1e, 0x16),
++	CS42L63_W(0x5f, 0x88),
++	CS42L63_W(0x3c, 0x3f),
++	CS42L63_W(0x3f, 0x3f),
++	CS42L63_W(0x40, 0x3f),
++	CS42L63_W(0x43, 0x3f),
++	CS42L63_W(0x44, 0x3f),
++	CS42L63_W(0x47, 0x3f),
++	CS42L63_W(0x48, 0x3f),
++	CS42L63_W(0x4b, 0x3f),
++	CS42L63_W(0x4c, 0x3f),
++	CS42L63_W(0x4f, 0x3f),
++	CS42L63_W(0x50, 0x3f),
++	CS42L63_W(0x53, 0x3f),
++	CS42L63_W(0x54, 0x3f),
++	CS42L63_W(0x57, 0x00),
++	CS42L63_W(0x58, 0x3f),
++	CS42L63_W(0x5b, 0x3f),
++	CS42L63_U(0x0d, 0x80, 0x80),
++	CS42L63_U(0x08, 0x50, 0x10),
++};
++
++/* input_stop: input stream stopped */
++static const struct cs42l63_step cs42l63_input_stop[] = {
++	CS42L63_U(0x14, 0x07, 0x00),
++	CS42L63_W(0x16, 0x34),
++	CS42L63_W(0x17, 0x34),
++	CS42L63_W(0x18, 0x34),
++	CS42L63_W(0x19, 0xa0),
++	CS42L63_W(0x1a, 0xa0),
++	CS42L63_W(0x1b, 0xa0),
++	CS42L63_W(0x5e, 0x00),
++	CS42L63_U(0x14, 0x10, 0x00),
++	CS42L63_U(0x15, 0xe0, 0x00),
++	CS42L63_U(0x06, 0x1e, 0x1e),
++	CS42L63_W(0x5f, 0x88),
++	CS42L63_W(0x3c, 0x3f),
++	CS42L63_W(0x3f, 0x3f),
++	CS42L63_W(0x40, 0x7f),
++	CS42L63_W(0x43, 0x3f),
++	CS42L63_W(0x44, 0x3f),
++	CS42L63_W(0x47, 0x3f),
++	CS42L63_W(0x48, 0x7f),
++	CS42L63_W(0x4b, 0x3f),
++	CS42L63_W(0x4c, 0x3f),
++	CS42L63_W(0x4f, 0x3f),
++	CS42L63_W(0x50, 0x7f),
++	CS42L63_W(0x53, 0x3f),
++	CS42L63_W(0x54, 0x3f),
++	CS42L63_W(0x57, 0x3f),
++	CS42L63_W(0x58, 0x7f),
++	CS42L63_W(0x5b, 0x3f),
++	CS42L63_U(0x0d, 0x80, 0x80),
++	CS42L63_U(0x08, 0x50, 0x50),
++};
++
++/* internal mic: input volume i = 0..128 = -96..+32 dB, iOS's 0x16f = i:
++ * { 0x14 & 7, 0x16-0x18, 0x19-0x1b } */
++static const u8 cs42l63_gain_internal[129][3] = {
++	{ 0x00, 0x00, 0xa0 }, { 0x00, 0x00, 0xa1 }, { 0x00, 0x00, 0xa2 }, { 0x00, 0x00, 0xa3 },
++	{ 0x00, 0x00, 0xa4 }, { 0x00, 0x00, 0xa5 }, { 0x00, 0x00, 0xa6 }, { 0x00, 0x00, 0xa7 },
++	{ 0x00, 0x00, 0xa8 }, { 0x00, 0x00, 0xa9 }, { 0x00, 0x00, 0xaa }, { 0x00, 0x00, 0xab },
++	{ 0x00, 0x00, 0xac }, { 0x00, 0x00, 0xad }, { 0x00, 0x00, 0xae }, { 0x00, 0x00, 0xaf },
++	{ 0x00, 0x00, 0xb0 }, { 0x00, 0x00, 0xb1 }, { 0x00, 0x00, 0xb2 }, { 0x00, 0x00, 0xb3 },
++	{ 0x00, 0x00, 0xb4 }, { 0x00, 0x00, 0xb5 }, { 0x00, 0x00, 0xb6 }, { 0x00, 0x00, 0xb7 },
++	{ 0x00, 0x00, 0xb8 }, { 0x00, 0x00, 0xb9 }, { 0x00, 0x00, 0xba }, { 0x00, 0x00, 0xbb },
++	{ 0x00, 0x00, 0xbc }, { 0x00, 0x00, 0xbd }, { 0x00, 0x00, 0xbe }, { 0x00, 0x00, 0xbf },
++	{ 0x00, 0x00, 0xc0 }, { 0x00, 0x00, 0xc1 }, { 0x00, 0x00, 0xc2 }, { 0x00, 0x00, 0xc3 },
++	{ 0x00, 0x00, 0xc4 }, { 0x00, 0x00, 0xc5 }, { 0x00, 0x00, 0xc6 }, { 0x00, 0x00, 0xc7 },
++	{ 0x00, 0x00, 0xc8 }, { 0x00, 0x00, 0xc9 }, { 0x00, 0x00, 0xca }, { 0x00, 0x00, 0xcb },
++	{ 0x00, 0x00, 0xcc }, { 0x00, 0x00, 0xcd }, { 0x00, 0x00, 0xce }, { 0x00, 0x00, 0xcf },
++	{ 0x00, 0x00, 0xd0 }, { 0x00, 0x00, 0xd1 }, { 0x00, 0x00, 0xd2 }, { 0x00, 0x00, 0xd3 },
++	{ 0x00, 0x00, 0xd4 }, { 0x00, 0x00, 0xd5 }, { 0x00, 0x00, 0xd6 }, { 0x00, 0x00, 0xd7 },
++	{ 0x00, 0x00, 0xd8 }, { 0x00, 0x00, 0xd9 }, { 0x00, 0x00, 0xda }, { 0x00, 0x00, 0xdb },
++	{ 0x00, 0x00, 0xdc }, { 0x00, 0x00, 0xdd }, { 0x00, 0x00, 0xde }, { 0x00, 0x00, 0xdf },
++	{ 0x00, 0x00, 0xe0 }, { 0x00, 0x00, 0xe1 }, { 0x00, 0x00, 0xe2 }, { 0x00, 0x00, 0xe3 },
++	{ 0x00, 0x00, 0xe4 }, { 0x00, 0x00, 0xe5 }, { 0x00, 0x00, 0xe6 }, { 0x00, 0x00, 0xe7 },
++	{ 0x00, 0x00, 0xe8 }, { 0x00, 0x00, 0xe9 }, { 0x00, 0x00, 0xea }, { 0x00, 0x00, 0xeb },
++	{ 0x00, 0x00, 0xec }, { 0x00, 0x00, 0xed }, { 0x00, 0x00, 0xee }, { 0x00, 0x00, 0xef },
++	{ 0x00, 0x00, 0xf0 }, { 0x00, 0x00, 0xf1 }, { 0x00, 0x00, 0xf2 }, { 0x00, 0x00, 0xf3 },
++	{ 0x00, 0x00, 0xf4 }, { 0x00, 0x00, 0xf5 }, { 0x00, 0x00, 0xf6 }, { 0x00, 0x00, 0xf7 },
++	{ 0x00, 0x00, 0xf8 }, { 0x00, 0x00, 0xf9 }, { 0x00, 0x00, 0xfa }, { 0x00, 0x00, 0xfb },
++	{ 0x00, 0x00, 0xfc }, { 0x00, 0x00, 0xfd }, { 0x00, 0x00, 0xfe }, { 0x00, 0x00, 0xff },
++	{ 0x00, 0x00, 0x00 }, { 0x00, 0x00, 0x01 }, { 0x00, 0x00, 0x02 }, { 0x00, 0x00, 0x03 },
++	{ 0x00, 0x00, 0x04 }, { 0x00, 0x00, 0x05 }, { 0x00, 0x00, 0x06 }, { 0x00, 0x00, 0x07 },
++	{ 0x00, 0x00, 0x08 }, { 0x00, 0x00, 0x09 }, { 0x00, 0x00, 0x0a }, { 0x00, 0x00, 0x0b },
++	{ 0x00, 0x00, 0x0c }, { 0x07, 0x00, 0xf9 }, { 0x07, 0x00, 0xfa }, { 0x07, 0x00, 0xfb },
++	{ 0x07, 0x00, 0xfc }, { 0x07, 0x00, 0xfd }, { 0x07, 0x00, 0xfe }, { 0x07, 0x00, 0xff },
++	{ 0x07, 0x00, 0x00 }, { 0x07, 0x00, 0x01 }, { 0x07, 0x00, 0x02 }, { 0x07, 0x00, 0x03 },
++	{ 0x07, 0x00, 0x04 }, { 0x07, 0x00, 0x05 }, { 0x07, 0x00, 0x06 }, { 0x07, 0x00, 0x07 },
++	{ 0x07, 0x00, 0x08 }, { 0x07, 0x00, 0x09 }, { 0x07, 0x00, 0x0a }, { 0x07, 0x00, 0x0b },
++	{ 0x07, 0x00, 0x0c },
++};
++
++/* headset mic: input volume i = 0..128 = -96..+32 dB, iOS's 0x16f = 2i - 8, from 0:
++ * { 0x14 & 7, 0x16-0x18, 0x19-0x1b } */
++static const u8 cs42l63_gain_headset[129][3] = {
++	{ 0x00, 0x34, 0xa0 }, { 0x00, 0x34, 0xa0 }, { 0x00, 0x34, 0xa0 }, { 0x00, 0x34, 0xa0 },
++	{ 0x00, 0x34, 0xa0 }, { 0x00, 0x34, 0xa1 }, { 0x00, 0x34, 0xa2 }, { 0x00, 0x34, 0xa3 },
++	{ 0x00, 0x34, 0xa4 }, { 0x00, 0x34, 0xa5 }, { 0x00, 0x34, 0xa6 }, { 0x00, 0x34, 0xa7 },
++	{ 0x00, 0x34, 0xa8 }, { 0x00, 0x34, 0xa9 }, { 0x00, 0x34, 0xaa }, { 0x00, 0x34, 0xab },
++	{ 0x00, 0x34, 0xac }, { 0x00, 0x34, 0xad }, { 0x00, 0x34, 0xae }, { 0x00, 0x34, 0xaf },
++	{ 0x00, 0x34, 0xb0 }, { 0x00, 0x34, 0xb1 }, { 0x00, 0x34, 0xb2 }, { 0x00, 0x34, 0xb3 },
++	{ 0x00, 0x34, 0xb4 }, { 0x00, 0x34, 0xb5 }, { 0x00, 0x34, 0xb6 }, { 0x00, 0x34, 0xb7 },
++	{ 0x00, 0x34, 0xb8 }, { 0x00, 0x34, 0xb9 }, { 0x00, 0x34, 0xba }, { 0x00, 0x34, 0xbb },
++	{ 0x00, 0x34, 0xbc }, { 0x00, 0x34, 0xbd }, { 0x00, 0x34, 0xbe }, { 0x00, 0x34, 0xbf },
++	{ 0x00, 0x34, 0xc0 }, { 0x00, 0x34, 0xc1 }, { 0x00, 0x34, 0xc2 }, { 0x00, 0x34, 0xc3 },
++	{ 0x00, 0x34, 0xc4 }, { 0x00, 0x34, 0xc5 }, { 0x00, 0x34, 0xc6 }, { 0x00, 0x34, 0xc7 },
++	{ 0x00, 0x34, 0xc8 }, { 0x00, 0x34, 0xc9 }, { 0x00, 0x34, 0xca }, { 0x00, 0x34, 0xcb },
++	{ 0x00, 0x34, 0xcc }, { 0x00, 0x34, 0xcd }, { 0x00, 0x34, 0xce }, { 0x00, 0x34, 0xcf },
++	{ 0x00, 0x34, 0xd0 }, { 0x00, 0x34, 0xd1 }, { 0x00, 0x34, 0xd2 }, { 0x00, 0x34, 0xd3 },
++	{ 0x00, 0x34, 0xd4 }, { 0x00, 0x34, 0xd5 }, { 0x00, 0x34, 0xd6 }, { 0x00, 0x34, 0xd7 },
++	{ 0x00, 0x34, 0xd8 }, { 0x00, 0x34, 0xd9 }, { 0x00, 0x34, 0xda }, { 0x00, 0x34, 0xdb },
++	{ 0x00, 0x34, 0xdc }, { 0x00, 0x34, 0xdd }, { 0x00, 0x34, 0xde }, { 0x00, 0x34, 0xdf },
++	{ 0x00, 0x34, 0xe0 }, { 0x00, 0x34, 0xe1 }, { 0x00, 0x34, 0xe2 }, { 0x00, 0x34, 0xe3 },
++	{ 0x00, 0x34, 0xe4 }, { 0x00, 0x34, 0xe5 }, { 0x00, 0x34, 0xe6 }, { 0x00, 0x34, 0xe7 },
++	{ 0x00, 0x34, 0xe8 }, { 0x00, 0x34, 0xe9 }, { 0x00, 0x34, 0xea }, { 0x00, 0x34, 0xeb },
++	{ 0x00, 0x34, 0xec }, { 0x00, 0x34, 0xed }, { 0x00, 0x34, 0xee }, { 0x00, 0x34, 0xef },
++	{ 0x00, 0x34, 0xf0 }, { 0x00, 0x34, 0xf1 }, { 0x00, 0x34, 0xf2 }, { 0x00, 0x34, 0xf3 },
++	{ 0x00, 0x34, 0xf4 }, { 0x00, 0x34, 0xf5 }, { 0x00, 0x34, 0xf6 }, { 0x00, 0x34, 0xf7 },
++	{ 0x00, 0x34, 0xf8 }, { 0x00, 0x34, 0xf9 }, { 0x00, 0x34, 0xfa }, { 0x00, 0x34, 0xfb },
++	{ 0x00, 0x34, 0xfc }, { 0x00, 0x34, 0xfd }, { 0x00, 0x34, 0xfe }, { 0x00, 0x34, 0xff },
++	{ 0x00, 0x34, 0x00 }, { 0x00, 0x36, 0x00 }, { 0x00, 0x38, 0x00 }, { 0x00, 0x3a, 0x00 },
++	{ 0x00, 0x3c, 0x00 }, { 0x00, 0x3e, 0x00 }, { 0x00, 0x00, 0x00 }, { 0x00, 0x02, 0x00 },
++	{ 0x00, 0x04, 0x00 }, { 0x00, 0x06, 0x00 }, { 0x00, 0x08, 0x00 }, { 0x00, 0x0a, 0x00 },
++	{ 0x00, 0x0c, 0x00 }, { 0x00, 0x0e, 0x00 }, { 0x00, 0x10, 0x00 }, { 0x00, 0x12, 0x00 },
++	{ 0x00, 0x80, 0x00 }, { 0x00, 0x82, 0x00 }, { 0x00, 0x84, 0x00 }, { 0x00, 0x86, 0x00 },
++	{ 0x00, 0x88, 0x00 }, { 0x00, 0x8a, 0x00 }, { 0x00, 0x8c, 0x00 }, { 0x00, 0x8e, 0x00 },
++	{ 0x00, 0x90, 0x00 }, { 0x00, 0x92, 0x00 }, { 0x00, 0x94, 0x00 }, { 0x00, 0x96, 0x00 },
++	{ 0x00, 0x98, 0x00 },
++};
+diff --git a/sound/soc/codecs/cs42l63.c b/sound/soc/codecs/cs42l63.c
+new file mode 100644
+index 000000000000..56c38951a617
+--- /dev/null
++++ b/sound/soc/codecs/cs42l63.c
+@@ -0,0 +1,1220 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Cirrus Logic CS42L63, Apple's codec of the A5 and A5X iPads: its serial
++ * port (ASP) takes 16-bit I2S from the SoC's I2S0, and line out 2 drives the
++ * speaker through an external amplifier with its own enable GPIO.  The iPad 3
++ * (J1) uses that much; the iPad 2 (K93) also its headphone output, its two
++ * microphone inputs -- the built-in one on digital mic input B, a headset's
++ * -- and the headset jack.
++ *
++ * The CS42L63 is Apple's part; no datasheet is public.  It is a sibling of
++ * the CS42L73 (device ID 42 a6 3x, the same rate codes and volume coding) with
++ * a flat 8-bit register map of its own.  This driver writes what iOS's
++ * AppleCS42L63Audio writes: its sequences were recorded by running that
++ * driver in an emulator, iOS 9.3.5's for the J1 (docs/research/j1-a5x.md)
++ * and iOS 8.4.1's for the K93 (docs/research/k93-audio.md,
++ * tools/audio/k93-cs42l63-sequences.py), and they agree wherever both boards
++ * use them.  They are compiled in from cs42l63-seq.h, which
++ * tools/audio/k93-seq2c.py generates from the recordings.  What most
++ * registers mean is not known, so they are named by number.
++ *
++ * What a board has comes from its device tree:
++ *
++ *   clocks "mclk"        the codec's 6 MHz MCLK, from the SoC's I2S0 (needed
++ *                        before it powers up; until it is there, probing
++ *                        is deferred)
++ *   speaker-amp-gpios    the speaker amplifier's enable: on after the path is
++ *                        up, off before it goes down, as iOS orders them
++ *   reset-gpios          the codec's reset (K93: PMU GPIO 13, active low),
++ *                        pulsed at the cold power-up as iOS does; without it,
++ *                        as iBoot leaves it
++ *   headset-switch       the TS3A8235 between the jack and the codec (K93):
++ *                        the headphones, a headset's microphone and the jack,
++ *                        watched by polling the codec's Mikey block
++ *   apple,internal-mic   the built-in microphone on digital mic input B (K93)
++ *
++ * Power.  With nothing to watch, the codec is powered for streams only:
++ * "Codec Power", a DAPM supply, powers it up before a stream and down once
++ * the pmdown time has passed, and MCLK runs while it is up.  A board with a
++ * headset jack keeps it powered from the start -- the Mikey block that sees a
++ * plug go in is the codec's -- as iOS does.
++ *
++ * Outputs.  A stream's start (unmute) runs iOS's speaker_start or hp_start,
++ * its end (mute) speaker_stop or hp_stop: the path, the levels, and the
++ * amplifier's enable last on and first off.  iOS's start sequences open an
++ * output at its maximum; every such write here carries the volume set
++ * instead, so nothing is ever louder than asked, not even for a millisecond.
++ *
++ * Volumes, in iOS's units:
++ *   "Speaker Playback Volume"    line out 2's level, 0x21/0x22 = 0x41 + v,
++ *                                0..62 = -76..-1 dB (2 dB steps to -50, then
++ *                                1 dB); with no headset jack it is the board's
++ *                                volume and starts at -22 dB, with one it
++ *                                starts at iOS's level (62) and the master is
++ *                                the volume
++ *   "Headphone Playback Volume"  the headphones' level, 0x23/0x25, the same
++ *                                coding (headset jack)
++ *   "Master Playback Volume"     the mixer's attenuation of the output in use
++ *                                (speaker 0x45/0x49, headphones 0x3d/0x41 =
++ *                                62 - v), 1 dB a step (headset jack)
++ * and "Headphone Playback Switch" sends playback to the headphones instead of
++ * the speaker, at once if a stream plays (the jack sets it).
++ *
++ * Capture runs iOS's input_internal_mic or input_headset_mic ("Capture
++ * Source"), input_stop after, and "Capture Volume" is iOS's input volume
++ * (control 0x16f) through iOS's own mapping for that source (cs42l63_gain_*:
++ * a boost, the analog stage, the digital volume), on one dB scale for both:
++ * 0-128 = -96 to +32 dB in 1 dB steps.  iOS records a mic -- one, on the
++ * ASP's left channel -- in mono; here it is also mixed into the right one
++ * (0x58 or 0x5b), so a stereo recording has it twice.
++ *
++ * The jack: the Mikey block's register 0x77 bit 7 is set while a plug is in
++ * (0x7b latches bit 6 on insertion, bit 5 on removal, and clears when read),
++ * measured on the K93.  Its interrupt line (SoC GPIO 15) stays masked as
++ * iOS's init leaves it, so the jack is polled, twice a second.  When a plug
++ * goes in, this decides what iOS's AppleCSCodecMikey decides for a headset
++ * without Apple's remote (docs/research/k93-audio.md):
++ *   - it measures the plug's mic contact in the CTIA wiring of the TS3A8235
++ *     (the jack's ground and mic contacts, 0x42), and in the OMTP one (0x43)
++ *     only if CTIA reads reverse-bias or short -- iOS measures both but
++ *     decides only then: the mic bias on (0x74 = 0x06), the comparators'
++ *     reference at 0x17 and 0x36 (0x75), the answer in 0x78 -- open, mic,
++ *     reverse-bias or short;
++ *   - keeps the wiring iOS would (OMTP only if CTIA reads reverse-bias or
++ *     short and OMTP does not), the bias off again.
++ * Then playback moves to the headphones and, with a mic, capture to it; both
++ * move back when the plug comes out (the bias off, the switch at 0x00: as
++ * iBoot leaves it, it passes nothing until it is written).  "Headphone Jack"
++ * and "Headset Mic Jack" tell userspace, the moved controls notified.
++ *
++ * The headset's mic is biased while it records, as iOS's MicOpen state does
++ * it (0x75 = 0x3c, 0x74 = 0x1e) -- without the bias it records exact zeros.
++ * iOS keeps it biased as long as the plug is in, to hear the headset's
++ * button; here it is off otherwise, because a plug pulled out with the bias
++ * on clicks in the earbuds.  The bias comes on behind iOS's pop guard (the
++ * switch in its guard state 0x06 meanwhile) and goes off bare, as in iOS:
++ * heard with earbuds in, both are silent that way, and click the other way
++ * round.  Apple's remote (Mikey's own protocol) and a headset's button are
++ * not done.
++ */
++
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/i2c.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/of.h>
++#include <linux/workqueue.h>
++#include <sound/jack.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++#include <sound/tlv.h>
++
++enum { CS_W, CS_U, CS_R, CS_SLEEP, CS_RESET, CS_SPK, CS_MCLK };
++
++struct cs42l63_step {
++	u8 op, reg, mask, val;
++};
++
++#define CS42L63_W(r, v)		{ CS_W, (r), 0xff, (v) }
++#define CS42L63_U(r, m, v)	{ CS_U, (r), (m), (v) }
++#define CS42L63_R(r)		{ CS_R, (r), 0, 0 }
++#define CS42L63_SLEEP(ms)	{ CS_SLEEP, 0, 0, (ms) }
++#define CS42L63_RESET(on)	{ CS_RESET, 0, 0, (on) }
++#define CS42L63_SPK(on)		{ CS_SPK, 0, 0, (on) }
++#define CS42L63_MCLK(on)	{ CS_MCLK, 0, 0, (on) }
++
++#include "cs42l63-seq.h"
++
++#define CS42L63_DEVID_AB	0x01	/* 0x42 0xa6 0x3x */
++#define CS42L63_REV_ID		0x05
++#define CS42L63_PWR1		0x06	/* bit 0: power down */
++#define CS42L63_SPC		0x11	/* bits 3:0: the sample rate code */
++#define CS42L63_IS1		0x62	/* interrupt status, read to clear */
++#define CS42L63_CTL_KEY		0x7d
++
++#define CS42L63_VOL_MAX		62	/* 0x7f = -1 dB, iOS's maximum */
++#define CS42L63_VOL_SPEAKER	41	/* -22 dB: a speaker-only board's start */
++#define CS42L63_GAIN_MAX	(ARRAY_SIZE(cs42l63_gain_internal) - 1)
++static_assert(ARRAY_SIZE(cs42l63_gain_internal) == ARRAY_SIZE(cs42l63_gain_headset));
++
++struct cs42l63 {
++	struct i2c_client *i2c;
++	struct device *dev;
++	struct gpio_desc *reset;	/* active low: 1 = held in reset; optional */
++	struct gpio_desc *spk;		/* the amplifier's enable: 1 = plays; optional */
++	struct clk *mclk;
++	bool mclk_on;
++	struct mutex lock;
++	bool keep_powered;		/* a headset jack to watch: powered from the start */
++	bool imic;			/* the built-in microphone (apple,internal-mic) */
++	bool powered;			/* out of power-down, every block configured */
++	bool cold;			/* not powered up since the reset (reset-gpios) */
++	unsigned int rate_code;		/* 0x11's, kept for the next power-up */
++	bool playing, recording;
++	bool hp;			/* playback to the headphones, not the speaker */
++	bool headset_mic;		/* capture from the headset's mic, not the built-in one */
++	unsigned int speaker[2], headphone[2];	/* 0..62, iOS's units, A and B */
++	unsigned int master;		/* 0..62; 62 (no attenuation) without a jack */
++	unsigned int capture;		/* the input volume, 0..128 = -96..+32 dB */
++
++	struct i2c_client *hsw;		/* the TS3A8235, if the DT names it */
++	u8 hsw_state;			/* what it was last set to */
++	struct snd_soc_component *comp;
++	struct snd_soc_jack jack;
++	struct delayed_work jack_work;
++	bool jack_in;
++	bool mic;			/* the plug in has a microphone */
++	bool bias;			/* the Mikey's mic bias is on */
++};
++
++/*
++ * The TS3A8235: iOS's setState writes only register 2.  Its states 1 and 2
++ * are the two wirings of a 4-pole plug; bit 6 is clear while iOS measures the
++ * mic contact and in its pop guard (its "slow" states), set otherwise.
++ */
++#define TS3A8235_STATE		0x02
++#define TS3A8235_CTIA		0x42	/* state 1: CTIA headsets (Apple's), headphones */
++#define TS3A8235_OMTP		0x43	/* state 2: the OMTP wiring */
++#define TS3A8235_GUARD		0x06	/* state 3, slow: while the mic bias comes on */
++#define TS3A8235_NORMAL		0x40	/* clear in the slow states */
++#define TS3A8235_NONE		0x00
++#define TS3A8235_RAMP_MS	50	/* the ADT's slow-ramp-delay */
++
++/* the Mikey block, as iOS's AppleCSCodecMikey drives it (0x70 + its register) */
++#define MIKEY_CTL		0x70	/* 0x01 in the modes used here */
++#define MIKEY_CTL2		0x71	/* bits 7:6 set in them */
++#define MIKEY_MODE		0x74	/* 0x03 bias off, 0x06 measuring, 0x1e a mic in use */
++#define MIKEY_REF		0x75	/* bits 5:0: the comparators' reference */
++#define MIKEY_SENSE		0x78	/* bit 0 the mic contact shorted, bit 1 above the reference */
++#define MIKEY_MODE_OFF		0x03
++#define MIKEY_MODE_MEASURE	0x06
++#define MIKEY_MODE_MIC		0x1e
++
++/* iOS's names for what the mic contact reads (0x8091bd14) */
++enum { LINE_OPEN, LINE_MIC, LINE_REVERSE, LINE_SHORT };
++static const char * const cs42l63_line[] = { "open", "mic", "reverse-bias", "short" };
++
++#define CS42L63_JACK_POLL_MS	500
++#define CS42L63_JACK_SETTLE_MS	200	/* a plug seen moving is read again after this */
++#define CS42L63_JACK_REG	0x77	/* Mikey register 7: bit 7, a plug is in */
++#define CS42L63_JACK_IN		0x80
++
++/* the mixer's attenuation of the output in use: 0 dB without a master */
++static u8 cs42l63_att(struct cs42l63 *c)
++{
++	return CS42L63_VOL_MAX - c->master;
++}
++
++/*
++ * The value to write instead of what a sequence wants: an output's analog
++ * level or the active mixer entry, unless the sequence mutes it (0x40 for a
++ * level, 0x3f / 0x7f for a mixer entry), is the volume that is set.
++ */
++static u8 cs42l63_vol_subst(struct cs42l63 *c, u8 reg, u8 val)
++{
++	u8 att = cs42l63_att(c);
++
++	switch (reg) {
++	case 0x21: case 0x22:			/* speaker (line out 2) level A / B */
++		return val == 0x40 ? val : 0x41 + c->speaker[reg - 0x21];
++	case 0x23: case 0x25:			/* headphone level A / B */
++		return val == 0x40 ? val : 0x41 + c->headphone[reg == 0x25];
++	case 0x3d: case 0x45:			/* ASP L -> HP A / speaker A */
++		return val == 0x3f ? val : att;
++	case 0x41: case 0x49:			/* ASP R -> HP B / speaker B */
++		return val == 0x7f ? val : 0x40 | att;
++	}
++	return val;
++}
++
++static int cs42l63_run(struct cs42l63 *c, const struct cs42l63_step *s, unsigned int n)
++{
++	unsigned int i;
++	int v, ret = 0;
++
++	for (i = 0; i < n && !ret; i++, s++) {
++		switch (s->op) {
++		case CS_W:
++			ret = i2c_smbus_write_byte_data(c->i2c, s->reg,
++							 cs42l63_vol_subst(c, s->reg, s->val));
++			break;
++		case CS_U:
++			v = i2c_smbus_read_byte_data(c->i2c, s->reg);
++			if (v < 0) {
++				ret = v;
++				break;
++			}
++			ret = i2c_smbus_write_byte_data(c->i2c, s->reg, (v & ~s->mask) | s->val);
++			break;
++		case CS_R:
++			v = i2c_smbus_read_byte_data(c->i2c, s->reg);
++			if (v < 0)
++				ret = v;
++			else
++				dev_dbg(c->dev, "reg 0x%02x = 0x%02x\n", s->reg, v);
++			break;
++		case CS_SLEEP:
++			msleep(s->val);
++			break;
++		case CS_RESET:
++			gpiod_set_value_cansleep(c->reset, s->val);
++			break;
++		case CS_SPK:
++			gpiod_set_value_cansleep(c->spk, s->val);
++			break;
++		case CS_MCLK:
++			if (s->val && !c->mclk_on) {
++				ret = clk_prepare_enable(c->mclk);
++				c->mclk_on = !ret;
++			} else if (!s->val && c->mclk_on) {
++				clk_disable_unprepare(c->mclk);
++				c->mclk_on = false;
++			}
++			break;
++		}
++	}
++	if (ret)
++		dev_err(c->dev, "step %u (op %u, reg 0x%02x) failed: %d\n", i - 1,
++			s[-1].op, s[-1].reg, ret);
++	return ret;
++}
++
++#define RUN(c, seq)	cs42l63_run((c), cs42l63_##seq, ARRAY_SIZE(cs42l63_##seq))
++
++static int cs42l63_upd(struct cs42l63 *c, u8 reg, u8 mask, u8 val)
++{
++	int v = i2c_smbus_read_byte_data(c->i2c, reg);
++
++	return v < 0 ? v : i2c_smbus_write_byte_data(c->i2c, reg, (v & ~mask) | val);
++}
++
++/* --- power ---------------------------------------------------------------- */
++
++/*
++ * iOS's power-up, MCLK running: on a cold start the reset pulsed (where the
++ * board has the line), the control key set for 10 ms and released, every
++ * block configured and out of power-down, the rate, every output off and
++ * muted, the inputs configured and off (a board that records).
++ */
++static int cs42l63_power_up(struct cs42l63 *c)
++{
++	int v, ret;
++
++	if (c->reset && c->cold) {
++		gpiod_set_value_cansleep(c->reset, 1);
++		msleep(10);
++		gpiod_set_value_cansleep(c->reset, 0);
++		usleep_range(1000, 2000);
++		c->cold = false;
++	}
++	ret = i2c_smbus_write_byte_data(c->i2c, CS42L63_CTL_KEY, 0xa5);
++	if (ret)
++		return ret;
++	usleep_range(10000, 11000);
++	ret = i2c_smbus_write_byte_data(c->i2c, CS42L63_CTL_KEY, 0x00);
++	ret = ret ?: RUN(c, power_up_seq);
++	ret = ret ?: cs42l63_upd(c, CS42L63_SPC, 0x0f, c->rate_code);
++	gpiod_set_value_cansleep(c->spk, 0);
++	ret = ret ?: RUN(c, outputs_idle);
++	if (!ret && (c->imic || c->hsw))
++		ret = RUN(c, inputs_idle);
++	if (ret)
++		return ret;
++	/* bit 7 latches once the codec runs from MCLK */
++	v = i2c_smbus_read_byte_data(c->i2c, CS42L63_IS1);
++	dev_dbg(c->dev, "powered up, status %02x\n", v);
++	c->powered = true;
++	return 0;
++}
++
++/*
++ * iOS's power-down: the outputs muted and off, the headset block's own part
++ * (a board with the jack), into power-down -- iOS waits for 0x62 bit 7, 10 ms
++ * a try, and goes on without it -- and the control key set again.
++ */
++static void cs42l63_power_down(struct cs42l63 *c)
++{
++	int i, v;
++
++	c->powered = false;
++	RUN(c, power_down_outputs);
++	if (c->hsw)
++		RUN(c, mikey_off);
++	cs42l63_upd(c, MIKEY_REF, 0x80, 0x00);
++	cs42l63_upd(c, CS42L63_PWR1, 0x01, 0x01);
++	for (i = 0; i < 10; i++) {
++		v = i2c_smbus_read_byte_data(c->i2c, CS42L63_IS1);
++		if (v < 0 || (v & 0x80))
++			break;
++		usleep_range(10000, 11000);
++	}
++	cs42l63_upd(c, CS42L63_PWR1, 0x40, 0x40);
++	usleep_range(10000, 11000);
++	i2c_smbus_write_byte_data(c->i2c, CS42L63_CTL_KEY, 0xa5);
++}
++
++/* MCLK, then the power-up; undone if that fails */
++static int cs42l63_power_on(struct cs42l63 *c)
++{
++	int ret;
++
++	if (!c->mclk_on) {
++		ret = clk_prepare_enable(c->mclk);
++		if (ret) {
++			dev_err(c->dev, "no MCLK: %d\n", ret);
++			return ret;
++		}
++		c->mclk_on = true;
++	}
++	ret = cs42l63_power_up(c);
++	if (ret) {
++		dev_err(c->dev, "power-up failed: %d\n", ret);
++		clk_disable_unprepare(c->mclk);
++		c->mclk_on = false;
++	}
++	return ret;
++}
++
++static void cs42l63_power_off(struct cs42l63 *c)
++{
++	if (c->powered)
++		cs42l63_power_down(c);
++	if (c->mclk_on)
++		clk_disable_unprepare(c->mclk);
++	c->mclk_on = false;
++}
++
++/* "Codec Power": for streams only, where nothing keeps the codec up */
++static int cs42l63_power_event(struct snd_soc_dapm_widget *w,
++			       struct snd_kcontrol *kcontrol, int event)
++{
++	struct cs42l63 *c = snd_soc_component_get_drvdata(snd_soc_dapm_to_component(w->dapm));
++	int ret = 0;
++
++	if (c->keep_powered)
++		return 0;
++	mutex_lock(&c->lock);
++	switch (event) {
++	case SND_SOC_DAPM_PRE_PMU:
++		ret = cs42l63_power_on(c);
++		break;
++	case SND_SOC_DAPM_POST_PMD:
++		/* DAPM goes on after a failed PRE_PMU: undo only what was done */
++		cs42l63_power_off(c);
++		break;
++	}
++	mutex_unlock(&c->lock);
++	return ret;
++}
++
++/* --- outputs -------------------------------------------------------------- */
++
++/* the volumes of the output in use, as iOS writes them while it plays */
++static int cs42l63_set_volumes(struct cs42l63 *c)
++{
++	unsigned int att = cs42l63_att(c);
++	const unsigned int *lvl = c->hp ? c->headphone : c->speaker;
++	u8 m0 = c->hp ? 0x3d : 0x45, m1 = c->hp ? 0x41 : 0x49;
++	u8 l0 = c->hp ? 0x23 : 0x21, l1 = c->hp ? 0x25 : 0x22;
++	int ret;
++
++	ret = i2c_smbus_write_byte_data(c->i2c, m0, att);
++	ret = ret ?: i2c_smbus_write_byte_data(c->i2c, m1, 0x40 | att);
++	ret = ret ?: i2c_smbus_write_byte_data(c->i2c, l0, 0x41 + lvl[0]);
++	ret = ret ?: i2c_smbus_write_byte_data(c->i2c, l1, 0x41 + lvl[1]);
++	return ret;
++}
++
++/* the output in use on and off (iOS's routing: the other one stays muted) */
++static int cs42l63_out_start(struct cs42l63 *c)
++{
++	return c->hp ? RUN(c, hp_start) : RUN(c, speaker_start);
++}
++
++static int cs42l63_out_stop(struct cs42l63 *c)
++{
++	return c->hp ? RUN(c, hp_stop) : RUN(c, speaker_stop);
++}
++
++/* playback to the headphones or the speaker, moved at once while a stream plays */
++static int cs42l63_set_hp(struct cs42l63 *c, bool hp)
++{
++	int ret = 0;
++
++	if (c->hp == hp)
++		return 0;
++	if (c->playing) {
++		ret = cs42l63_out_stop(c);
++		c->hp = hp;
++		ret = ret ?: cs42l63_out_start(c);
++	} else {
++		c->hp = hp;
++	}
++	return ret;
++}
++
++/*
++ * iOS's input volume for the source in use, and the mic in both channels: iOS
++ * sends the internal mic's path A (0x54) or the headset's path B (0x57) to the
++ * ASP's left channel; the same path's entry for the right one is 0x58 or 0x5b.
++ */
++static int cs42l63_set_gain(struct cs42l63 *c)
++{
++	const u8 *g = (c->headset_mic ? cs42l63_gain_headset : cs42l63_gain_internal)[c->capture];
++	int v = i2c_smbus_read_byte_data(c->i2c, 0x14), ret, i;
++
++	if (v < 0)
++		return v;
++	ret = i2c_smbus_write_byte_data(c->i2c, 0x14, (v & ~0x07) | g[0]);
++	for (i = 0; i < 3 && !ret; i++)
++		ret = i2c_smbus_write_byte_data(c->i2c, 0x16 + i, g[1]);
++	for (i = 0; i < 3 && !ret; i++)
++		ret = i2c_smbus_write_byte_data(c->i2c, 0x19 + i, g[2]);
++	if (!ret)
++		ret = i2c_smbus_write_byte_data(c->i2c, c->headset_mic ? 0x5b : 0x58, 0x00);
++	return ret;
++}
++
++/* --- the Mikey block and the headset switch ----------------------------------- */
++
++static int cs42l63_hsw_set(struct cs42l63 *c, u8 state)
++{
++	c->hsw_state = state;
++	return c->hsw ? i2c_smbus_write_byte_data(c->hsw, TS3A8235_STATE, state) : 0;
++}
++
++/*
++ * One of iOS's Mikey modes as the K93 runs them (AppleCSCodecMikey 0x8091c464,
++ * modes 0/3, 4 and 8): 0x70 = 0x01, 0x71 bits 7:6 set, 0x74 = the mode, then
++ * its settling time.  The bias coming on (0x74 bits 2:1 other than 01) while a
++ * plug is connected goes behind iOS's pop guard (0x8091c63c,
++ * headphone-pop-workaround = 2): the switch in its guard state for the
++ * slow-ramp delay while 0x74 changes.  Heard on the iPad with earbuds in, as
++ * iOS has it: the bias coming on clicks bare and behind a 0x46 guard, not
++ * behind 0x06; going off it is silent bare, and clicks behind 0x06.
++ */
++static int cs42l63_mikey_mode(struct cs42l63 *c, u8 mode)
++{
++	bool on = (mode & 6) != 2;
++	u8 state = c->hsw_state;
++	int ret;
++
++	ret = i2c_smbus_write_byte_data(c->i2c, MIKEY_CTL, 0x01);
++	ret = ret ?: cs42l63_upd(c, MIKEY_CTL2, 0xc0, 0xc0);
++	if (!ret && on && !c->bias && c->hsw && state != TS3A8235_NONE) {
++		ret = cs42l63_hsw_set(c, TS3A8235_GUARD);
++		ret = ret ?: i2c_smbus_write_byte_data(c->i2c, MIKEY_MODE, mode);
++		msleep(TS3A8235_RAMP_MS);
++		ret = cs42l63_hsw_set(c, state) ?: ret;
++	}
++	ret = ret ?: i2c_smbus_write_byte_data(c->i2c, MIKEY_MODE, mode);
++	if (!ret)
++		c->bias = on;
++	msleep(mode & 4 ? 35 : mode & 1 ? 10 : 15);
++	return ret;
++}
++
++/* the bias off: reference 0x36 and mode 0, as iOS leaves headphones */
++static int cs42l63_bias_off(struct cs42l63 *c)
++{
++	int ret = cs42l63_mikey_mode(c, MIKEY_MODE_OFF);
++
++	return cs42l63_upd(c, MIKEY_REF, 0x3f, 0x36) ?: ret;
++}
++
++/* the bias on for the headset's mic: iOS's MicOpen, reference 0x3c and mode 8 */
++static int cs42l63_bias_mic(struct cs42l63 *c)
++{
++	int ret = cs42l63_upd(c, MIKEY_REF, 0x3f, 0x3c);
++
++	return ret ?: cs42l63_mikey_mode(c, MIKEY_MODE_MIC);
++}
++
++/*
++ * What the mic contact reads in a wiring of the switch (iOS's 0x8091bc00 and
++ * 0x8091bd14): the bias on, reference 0x17 -- shorted, or reversed (above
++ * it) -- then reference 0x36: a mic above it, else open.  The bias is left
++ * on.  iOS measures in the switch's slow states, the bias coming on bare;
++ * here in the normal ones, behind the guard: the same reading, no click.
++ */
++static int cs42l63_measure(struct cs42l63 *c, u8 wiring)
++{
++	int v, ret;
++
++	ret = cs42l63_hsw_set(c, wiring);
++	ret = ret ?: cs42l63_upd(c, MIKEY_REF, 0x3f, 0x17);
++	ret = ret ?: cs42l63_mikey_mode(c, MIKEY_MODE_MEASURE);
++	if (ret)
++		return ret;
++	msleep(TS3A8235_RAMP_MS);
++	v = i2c_smbus_read_byte_data(c->i2c, MIKEY_SENSE);
++	if (v < 0)
++		return v;
++	if (v & 1)
++		return LINE_SHORT;
++	if (v & 2)
++		return LINE_REVERSE;
++	ret = cs42l63_upd(c, MIKEY_REF, 0x3f, 0x36);
++	usleep_range(1000, 2000);
++	v = ret ?: i2c_smbus_read_byte_data(c->i2c, MIKEY_SENSE);
++	if (v < 0)
++		return v;
++	return (v & 2) ? LINE_MIC : LINE_OPEN;
++}
++
++/*
++ * A plug went in: its wiring and its mic, decided as iOS's detection decides
++ * them.  iOS measures both wirings, but keeps CTIA unless CTIA reads
++ * reverse-bias or short and OMTP does not -- so OMTP is measured here only
++ * when CTIA reads one of those.  The bias goes off again after: here it is
++ * on only while the headset's mic records (cs42l63_in_start), not all the
++ * time as in iOS, which watches the headset's button with it -- a plug
++ * pulled out with the bias on clicks in the earbuds (heard on the iPad).
++ */
++static void cs42l63_plug_in(struct cs42l63 *c)
++{
++	int r[2] = { LINE_OPEN, LINE_OPEN }, ret;
++	bool omtp = false;
++
++	c->mic = false;
++	ret = cs42l63_measure(c, TS3A8235_CTIA);
++	if (ret >= 0) {
++		r[0] = ret;
++		ret = 0;
++	}
++	if (!ret && r[0] >= LINE_REVERSE) {
++		ret = cs42l63_bias_off(c);
++		ret = ret ?: cs42l63_measure(c, TS3A8235_OMTP);
++		if (ret >= 0) {
++			r[1] = ret;
++			ret = 0;
++			omtp = r[1] <= LINE_MIC;
++		}
++	}
++	c->mic = !ret && r[omtp] == LINE_MIC;
++	ret = cs42l63_bias_off(c) ?: ret;
++	ret = cs42l63_hsw_set(c, omtp ? TS3A8235_OMTP : TS3A8235_CTIA) ?: ret;
++	if (ret)
++		dev_warn(c->dev, "could not measure the plug: %d\n", ret);
++	dev_info(c->dev, "plug in: the mic contact reads %s (CTIA), %s (OMTP): %s wiring, %s\n",
++		 cs42l63_line[r[0]], r[0] >= LINE_REVERSE ? cs42l63_line[r[1]] : "not measured",
++		 omtp ? "OMTP" : "CTIA", c->mic ? "a headset with a mic" : "headphones");
++}
++
++/* the plug came out: the switch open first, then the bias off */
++static void cs42l63_plug_out(struct cs42l63 *c)
++{
++	int ret;
++
++	ret = cs42l63_hsw_set(c, TS3A8235_NONE);
++	ret = cs42l63_bias_off(c) ?: ret;
++	if (ret)
++		dev_warn(c->dev, "could not release the jack: %d\n", ret);
++	c->mic = false;
++	dev_info(c->dev, "plug out\n");
++}
++
++/* --- capture ------------------------------------------------------------------ */
++
++/* the input path on: a headset's mic biased first, behind the guard */
++static int cs42l63_in_start(struct cs42l63 *c)
++{
++	int ret;
++
++	if (c->headset_mic) {
++		ret = c->mic ? cs42l63_bias_mic(c) : 0;
++		ret = ret ?: RUN(c, input_headset_mic);
++	} else {
++		ret = RUN(c, input_internal_mic);
++	}
++	return ret ?: cs42l63_set_gain(c);
++}
++
++/* the input path off, and a headset's mic bias with it */
++static int cs42l63_in_stop(struct cs42l63 *c)
++{
++	int ret = RUN(c, input_stop);
++
++	if (c->bias && c->jack_in)
++		ret = cs42l63_bias_off(c) ?: ret;
++	return ret;
++}
++
++/* capture from the headset's mic or the built-in one, moved at once while recording */
++static int cs42l63_set_source(struct cs42l63 *c, bool headset)
++{
++	int ret = 0;
++
++	if (c->headset_mic == headset)
++		return 0;
++	if (c->recording) {
++		ret = cs42l63_in_stop(c);
++		c->headset_mic = headset;
++		ret = ret ?: cs42l63_in_start(c);
++	} else {
++		c->headset_mic = headset;
++	}
++	return ret;
++}
++
++/* --- controls ------------------------------------------------------------- */
++
++enum { CTL_SPEAKER, CTL_HEADPHONE, CTL_MASTER, CTL_CAPTURE };
++
++static unsigned int cs42l63_vol_max(struct snd_kcontrol *kc)
++{
++	return kc->private_value == CTL_CAPTURE ? CS42L63_GAIN_MAX : CS42L63_VOL_MAX;
++}
++
++/* A and B for the outputs' levels, one value for the master and the input */
++static unsigned int cs42l63_vol_count(struct snd_kcontrol *kc)
++{
++	return kc->private_value <= CTL_HEADPHONE ? 2 : 1;
++}
++
++static int cs42l63_vol_info(struct snd_kcontrol *kc, struct snd_ctl_elem_info *ui)
++{
++	ui->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
++	ui->count = cs42l63_vol_count(kc);
++	ui->value.integer.min = 0;
++	ui->value.integer.max = cs42l63_vol_max(kc);
++	return 0;
++}
++
++static unsigned int *cs42l63_vol_field(struct cs42l63 *c, struct snd_kcontrol *kc)
++{
++	switch (kc->private_value) {
++	case CTL_SPEAKER:
++		return c->speaker;
++	case CTL_HEADPHONE:
++		return c->headphone;
++	case CTL_CAPTURE:
++		return &c->capture;
++	}
++	return &c->master;
++}
++
++static int cs42l63_vol_get(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uc)
++{
++	struct cs42l63 *c = snd_soc_component_get_drvdata(snd_kcontrol_chip(kc));
++	unsigned int *f, i;
++
++	mutex_lock(&c->lock);
++	f = cs42l63_vol_field(c, kc);
++	for (i = 0; i < cs42l63_vol_count(kc); i++)
++		uc->value.integer.value[i] = f[i];
++	mutex_unlock(&c->lock);
++	return 0;
++}
++
++static int cs42l63_vol_put(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uc)
++{
++	struct cs42l63 *c = snd_soc_component_get_drvdata(snd_kcontrol_chip(kc));
++	unsigned int *f, i, n = cs42l63_vol_count(kc);
++	bool changed = false;
++	int ret = 0;
++
++	for (i = 0; i < n; i++)
++		if (uc->value.integer.value[i] < 0 || uc->value.integer.value[i] > cs42l63_vol_max(kc))
++			return -EINVAL;
++	mutex_lock(&c->lock);
++	f = cs42l63_vol_field(c, kc);
++	for (i = 0; i < n; i++) {
++		changed |= f[i] != uc->value.integer.value[i];
++		f[i] = uc->value.integer.value[i];
++	}
++	if (changed) {
++		if (kc->private_value == CTL_CAPTURE) {
++			if (c->recording)
++				ret = cs42l63_set_gain(c);
++		} else if (c->playing) {
++			ret = cs42l63_set_volumes(c);
++		}
++	}
++	mutex_unlock(&c->lock);
++	return ret ?: changed;
++}
++
++/* on/off controls: 0 the headphones (playback), 1 the headset's mic (capture) */
++static bool *cs42l63_sw_field(struct cs42l63 *c, struct snd_kcontrol *kc)
++{
++	return kc->private_value ? &c->headset_mic : &c->hp;
++}
++
++static int cs42l63_sw_info(struct snd_kcontrol *kc, struct snd_ctl_elem_info *ui)
++{
++	static const char * const srcs[] = { "Internal Mic", "Headset Mic" };
++
++	if (kc->private_value)
++		return snd_ctl_enum_info(ui, 1, ARRAY_SIZE(srcs), srcs);
++	ui->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
++	ui->count = 1;
++	ui->value.integer.min = 0;
++	ui->value.integer.max = 1;
++	return 0;
++}
++
++static int cs42l63_sw_get(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uc)
++{
++	struct cs42l63 *c = snd_soc_component_get_drvdata(snd_kcontrol_chip(kc));
++	bool v;
++
++	mutex_lock(&c->lock);
++	v = *cs42l63_sw_field(c, kc);
++	mutex_unlock(&c->lock);
++	if (kc->private_value)
++		uc->value.enumerated.item[0] = v;
++	else
++		uc->value.integer.value[0] = v;
++	return 0;
++}
++
++/* moved while a stream runs: the old path off, the new one on, as iOS does */
++static int cs42l63_sw_put(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uc)
++{
++	struct cs42l63 *c = snd_soc_component_get_drvdata(snd_kcontrol_chip(kc));
++	bool v = kc->private_value ? uc->value.enumerated.item[0] : uc->value.integer.value[0];
++	bool *f;
++	int ret = 0;
++
++	if (kc->private_value ? uc->value.enumerated.item[0] > 1 : uc->value.integer.value[0] > 1)
++		return -EINVAL;
++	mutex_lock(&c->lock);
++	f = cs42l63_sw_field(c, kc);
++	if (*f == v) {
++		mutex_unlock(&c->lock);
++		return 0;
++	}
++	if (!kc->private_value)
++		ret = cs42l63_set_hp(c, v);
++	else
++		ret = cs42l63_set_source(c, v);
++	mutex_unlock(&c->lock);
++	return ret ?: 1;
++}
++
++/* -76 dB in 2 dB steps to -50, then 1 dB steps (the CS42L73's coding) */
++static const DECLARE_TLV_DB_RANGE(cs42l63_vol_tlv,
++	0, 13, TLV_DB_SCALE_ITEM(-7600, 200, 0),
++	14, CS42L63_VOL_MAX, TLV_DB_SCALE_ITEM(-4900, 100, 0)
++);
++/* the mixer's attenuation, 1 dB a step down from 0 dB */
++static const DECLARE_TLV_DB_SCALE(cs42l63_master_tlv, -6200, 100, 0);
++/* the input volume: 0..128 = -96..+32 dB, for either mic */
++static const DECLARE_TLV_DB_SCALE(cs42l63_capture_tlv, -9600, 100, 0);
++
++#define CS42L63_VOLUME(xname, xtlv, which) {					\
++	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = (xname),			\
++	.access = SNDRV_CTL_ELEM_ACCESS_READWRITE | SNDRV_CTL_ELEM_ACCESS_TLV_READ, \
++	.tlv.p = (xtlv), .info = cs42l63_vol_info, .get = cs42l63_vol_get,	\
++	.put = cs42l63_vol_put, .private_value = (which) }
++#define CS42L63_SWITCH(xname, which) {						\
++	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = (xname),			\
++	.info = cs42l63_sw_info, .get = cs42l63_sw_get, .put = cs42l63_sw_put,	\
++	.private_value = (which) }
++
++/* every board: its speaker */
++static const struct snd_kcontrol_new cs42l63_speaker_controls[] = {
++	CS42L63_VOLUME("Speaker Playback Volume", cs42l63_vol_tlv, CTL_SPEAKER),
++};
++
++/* a board with the headset jack: the headphones, the master over both */
++static const struct snd_kcontrol_new cs42l63_headphone_controls[] = {
++	CS42L63_VOLUME("Master Playback Volume", cs42l63_master_tlv, CTL_MASTER),
++	CS42L63_VOLUME("Headphone Playback Volume", cs42l63_vol_tlv, CTL_HEADPHONE),
++	CS42L63_SWITCH("Headphone Playback Switch", 0),
++};
++
++/* a board that records */
++static const struct snd_kcontrol_new cs42l63_capture_controls[] = {
++	CS42L63_VOLUME("Capture Volume", cs42l63_capture_tlv, CTL_CAPTURE),
++};
++
++/* the built-in mic and a headset's: which one records */
++static const struct snd_kcontrol_new cs42l63_source_controls[] = {
++	CS42L63_SWITCH("Capture Source", 1),
++};
++
++/* --- the jack ----------------------------------------------------------------- */
++
++static void cs42l63_notify(struct snd_soc_card *card, const char *name)
++{
++	struct snd_kcontrol *kc = snd_soc_card_get_kcontrol(card, name);
++
++	if (kc)
++		snd_ctl_notify(card->snd_card, SNDRV_CTL_EVENT_MASK_VALUE, &kc->id);
++}
++
++static bool cs42l63_plugged(struct cs42l63 *c, bool *in)
++{
++	int v = i2c_smbus_read_byte_data(c->i2c, CS42L63_JACK_REG);
++
++	*in = v >= 0 && (v & CS42L63_JACK_IN);
++	return v >= 0;
++}
++
++static void cs42l63_jack_work(struct work_struct *w)
++{
++	struct cs42l63 *c = container_of(to_delayed_work(w), struct cs42l63, jack_work);
++	struct snd_soc_card *card = c->comp->card;
++	bool in, again, hp_moved, src_moved;
++	int status;
++
++	if (!cs42l63_plugged(c, &in) || in == c->jack_in)
++		goto out;
++	/* the mic contact is measured next: let a moving plug settle first */
++	msleep(CS42L63_JACK_SETTLE_MS);
++	if (!cs42l63_plugged(c, &again) || again != in)
++		goto out;
++
++	mutex_lock(&c->lock);
++	c->jack_in = in;
++	/* the contacts and the mic's bias first, then the sound onto them */
++	if (in)
++		cs42l63_plug_in(c);
++	else
++		cs42l63_plug_out(c);
++	hp_moved = c->hp != in;
++	if (cs42l63_set_hp(c, in))
++		dev_warn(c->dev, "could not move playback to the %s\n", in ? "headphones" : "speaker");
++	/* capture follows a headset's mic in and out, as iOS routes it */
++	src_moved = c->headset_mic != (in && c->mic);
++	if (cs42l63_set_source(c, in && c->mic))
++		dev_warn(c->dev, "could not move capture to the %s mic\n",
++			 in && c->mic ? "headset's" : "built-in");
++	status = !in ? 0 : c->mic ? SND_JACK_HEADSET : SND_JACK_HEADPHONE;
++	mutex_unlock(&c->lock);
++
++	snd_soc_jack_report(&c->jack, status, SND_JACK_HEADSET);
++	if (hp_moved)
++		cs42l63_notify(card, "Headphone Playback Switch");
++	if (src_moved)
++		cs42l63_notify(card, "Capture Source");
++out:
++	queue_delayed_work(system_power_efficient_wq, &c->jack_work,
++			   msecs_to_jiffies(CS42L63_JACK_POLL_MS));
++}
++
++/* --- the DAI ---------------------------------------------------------------- */
++
++/* the rate codes AppleCS42L63Audio writes to 0x11 */
++static int cs42l63_rate_code(unsigned int rate)
++{
++	switch (rate) {
++	case 8000:	return 1;
++	case 11025:	return 2;
++	case 12000:	return 3;
++	case 16000:	return 4;
++	case 22050:	return 5;
++	case 24000:	return 6;
++	case 32000:	return 7;
++	case 44100:	return 8;
++	case 48000:	return 9;
++	}
++	return -EINVAL;
++}
++
++/* kept for the next power-up, and written now if the codec is up */
++static int cs42l63_hw_params(struct snd_pcm_substream *ss, struct snd_pcm_hw_params *params,
++			     struct snd_soc_dai *dai)
++{
++	struct cs42l63 *c = snd_soc_component_get_drvdata(dai->component);
++	int code = cs42l63_rate_code(params_rate(params)), ret = 0;
++
++	if (code < 0)
++		return code;
++	mutex_lock(&c->lock);
++	c->rate_code = code;
++	if (c->powered)
++		ret = cs42l63_upd(c, CS42L63_SPC, 0x0f, code);
++	mutex_unlock(&c->lock);
++	return ret;
++}
++
++/* the only format the ASP is known to take: 16-bit I2S, the SoC's clocks */
++static int cs42l63_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
++{
++	if ((fmt & SND_SOC_DAIFMT_FORMAT_MASK) != SND_SOC_DAIFMT_I2S ||
++	    (fmt & SND_SOC_DAIFMT_INV_MASK) != SND_SOC_DAIFMT_NB_NF ||
++	    (fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) != SND_SOC_DAIFMT_CBC_CFC)
++		return -EINVAL;
++	return 0;
++}
++
++/* a stream's start and end: its output's or its input's path on and off */
++static int cs42l63_mute_stream(struct snd_soc_dai *dai, int mute, int stream)
++{
++	struct cs42l63 *c = snd_soc_component_get_drvdata(dai->component);
++	int ret = 0;
++
++	mutex_lock(&c->lock);
++	if (!c->powered) {
++		/* the power-up failed (Codec Power): nothing to switch */
++		ret = mute ? 0 : -EIO;
++	} else if (stream == SNDRV_PCM_STREAM_CAPTURE) {
++		if (!mute && !c->recording) {
++			ret = cs42l63_in_start(c);
++			c->recording = !ret;
++		} else if (mute && c->recording) {
++			ret = cs42l63_in_stop(c);
++			c->recording = false;
++		}
++	} else if (!mute && !c->playing) {
++		/* the start sequence writes the volumes set (cs42l63_vol_subst) */
++		ret = cs42l63_out_start(c);
++		c->playing = !ret;
++	} else if (mute && c->playing) {
++		ret = cs42l63_out_stop(c);
++		c->playing = false;
++	}
++	mutex_unlock(&c->lock);
++	return ret;
++}
++
++static const struct snd_soc_dai_ops cs42l63_dai_ops = {
++	.hw_params = cs42l63_hw_params,
++	.set_fmt = cs42l63_set_fmt,
++	.mute_stream = cs42l63_mute_stream,
++};
++
++static struct snd_soc_dai_driver cs42l63_dai = {
++	.name = "cs42l63-asp",
++	.playback = {
++		.stream_name = "ASP Playback",
++		.channels_min = 2,
++		.channels_max = 2,
++		.rates = SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_44100 |
++			 SNDRV_PCM_RATE_48000,
++		.formats = SNDRV_PCM_FMTBIT_S16_LE,
++	},
++	.capture = {
++		.stream_name = "ASP Capture",
++		.channels_min = 2,
++		.channels_max = 2,
++		.rates = SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_44100 |
++			 SNDRV_PCM_RATE_48000,
++		.formats = SNDRV_PCM_FMTBIT_S16_LE,
++	},
++	.symmetric_rate = 1,		/* one ASP clock for both */
++	.ops = &cs42l63_dai_ops,
++};
++
++/* --- component -------------------------------------------------------------- */
++
++static const struct snd_soc_dapm_widget cs42l63_widgets[] = {
++	SND_SOC_DAPM_SUPPLY("Codec Power", SND_SOC_NOPM, 0, 0, cs42l63_power_event,
++			    SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
++	SND_SOC_DAPM_AIF_IN("ASP RX", "ASP Playback", 0, SND_SOC_NOPM, 0, 0),
++	SND_SOC_DAPM_AIF_OUT("ASP TX", "ASP Capture", 0, SND_SOC_NOPM, 0, 0),
++	SND_SOC_DAPM_OUTPUT("OUT"),
++	SND_SOC_DAPM_INPUT("MIC"),
++};
++
++/* the paths are switched by the streams themselves (mute_stream); DAPM
++ * only powers the codec around them */
++static const struct snd_soc_dapm_route cs42l63_routes[] = {
++	{ "ASP RX", NULL, "Codec Power" },
++	{ "ASP TX", NULL, "Codec Power" },
++	{ "OUT", NULL, "ASP RX" },
++	{ "ASP TX", NULL, "MIC" },
++};
++
++static int cs42l63_add_controls(struct snd_soc_component *comp)
++{
++	struct cs42l63 *c = snd_soc_component_get_drvdata(comp);
++	int ret;
++
++	ret = snd_soc_add_component_controls(comp, cs42l63_speaker_controls,
++					     ARRAY_SIZE(cs42l63_speaker_controls));
++	if (!ret && c->hsw)
++		ret = snd_soc_add_component_controls(comp, cs42l63_headphone_controls,
++						     ARRAY_SIZE(cs42l63_headphone_controls));
++	if (!ret && (c->imic || c->hsw))
++		ret = snd_soc_add_component_controls(comp, cs42l63_capture_controls,
++						     ARRAY_SIZE(cs42l63_capture_controls));
++	if (!ret && c->imic && c->hsw)
++		ret = snd_soc_add_component_controls(comp, cs42l63_source_controls,
++						     ARRAY_SIZE(cs42l63_source_controls));
++	return ret;
++}
++
++/* the ID can only be read out of reset and with MCLK: a board with the reset
++ * line reads it after the first power-up, one without at probe */
++static int cs42l63_check_id(struct cs42l63 *c)
++{
++	int id[3], rev, i;
++
++	for (i = 0; i < 3; i++) {
++		id[i] = i2c_smbus_read_byte_data(c->i2c, CS42L63_DEVID_AB + i);
++		if (id[i] < 0)
++			return dev_err_probe(c->dev, id[i], "no answer\n");
++	}
++	if (id[0] != 0x42 || id[1] != 0xa6 || (id[2] & 0xf0) != 0x30)
++		return dev_err_probe(c->dev, -ENODEV, "device ID %02x%02x%02x, not a CS42L63\n",
++				     id[0], id[1], id[2]);
++	rev = i2c_smbus_read_byte_data(c->i2c, CS42L63_REV_ID);
++	dev_info(c->dev, "CS42L63, device ID %02x %02x %02x, revision %02x\n",
++		 id[0], id[1], id[2], rev & 0xff);
++	return 0;
++}
++
++static int cs42l63_component_probe(struct snd_soc_component *comp)
++{
++	struct cs42l63 *c = snd_soc_component_get_drvdata(comp);
++	int ret;
++
++	c->comp = comp;
++	ret = cs42l63_add_controls(comp);
++	if (ret)
++		return ret;
++	if (!c->keep_powered)
++		return 0;
++
++	/* the jack: powered from now on, as iOS's cold init leaves it */
++	mutex_lock(&c->lock);
++	ret = cs42l63_power_on(c);
++	mutex_unlock(&c->lock);
++	if (ret)
++		return ret;
++	if (c->reset && cs42l63_check_id(c))
++		dev_warn(c->dev, "going on all the same, as iOS does\n");
++
++	/* one jack, its two halves as "Headphone Jack" and "Headset Mic Jack" */
++	ret = snd_soc_card_jack_new_pins(comp->card, "Headset", SND_JACK_HEADSET, &c->jack, NULL, 0);
++	ret = ret ?: snd_jack_add_new_kctl(c->jack.jack, "Headphone", SND_JACK_HEADPHONE);
++	ret = ret ?: snd_jack_add_new_kctl(c->jack.jack, "Headset Mic", SND_JACK_MICROPHONE);
++	if (ret)
++		dev_warn(c->dev, "no jack device (%d); the jack is still followed\n", ret);
++	INIT_DELAYED_WORK(&c->jack_work, cs42l63_jack_work);
++	queue_delayed_work(system_power_efficient_wq, &c->jack_work, 0);
++	return 0;
++}
++
++static void cs42l63_component_remove(struct snd_soc_component *comp)
++{
++	struct cs42l63 *c = snd_soc_component_get_drvdata(comp);
++
++	if (c->keep_powered)
++		cancel_delayed_work_sync(&c->jack_work);
++	mutex_lock(&c->lock);
++	if (c->powered && c->playing)
++		cs42l63_out_stop(c);
++	c->playing = false;
++	if (c->powered && c->recording)
++		cs42l63_in_stop(c);
++	c->recording = false;
++	cs42l63_power_off(c);
++	gpiod_set_value_cansleep(c->reset, 1);
++	mutex_unlock(&c->lock);
++}
++
++static const struct snd_soc_component_driver cs42l63_component = {
++	.probe = cs42l63_component_probe,
++	.remove = cs42l63_component_remove,
++	.dapm_widgets = cs42l63_widgets,
++	.num_dapm_widgets = ARRAY_SIZE(cs42l63_widgets),
++	.dapm_routes = cs42l63_routes,
++	.num_dapm_routes = ARRAY_SIZE(cs42l63_routes),
++	.use_pmdown_time = 1,
++	.endianness = 1,
++};
++
++static void cs42l63_put_hsw(void *data)
++{
++	put_device(&((struct i2c_client *)data)->dev);
++}
++
++static int cs42l63_i2c_probe(struct i2c_client *i2c)
++{
++	struct device *dev = &i2c->dev;
++	struct device_node *np;
++	struct cs42l63 *c;
++	int ret;
++
++	c = devm_kzalloc(dev, sizeof(*c), GFP_KERNEL);
++	if (!c)
++		return -ENOMEM;
++	c->i2c = i2c;
++	c->dev = dev;
++	mutex_init(&c->lock);
++	i2c_set_clientdata(i2c, c);
++	c->rate_code = 9;			/* 48 kHz */
++	c->cold = true;
++	/* either mic at +24 dB, 8 dB under iOS's default (a voice close to a
++	 * headset's mic comes near full scale there); 0, -96 dB, is silence */
++	c->capture = 120;
++
++	/*
++	 * MCLK comes from the SoC's audio node, which registers it before it
++	 * creates the sound card: until then, this probe is deferred.
++	 */
++	c->mclk = devm_clk_get(dev, "mclk");
++	if (IS_ERR(c->mclk))
++		return dev_err_probe(dev, PTR_ERR(c->mclk), "no MCLK\n");
++	/* held in reset until the cold power-up lets it go, as iOS's start() does */
++	c->reset = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
++	if (IS_ERR(c->reset))
++		return dev_err_probe(dev, PTR_ERR(c->reset), "reset GPIO\n");
++	/* the speaker amplifier, off until a stream needs it */
++	c->spk = devm_gpiod_get_optional(dev, "speaker-amp", GPIOD_OUT_LOW);
++	if (IS_ERR(c->spk))
++		return dev_err_probe(dev, PTR_ERR(c->spk), "speaker amplifier GPIO\n");
++	np = of_parse_phandle(dev->of_node, "headset-switch", 0);
++	if (np) {
++		c->hsw = of_find_i2c_device_by_node(np);
++		of_node_put(np);
++		if (!c->hsw)
++			return -EPROBE_DEFER;
++		ret = devm_add_action_or_reset(dev, cs42l63_put_hsw, c->hsw);
++		if (ret)
++			return ret;
++	}
++	c->imic = of_property_read_bool(dev->of_node, "apple,internal-mic");
++	c->keep_powered = c->hsw;
++
++	if (c->hsw) {
++		/* the master is the volume, over iOS's own levels: the speaker's
++		 * top, the headphones lower -- ears are close */
++		c->speaker[0] = c->speaker[1] = CS42L63_VOL_MAX;
++		c->headphone[0] = c->headphone[1] = 50;
++		c->master = 48;
++	} else {
++		/* the speaker's level is the volume */
++		c->speaker[0] = c->speaker[1] = CS42L63_VOL_SPEAKER;
++		c->master = CS42L63_VOL_MAX;
++	}
++
++	if (!c->reset) {
++		ret = cs42l63_check_id(c);
++		if (ret)
++			return ret;
++	}
++	return devm_snd_soc_register_component(dev, &cs42l63_component, &cs42l63_dai, 1);
++}
++
++static const struct of_device_id cs42l63_of_match[] = {
++	{ .compatible = "cirrus,cs42l63" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, cs42l63_of_match);
++
++static const struct i2c_device_id cs42l63_id[] = {
++	{ "cs42l63" },
++	{ }
++};
++MODULE_DEVICE_TABLE(i2c, cs42l63_id);
++
++static struct i2c_driver cs42l63_i2c_driver = {
++	.driver = {
++		.name = "cs42l63",
++		.of_match_table = cs42l63_of_match,
++	},
++	.id_table = cs42l63_id,
++	.probe = cs42l63_i2c_probe,
++};
++module_i2c_driver(cs42l63_i2c_driver);
++
++MODULE_DESCRIPTION("Cirrus Logic CS42L63 codec (iPad 2, iPad 3), iOS's sequences");
++MODULE_LICENSE("GPL");

@@ -3,7 +3,7 @@ From: rzxvx <rrzxznewid@gmail.com>
 Date: Sat, 19 Sep 2026 20:22:45 +0000
 Subject: [PATCH] spi: Add the Apple S5L8940X SPI controller
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at d92da7d:
   devices/a5/patches/files-sandcastle-port/drivers/spi/spi-s5l8940x.c
   devices/a5/patches/tree/0001-cascadia.patch
 
@@ -23,7 +23,7 @@ drivers they were based on.
  create mode 100644 drivers/spi/spi-s5l8940x.c
 
 diff --git a/drivers/spi/Kconfig b/drivers/spi/Kconfig
-index 823797217..159a59d71 100644
+index 823797217404..159a59d715bc 100644
 --- a/drivers/spi/Kconfig
 +++ b/drivers/spi/Kconfig
 @@ -1252,6 +1252,10 @@ config SPI_TLE62X0
@@ -56,7 +56,7 @@ index 823797217..159a59d71 100644
 +	default y
  endif # SPI
 diff --git a/drivers/spi/Makefile b/drivers/spi/Makefile
-index a9b1bc259..f4f860df5 100644
+index a9b1bc259b68..f4f860df5042 100644
 --- a/drivers/spi/Makefile
 +++ b/drivers/spi/Makefile
 @@ -160,3 +160,4 @@ obj-$(CONFIG_SPI_AMD)			+= spi-amd.o
@@ -66,7 +66,7 @@ index a9b1bc259..f4f860df5 100644
 +obj-$(CONFIG_SPI_S5L8940X)    += spi-s5l8940x.o
 diff --git a/drivers/spi/spi-s5l8940x.c b/drivers/spi/spi-s5l8940x.c
 new file mode 100644
-index 000000000..6dd852491
+index 000000000000..6dd8524911c6
 --- /dev/null
 +++ b/drivers/spi/spi-s5l8940x.c
 @@ -0,0 +1,476 @@

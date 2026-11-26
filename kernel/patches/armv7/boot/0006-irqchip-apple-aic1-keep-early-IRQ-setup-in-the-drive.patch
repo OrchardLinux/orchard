@@ -8,18 +8,21 @@ under the existing interrupt mask. Restore local IRQs before probing
 the clockevent. Core init only needs an early boot call so workqueue
 setup can rely on the tick.
 
+[Orchard: rebased onto Cascadia d92da7d, whose kernel_init now starts the
+ AIC1 clockevent itself]
+
 Link: https://github.com/OrchardLinux/orchard/issues/79
 Assisted-by: LLM
 Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
 ---
- drivers/irqchip/irq-apple-aic1.c   | 120 ++++++-----------------------
- include/linux/irqchip/apple-aic1.h |  13 ++++
- init/main.c                        |  43 +----------
- 3 files changed, 39 insertions(+), 137 deletions(-)
+ drivers/irqchip/irq-apple-aic1.c   | 152 ++++++-----------------------
+ include/linux/irqchip/apple-aic1.h |  13 +++
+ init/main.c                        |  47 +--------
+ 3 files changed, 46 insertions(+), 166 deletions(-)
  create mode 100644 include/linux/irqchip/apple-aic1.h
 
 diff --git a/drivers/irqchip/irq-apple-aic1.c b/drivers/irqchip/irq-apple-aic1.c
-index 347efc49d..f6fda8168 100644
+index 4d1493139..f6fda8168 100644
 --- a/drivers/irqchip/irq-apple-aic1.c
 +++ b/drivers/irqchip/irq-apple-aic1.c
 @@ -28,7 +28,9 @@
@@ -157,16 +160,50 @@ index 347efc49d..f6fda8168 100644
  }
  
  #ifdef CONFIG_SMP
-@@ -1023,7 +938,7 @@ static bool aic1_tmr_tried __initdata;
-  * also gives CPU1 its clockevent as it comes online and lets dwc2 decide
-  * whether the USB SOF fallback is needed when it probes.
-  */
+@@ -1014,34 +929,16 @@ static bool __init aic1_tmr_try(struct apple_aic1 *aic, u32 win,
+ 	return false;
+ }
+ 
+-/*
+- * Register only on a timer seen to fire.  Failing leaves the system exactly as
+- * it was -- the SOF tick carries on -- so this cannot cost a boot.
+- *
+- * kernel_init() calls apple_aic1_timer_start() as soon as the AIC is re-armed
+- * and interrupts are on (init/main.c, in patches/tree/0001), before
+- * workqueue_init() makes the first kernel threads.  That is required, not
+- * tidy: kthread_bind() waits in wait_task_inactive(), and if the scheduler
+- * has preempted the new thread before it slept, the wait is a one-tick
+- * hrtimer sleep.  With no clockevent that sleep never ends.  Whether the
+- * thread is preempted depends on timing, so on the J1 the boot hung or not
+- * with how slow the early console was (a 2 ms delay per message was enough
+- * to pass; earlycon=j1fb's drawing too).  The early_initcall below is the
+- * fallback for a kernel without that call.
+- *
+- * early_initcall: dwc2 decides whether to take Start-of-Frame interrupts
+- * when it first initialises the core, at device_initcall, and it asks whether
+- * this timer is live; and it must come before smp_init().  Until it runs there
+- * is no clockevent at all and jiffies stand still -- harmless on one CPU, but
+- * with CPU1 online the first RCU grace period waits for ever and the boot
+- * stops here.  Registered first, it hands CPU1 a clockevent of its own through
+- * the STARTING callback as CPU1 comes up, the same order as onlining CPU1 by
+- * hand.  The AIC is re-armed and interrupts are on before any initcall runs
+- * (init/main.c), so the probe below still sees the timer fire.
+- */
+ static bool aic1_tmr_tried __initdata;
+ 
 -int __init apple_aic1_timer_start(void)
++/*
++ * Probe once interrupts are usable. The boot CPU needs a clockevent before
++ * workqueue_init() starts kernel threads: kthread_bind() can sleep on an
++ * hrtimer in wait_task_inactive() before early initcalls. Registering here
++ * also gives CPU1 its clockevent as it comes online and lets dwc2 decide
++ * whether the USB SOF fallback is needed when it probes.
++ */
 +static int __init aic1_timer_init(void)
  {
  	struct apple_aic1 *aic = apple_aic1;
  
-@@ -1065,9 +980,20 @@ int __init apple_aic1_timer_start(void)
+@@ -1083,9 +980,20 @@ int __init apple_aic1_timer_start(void)
  	return 0;
  }
  
@@ -209,7 +246,7 @@ index 000000000..7fb10f4de
 +
 +#endif
 diff --git a/init/main.c b/init/main.c
-index 1813fbf2d..4a9909d1a 100644
+index 09fc3a337..4a9909d1a 100644
 --- a/init/main.c
 +++ b/init/main.c
 @@ -26,6 +26,7 @@
@@ -220,7 +257,7 @@ index 1813fbf2d..4a9909d1a 100644
  #include <linux/memblock.h>
  #include <linux/acpi.h>
  #include <linux/bootconfig.h>
-@@ -1466,46 +1467,8 @@ static int __ref kernel_init(void *unused)
+@@ -1466,50 +1467,8 @@ static int __ref kernel_init(void *unused)
  	 */
  	wait_for_completion(&kthreadd_done);
  
@@ -250,7 +287,7 @@ index 1813fbf2d..4a9909d1a 100644
 -		void apple_aic1_quiesce(void);
 -		void apple_aic1_hw_quiesce(bool read_back);
 -		void apple_aic1_rearm(void);
--		int __init apple_aic1_timer_start(void);
+-		int apple_aic1_timer_start(void);
 -
 -		apple_aic1_quiesce();
 -		apple_aic1_hw_quiesce(false);
@@ -261,6 +298,10 @@ index 1813fbf2d..4a9909d1a 100644
 -		apple_aic1_rearm();
 -		early_boot_irqs_disabled = false;
 -		local_irq_enable();
+-		/* The tick, before workqueue_init() makes the first kernel
+-		 * threads: kthread_bind() can sleep one tick in
+-		 * wait_task_inactive(), and with no clockevent yet that sleep
+-		 * never ends (irq-apple-aic1.c, apple_aic1_timer_start). */
 -		apple_aic1_timer_start();
 -	}
 -#endif

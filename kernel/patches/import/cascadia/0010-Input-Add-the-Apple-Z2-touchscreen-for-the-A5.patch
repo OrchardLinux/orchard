@@ -1,14 +1,15 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: rzxvx <rrzxznewid@gmail.com>
-Date: Mon, 26 Oct 2026 13:14:36 +1300
+Date: Wed, 18 Nov 2026 10:41:24 +0100
 Subject: [PATCH] Input: Add the Apple Z2 touchscreen for the A5
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at d92da7d:
   devices/a5/patches/files-sandcastle-port/drivers/input/touchscreen/apple-z2.c
   devices/a5/patches/tree/0001-cascadia.patch
 
 Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (11 commits);
   Stephen Cox <stephencoxmail@gmail.com> (b52090e, 31b1522)
+  Simone99 <simone060699@gmail.com> (c10bedd)
 
 The S5L8940X drivers here are Cascadia ports of Corellium's Project
 Sandcastle (https://github.com/corellium/linux-sandcastle,
@@ -19,12 +20,12 @@ drivers they were based on.
 ---
  drivers/input/touchscreen/Kconfig    |   5 +
  drivers/input/touchscreen/Makefile   |   1 +
- drivers/input/touchscreen/apple-z2.c | 731 +++++++++++++++++++++++++++
- 3 files changed, 737 insertions(+)
+ drivers/input/touchscreen/apple-z2.c | 748 +++++++++++++++++++++++++++
+ 3 files changed, 754 insertions(+)
  create mode 100644 drivers/input/touchscreen/apple-z2.c
 
 diff --git a/drivers/input/touchscreen/Kconfig b/drivers/input/touchscreen/Kconfig
-index 1ac26fc2e..9bde1a9fc 100644
+index 1ac26fc2e3eb..9bde1a9fc415 100644
 --- a/drivers/input/touchscreen/Kconfig
 +++ b/drivers/input/touchscreen/Kconfig
 @@ -1388,4 +1388,9 @@ config TOUCHSCREEN_HIMAX_HX83112B
@@ -38,7 +39,7 @@ index 1ac26fc2e..9bde1a9fc 100644
 +	default y
  endif
 diff --git a/drivers/input/touchscreen/Makefile b/drivers/input/touchscreen/Makefile
-index 82bc837ca..c4602d435 100644
+index 82bc837ca01e..c4602d435c8f 100644
 --- a/drivers/input/touchscreen/Makefile
 +++ b/drivers/input/touchscreen/Makefile
 @@ -117,3 +117,4 @@ obj-$(CONFIG_TOUCHSCREEN_IQS5XX)	+= iqs5xx.o
@@ -48,10 +49,10 @@ index 82bc837ca..c4602d435 100644
 +obj-$(CONFIG_TOUCHSCREEN_APPLE_Z2)    += apple-z2.o
 diff --git a/drivers/input/touchscreen/apple-z2.c b/drivers/input/touchscreen/apple-z2.c
 new file mode 100644
-index 000000000..c6b6d40d1
+index 000000000000..924185abb2cb
 --- /dev/null
 +++ b/drivers/input/touchscreen/apple-z2.c
-@@ -0,0 +1,731 @@
+@@ -0,0 +1,748 @@
 +/*
 + * Driver for multi-touch panels found on S5L8940X (Apple A5) SoC-base mobile devices.
 + *
@@ -148,10 +149,18 @@ index 000000000..c6b6d40d1
 + * and [14..15] the major and minor width, [16..17] the angle.  States are
 + * Apple's path stages: 3 make-touch and 4 touching mean a finger on the
 + * glass, anything else is on its way off.  There are no frames without a
-+ * finger: the last one of a touch carries its lift. */
++ * finger: the last one of a touch carries its lift.
++ *
++ * The iPad 2's Z2F13 (family 0x13) sends 28 bytes a touch: frames of
++ * 24 + 28 n bytes, seen on the K93 2026-11-09, which the 30-byte stride
++ * rejected outright.  The record is taken to be the same one without its
++ * last field, so the stride comes from the frame and the offsets stay (iOS
++ * 8.4.1's Z2F13 firmware sends the 30-byte one again); the first frames with
++ * touches are dumped once, with dynamic debug on, so that can be checked. */
 +static void hx_touch_process_report(struct hx_touch_data *hxt, u8 *data, unsigned len)
 +{
-+    unsigned ntouch, i, finger, state, down;
++    static unsigned dumped;
++    unsigned ntouch, i, finger, state, down, stride;
 +    u8 *touch;
 +    long long posx, posy;
 +    unsigned widthm, widthu;
@@ -165,13 +174,22 @@ index 000000000..c6b6d40d1
 +    }
 +
 +    ntouch = data[16];
-+    if(len < 24 + ntouch * 30) {
++    stride = ntouch ? (len - 24) / ntouch : 30;
++    stride = stride >= 30 ? 30 : 28;
++    if(len < 24 + ntouch * stride) {
 +        dev_warn_ratelimited(&hxt->spi->dev, "frame too short for %u touches (%u bytes)\n", ntouch, len);
 +        return;
 +    }
++    if(ntouch && dumped < 6) {
++        dumped++;
++        dev_dbg(&hxt->spi->dev, "frame, %u touch(es) of %u bytes: %*ph\n",
++                ntouch, stride, min(len, 24u), data);
++        for(i = 0; i < ntouch && i < 2; i++)
++            dev_dbg(&hxt->spi->dev, "  touch %u: %*ph\n", i, stride, data + 24 + stride * i);
++    }
 +
 +    for(i=0; i<ntouch; i++) {
-+        touch = data + 24 + 30 * i;
++        touch = data + 24 + stride * i;
 +        finger = touch[0];
 +        state = touch[1];
 +        down = state == 3 || state == 4;

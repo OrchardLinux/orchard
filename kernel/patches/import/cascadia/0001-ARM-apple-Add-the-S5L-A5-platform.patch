@@ -1,9 +1,9 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: rzxvx <rrzxznewid@gmail.com>
-Date: Mon, 26 Oct 2026 19:57:57 +1300
+Date: Wed, 18 Nov 2026 10:41:24 +0100
 Subject: [PATCH] ARM: apple: Add the S5L (A5) platform
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at d92da7d:
   devices/a5/patches/files/arch/arm/include/asm/apple_boot.h
   devices/a5/patches/files/arch/arm/mach-apple/Kconfig
   devices/a5/patches/files/arch/arm/mach-apple/Makefile
@@ -21,8 +21,9 @@ Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Casca
   devices/a5/patches/tree/0001-cascadia.patch
 
 Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (6 commits);
+  Stephen Cox <stephencoxmail@gmail.com> (a814532, 7d956cd, 7533fbb)
   K <k@Ks-MacBook-Pro-4.local> (3dc80cf)
-  Stephen Cox <stephencoxmail@gmail.com> (a814532)
+  Simone99 <simone060699@gmail.com> (c10bedd)
 
 [Orchard: imported for the apple-armv7 platform; see kernel/sources.toml]
 ---
@@ -35,15 +36,15 @@ Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (6 commits);
  arch/arm/mach-apple/apple.c            | 441 +++++++++++++++++++++++++
  arch/arm/mach-apple/apple_pmu_clkevt.c | 271 +++++++++++++++
  arch/arm/mach-apple/apple_sof_clkevt.c | 201 +++++++++++
- arch/arm/mach-apple/apple_wdt_clkevt.c | 175 ++++++++++
+ arch/arm/mach-apple/apple_wdt_clkevt.c | 243 ++++++++++++++
  arch/arm/mach-apple/font8x8.h          | 109 ++++++
  arch/arm/mach-apple/headsmp.S          |  62 ++++
- arch/arm/mach-apple/j1_earlyfb.c       | 149 +++++++++
+ arch/arm/mach-apple/j1_earlyfb.c       | 171 ++++++++++
  arch/arm/mach-apple/p105_fb_dbg.c      | 212 ++++++++++++
  arch/arm/mach-apple/p105_fb_dbg.h      |  22 ++
  arch/arm/mach-apple/platsmp.c          | 224 +++++++++++++
  arch/arm/mach-apple/pmccntr.c          | 117 +++++++
- 17 files changed, 2071 insertions(+)
+ 17 files changed, 2161 insertions(+)
  create mode 100644 arch/arm/include/asm/apple_boot.h
  create mode 100644 arch/arm/mach-apple/Kconfig
  create mode 100644 arch/arm/mach-apple/Makefile
@@ -60,7 +61,7 @@ Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (6 commits);
  create mode 100644 arch/arm/mach-apple/pmccntr.c
 
 diff --git a/arch/arm/Kconfig b/arch/arm/Kconfig
-index 202397be7..e925dc556 100644
+index 202397be76d8..e925dc55689f 100644
 --- a/arch/arm/Kconfig
 +++ b/arch/arm/Kconfig
 @@ -359,6 +359,8 @@ source "arch/arm/mach-actions/Kconfig"
@@ -73,7 +74,7 @@ index 202397be7..e925dc556 100644
  
  source "arch/arm/mach-aspeed/Kconfig"
 diff --git a/arch/arm/Makefile b/arch/arm/Makefile
-index aafebf145..173205729 100644
+index aafebf145738..173205729ea9 100644
 --- a/arch/arm/Makefile
 +++ b/arch/arm/Makefile
 @@ -173,6 +173,7 @@ textofs-$(CONFIG_ARCH_AXXIA) := 0x00308000
@@ -85,7 +86,7 @@ index aafebf145..173205729 100644
  machine-$(CONFIG_ARCH_ASPEED)           += aspeed
  machine-$(CONFIG_ARCH_AT91)		+= at91
 diff --git a/arch/arm/boot/dts/Makefile b/arch/arm/boot/dts/Makefile
-index efe38eb25..4a49736c3 100644
+index efe38eb25301..4a49736c30e0 100644
 --- a/arch/arm/boot/dts/Makefile
 +++ b/arch/arm/boot/dts/Makefile
 @@ -39,3 +39,4 @@ subdir-y += unisoc
@@ -95,7 +96,7 @@ index efe38eb25..4a49736c3 100644
 +dtb-$(CONFIG_ARCH_APPLE_S5L) += ipad-mini1.dtb
 diff --git a/arch/arm/include/asm/apple_boot.h b/arch/arm/include/asm/apple_boot.h
 new file mode 100644
-index 000000000..61c7908a5
+index 000000000000..61c7908a5e54
 --- /dev/null
 +++ b/arch/arm/include/asm/apple_boot.h
 @@ -0,0 +1,50 @@
@@ -151,7 +152,7 @@ index 000000000..61c7908a5
 +#endif
 diff --git a/arch/arm/mach-apple/Kconfig b/arch/arm/mach-apple/Kconfig
 new file mode 100644
-index 000000000..63f344f29
+index 000000000000..63f344f29855
 --- /dev/null
 +++ b/arch/arm/mach-apple/Kconfig
 @@ -0,0 +1,30 @@
@@ -187,7 +188,7 @@ index 000000000..63f344f29
 +	  Say N unless you are building a kernel for one of these devices.
 diff --git a/arch/arm/mach-apple/Makefile b/arch/arm/mach-apple/Makefile
 new file mode 100644
-index 000000000..71f116425
+index 000000000000..71f11642519e
 --- /dev/null
 +++ b/arch/arm/mach-apple/Makefile
 @@ -0,0 +1,4 @@
@@ -197,7 +198,7 @@ index 000000000..71f116425
 +obj-$(CONFIG_SERIAL_EARLYCON)	+= j1_earlyfb.o
 diff --git a/arch/arm/mach-apple/apple.c b/arch/arm/mach-apple/apple.c
 new file mode 100644
-index 000000000..e4aaa6c00
+index 000000000000..e4aaa6c00b92
 --- /dev/null
 +++ b/arch/arm/mach-apple/apple.c
 @@ -0,0 +1,441 @@
@@ -644,7 +645,7 @@ index 000000000..e4aaa6c00
 +MACHINE_END
 diff --git a/arch/arm/mach-apple/apple_pmu_clkevt.c b/arch/arm/mach-apple/apple_pmu_clkevt.c
 new file mode 100644
-index 000000000..9f66b8bf6
+index 000000000000..9f66b8bf6eeb
 --- /dev/null
 +++ b/arch/arm/mach-apple/apple_pmu_clkevt.c
 @@ -0,0 +1,271 @@
@@ -921,7 +922,7 @@ index 000000000..9f66b8bf6
 +late_initcall(apple_pmu_clkevt_register);
 diff --git a/arch/arm/mach-apple/apple_sof_clkevt.c b/arch/arm/mach-apple/apple_sof_clkevt.c
 new file mode 100644
-index 000000000..6c4b46948
+index 000000000000..6c4b46948109
 --- /dev/null
 +++ b/arch/arm/mach-apple/apple_sof_clkevt.c
 @@ -0,0 +1,201 @@
@@ -1128,10 +1129,10 @@ index 000000000..6c4b46948
 +late_initcall(apple_sof_clkevt_register);
 diff --git a/arch/arm/mach-apple/apple_wdt_clkevt.c b/arch/arm/mach-apple/apple_wdt_clkevt.c
 new file mode 100644
-index 000000000..1b3bcf6c7
+index 000000000000..bd58731f7cea
 --- /dev/null
 +++ b/arch/arm/mach-apple/apple_wdt_clkevt.c
-@@ -0,0 +1,175 @@
+@@ -0,0 +1,243 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Apple S5L894x watchdog counter -- CPU frequency calibration.
@@ -1171,19 +1172,25 @@ index 000000000..1b3bcf6c7
 +#define pr_fmt(fmt) "apple-wdt: " fmt
 +
 +#include <linux/clocksource.h>
++#include <linux/delay.h>
 +#include <linux/init.h>
 +#include <linux/io.h>
 +#include <linux/kernel.h>
 +#include <linux/math64.h>
++#include <linux/notifier.h>
 +#include <linux/of.h>
 +#include <linux/of_address.h>
 +#include <linux/printk.h>
++#include <linux/reboot.h>
 +#include <linux/sched_clock.h>
 +
 +#include <asm/delay.h>
 +#include <linux/processor.h>
 +
 +#define WDT_CUR_TIME		0x00
++#define WDT_BITE_TIME		0x04
++#define WDT_CTRL		0x0c
++#define WDT_CTRL_RESET_EN	BIT(2)
 +#define APPLE_WDT_REF_HZ	24000000UL
 +
 +static inline u32 apple_pmccntr(void)
@@ -1307,9 +1314,71 @@ index 000000000..1b3bcf6c7
 +
 +	return (unsigned long)hz;
 +}
++
++/*
++ * Restart: the watchdog's bite, a millisecond from now.  The comparator and
++ * RESET_EN are the proven half of this block (the header above): armed this
++ * way the machine resets, and iBoot boots whatever it boots on its own --
++ * iOS, on an iPad started by kDFU -- with no button pressed.  On the K93 the
++ * same two writes from userspace (pongo/k93_user_watchdog.S) brought the
++ * iPad back to iOS by themselves.  CUR_TIME is left alone: it is the
++ * clocksource, and mdelay() below runs on it.
++ */
++static int apple_wdt_restart(struct sys_off_data *data)
++{
++	u32 now = readl_relaxed(wdt_base + WDT_CUR_TIME);
++
++	writel_relaxed(now + APPLE_WDT_REF_HZ / 1000, wdt_base + WDT_BITE_TIME);
++	writel(WDT_CTRL_RESET_EN, wdt_base + WDT_CTRL);
++	(void)readl(wdt_base + WDT_CTRL);
++	mdelay(500);
++	pr_emerg("the watchdog did not reset the machine\n");
++	return NOTIFY_DONE;
++}
++
++/*
++ * A safety net for the way there: a restart goes through every driver's
++ * shutdown first, and one that hangs (seen once on the iPad 2, 2026-11-09:
++ * no console, no ssh, still on the bus) leaves the machine dead until
++ * someone holds the buttons.  So the bite is armed 10 s ahead before any of
++ * that runs; the restart handler then brings it forward to 1 ms.
++ */
++static int apple_wdt_reboot_notify(struct notifier_block *nb, unsigned long action, void *data)
++{
++	if (action == SYS_RESTART) {
++		u32 now = readl_relaxed(wdt_base + WDT_CUR_TIME);
++
++		writel_relaxed(now + 10 * APPLE_WDT_REF_HZ, wdt_base + WDT_BITE_TIME);
++		writel(WDT_CTRL_RESET_EN, wdt_base + WDT_CTRL);
++		pr_info("restart: the watchdog will reset the machine in 10 s at the latest\n");
++	}
++	return NOTIFY_DONE;
++}
++
++static struct notifier_block apple_wdt_reboot_nb = {
++	.notifier_call = apple_wdt_reboot_notify,
++	.priority = INT_MAX,		/* before anything else gets to hang */
++};
++
++static int __init apple_wdt_restart_init(void)
++{
++	struct sys_off_handler *h;
++
++	if (!wdt_base)
++		return 0;
++	register_reboot_notifier(&apple_wdt_reboot_nb);
++	h = register_sys_off_handler(SYS_OFF_MODE_RESTART, SYS_OFF_PRIO_DEFAULT,
++				     apple_wdt_restart, NULL);
++	if (IS_ERR(h))
++		pr_err("no restart handler: %ld\n", PTR_ERR(h));
++	else
++		pr_info("restart through the watchdog's bite\n");
++	return 0;
++}
++device_initcall(apple_wdt_restart_init);
 diff --git a/arch/arm/mach-apple/font8x8.h b/arch/arm/mach-apple/font8x8.h
 new file mode 100644
-index 000000000..ef1b89667
+index 000000000000..ef1b89667f86
 --- /dev/null
 +++ b/arch/arm/mach-apple/font8x8.h
 @@ -0,0 +1,109 @@
@@ -1424,7 +1493,7 @@ index 000000000..ef1b89667
 +#endif
 diff --git a/arch/arm/mach-apple/headsmp.S b/arch/arm/mach-apple/headsmp.S
 new file mode 100644
-index 000000000..50cc1d53b
+index 000000000000..50cc1d53b2e5
 --- /dev/null
 +++ b/arch/arm/mach-apple/headsmp.S
 @@ -0,0 +1,62 @@
@@ -1492,18 +1561,24 @@ index 000000000..50cc1d53b
 +ENDPROC(apple_s5l_cpu_resume)
 diff --git a/arch/arm/mach-apple/j1_earlyfb.c b/arch/arm/mach-apple/j1_earlyfb.c
 new file mode 100644
-index 000000000..775da1021
+index 000000000000..75c59df45052
 --- /dev/null
 +++ b/arch/arm/mach-apple/j1_earlyfb.c
-@@ -0,0 +1,149 @@
+@@ -0,0 +1,171 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * earlycon=j1fb: the boot log on iBoot's scanout, from parse_early_param on.
 + *
 + * iPad3,1 (J1) panel: 2048x1536, x8r8g8b8, stride 8192, at 0xbdb00000 (the
-+ * address the loader's framebuffer search found). Text is the 8x8 font at
-+ * scale 2, so 128 columns by 96 rows; it wraps to the top and clears the
-+ * line ahead instead of scrolling.
++ * address the loader's framebuffer search found). The panel scans out
++ * landscape with the home button on the left; the text is drawn portrait,
++ * home button at the bottom (rotated 90 degrees clockwise, as
++ * fbcon=rotate:1 does). The 8x8 font at scale 2 gives 96 columns by 128
++ * rows; it wraps to the top and clears the line ahead instead of scrolling.
++ *
++ * Once a framebuffer is registered (simplefb, a device_initcall) fbcon owns
++ * the panel -- with console=tty0 it redraws the log under the penguins --
++ * so this stops drawing there rather than at late_initcall.
 + *
 + * This runs before the kernel has any mapping for the panel, and while
 + * prepare_page_table and devicemaps_init are still clearing kernel page
@@ -1516,8 +1591,10 @@ index 000000000..775da1021
 + * boot console whose code is in init memory, so this hands the panel back
 + * (to simplefb/fbcon and userspace) at late_initcall time.
 + *
-+ * Without a console this slow, the kernel dies early in boot on J1; with
-+ * it, it boots. The underlying fault is not found yet.
++ * It used to be required: without it the J1 hung early in boot. That was
++ * the missing tick before the AIC timer (irq-apple-aic1.c,
++ * apple_aic1_timer_start), which a slow console happened to hide. It is
++ * the boot log on the glass now, nothing more.
 + */
 +#include <linux/console.h>
 +#include <linux/init.h>
@@ -1537,12 +1614,24 @@ index 000000000..775da1021
 +#define J1FB_STRIDE	8192
 +#define J1FB_SCALE	2
 +#define J1FB_CELL	(FONT8_W * J1FB_SCALE)
-+#define J1FB_COLS	(J1FB_W / J1FB_CELL)
-+#define J1FB_ROWS	(J1FB_H / J1FB_CELL)
++/* Portrait: logical x runs down the scanout, logical y right to left. */
++#define J1FB_LW		J1FB_H
++#define J1FB_LH		J1FB_W
++#define J1FB_COLS	(J1FB_LW / J1FB_CELL)
++#define J1FB_ROWS	(J1FB_LH / J1FB_CELL)
 +#define J1FB_FG		0x00ffffffu
 +#define J1FB_BG		0x00000000u
 +
 +static unsigned int j1fb_col __initdata, j1fb_row __initdata;
++
++/* fbdev's count (fbmem.c); not in <linux/fb.h> */
++extern int num_registered_fb;
++
++/* The scanout address of logical (portrait) pixel lx, ly. */
++static inline u8 __iomem *j1fb_px(unsigned int lx, unsigned int ly)
++{
++	return (u8 __iomem *)J1FB_VIRT + lx * J1FB_STRIDE + (J1FB_W - 1 - ly) * 4;
++}
 +
 +/* Shared device, kernel RW, never executable. */
 +#define J1FB_SECT_PROT	(PMD_TYPE_SECT | PMD_SECT_AP_WRITE | PMD_SECT_BUFFERABLE | \
@@ -1573,33 +1662,30 @@ index 000000000..775da1021
 +
 +static void __init j1fb_fill(unsigned int row, u32 color)
 +{
-+	u8 __iomem *base = (u8 __iomem *)J1FB_VIRT +
-+			   row * J1FB_CELL * J1FB_STRIDE;
-+	unsigned int y, x;
++	unsigned int x, y;
 +
-+	for (y = 0; y < J1FB_CELL; y++)
-+		for (x = 0; x < J1FB_W; x++)
-+			writel_relaxed(color, base + y * J1FB_STRIDE + x * 4);
++	for (x = 0; x < J1FB_LW; x++)
++		for (y = 0; y < J1FB_CELL; y++)
++			writel_relaxed(color, j1fb_px(x, row * J1FB_CELL + y));
 +}
 +
 +static void __init j1fb_glyph(unsigned int col, unsigned int row, char ch)
 +{
-+	u8 __iomem *base = (u8 __iomem *)J1FB_VIRT +
-+			   row * J1FB_CELL * J1FB_STRIDE + col * J1FB_CELL * 4;
 +	const unsigned char *g;
 +	unsigned int y, x;
 +
 +	if (ch < FONT8_FIRST || ch > FONT8_LAST)
 +		ch = '?';
 +	g = &font8x8[(ch - FONT8_FIRST) * FONT8_H];
-+	for (y = 0; y < J1FB_CELL; y++) {
-+		u8 bits = g[y / J1FB_SCALE];
-+
-+		for (x = 0; x < J1FB_CELL; x++) {
++	/* x outer: each x is one scanout line, so the writes stay close */
++	for (x = 0; x < J1FB_CELL; x++) {
++		for (y = 0; y < J1FB_CELL; y++) {
 +			/* font8x8 stores the leftmost pixel in bit 0. */
++			u8 bits = g[y / J1FB_SCALE];
 +			u32 c = (bits >> (x / J1FB_SCALE)) & 1 ? J1FB_FG : J1FB_BG;
 +
-+			writel_relaxed(c, base + y * J1FB_STRIDE + x * 4);
++			writel_relaxed(c, j1fb_px(col * J1FB_CELL + x,
++						  row * J1FB_CELL + y));
 +		}
 +	}
 +}
@@ -1615,6 +1701,8 @@ index 000000000..775da1021
 +
 +static void __init j1fb_write(struct console *con, const char *s, unsigned int n)
 +{
++	if (IS_BUILTIN(CONFIG_FB_CORE) && READ_ONCE(num_registered_fb))
++		return;		/* fbcon has the panel */
 +	if (!j1fb_mapped())
 +		return;
 +	while (n--) {
@@ -1639,7 +1727,10 @@ index 000000000..775da1021
 +		return -EBUSY;
 +	j1fb_col = 0;
 +	j1fb_row = 0;
-+	j1fb_fill(0, J1FB_BG);
++	/* iBoot's picture off: a black screen, as a normal boot starts */
++	for (j1fb_row = 0; j1fb_row < J1FB_ROWS; j1fb_row++)
++		j1fb_fill(j1fb_row, J1FB_BG);
++	j1fb_row = 0;
 +	j1fb_fill(1, 0x00404040u);
 +	dev->con->write = j1fb_write;
 +	return 0;
@@ -1647,7 +1738,7 @@ index 000000000..775da1021
 +EARLYCON_DECLARE(j1fb, j1fb_setup);
 diff --git a/arch/arm/mach-apple/p105_fb_dbg.c b/arch/arm/mach-apple/p105_fb_dbg.c
 new file mode 100644
-index 000000000..8eb7f5771
+index 000000000000..8eb7f5771ce1
 --- /dev/null
 +++ b/arch/arm/mach-apple/p105_fb_dbg.c
 @@ -0,0 +1,212 @@
@@ -1865,7 +1956,7 @@ index 000000000..8eb7f5771
 +}
 diff --git a/arch/arm/mach-apple/p105_fb_dbg.h b/arch/arm/mach-apple/p105_fb_dbg.h
 new file mode 100644
-index 000000000..1880315dc
+index 000000000000..1880315dcb1b
 --- /dev/null
 +++ b/arch/arm/mach-apple/p105_fb_dbg.h
 @@ -0,0 +1,22 @@
@@ -1893,7 +1984,7 @@ index 000000000..1880315dc
 +#endif
 diff --git a/arch/arm/mach-apple/platsmp.c b/arch/arm/mach-apple/platsmp.c
 new file mode 100644
-index 000000000..6245ac72c
+index 000000000000..6245ac72c0bf
 --- /dev/null
 +++ b/arch/arm/mach-apple/platsmp.c
 @@ -0,0 +1,224 @@
@@ -2123,7 +2214,7 @@ index 000000000..6245ac72c
 +CPU_METHOD_OF_DECLARE(apple_pmgr_core, "apple,pmgr-core", &apple_s5l_smp_ops);
 diff --git a/arch/arm/mach-apple/pmccntr.c b/arch/arm/mach-apple/pmccntr.c
 new file mode 100644
-index 000000000..dc1e34945
+index 000000000000..dc1e349453b2
 --- /dev/null
 +++ b/arch/arm/mach-apple/pmccntr.c
 @@ -0,0 +1,117 @@

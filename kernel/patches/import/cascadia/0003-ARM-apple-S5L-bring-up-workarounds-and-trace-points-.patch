@@ -1,25 +1,26 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: rzxvx <rrzxznewid@gmail.com>
-Date: Sat, 26 Sep 2026 21:21:08 +0300
+Date: Tue, 17 Nov 2026 23:17:55 +0300
 Subject: [PATCH] ARM: apple: S5L bring-up workarounds and trace points in core
  code
 
-Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at 091d441:
+Imported unchanged from Project Cascadia (https://github.com/rzxvx/Project-Cascadia) at d92da7d:
   devices/a5/patches/tree/0001-cascadia.patch
 
-Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (3 commits).
+Cascadia history of these files: rzxvx <rrzxznewid@gmail.com> (4 commits);
+  Stephen Cox <stephencoxmail@gmail.com> (48ff9fb, 9412e3c, 7d956cd)
 
 [Orchard: imported for the apple-armv7 platform; see kernel/sources.toml]
 ---
- arch/arm/kernel/entry-armv.S | 10 +++++
+ arch/arm/kernel/entry-armv.S | 10 ++++
  arch/arm/kernel/smp.c        |  3 +-
  arch/arm/mm/alignment.c      |  9 ++--
- init/main.c                  | 87 +++++++++++++++++++++++++++++++++++-
+ init/main.c                  | 93 +++++++++++++++++++++++++++++++++++-
  kernel/fork.c                | 24 ++++++++++
- 5 files changed, 126 insertions(+), 7 deletions(-)
+ 5 files changed, 132 insertions(+), 7 deletions(-)
 
 diff --git a/arch/arm/kernel/entry-armv.S b/arch/arm/kernel/entry-armv.S
-index 1dfae1af8..e4084f15d 100644
+index 1dfae1af8e31..e4084f15d1a0 100644
 --- a/arch/arm/kernel/entry-armv.S
 +++ b/arch/arm/kernel/entry-armv.S
 @@ -224,6 +224,15 @@ ENDPROC(__dabt_svc)
@@ -47,7 +48,7 @@ index 1dfae1af8..e4084f15d 100644
   UNWIND(.fnend		)
  ENDPROC(__irq_svc)
 diff --git a/arch/arm/kernel/smp.c b/arch/arm/kernel/smp.c
-index 3431c0553..2d46adad3 100644
+index 3431c0553f45..2d46adad3f6d 100644
 --- a/arch/arm/kernel/smp.c
 +++ b/arch/arm/kernel/smp.c
 @@ -469,7 +469,8 @@ asmlinkage void secondary_start_kernel(struct task_struct *task)
@@ -61,7 +62,7 @@ index 3431c0553..2d46adad3 100644
  
  	/*
 diff --git a/arch/arm/mm/alignment.c b/arch/arm/mm/alignment.c
-index 3c6ddb1af..c9e36089c 100644
+index 3c6ddb1afdc4..c9e36089c35d 100644
 --- a/arch/arm/mm/alignment.c
 +++ b/arch/arm/mm/alignment.c
 @@ -343,7 +343,7 @@ do_alignment_ldrhstrh(unsigned long addr, u32 instr, struct pt_regs *regs)
@@ -102,7 +103,7 @@ index 3c6ddb1af..c9e36089c 100644
  		for (regbits = REGMASK_BITS(instr), rd = 0; regbits;
  		     regbits >>= 1, rd += 1)
 diff --git a/init/main.c b/init/main.c
-index c4778edae..296545649 100644
+index c4778edae797..4008812d0126 100644
 --- a/init/main.c
 +++ b/init/main.c
 @@ -698,6 +698,12 @@ static void __init setup_command_line(char *command_line)
@@ -144,7 +145,7 @@ index c4778edae..296545649 100644
  	}
  	WARN(msgbuf[0], "initcall %pS returned with %s\n", fn, msgbuf);
  
-@@ -1466,6 +1481,64 @@ static int __ref kernel_init(void *unused)
+@@ -1466,6 +1481,70 @@ static int __ref kernel_init(void *unused)
  	 */
  	wait_for_completion(&kthreadd_done);
  
@@ -185,6 +186,7 @@ index c4778edae..296545649 100644
 +		void apple_aic1_quiesce(void);
 +		void apple_aic1_hw_quiesce_quiet(void);
 +		void apple_aic1_rearm(void);
++		int apple_aic1_timer_start(void);
 +
 +		p105_fb_dbg("init_go");
 +		apple_aic1_quiesce();
@@ -201,6 +203,11 @@ index c4778edae..296545649 100644
 +		p105_fb_dbg("thaw_on");
 +		apple_aic1_release_escape();
 +		p105_fb_dbg("esc_off");
++		/* The tick, before workqueue_init() makes the first kernel
++		 * threads: kthread_bind() can sleep one tick in
++		 * wait_task_inactive(), and with no clockevent yet that sleep
++		 * never ends (irq-apple-aic1.c, apple_aic1_timer_start). */
++		apple_aic1_timer_start();
 +	}
 +#endif
 +#ifdef CONFIG_ARCH_APPLE_S5L
@@ -209,7 +216,7 @@ index c4778edae..296545649 100644
  	kernel_init_freeable();
  	/* need to finish all async __init code before freeing the memory */
  	async_synchronize_full();
-@@ -1475,6 +1548,13 @@ static int __ref kernel_init(void *unused)
+@@ -1475,6 +1554,13 @@ static int __ref kernel_init(void *unused)
  	ftrace_free_init_mem();
  	kgdb_free_init_mem();
  	exit_boot_config();
@@ -223,7 +230,7 @@ index c4778edae..296545649 100644
  	free_initmem();
  	mark_readonly();
  
-@@ -1492,7 +1572,10 @@ static int __ref kernel_init(void *unused)
+@@ -1492,7 +1578,10 @@ static int __ref kernel_init(void *unused)
  	do_sysctl_args();
  
  	if (ramdisk_execute_command) {
@@ -236,7 +243,7 @@ index c4778edae..296545649 100644
  			return 0;
  		pr_err("Failed to execute %s (error %d)\n",
 diff --git a/kernel/fork.c b/kernel/fork.c
-index 22f43721d..eb4f68a52 100644
+index 22f43721d031..eb4f68a52799 100644
 --- a/kernel/fork.c
 +++ b/kernel/fork.c
 @@ -2814,7 +2814,14 @@ pid_t kernel_clone(struct kernel_clone_args *args)

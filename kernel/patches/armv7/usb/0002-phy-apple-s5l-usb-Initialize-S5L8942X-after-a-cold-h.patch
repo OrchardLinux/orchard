@@ -15,25 +15,30 @@ for the legacy compatibles.
 [Orchard: from shaynelegault/orchard#90 25379c1 (source range
  97d6283e22e8..55132508cfd5);
  moved to patches/armv7/usb; dropped the test notes from the commit
- message]
+ message; rebased onto Cascadia ad28ba4 (unchanged there up to d92da7d), which turns UPERF and USBREG
+ on as AUX0/AUX1 and programs a powered-down PHY for every compatible:
+ the three parents are enabled for every compatible, and a parent other
+ than OTG that does not answer stops only S5L8942X; the legacy
+ compatibles keep Cascadia's programming of a powered-down PHY; the
+ A5X usb1 PHY writes OPHY_UOTGTUNE2 where Cascadia named it OPHYUNK2]
 
 Assisted-by: LLM
 Signed-off-by: Shayne Legault <8741557+shaynelegault@users.noreply.github.com>
 Link: https://github.com/OrchardLinux/orchard/pull/226#issuecomment-7133476475
 ---
- drivers/phy/phy-apple-s5l-usb.c | 327 ++++++++++++++++++++++----------
- 1 file changed, 226 insertions(+), 101 deletions(-)
+ drivers/phy/phy-apple-s5l-usb.c | 355 +++++++++++++++++++++-----------
+ 1 file changed, 236 insertions(+), 119 deletions(-)
 
 diff --git a/drivers/phy/phy-apple-s5l-usb.c b/drivers/phy/phy-apple-s5l-usb.c
-index 378ac6beb7ae..04beb3b7b381 100644
+index ad89c1d025ea..decc8152915f 100644
 --- a/drivers/phy/phy-apple-s5l-usb.c
 +++ b/drivers/phy/phy-apple-s5l-usb.c
-@@ -1,37 +1,40 @@
+@@ -1,39 +1,41 @@
  // SPDX-License-Identifier: GPL-2.0-only
  /*
 - * Apple S5L USB PHY driver (otgphyctrl,s5l8940x)
 - * Register values taken from a live iBoot/DFU PHY dump on real hardware
-- * (see docs/PHY-DUMP.md): OPHYPWR=0x6 OPHYCLK=0x1 UNK1_1C=0x6 UNK2_44=0xF8
+- * (see docs/PHY-DUMP.md): OPHYPWR=0x6 OPHYCLK=0x1 UNK1_1C=0x6 UNK2_44=0x2FF3
 - * UNK4_60=0x200 ORSTCON=0x0 -- these are the exact bits iBoot leaves set
 - * while its own USB (DFU) is actively enumerated, i.e. known-working state.
 + * Apple S5L USB PHY driver (otgphyctrl,s5l8940x).
@@ -41,7 +46,7 @@ index 378ac6beb7ae..04beb3b7b381 100644
 + * clocks and PHY before either the gadget or the HSIC host uses the block.
   */
  
-+#include <linux/clk.h>
+ #include <linux/clk.h>
  #include <linux/delay.h>
  #include <linux/io.h>
 +#include <linux/iopoll.h>
@@ -64,14 +69,15 @@ index 378ac6beb7ae..04beb3b7b381 100644
 -#define OPHYPWR_XOPOWERDOWN		BIT(2)
 +#define OPHYPWR_ACTIVE			0x6
  #define OPHYCLK_CLKSEL_MASK		0x3
--#define OPHYCLK_CLKSEL_24MHZ		0x1
+ #define OPHYCLK_CLKSEL_24MHZ		0x1
  #define ORSTCON_PHYSWRESET		BIT(0)
  
 -/* Values as observed live from iBoot's working PHY state */
 +/* S5L8942X values from the native PHY power-on sequence. */
  #define OPHYUNK4_START			0x200
 -#define OPHYUNK1_START			0x6
--#define OPHYUNK2_START			0xF8
+-#define OPHYPWR_ON			0x6
+-#define OPHYUNK2_START			0x2FF3
 +#define OPHYUNK1_START			0x4
 +#define OPHYUNK1_OTG_ENABLE		BIT(1)
 +#define OPHY_UOTGTUNE1			0x40
@@ -81,13 +87,19 @@ index 378ac6beb7ae..04beb3b7b381 100644
  
  #define PMGR_BASE		0x3F100000
  #define PMGR_GATE_ON		0xF
-@@ -66,19 +69,15 @@
+@@ -68,24 +70,16 @@
   * is not a device-clocks entry at all.  Writing a gate value at `base + 5 * 4`
   * and `base + 292 * 4`, as this driver did, hit PERFCNT's gate and an empty
   * address respectively.  Neither has anything to do with USB. */
+-/* Two more of the block's power states.  iBoot's DFU leaves all three of these
+- * on, its jump to a kernel turns them off (docs/research/p105-pcless-boot.md).
+- * Which device each one is has not been established. */
+-#define PMGR_USB_AUX0		0x1080
+-#define PMGR_USB_AUX1		0x1098
 +/* Native firmware enables UPERF, OTG and USBREG in this order. The ADT
 + * confirms UPERF (id 40, index 0x20) and USBREG (id 42, index 0x26) as
 + * USB's parents. USB-PHY's zero register index does not remove its parents.
++ * iBEC's jump to a kernel turns all three off; a DFU boot leaves them on.
 + */
 +#define PMGR_UPERF		0x1080
  #define PMGR_USB_OTG		0x1084
@@ -107,7 +119,7 @@ index 378ac6beb7ae..04beb3b7b381 100644
  
  /* The host side: EHCI and its HSIC port, where the Wi-Fi chip is.
   *
-@@ -108,6 +107,14 @@
+@@ -115,6 +109,14 @@
   * console, the network -- must not wait for it. */
  #define USBCPLX_HSIC_EN		BIT(2)
  
@@ -122,7 +134,7 @@ index 378ac6beb7ae..04beb3b7b381 100644
  struct s5l_usbphy {
  	void __iomem *base;
  	void __iomem *pmgr;
-@@ -117,6 +124,10 @@ struct s5l_usbphy {
+@@ -124,6 +126,10 @@ struct s5l_usbphy {
  	struct regulator *lpo_supply;	/* the chip's 32 kHz sleep clock */
  	bool lpo_supply_on;
  	struct device *dev;
@@ -133,7 +145,7 @@ index 378ac6beb7ae..04beb3b7b381 100644
  	struct phy *phys[2];		/* [0] OTG, [1] host/HSIC */
  };
  
-@@ -130,7 +141,7 @@ static int s5l_pmgr_on(struct s5l_usbphy *p, u32 off)
+@@ -137,7 +143,7 @@ static int s5l_pmgr_on(struct s5l_usbphy *p, u32 off)
  	writel((v & ~0x10f) | PMGR_GATE_ON, p->pmgr + off);
  	for (n = 0; n < 1000; n++) {
  		v = readl(p->pmgr + off);
@@ -142,7 +154,7 @@ index 378ac6beb7ae..04beb3b7b381 100644
  			return 0;
  		udelay(1);
  	}
-@@ -138,105 +149,194 @@ static int s5l_pmgr_on(struct s5l_usbphy *p, u32 off)
+@@ -145,123 +151,209 @@ static int s5l_pmgr_on(struct s5l_usbphy *p, u32 off)
  	return -ETIMEDOUT;
  }
  
@@ -180,10 +192,12 @@ index 378ac6beb7ae..04beb3b7b381 100644
 +	default:
 +		return -EINVAL;
 +	}
-+}
-+
+ }
+ 
+-static int s5l_usbphy_init(struct phy *phy)
 +static bool s5l_usbphy_is_ready(struct s5l_usbphy *p)
-+{
+ {
+-	struct s5l_usbphy *p = phy_get_drvdata(phy);
 +	int clksel = s5l_usbphy_clk_sel(clk_get_rate(p->refclk));
 +
 +	return clksel >= 0 &&
@@ -212,32 +226,19 @@ index 378ac6beb7ae..04beb3b7b381 100644
 +	writel(OPHY_UOTGTUNE1_DEVICE, p->base + OPHY_UOTGTUNE1);
 +	writel(OPHY_UOTGTUNE2_DEVICE, p->base + OPHY_UOTGTUNE2);
 +	udelay(10);
-+
+ 
+-	dev_info(p->dev, "PHY init start\n");
 +	v = readl(p->base + OPHYCLK);
 +	writel((v & ~OPHYCLK_CLKSEL_MASK) | clksel, p->base + OPHYCLK);
 +	if ((readl(p->base + OPHYCLK) & OPHYCLK_CLKSEL_MASK) != clksel) {
 +		dev_err(p->dev, "PHY reference clock selection did not latch\n");
 +		return -EIO;
 +	}
-+
-+	return 0;
- }
  
- static int s5l_usbphy_init(struct phy *phy)
- {
- 	struct s5l_usbphy *p = phy_get_drvdata(phy);
-+	u32 v;
-+	int ret = 0;
- 
--	dev_info(p->dev, "PHY init start\n");
--
 -	/* -- pre-touch snapshot: what did iBoot leave us? -- */
 -	phy_dump_regs(p, "pre");
-+	mutex_lock(&p->lock);
-+	if (p->init_users) {
-+		p->init_users++;
-+		goto out;
-+	}
++	return 0;
++}
  
 -	/* The gadget's own gate.  iBoot leaves USB-OTG on -- its DFU runs on it,
 -	 * which is how this port ever enumerated with every gate write landing
@@ -250,33 +251,47 @@ index 378ac6beb7ae..04beb3b7b381 100644
 -	dev_info(p->dev, "usb-complex pre: OTG(88)=0x%08x EHCI(89)=0x%08x OHCI0(90)=0x%08x OHCI1(91)=0x%08x\n",
 -		 readl(p->pmgr + PMGR_USB_OTG), readl(p->pmgr + PMGR_USB_EHCI),
 -		 readl(p->pmgr + PMGR_USB_OHCI0), readl(p->pmgr + PMGR_USB_OHCI1));
++static int s5l_usbphy_init(struct phy *phy)
++{
++	struct s5l_usbphy *p = phy_get_drvdata(phy);
++	u32 v;
++	int ret = 0;
+ 
+-	s5l_pmgr_on(p, PMGR_USB_AUX0);
+-	s5l_pmgr_on(p, PMGR_USB_AUX1);
+-	s5l_pmgr_on(p, PMGR_USB_OTG);
++	mutex_lock(&p->lock);
++	if (p->init_users) {
++		p->init_users++;
++		goto out;
++	}
+ 
+-	dev_info(p->dev, "usb-complex OTG(88) now 0x%08x\n",
+-		 readl(p->pmgr + PMGR_USB_OTG));
 +	if (p->data && p->data->cold_init) {
 +		ret = clk_prepare_enable(p->refclk);
 +		if (ret)
 +			goto out;
- 
--	s5l_pmgr_on(p, PMGR_USB_OTG);
-+		/* Native firmware enables these parents in this order. */
-+		if ((readl(p->pmgr + PMGR_UPERF) & 0xff) != 0xff ||
-+		    (readl(p->pmgr + PMGR_USB_OTG) & 0xff) != 0xff ||
-+		    (readl(p->pmgr + PMGR_USBREG) & 0xff) != 0xff)
-+			usleep_range(10000, 11000);
- 
--	dev_info(p->dev, "usb-complex OTG(88) now 0x%08x\n",
--		 readl(p->pmgr + PMGR_USB_OTG));
-+		ret = s5l_pmgr_on(p, PMGR_UPERF);
-+		if (ret)
-+			goto disable_clock;
 +	}
  
++	/* Native firmware enables these parents in this order. */
++	if ((readl(p->pmgr + PMGR_UPERF) & 0xff) != 0xff ||
++	    (readl(p->pmgr + PMGR_USB_OTG) & 0xff) != 0xff ||
++	    (readl(p->pmgr + PMGR_USBREG) & 0xff) != 0xff)
++		usleep_range(10000, 11000);
++
++	/* The legacy compatibles also name the A5X, whose power-state registers
++	 * are elsewhere: for them a parent that does not answer is not fatal. */
++	ret = s5l_pmgr_on(p, PMGR_UPERF);
++	if (ret && p->data && p->data->cold_init)
++		goto disable_clock;
 +	ret = s5l_pmgr_on(p, PMGR_USB_OTG);
 +	if (ret)
 +		goto disable_clock;
-+	if (p->data && p->data->cold_init) {
-+		ret = s5l_pmgr_on(p, PMGR_USBREG);
-+		if (ret)
-+			goto disable_clock;
-+	}
++	ret = s5l_pmgr_on(p, PMGR_USBREG);
++	if (ret && p->data && p->data->cold_init)
++		goto disable_clock;
++	ret = 0;
  	udelay(100);
  
 -	/* -- post-gate snapshot: are the regs alive now? -- */
@@ -299,14 +314,38 @@ index 378ac6beb7ae..04beb3b7b381 100644
 -	 * problem is easy to spot in the UART log.
 -	 *
 -	 * Old comment claimed "OPHYUNK2=0xF8 is what iBoot's DFU state
--	 * leaves set". That was wrong; the correct DFU state is 0x2ff3. */
+-	 * leaves set". That was wrong; the correct DFU state is 0x2ff3.
+-	 *
+-	 * The exception: booted from the NAND, iBEC's jump to the kernel has
+-	 * powered the PHY down and left none of this set.  OPHYPWR tells the
+-	 * two apart, and then this writes the values a DFU boot leaves. */
+-	if (readl(p->base + OPHYPWR) != OPHYPWR_ON) {
++	if (p->data && p->data->cold_init) {
++		if (!s5l_usbphy_is_ready(p)) {
++			ret = s5l_usbphy_cold_init(p);
++			if (ret)
++				goto disable_clock;
++		}
++	} else if (readl(p->base + OPHYPWR) != OPHYPWR_ACTIVE) {
++		/* Legacy compatibles keep the tuning firmware leaves, unless
++		 * the boot loader powered the PHY down (iBEC's jump to a kernel
++		 * from the NAND): then the values a DFU boot leaves. */
+ 		dev_info(p->dev, "PHY left off by the boot loader: programming it\n");
+ 		writel(OPHYCLK_CLKSEL_24MHZ, p->base + OPHYCLK);
+ 		writel(0xc, p->base + 0x14);
+-		writel(OPHYUNK1_START, p->base + OPHYUNK1);
++		writel(OPHYUNK1_START | OPHYUNK1_OTG_ENABLE, p->base + OPHYUNK1);
+ 		writel(0xc00, p->base + 0x20);
+-		writel(0x549, p->base + 0x40);
+-		writel(OPHYUNK2_START, p->base + OPHYUNK2);
++		writel(OPHY_UOTGTUNE1_DEVICE, p->base + OPHY_UOTGTUNE1);
++		writel(OPHY_UOTGTUNE2_DEVICE, p->base + OPHY_UOTGTUNE2);
+ 		writel(OPHYUNK4_START, p->base + OPHYUNK4);
+-		writel(OPHYPWR_ON, p->base + OPHYPWR);
++		writel(OPHYPWR_ACTIVE, p->base + OPHYPWR);
+ 		udelay(100);
+ 	}
 -
-+	/* Legacy compatibles retain the tuning established by firmware. */
-+	if (p->data && p->data->cold_init && !s5l_usbphy_is_ready(p)) {
-+		ret = s5l_usbphy_cold_init(p);
-+		if (ret)
-+			goto disable_clock;
-+	}
  	udelay(10);
  
 -	/* Toggle PHY soft reset — clears any pending state without touching
@@ -410,7 +449,7 @@ index 378ac6beb7ae..04beb3b7b381 100644
  };
  
  static int s5l_hostphy_power_on(struct phy *phy)
-@@ -287,11 +387,13 @@ static int s5l_hostphy_power_on(struct phy *phy)
+@@ -312,11 +404,13 @@ static int s5l_hostphy_power_on(struct phy *phy)
  	ret = s5l_pmgr_on(p, PMGR_USB_EHCI);
  	if (ret)
  		return ret;
@@ -426,7 +465,7 @@ index 378ac6beb7ae..04beb3b7b381 100644
  		 readl(p->pmgr + PMGR_USB_EHCI), readl(p->pmgr + PMGR_USB_OHCI0),
  		 p->usbcplx ? readl(p->usbcplx) : 0);
  	return 0;
-@@ -312,7 +414,24 @@ static int s5l_hostphy_power_off(struct phy *phy)
+@@ -337,7 +431,24 @@ static int s5l_hostphy_power_off(struct phy *phy)
  	return 0;
  }
  
@@ -451,9 +490,18 @@ index 378ac6beb7ae..04beb3b7b381 100644
  	.power_on  = s5l_hostphy_power_on,
  	.power_off = s5l_hostphy_power_off,
  	.owner     = THIS_MODULE,
-@@ -337,13 +456,19 @@ static int s5l_usbphy_probe(struct platform_device *pdev)
- 	struct phy *phy;
- 	struct phy_provider *provider;
+@@ -394,7 +505,7 @@ static int s5l_usb1phy_power_on(struct phy *phy)
+ 	writel(0x0f, p->base + OPHYPWR);
+ 	writel(0x11, p->base + OPHYCLK);	/* 24 MHz reference */
+ 	writel(0x349, p->base + 0x40);
+-	writel(0x733, p->base + OPHYUNK2);
++	writel(0x733, p->base + OPHY_UOTGTUNE2);
+ 	udelay(20);
+ 	writel(readl(p->base + ORSTCON) & ~USB1_RST_PHY, p->base + ORSTCON);
+ 	usleep_range(1000, 1500);
+@@ -486,13 +597,19 @@ static int s5l_usbphy_probe(struct platform_device *pdev)
+ 	if (of_device_is_compatible(pdev->dev.of_node, "apple,s5l8945x-usb1-phy"))
+ 		return s5l_usb1phy_probe(pdev);
  
 -	dev_info(&pdev->dev, "Apple S5L USB PHY probe\n");
 -
@@ -473,7 +521,7 @@ index 378ac6beb7ae..04beb3b7b381 100644
  
  	p->base = devm_platform_ioremap_resource(pdev, 0);
  	if (IS_ERR(p->base)) {
-@@ -385,11 +510,11 @@ static int s5l_usbphy_probe(struct platform_device *pdev)
+@@ -534,11 +651,11 @@ static int s5l_usbphy_probe(struct platform_device *pdev)
  	if (IS_ERR(provider))
  		return PTR_ERR(provider);
  
@@ -485,4 +533,4 @@ index 378ac6beb7ae..04beb3b7b381 100644
 +	{ .compatible = "apple,s5l8942x-otgphy", .data = &s5l8942x_usbphy_data },
  	{ .compatible = "apple,s5l8940x-otgphy" },
  	{ .compatible = "apple,s5l8930x-otgphy" },
- 	{ },
+ 	{ .compatible = "apple,s5l8945x-usb1-phy" },
