@@ -33,7 +33,7 @@ tested_by = ["ricktav"] # #230
 # (tools/catalog/drivers.json) but it has not been shown to work here.
 [features]
 display = "working" # simple framebuffer 1536x2048, console and the Omarchy desktop; installed Omarchy A, kernel main eab974c plus test patches, J71 2026-11-24
-screen_off = "missing"
+screen_off = "working" # bl_power 4 sets apple_pmic_bl (PMIC 0x600) to 0: Power darkens and Home lights it, 60 s without touch darkens and a touch wakes it without acting; brightness 819 or 2047 restored per day/night look; J71 2026-11-26, floor-plan panel RAM boot on main d54bb4ca
 backlight = "working" # PMIC backlight, brightness from the Omarchy menu (1412/2047 at 60 %); installed Omarchy A, kernel main eab974c plus test patches, J71 2026-11-24
 gpu_desktop = "missing"
 touch = "untested" # N1 on SPI2 with the J72 path reports contacts in Omarchy, but after 5-40 min it logs "J72 touch stopped after error -71" and stays off until apple-z2 is rebound; installed Omarchy A, kernel main eab974c plus test patches, J71 2026-11-24. Still so with the released linux-orchard-apple-4k 0.3.8-1 and omarchy-a 0.3.6, no test patches: stopped 351 s after boot, J71 2026-11-26

@@ -33,7 +33,7 @@ tested_by = ["perryraskin"] # #66
 # (tools/catalog/drivers.json), plus the display's boot console.
 [features]
 display = "working" # Omarchy A desktop on the panel; installed Omarchy A, perryraskin, J86 iOS 12.5.8 2026-11-26 (#66)
-screen_off = "missing"
+screen_off = "untested" # backlight off through apple_pmic_bl (PMIC 0x600, mini2.dtsi), as on the J72 (#232)
 backlight = "untested"
 gpu_desktop = "missing"
 touch = "working" # N1 touch works in Omarchy A; installed Omarchy A, perryraskin, J86 iOS 12.5.8 2026-11-26 (#66)
