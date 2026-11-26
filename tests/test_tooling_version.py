@@ -134,7 +134,9 @@ class Orchard2Switch(Fixture):
             self.assertEqual(self.ran('build', '.'), expected)
         self.assertEqual(self.ran('devices'), [f'orchard2 devices {self.env["data"]}'])
         self.assertEqual(self.ran('devices', ORCHARD2='0'), ['python devices'])
-        self.assertEqual(self.ran('doctor'), ['python doctor'])
+        self.assertEqual(self.ran('doctor'), [f'orchard2 doctor {self.env["data"]}'])
+        self.assertEqual(self.ran('doctor', ORCHARD2='0'), ['python doctor'])
+        self.assertEqual(self.ran('setup'), ['python setup'])
 
     def test_arguments_are_passed_on_as_they_are(self):
         self.assertEqual(self.ran('build', 'a b', '--explain', ORCHARD2='1'),
