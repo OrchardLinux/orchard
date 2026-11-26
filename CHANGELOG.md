@@ -54,6 +54,8 @@ is missing or empty.
   the unit's factory calibration from the ADT.
 - iPhone 8 Plus: the phone no longer locks up when the AOP takes over the
   Touch ID sensor; Linux leaves the AOP's GPIO interrupts to the AOP.
+- iPhone 8 Plus: after a wake the screen is back in about 0.3 s instead of
+  8 s; the touch controller boots in the background.
 - iPad mini 2 (Cellular): display, touch, storage, Wi-Fi, speakers, charging,
   sleep and wake and USB networking work on an installed Omarchy A. Tested by
   perryraskin (thanks!).

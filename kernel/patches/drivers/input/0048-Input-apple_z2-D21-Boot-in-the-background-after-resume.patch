@@ -1,0 +1,117 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dugs <dugahol@protonmail.com>
+Date: Thu, 26 Nov 2026 00:00:00 +0000
+Subject: [PATCH] Input: apple_z2: D21: Boot in the background after resume
+
+The D21 boot uploads the firmware and took 7.8 s inside resume, holding
+up the whole system resume and so the screen after a wake. Start it from
+complete() on a work item, as the other controllers already do.
+
+On the iPhone 8 Plus the screen is back about 0.3 s after the wake press
+instead of 8 s; touch follows when the controller has booted, as before.
+
+Assisted-by: LLM
+Signed-off-by: Dugs <dugahol@protonmail.com>
+---
+--- a/drivers/input/touchscreen/apple_z2.c	2026-11-26 01:34:38.851670204 +1030
++++ b/drivers/input/touchscreen/apple_z2.c	2026-11-26 01:34:38.890980526 +1030
+@@ -5747,8 +5747,10 @@
+ {
+ 	struct apple_z2 *z2 = spi_get_drvdata(to_spi_device(dev));
+ 
+-	if (apple_z2_spi_is_d21(to_spi_device(dev)))
++	if (apple_z2_spi_is_d21(to_spi_device(dev))) {
++		apple_z2_d21_complete(dev);
+ 		return;
++	}
+ 	if (!z2->boot_due)
+ 		return;
+ 	z2->boot_due = false;
+--- a/drivers/input/touchscreen/apple_z2_d21.h	2026-11-26 01:34:38.854126276 +1030
++++ b/drivers/input/touchscreen/apple_z2_d21.h	2026-11-26 01:34:38.890706239 +1030
+@@ -225,6 +225,9 @@
+ 	/* A contact is currently reported down. */
+ 	bool d21_contact_down;
+ 	bool d21_recovering;
++	/* Resume marked a boot due; complete() starts it in the background. */
++	bool d21_boot_due;
++	struct work_struct d21_resume_work;
+ 	bool stopping;
+ 	bool irq_on;
+ 	/* Boot-edge storm guard + boot deadline (see apple_z2_d21_irq). */
+@@ -308,6 +311,7 @@
+ static void apple_z2_d21_z2_checksum(u8 *cmd, unsigned int len);
+ static bool apple_z2_d21_z2_checksum_valid(const u8 *cmd, unsigned int len);
+ static int apple_z2_d21_boot(struct apple_z2_d21 *z2);
++static void apple_z2_d21_resume_work(struct work_struct *work);
+ static void apple_z2_d21_platform_power_off(struct apple_z2_d21 *z2);
+ static void apple_z2_d21_start_recovery(struct apple_z2_d21 *z2, int error);
+ static void apple_z2_d21_irq_off_nosync(struct apple_z2_d21 *z2);
+@@ -5319,6 +5323,7 @@
+ 	 * because stop() unconditionally cancels them. */
+ 	INIT_DELAYED_WORK(&z2->d21_rearm, apple_z2_d21_rearm_work);
+ 	INIT_DELAYED_WORK(&z2->d21_watch, apple_z2_d21_watch_work);
++	INIT_WORK(&z2->d21_resume_work, apple_z2_d21_resume_work);
+ 	spi_set_drvdata(spi, z2);
+ 
+ 	z2->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
+@@ -5525,22 +5530,57 @@
+ 	if (d21_z2_now == z2)
+ 		d21_z2_now = NULL;
+ 	mutex_unlock(&d21_now_lock);
++	cancel_work_sync(&z2->d21_resume_work);
+ 	apple_z2_d21_stop(z2);
+ }
+ 
+ static int apple_z2_d21_suspend(struct device *dev)
+ {
+-	apple_z2_d21_stop(spi_get_drvdata(to_spi_device(dev)));
++	struct apple_z2_d21 *z2 = spi_get_drvdata(to_spi_device(dev));
++
++	/* A controller still booting from the last resume stops first */
++	cancel_work_sync(&z2->d21_resume_work);
++	apple_z2_d21_stop(z2);
+ 
+ 	return 0;
+ }
+ 
++static void apple_z2_d21_resume_work(struct work_struct *work)
++{
++	struct apple_z2_d21 *z2 = container_of(work, struct apple_z2_d21,
++					       d21_resume_work);
++	int error;
++
++	error = apple_z2_d21_boot(z2);
++	if (error)
++		dev_err(&z2->spidev->dev,
++			"D21: touch did not start after resume: %d\n", error);
++}
++
++/*
++ * The boot uploads the firmware and takes about 7.8 s, which held up the
++ * whole resume (and so the screen) on the iPhone 8 Plus. As for the other
++ * controllers, resume only marks it due and complete() starts it in the
++ * background once every device, the SPI controller included, has resumed.
++ */
+ static int apple_z2_d21_resume(struct device *dev)
+ {
+ 	struct apple_z2_d21 *z2 = spi_get_drvdata(to_spi_device(dev));
+ 
+ 	z2->stopping = false;
+-	return apple_z2_d21_boot(z2);
++	z2->d21_boot_due = true;
++	return 0;
++}
++
++/* Also runs when sleep was aborted before suspend(): boot only if stopped. */
++static void apple_z2_d21_complete(struct device *dev)
++{
++	struct apple_z2_d21 *z2 = spi_get_drvdata(to_spi_device(dev));
++
++	if (!z2->d21_boot_due)
++		return;
++	z2->d21_boot_due = false;
++	queue_work(system_dfl_long_wq, &z2->d21_resume_work);
+ }
+ 
+ #endif /* _APPLE_Z2_D21_H */
