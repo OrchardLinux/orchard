@@ -13,6 +13,7 @@ is missing or empty.
 
 ### Devices
 
+- iPhone 8 Plus: Wi-Fi works (BCM4357). Tested by ryzensnyper.
 - A11 devices: PCIe DMA through the DART works. The T8015 DART is driven
   with its own (T8020-like) register layout instead of the S5L8960X one,
   which it ignores. Needed for Wi-Fi on the iPhone 8 Plus; tested there only.

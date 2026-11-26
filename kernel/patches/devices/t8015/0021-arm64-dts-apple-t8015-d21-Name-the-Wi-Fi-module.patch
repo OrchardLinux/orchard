@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dugs <dugahol@protonmail.com>
+Date: Thu, 26 Nov 2026 00:00:00 +0000
+Subject: [PATCH] arm64: dts: apple: t8015-d21: Name the Wi-Fi module
+
+The D21's ADT wlan module-instance is "pegasuse". Set brcm,board-type
+so brcmfmac looks for the D21's own firmware and NVRAM.
+
+Assisted-by: LLM
+Signed-off-by: Dugs <dugahol@protonmail.com>
+---
+--- a/arch/arm64/boot/dts/apple/t8015-d21.dts	2026-11-26 00:29:38.369822921 +1030
++++ b/arch/arm64/boot/dts/apple/t8015-d21.dts	2026-11-26 00:29:51.660458357 +1030
+@@ -69,3 +69,8 @@
+ &touchclk {
+ 	clock-frequency = <32768>;
+ };
++
++/* The D21's Wi-Fi module, as its ADT's wlan module-instance names it */
++&wifi0 {
++	brcm,board-type = "apple,pegasuse";
++};
