@@ -32,6 +32,9 @@ is missing or empty.
 - A7, A8 and A8X devices: the storage driver no longer sleeps while it hands a
   request to the storage controller, which could warn at boot or stall when two
   programs read at once. Found and fixed by brkosebay (thanks!).
+- iPad Air 2: the ambient light sensor works. Both of its sensors get their
+  own factory calibration, so the screen brightness can follow the room.
+  Found and tested on the Wi-Fi model by ricktav (thanks!).
 - iPhone 8 Plus: the Always-On Processor starts, with its firmware from the
   recipe, and serves the accelerometer, gyroscope and barometer; the screen
   rotates with the phone. Both models; tested on the Global one by ryzensnyper
