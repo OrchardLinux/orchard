@@ -32,6 +32,12 @@ is missing or empty.
 - A7, A8 and A8X devices: the storage driver no longer sleeps while it hands a
   request to the storage controller, which could warn at boot or stall when two
   programs read at once. Found and fixed by brkosebay (thanks!).
+- iPad Air (Wi-Fi) and iPad mini 2 (Wi-Fi): the screen switches off (Power
+  darkens it, Home or a touch lights it again), and the iPad mini 2 (Wi-Fi)'s
+  speakers play through the shared speaker driver. Tested by ricktav (thanks!).
+- iPhone 6s Plus: Bluetooth headphones play the desktop sound, HEVC video
+  decodes in hardware (smooth full-screen playback), and the USB serial console
+  comes up at every boot. Tested by ricktav (thanks!).
 - iPad Air and iPad mini 2: unplugging the charger during sleep wakes the
   tablet, so it drops back to a safe charging current and checks the next
   charger again; on the same charger it keeps charging at full speed through
