@@ -32,6 +32,11 @@ is missing or empty.
 - A7, A8 and A8X devices: the storage driver no longer sleeps while it hands a
   request to the storage controller, which could warn at boot or stall when two
   programs read at once. Found and fixed by brkosebay (thanks!).
+- iPad Air and iPad mini 2: unplugging the charger during sleep wakes the
+  tablet, so it drops back to a safe charging current and checks the next
+  charger again; on the same charger it keeps charging at full speed through
+  sleep. USB to the computer comes back cleanly after such a cable swap.
+  Found and tested on the iPad Air (Cellular) by thisiscamk (thanks!).
 - iPad Air 2: the ambient light sensor works. Both of its sensors get their
   own factory calibration, so the screen brightness can follow the room.
   Found and tested on the Wi-Fi model by ricktav (thanks!).

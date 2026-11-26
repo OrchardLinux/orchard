@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: thisiscamk <100883750+thisiscamk@users.noreply.github.com>
+Date: Thu, 26 Nov 2026 21:30:00 +0800
+Subject: [PATCH] arm64: dts: apple: s5l8960x: Wake on the D2089 source event
+
+A live unplug/replug cycle on the iPad Air (Cellular) latched D2089 event
+0 at the replug edge.  This is also the event identified as the D2089 plug
+event from iOS 12 when support for this PMIC was added.
+
+Give that event to the charger after its line and ADC interrupts.  The
+charger can then arm the real PMIC event as a wake source instead of
+relying on polling while the system is asleep.  Every A7 iPad has the
+same D2089 and charger node, so this goes in the iPad Air and iPad mini
+2/3 files they share.
+
+Tested on an iPad Air (Cellular, J72).
+
+Assisted-by: LLM
+Signed-off-by: thisiscamk <100883750+thisiscamk@users.noreply.github.com>
+---
+ arch/arm64/boot/dts/apple/s5l8960x-air1.dtsi  | 7 ++++---
+ arch/arm64/boot/dts/apple/s5l8960x-mini2.dtsi | 7 ++++---
+ 2 files changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/s5l8960x-air1.dtsi b/arch/arm64/boot/dts/apple/s5l8960x-air1.dtsi
+index 4a807b073..9c95a1c6c 100644
+--- a/arch/arm64/boot/dts/apple/s5l8960x-air1.dtsi
++++ b/arch/arm64/boot/dts/apple/s5l8960x-air1.dtsi
+@@ -199,11 +199,12 @@ tristar_charger: charger@60 {
+ 		reg-names = "status", "control", "adc";
+ 		interrupt-parent = <&pmu_events>;
+ 		/*
+-		 * The PMU line and ADC done. No source events, as on the iPad
+-		 * Air 2: the charger's 100 ms poll of 0x60 sees plug and unplug.
++		 * The PMU line, ADC done and the D2089's plug event (event 0),
++		 * which wakes the system when the source changes during sleep.
+ 		 */
+ 		interrupts = <112 IRQ_TYPE_EDGE_RISING>,
+-			     <89 IRQ_TYPE_EDGE_RISING>;
++			     <89 IRQ_TYPE_EDGE_RISING>,
++			     <0 IRQ_TYPE_EDGE_RISING>;
+ 		apple,tristar = <&tristar>;
+ 		input-current-limit-microamp = <1500000>;
+ 
+diff --git a/arch/arm64/boot/dts/apple/s5l8960x-mini2.dtsi b/arch/arm64/boot/dts/apple/s5l8960x-mini2.dtsi
+index 460683c73..2df5c1053 100644
+--- a/arch/arm64/boot/dts/apple/s5l8960x-mini2.dtsi
++++ b/arch/arm64/boot/dts/apple/s5l8960x-mini2.dtsi
+@@ -121,11 +121,12 @@ tristar_charger: charger@60 {
+ 		reg-names = "status", "control", "adc";
+ 		interrupt-parent = <&pmu_events>;
+ 		/*
+-		 * The PMU line and ADC done. No source events, as on the iPad
+-		 * Air 2: the charger's 100 ms poll of 0x60 sees plug and unplug.
++		 * The PMU line, ADC done and the D2089's plug event (event 0),
++		 * which wakes the system when the source changes during sleep.
+ 		 */
+ 		interrupts = <112 IRQ_TYPE_EDGE_RISING>,
+-			     <89 IRQ_TYPE_EDGE_RISING>;
++			     <89 IRQ_TYPE_EDGE_RISING>,
++			     <0 IRQ_TYPE_EDGE_RISING>;
+ 		apple,tristar = <&tristar>;
+ 		input-current-limit-microamp = <1500000>;
+ 
+-- 
+2.54.0 (Apple Git-157)
+
