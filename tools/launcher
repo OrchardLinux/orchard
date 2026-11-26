@@ -96,7 +96,7 @@ orchard2_command() {
 # theirs works on the device at the same time.
 orchard2_on_device() {
     needs_orchard2
-    entry=${ORCHARD_ENTRY:-${ORCHARD_VIA:-}}
+    route=${ORCHARD_BOOT:-${ORCHARD_VIA:-}}
     count=$#
     while [ "$count" -gt 0 ]; do
         argument=$1
@@ -104,20 +104,17 @@ orchard2_on_device() {
         count=$((count - 1))
         case $argument in
             --via)
-                [ "$count" -gt 0 ] || { echo 'orchard: --via palera1n or --via checkra1n' >&2; exit 2; }
-                entry=$1; shift; count=$((count - 1)) ;;
-            --via=*) entry=${argument#*=} ;;
+                [ "$count" -gt 0 ] || { echo 'orchard: --via takes a boot route, such as palera1n, checkra1n or ibss' >&2; exit 2; }
+                route=$1; shift; count=$((count - 1)) ;;
+            --via=*) route=${argument#*=} ;;
             --manifest|--release) set -- "$@" --index ;;
             --manifest=*|--release=*) set -- "$@" "--index=${argument#*=}" ;;
             *) set -- "$@" "$argument" ;;
         esac
     done
-    case $entry in
-        ''|palera1n|checkra1n) ;;
-        *) echo "orchard: no entry $entry; there are palera1n and checkra1n" >&2; exit 2 ;;
-    esac
     uv sync --quiet --project "$root" >&2
-    [ -z "$entry" ] || export ORCHARD_ENTRY="$entry"
+    # orchard2 knows the routes (routes.toml) and refuses one it has not.
+    [ -z "$route" ] || export ORCHARD_BOOT="$route"
     export ORCHARD_DATA="${ORCHARD_DATA:-$root}"
     exec "$root/.venv/bin/python" -c '
 import os, sys

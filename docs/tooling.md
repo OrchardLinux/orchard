@@ -56,7 +56,7 @@ What `install` and `launch` do then is described in OrchardLinux/tools, [`crates
 - Both start from DFU mode only, and show the steps of the device that is connected in another mode. A running recovery is not resumed, and a Pongo or m1n1 that waits is not used.
 - `launch` starts the one installed system; with several it lets you choose with the arrow keys. `launch --list` prints them and starts nothing; `--entry ID` starts that one.
 - Only one iPhone or iPad may be connected. 32-bit boards are refused.
-- palera1n enters every board. `--via checkra1n` (and `ORCHARD_VIA`) become `ORCHARD_ENTRY=checkra1n`; Python follows the board's `[boot] entries` instead.
+- The boot route is the first in `routes.toml` that fits the board's chip, palera1n today. `--via ROUTE` (and `ORCHARD_VIA`) become `ORCHARD_BOOT=ROUTE`, as orchard2's own `--boot ROUTE`: `checkra1n`, or `ibss` for gaster and Apple's patched iBSS. Python follows the board's `[boot] entries` instead.
 - The operation lock of the Python commands is held while orchard2 runs.
 
 `orchard python ARGS` runs Python in the running version's environment, for a distribution's own scripts. An `orchard = "PATH"` line in `orchard.local.toml`, which used to choose the checkout, is refused with what to use instead.
