@@ -204,13 +204,38 @@ class Orchard2Switch(Fixture):
             self.assertIn(hint, self.result.stderr)
         self.assertEqual(self.ran('cache', '--prune'), ['python cache --prune'])
 
-    def test_run_builds_with_it_and_boots_here(self):
+    def test_run_is_orchard2s(self):
+        self.orchard2('printf "orchard2 %s boot=%s\\n" "$*" "${ORCHARD_BOOT:-}" >> "$LOG"; [ -e /dev/fd/3 ] && echo locked >> "$LOG"')
+        shutil.rmtree(self.clone, ignore_errors=True)
+        self.fake_python()
+        # It builds by itself: one command, with the route and without -y.
         self.assertEqual(self.ran('run', '-y', 'a', '--via', 'checkra1n', '--device', 'j71b', ORCHARD2='1'),
-                         [f'orchard2 build a --device j71b {self.env["data"]}',
-                          'python run --no-build -y a --via checkra1n --device j71b'])
-        self.assertEqual(self.ran('run', '--no-build', 'a', ORCHARD2='1'), ['python run --no-build a'])
+                         ['orchard2 run a --device j71b boot=checkra1n', 'locked'])
+        self.assertEqual(self.ran('run', ORCHARD2='1'), ['orchard2 run boot=', 'locked'])
+        self.assertEqual(self.ran('run', '--no-build', 'a', '--cache', 'c', ORCHARD2='1', ORCHARD_VIA='ibss'),
+                         ['orchard2 run --no-build a --cache c boot=ibss', 'locked'])
+
+    def test_what_orchard2_does_not_boot_is_booted_here(self):
+        self.orchard2('printf "orchard2 %s\\n" "$*" >> "$LOG"; [ "$1" = build ] || exit 10')
+        shutil.rmtree(self.clone, ignore_errors=True)
+        self.fake_python()
+        # No boot route for the device (exit status 10): Python boots what orchard2 built.
+        self.assertEqual(self.ran('run', '-y', 'a', ORCHARD2='1'), ['orchard2 run a', 'python run --no-build -y a'])
+        self.assertIn('booting what it built here', self.result.stderr)
+        # Another failure is the run's result.
+        self.orchard2('printf "orchard2 %s\\n" "$*" >> "$LOG"; exit 4')
+        self.assertEqual(self.ran('run', 'a', ORCHARD2='1'), ['orchard2 run a'])
+        self.assertEqual(self.result.returncode, 4)
+        # A distribution checkout's release is built by orchard2 and booted here.
+        self.orchard2('printf "orchard2 %s\\n" "$*" >> "$LOG"')
+        (self.root / 'work/d').mkdir()
+        (self.root / 'work/d/orchard.toml').write_text('[release]\n')
+        self.assertEqual(self.ran('run', 'd', '--via', 'checkra1n', ORCHARD2='1'),
+                         ['orchard2 build d', 'python run --no-build d --via checkra1n'])
 
     def test_a_failed_build_is_not_booted_and_keeps_its_status(self):
+        shutil.rmtree(self.clone, ignore_errors=True)
+        self.fake_python()
         self.orchard2('exit 13')
         self.assertEqual(self.ran('run', 'a', ORCHARD2='1'), [])
         self.assertEqual(self.result.returncode, 13)

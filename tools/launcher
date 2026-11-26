@@ -91,6 +91,23 @@ orchard2_command() {
         orchard2 "$@"
 }
 
+# orchard2 ARGS while the Python commands' operation lock is held, so that no
+# run, boot or install of theirs works on the device at the same time.
+under_operation_lock() {
+    "$root/.venv/bin/python" -c '
+import os, sys
+from orchard.state import operation_lock
+try:
+    with operation_lock() as lock:
+        if lock is None:
+            raise ValueError("this orchard is older than the switch for install and launch; unset ORCHARD_VERSION or set ORCHARD2=0")
+        os.set_inheritable(lock, True)
+        os.execvp(sys.argv[1], sys.argv[1:])
+except ValueError as error:
+    sys.exit(f"orchard: {error}")
+' orchard2 "$@"
+}
+
 # orchard2 install or launch ARGS. The operation lock is the Python commands':
 # it is held for as long as orchard2 runs, so that no run, boot or install of
 # theirs works on the device at the same time.
@@ -116,18 +133,8 @@ orchard2_on_device() {
     # orchard2 knows the routes (routes.toml) and refuses one it has not.
     [ -z "$route" ] || export ORCHARD_BOOT="$route"
     export ORCHARD_DATA="${ORCHARD_DATA:-$root}"
-    exec "$root/.venv/bin/python" -c '
-import os, sys
-from orchard.state import operation_lock
-try:
-    with operation_lock() as lock:
-        if lock is None:
-            raise ValueError("this orchard is older than the switch for install and launch; unset ORCHARD_VERSION or set ORCHARD2=0")
-        os.set_inheritable(lock, True)
-        os.execvp(sys.argv[1], sys.argv[1:])
-except ValueError as error:
-    sys.exit(f"orchard: {error}")
-' orchard2 "$@"
+    under_operation_lock "$@"
+    exit
 }
 
 # A checkout's bin/orchard names itself, for its own code.
@@ -211,29 +218,64 @@ case ${1:-} in
             exit 2
         fi ;;
     run)
-        # What run builds first; booting it stays here.
+        # orchard2 builds and boots a payload project. A distribution
+        # checkout's release, and a device orchard2 has no boot route for,
+        # are booted here after orchard2 built them.
         if orchard2_on; then
             shift
-            build=1
+            build=1 help='' directory=. value=''
+            route=${ORCHARD_BOOT:-${ORCHARD_VIA:-}}
             for argument; do
-                case $argument in --no-build|-h|--help) build= ;; esac
+                case $value in
+                    via) route=$argument; value=; continue ;;
+                    other) value=; continue ;;
+                esac
+                case $argument in
+                    --no-build) build= ;;
+                    -h|--help) help=1 ;;
+                    --via) value=via ;;
+                    --via=*) route=${argument#*=} ;;
+                    --version|--device|--platform|--cache|--kernel-dir|--kernel-tree|--packages|--pongo|--busybox|--loader) value=other ;;
+                    -*) ;;
+                    *) directory=$argument ;;
+                esac
             done
-            if [ -n "$build" ]; then
-                (
-                    count=$#
-                    while [ "$count" -gt 0 ]; do
-                        argument=$1
-                        shift
-                        count=$((count - 1))
-                        case $argument in
-                            -y|--yes|--via=*) ;;
-                            --via) shift; count=$((count - 1)) ;;
-                            *) set -- "$@" "$argument" ;;
-                        esac
-                    done
-                    orchard2_command build "$@" >&2
-                )
-                set -- --no-build "$@"
+            # orchard2's own arguments: without -y (it does not ask) and
+            # --via (the boot route goes by ORCHARD_BOOT).
+            mine() {
+                command=$1
+                shift
+                count=$#
+                while [ "$count" -gt 0 ]; do
+                    argument=$1
+                    shift
+                    count=$((count - 1))
+                    case $argument in
+                        -y|--yes|--via=*) ;;
+                        --via) shift; count=$((count - 1)) ;;
+                        *) set -- "$@" "$argument" ;;
+                    esac
+                done
+                "$command" "$@"
+            }
+            if [ -n "$help" ]; then
+                :
+            elif grep -Eqs '^\[release\]' "$directory/orchard.toml"; then
+                if [ -n "$build" ]; then
+                    mine orchard2_command build "$@" >&2
+                    set -- --no-build "$@"
+                fi
+            else
+                needs_orchard2
+                uv sync --quiet --project "$root" >&2
+                [ -z "$route" ] || export ORCHARD_BOOT="$route"
+                export ORCHARD_DATA="${ORCHARD_DATA:-$root}" ORCHARD_PYTHON="${ORCHARD_PYTHON:-$root/.venv/bin/python}"
+                status=0
+                mine under_operation_lock run "$@" || status=$?
+                # 10: orchard2 cannot do it (no boot route for this device yet).
+                [ "$status" -eq 10 ] || exit "$status"
+                echo 'orchard: orchard2 does not boot this yet; booting what it built here' >&2
+                [ -z "$build" ] || set -- --no-build "$@"
             fi
             set -- run "$@"
         fi ;;
