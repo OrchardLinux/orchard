@@ -13,6 +13,9 @@ is missing or empty.
 
 ### Devices
 
+- A11 devices: PCIe DMA through the DART works. The T8015 DART is driven
+  with its own (T8020-like) register layout instead of the S5L8960X one,
+  which it ignores. Needed for Wi-Fi on the iPhone 8 Plus; tested there only.
 - iPad mini 2 (Cellular): display, touch, storage, Wi-Fi, speakers, charging,
   sleep and wake and USB networking work on an installed Omarchy A. Tested by
   perryraskin (thanks!).
