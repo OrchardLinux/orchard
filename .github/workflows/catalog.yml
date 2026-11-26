@@ -9,6 +9,7 @@ on:
       - 'chips/**'
       - 'methods.toml'
       - 'features.toml'
+      - 'routes.toml'
       - 'tools/catalog/drivers.json'
       - 'tools/catalog/generate'
       - '.github/workflows/catalog.yml'

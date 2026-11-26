@@ -1,0 +1,46 @@
+# Routes: the ways into a device, and where each works.
+#
+# A boot route takes a device from DFU mode to a loader that starts Linux. An access
+# route gets an app of ours running inside iOS with access to the storage. Which routes
+# a board has follows from its chip (chips/*.toml, by `soc`), and for access routes from
+# the iOS version it runs: boards do not list routes. Within a kind, the order here is
+# the preference; a route with `named = true` is taken only when asked for by name.
+#
+# `fits` says where a route works, from the tool's own published list (`source`).
+# `ios` is a list of version ranges, both ends included; without it any version fits.
+# `ends` is the loader a boot route leaves the device in: `m1n1` starts a system from the
+# device's storage or one sent from the computer, `cascadia` only one sent with it.
+schema = 1
+
+[boot.palera1n]
+ends = "m1n1"
+fits = [{ chips = ["t7000", "t7001", "s8000", "s8001", "s8003", "t8010", "t8011", "t8015"] }]
+source = "https://palera.in: devices from A8 to A11"
+
+[boot.checkra1n]
+ends = "m1n1"
+fits = [{ chips = ["s5l8960x", "t7000", "t7001", "s8000", "s8001", "s8003", "t8010", "t8011", "t8015"] }]
+source = "https://checkra.in: iPhone 5s to iPhone X (A7 to A11)"
+
+[boot.ibss]
+ends = "m1n1"
+fits = [{ chips = ["s5l8960x", "t7000", "t7001", "s8000", "s8001", "s8003", "t8010", "t8011", "t8015"] }]
+source = "HoolockLinux/remote_boot@e254a58: gaster and a patched iBSS (and iBEC) on A7 to A11"
+
+[boot.autogo]
+ends = "cascadia"
+named = true
+fits = [{ chips = ["s5l8940x", "s5l8942x"] }]
+source = "rzxvx/Project-Cascadia@091d441 devices/a5: patched iBSS and an iBEC that starts the loader it is sent"
+
+[access.palera1n]
+fits = [{ chips = ["t7000", "t7001", "s8000", "s8001", "s8003", "t8010", "t8011", "t8015"], ios = [["15.0", ""]] }]
+source = "https://palera.in: A8 to A11, iOS 15.0 and later"
+
+[access.checkra1n]
+fits = [{ chips = ["s5l8960x", "t7000", "t7001", "s8000", "s8001", "s8003", "t8010", "t8011", "t8015"], ios = [["12.0", "14.8.1"]] }]
+source = "https://checkra.in: A7 to A11, iOS 12.0 to 14.8.1"
+
+[access.dopamine]
+fits = [{ chips = ["t7000", "t7001", "s8000", "s8001", "s8003", "t8010", "t8011", "t8015", "t8020", "t8027", "t8030"], ios = [["15.0", "18.7.1"], ["26.0", "26.0.1"]] }]
+source = "OrchardLinux/resize-apfs README (pinned Dopamine): A8 to A13 on iOS 15.0 to 18.7.1 and 26.0 to 26.0.1"
