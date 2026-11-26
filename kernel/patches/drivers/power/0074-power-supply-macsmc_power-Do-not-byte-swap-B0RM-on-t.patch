@@ -1,0 +1,63 @@
+From 177a4781838f3ec9827afdffefb7e6da95a4b8ea Mon Sep 17 00:00:00 2001
+From: Dugs <dugahol@protonmail.com>
+Date: Thu, 26 Nov 2026 22:10:56 +1030
+Subject: [PATCH] power: supply: macsmc_power: Do not byte-swap B0RM on the
+ T8015
+
+The driver takes a 4-byte BCF0 to mean older SMC firmware, which passes
+the remaining capacity (B0RM) through big-endian. The T8015 SMC (iPhone
+8 Plus, iOS 16.7.16) has a 4-byte BCF0 but sends B0RM as a native ui16,
+the same as the full-charge key B0FC. Swapping it made charge_now and
+energy_now about 13 times too high (0x0869 = 2153 mAh read as 26 Ah).
+
+Keep the BCF0 test for the Macs and never swap B0RM on the T8015.
+
+Tested on an iPhone 8 Plus (D21): the SMC reports B0RM and B0FC both as
+ui16, raw 69 08 and 91 08.
+
+Assisted-by: LLM
+Signed-off-by: Dugs <dugahol@protonmail.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/power/supply/macsmc-power.c | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/power/supply/macsmc-power.c b/drivers/power/supply/macsmc-power.c
+index ada6554..e12bcc0 100644
+--- a/drivers/power/supply/macsmc-power.c
++++ b/drivers/power/supply/macsmc-power.c
+@@ -94,6 +94,7 @@ struct macsmc_power {
+ 	 * (Modern firmware)
+ 	 */
+ 	bool fw_ge_27;
++	bool b0rm_swapped; /* B0RM arrives big-endian */
+ 
+ 	u32 b0ap_type; /* SMC key type for power now (si16 or si32) */
+ 
+@@ -330,7 +331,7 @@ static int macsmc_battery_get_capacity_level(struct macsmc_power *power)
+ static s16 macsmc_swap_b0rm(struct macsmc_power *power, s16 b0rm)
+ {
+ 	/* B0RM was Big Endian, likely pass through from TI gas gauge */
+-	return power->fw_ge_27 ? b0rm : (s16)swab16(b0rm);
++	return power->b0rm_swapped ? (s16)swab16(b0rm) : b0rm;
+ }
+ 
+ static int macsmc_battery_get_property(struct power_supply *psy,
+@@ -775,6 +776,14 @@ static int macsmc_power_probe(struct platform_device *pdev)
+ 			return -EIO;
+ 		}
+ 
++		/*
++		 * Older Mac SMC firmware passes B0RM through big-endian. The
++		 * T8015 SMC keeps a 4-byte BCF0 but sends B0RM as a native ui16,
++		 * like B0FC.
++		 */
++		power->b0rm_swapped = !power->fw_ge_27 &&
++			!of_device_is_compatible(dev->parent->of_node, "apple,t8015-smc");
++
+ 		/* B0AP changed from si16 to si32 in iOS 15.0 so detect it here */
+ 		ret = apple_smc_get_key_info(smc, SMC_KEY(B0AP), &info);
+ 		if (!ret)
+-- 
+2.55.0
+

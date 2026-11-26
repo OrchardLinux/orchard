@@ -13,6 +13,8 @@ is missing or empty.
 
 ### Devices
 
+- iPhone 8 Plus: the battery's remaining charge and energy read correctly
+  (they were about 13 times too high).
 - iPad mini 2 (Cellular): display, touch, storage, Wi-Fi, speakers, charging,
   sleep and wake and USB networking work on an installed Omarchy A. Tested by
   perryraskin (thanks!).
