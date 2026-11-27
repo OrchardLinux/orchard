@@ -138,10 +138,12 @@ Done; `src/orchard/installer.py` and `src/orchard/user.py`.
   zipapp (`--installer-url`, or the one next to it), checks both by SHA-256 and runs
   `install`, prompting on the terminal even when piped from curl. No system
   Python, no uv. The zipapp unpacks once into `STORE/core/VERSION-HASH`.
-- **The user's `orchard`** is the command OrchardLinux/tools' `install.sh`
-  installs: one program, which `orchard update` replaces with its newest
-  build. The Python core an earlier installer left
-  (`STORE/core`, `orchard-core.pyz`) is no longer published.
+- **The user's `orchard`:** a distribution's command-line installer
+  (`python -m orchard.installer release`, the Python one) still leaves
+  `STORE/core/current.json` and `~/.local/bin/orchard`, a launcher of the core
+  with `install`, `launch`, `devices` and `update`; its `update` installs the
+  latest orchard release's `orchard-core.pyz`. OrchardLinux/tools'
+  `install.sh` puts the Rust command in the same place.
 - **State:** the store and the build cache record their layout version
   (`cache.STATE_VERSION`, `state.json`); an orchard that finds a newer one refuses
   to touch it.

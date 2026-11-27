@@ -105,7 +105,6 @@ is missing or empty.
 - A checkout's `bin/orchard` is that command on the checkout's recipes and
   board data. `bin/orchard python …` still runs Python in the checkout's
   environment; the Python command line is no longer started by anything.
-- The nightly no longer publishes `orchard-core.pyz`.
 - A platform no longer has a `series` entry (`platforms/*.toml`,
   `kernel/series/`): its kernel is OrchardLinux/linux at the lock's commit.
   The kernel source keys change with it, so the next nightly compiles every
