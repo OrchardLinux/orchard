@@ -9,7 +9,7 @@ open work, and contributed code that is not in the tree yet.
 **Charging (PR #46).** The Bellatrix port supply and the D2365 charger are
 enabled. A DCP wall charger gets the 1500 mA grant (#179, confirmed on
 J171 2026-11-18); other sources get 500 mA
-(`kernel/patches/drivers/power/0014`). The earlier test in #46 ran with a
+(OrchardLinux/linux, "power: supply: apple_d2365_charger: Grant 500 mA, not a fixed …"). The earlier test in #46 ran with a
 fixed 1425 mA and does not cover this. Test with the 500 mA build, following
 the test plan in
 [`docs/bring-up/charging/adaptive-charging.md`](../../docs/bring-up/charging/adaptive-charging.md)

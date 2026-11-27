@@ -120,7 +120,7 @@ which one and opens a shell on the console.
 ## Partitions (LwVM, 32-bit boards, interim)
 
 The iOS disk of 32-bit boards is partitioned with LwVM, which the kernel reads
-(`kernel/patches/armv7/block`): partitions keep their LwVM entry number, and the
+(`block/partitions/lwvm.c` in OrchardLinux/linux `armv7`): partitions keep their LwVM entry number, and the
 entry's GUID is their PARTUUID. Until the iOS resize step creates the Linux
 entry, the installer only replaces an existing, unencrypted Linux entry
 (`0fc63daf-8483-4772-8e79-3d69d8477de4`) in place and never writes the LwVM map.

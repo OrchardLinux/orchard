@@ -46,7 +46,9 @@ catalog marks the other boards `untested`, and their owners find out.
 - Commits in upstream style: one topic each, `Assisted-by: LLM`, no
   Signed-off-by, the author from the global git config.
 - Never rewrite `main` or `armv7` of OrchardLinux/linux, or `main` of
-  OrchardLinux/m1n1: no force-push, no rebase of what is merged.
+  OrchardLinux/m1n1: no force-push, no rebase of what is merged. The
+  branches are protected against it. A new base under the series is added
+  on top with `tools/kernel-tree/replay`.
 - Orchard builds the kernel commit its lock names. When orchard needs a
   merged kernel change, `tools/kernel-tree/take` moves the lock and rewrites
   the config copies; commit that in the orchard pull request that needs it

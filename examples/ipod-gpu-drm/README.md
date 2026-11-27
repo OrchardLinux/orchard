@@ -1,7 +1,7 @@
 # ipod-gpu-drm
 
 A RAM payload that tests the A8 (T7000) GPU, a PowerVR GX6450, through powervr's A8 variant
-(`kernel/patches/drivers/gpu/0063`–`0073`, `devices/t7000/0011` and `0012`). It is `minimal-boot` with a
+(in OrchardLinux/linux: the `drm/imagination: apple:` A8 commits and the T7000 GPU device tree commits). It is `minimal-boot` with a
 constant USB serial number (`a8-gpu-drm`, so macOS does not ask to allow the accessory on every boot),
 the kernel's modules, the GPU firmware, a test script and, optionally, a Vulkan bundle built from
 OrchardLinux/mesa.

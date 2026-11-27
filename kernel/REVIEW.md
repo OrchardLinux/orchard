@@ -1,5 +1,10 @@
 # Review: Orchard's J71b kernel delta against the new stack
 
+> **History.** This is the review made during that migration, in October 2026. The patch layers it describes became the
+> branches of OrchardLinux/linux in November 2026 and orchard no longer carries
+> patch files; `kernel/README.md` describes the kernel today. Paths such as
+> `patches/…` are in orchard's history up to the tag `kernel-patches-final`.
+
 Inputs:
 - **ours**: Hoolock `6831bc70` plus the current `patches/j71b/*`, the kernel J71b has run;
 - **new**: torvalds `v7.3-rc1` + `patches/hoolock` + `patches/import/pauli1go`.

@@ -7,7 +7,7 @@ open work, and contributed code that is not in the tree yet.
 ## Needs testing
 
 **GPU (A8, PowerVR GX6450).** powervr's A8 variant
-(`kernel/patches/drivers/gpu/0063`–`0073`, `devices/t7000/0011`) probes,
+(OrchardLinux/linux: the `drm/imagination: apple:` commits from "Describe the S8003 chip in a variant" on, and "arm64: dts: apple: t7000: Describe the GPU") probes,
 boots the GPU firmware and runs compute and render jobs on this board:
 Vulkan 1.2 through Mesa's powervr driver and OpenGL ES 3.1 through Zink,
 no faults over a 514k-job soak. Experimental: dEQP has not run, so the

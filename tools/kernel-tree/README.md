@@ -30,15 +30,44 @@ branch heads, or to the commits named, and writes
 `kernel/configs/<platform>/config` again from the tree's defconfigs. Commit
 the result with the change that needs it.
 
+## A new base under the series
+
+The branches are never force-pushed. A move to a newer upstream, a re-import
+of a layer or a re-ordering is added on top of the branch:
+
+```sh
+orchard python tools/kernel-tree/replay --linux ../linux --branch armv7 --from OLD --onto NEW
+```
+
+`replay` makes a marker commit with NEW's content (first parent NEW, second
+parent the branch as it is) and replays the commits of `OLD..armv7` after it,
+with their authors and messages; a commit NEW already has is dropped. The
+result, `armv7-replayed`, descends from the branch, so pushing it is a
+fast-forward and nothing before is lost. Everything after the newest marker
+is the current series on its base. It needs no checkout, so the clone can be
+bare and on any filesystem; a commit that does not apply stops it, to be
+resolved by hand and continued with `--continue`.
+
 ## Importing other trees
 
 `import-cascadia.py` rebuilds Project Cascadia's A5 kernel as commits on
-v6.12 (it leaves them at `refs/orchard/cascadia-import` in the linux clone)
-and can still write them as patch files. A refresh replays the `armv7`
-series on the new import and adds the result on top of the branch, as
-`docs/platforms-and-builds.md` describes for any re-base.
-`kernel/tools/linearize-merges.py` and `replay-commits.py` did the same for
-the Hoolock and Pauli1Go layers.
+v6.12 and leaves them at `refs/orchard/cascadia-import` in the linux clone
+(`--out DIR` also writes them as patch files). A Cascadia refresh is then:
+
+```sh
+orchard python tools/kernel-tree/import-cascadia.py --cascadia ../Project-Cascadia --commit REV \
+    --linux ../linux --base adc218676eef25575469234709c2d87185ca223a
+orchard python tools/kernel-tree/replay --linux ../linux --branch armv7 \
+    --from LAST --onto refs/orchard/cascadia-import
+```
+
+LAST is the last commit of the import that `armv7` is on: the board device
+tree commit before Orchard's own first commit (after the newest marker, or in
+the original `import/cascadia` layer). Record the new Cascadia commit in
+`kernel/sources.toml`, push the result as a pull request's worth of review,
+and take it into orchard with `take`.
+`kernel/tools/linearize-merges.py` and `replay-commits.py` made the Hoolock
+and Pauli1Go layers.
 
 ## Going back to patch files
 
