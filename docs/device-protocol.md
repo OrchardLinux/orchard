@@ -1,9 +1,8 @@
 # Device protocol v1
 
 The recovery exposes `orchard-device` with three operations. Installing does not
-go through it: the CLI copies its own install script
-(`src/orchard/install_device.py`) to the recovery and runs it over SSH, so
-the host and device side of an install always come from the same CLI version.
+go through it: the install script (`boot/initramfs/install/install_device.py`)
+is copied to the recovery and run over SSH.
 
 ## Ownership
 

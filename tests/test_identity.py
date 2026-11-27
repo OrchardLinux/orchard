@@ -1,7 +1,6 @@
 """Boot identity publication from bounded ADT fixtures; no device activation."""
 import importlib.util
 import hashlib
-import json
 import os
 from pathlib import Path
 import re
@@ -13,13 +12,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from orchard.apple import adt
-
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('orchard_identity_test', ROOT/'runtime/recovery/identity.py')
 identity = importlib.util.module_from_spec(spec)
-with patch.dict(sys.modules, {'adt':adt}):
-    spec.loader.exec_module(identity)
+sys.path.insert(0, str(ROOT/'runtime/recovery'))    # identity.py imports adt.py beside it
+spec.loader.exec_module(identity)
 BOOT = '11111111-1111-4111-8111-111111111111'
 
 
@@ -185,14 +182,6 @@ if __name__ == '__main__':
 
 
 class MacCurrentIdentity(unittest.TestCase):
-    def test_installed_systems_use_the_mac_current_product_id_only_with_an_orchard_serial(self):
-        from orchard.apple import linux_usb
-        self.assertEqual(linux_usb.mode(0x1014, 'BOARD:j71b ID:0123456789ab'), 'system')
-        self.assertEqual(linux_usb.mode(0x1014, 'BOOT:11111111-1111-4111-8111-111111111111 BOARD:j71b'), 'system')
-        self.assertEqual(linux_usb.mode(0x1014, 'DWH12345678'), 'other')
-        self.assertEqual(linux_usb.mode(0x1014, 'BOARD:j71b'), 'other')
-        self.assertEqual(linux_usb.mode(0x4145, 'BOARD:j71b ID:0123456789ab'), 'system')
-        self.assertEqual(linux_usb.mode(0x4144, ''), 'ram')
 
     def test_the_installed_gadget_asks_for_the_mac_current_identity(self):
         init = (ROOT / 'boot/initramfs/root/init').read_text()
@@ -200,6 +189,3 @@ class MacCurrentIdentity(unittest.TestCase):
         self.assertIn('echo 0x1014 > "$g/idProduct"', gadget)
         self.assertIn('echo 0xef > "$g/bDeviceClass"', gadget)
 
-    def test_linux_hosts_get_access_to_the_mac_current_identity(self):
-        from orchard import host_setup
-        self.assertIn('ATTRS{idProduct}=="1014"', host_setup.usb_rules('plugdev'))

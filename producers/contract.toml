@@ -2,8 +2,6 @@
 # (orchard2: tools/crates/build). It is updated apart from the recipes, so
 # what a cache key is made from is stated here, not compiled into it: a tool
 # that finds more here than it knows refuses to build.
-# orchard's Python has the same in src/orchard/build.py; tests/test_contract.py
-# keeps the two equal.
 
 # The form of this file.
 schema = 1

@@ -30,8 +30,7 @@ class CIEfficiency(unittest.TestCase):
         self.assertNotIn('build-pongo.py', job(workflow, 'assets'))
 
     def test_every_platform_kernel_is_built_once_and_bundled(self):
-        from orchard.ram import boards_by_platform
-        platforms = sorted(boards_by_platform(ROOT))  # every architecture, apple-armv7 too
+        platforms = sorted(path.stem for path in (ROOT / 'platforms').glob('*.toml'))  # every architecture, apple-armv7 too
         self.assertIn('apple-armv7', platforms)
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
         matrix = re.search(r'platform: \[([^\]]*)\]', job(workflow, 'kernel')).group(1)

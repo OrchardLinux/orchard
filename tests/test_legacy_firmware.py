@@ -10,8 +10,7 @@ import unittest
 from unittest.mock import patch
 import zlib
 
-from orchard import recipe
-from orchard.apple import aes, firmware_keys, hfs, legacy_images, remote_ipsw, sgx, sparse_deflate, trx, udif
+from orchard.apple import aes, firmware_keys, hfs, legacy_images, remote_ipsw, sparse_deflate, udif
 from test_remote_ipsw import Response, server
 
 
@@ -292,37 +291,6 @@ class LegacyFirmware(unittest.TestCase):
             with self.assertRaises(ValueError):
                 remote.read_ranges([(3, 5), (100, 7)])
 
-    def test_trx_crc_nvram_and_placeholder(self):
-        fw = trx_fixture(old=bytes(28))
-        result = trx.add_nvram(fw, b'# comment\n board = test # comment\n', '02:00:00:00:00:00')
-        self.assertIn(b'board=test\0macaddr=02:00:00:00:00:00\0\0', result)
-        self.assertEqual(struct.unpack_from('<I', result, 8)[0], zlib.crc32(result[12:]) ^ 0xffffffff)
-        words = (len(result) - 28 - len(b'firmware') - 4) // 4
-        self.assertEqual(struct.unpack_from('<I', result, len(result) - 4)[0], ((~words & 65535) << 16) | words)
-        for bad in [b'x', fw[:-1], fw[:8] + bytes(4) + fw[12:], trx_fixture(old=b'x')]:
-            with self.assertRaises(ValueError):
-                trx.add_nvram(bad, b'x=1', '02:00:00:00:00:00')
-        with self.assertRaises(ValueError):
-            trx.add_nvram(fw, b'macaddr=00:00:00:00:00:01', '02:00:00:00:00:00')
-        # Bytes the header length counts past offsets[0] + offsets[2] are dropped, as Cascadia does.
-        tail = bytearray(trx_fixture())
-        tail += b'trailer'
-        struct.pack_into('<I', tail, 4, len(tail))
-        struct.pack_into('<I', tail, 8, zlib.crc32(tail[12:]) ^ 0xffffffff)
-        self.assertEqual(trx.add_nvram(bytes(tail), b'x=1', '02:00:00:00:00:00'),
-                         trx.add_nvram(trx_fixture(), b'x=1', '02:00:00:00:00:00'))
-        # Any other bootstrap address would escape the boot-time replacement.
-        with self.assertRaisesRegex(ValueError, 'placeholder'):
-            trx.add_nvram(fw, b'x=1', '02:10:5a:05:00:03')
-
-    def test_sgx_container_layout(self):
-        output = sgx.extract(sgx_fixture(), 'TEST')
-        self.assertEqual(struct.unpack_from('<8s7I16s', output),
-                         (b'SGX543FW', 1, 64, 8, 72, 4, 0x9100, 0x8400, b'TEST' + bytes(12)))
-        self.assertEqual(output[64:], b'GPU-CODEPDS!')
-        for bad in [b'bad', sgx_fixture()[:100], sgx_fixture().replace(b'SGXDriver543', b'OtherDriver!')]:
-            with self.assertRaises(ValueError):
-                sgx.extract(bad, 'TEST')
 
     def test_hfs_index_seeks_first_equal_parent(self):
         files = {'alpha': b'a', 'beta': b'b', 'gamma': b'c'}
@@ -406,94 +374,6 @@ class LegacyFirmware(unittest.TestCase):
             with self.assertRaises(ValueError):
                 firmware_keys.KeyStore('archive-hash', link).get('kernel', 'img3')
 
-    def test_recipe_auxiliary_inputs_are_checked_and_selected(self):
-        fw, nv = trx_fixture(), b'board=test'
-        result = trx.add_nvram(fw, nv, '02:00:00:00:00:00')
-        output = {'destination': 'lib/firmware/wifi', 'sha256': sha(result), 'steps': [
-            {'step': 'trx-add-nvram@1', 'input': 'fw', 'nvram': 'nv', 'placeholder_mac': '02:00:00:00:00:00'}]}
-        document = {'schema': 2, 'inputs': {'fw': {'sha256': sha(fw)}, 'nv': {'sha256': sha(nv)}}, 'outputs': [output]}
-        recipe.supported(document)
-        self.assertEqual(recipe.needed_inputs(document), ['fw', 'nv'])
-        self.assertEqual(recipe.needed_inputs(document, []), [])
-        self.assertEqual(recipe.run(document, {'fw': fw, 'nv': nv}.__getitem__), {'lib/firmware/wifi': result})
-        with self.assertRaisesRegex(ValueError, 'input differs'):
-            recipe.run(document, {'fw': fw, 'nv': b'wrong'}.__getitem__)
-        output['steps'][0]['nvram'] = 'unknown'
-        with self.assertRaisesRegex(ValueError, 'Unknown recipe input'):
-            recipe.supported(document)
-
-    def test_all_four_recipe_outputs_from_generated_inputs(self):
-        document = json.loads((Path(__file__).resolve().parents[1] / 'devices/p105/firmware.json').read_text())
-        hcd = b'\x4c\xfc\x05' + bytes(4) + b'x' + b'\x4e\xfc\x04' + bytes(4)
-        inputs = {'P105.mtprops': b'generated touch data', 'borg.trx': trx_fixture(),
-                  'borg-t-st.txt': b'board=test', 'BlueTool': b'binary prefix' + hcd + b'trailing',
-                  'kernelcache': sgx_fixture()}
-        expected = [inputs['P105.mtprops'],
-                    trx.add_nvram(inputs['borg.trx'], inputs['borg-t-st.txt'], '02:00:00:00:00:00'),
-                    hcd, sgx.extract(inputs['kernelcache'], '12H321')]
-        for name, data in inputs.items():
-            document['inputs'][name]['sha256'] = sha(data)
-        self.assertEqual(recipe.pending(document), [])
-        for output, data in zip(document['outputs'], expected):
-            output['sha256'] = sha(data)
-        recipe.check(document)
-        seen = []
-
-        def read(name):
-            seen.append(name)
-            return inputs[name]
-
-        result = recipe.run(document, read)
-        self.assertEqual(list(result.values()), expected)
-        self.assertEqual(sorted(seen), sorted(inputs))
-        seen.clear()
-        recipe.run(document, read, document['outputs'][2:3])
-        self.assertEqual(seen, ['BlueTool'])
-        document['outputs'][0]['sha256'] = '0' * 64
-        with self.assertRaisesRegex(ValueError, 'output differs'):
-            recipe.run(document, read)
-        # A pending output is made without a hash check, from pinned inputs only.
-        wifi = document['outputs'][1]
-        del wifi['sha256']
-        wifi['pending'] = 'not measured'
-        recipe.check(document)
-        self.assertEqual(recipe.run(document, read, [wifi]), {wifi['destination']: expected[1]})
-        del document['inputs']['borg.trx']['sha256']
-        with self.assertRaisesRegex(ValueError, 'reads unpinned inputs'):
-            recipe.supported(document)
-        wifi['sha256'] = '0' * 64
-        with self.assertRaisesRegex(ValueError, 'either sha256 or pending'):
-            recipe.supported(document)
-
-    def test_builds_install_pinned_outputs_and_measure_pending_ones(self):
-        from orchard import firmware
-
-        class Progress:
-            phases = []
-
-            def phase(self, text):
-                self.phases.append(text)
-
-        made = []
-
-        def produce(profile, document, outputs, clock, progress):
-            made.append([o['destination'] for o in outputs])
-            return {o['destination']: o['destination'].encode() for o in outputs}
-
-        pinned = {'destination': 'lib/firmware/a', 'sha256': sha(b'lib/firmware/a'), 'steps': []}
-        waiting = {'destination': 'lib/firmware/b', 'pending': 'not measured', 'steps': []}
-        document = {'inputs': {}, 'outputs': [pinned, waiting]}
-        with tempfile.TemporaryDirectory() as directory, \
-                patch.object(firmware, 'recipe_for', lambda *a, **k: document), \
-                patch.object(firmware, 'cache_root', lambda: Path(directory)), \
-                patch.object(firmware, '_produce', produce):
-            outputs = firmware.ensure('test', None, Progress())
-            self.assertEqual(sorted(p.name for p in outputs.iterdir()), [pinned['sha256']])
-            self.assertTrue(firmware.cached('test'))
-            self.assertIn('Not installing lib/firmware/b: its hash is pending verification', Progress.phases)
-            self.assertEqual(firmware.measure('test', None, Progress()), {'lib/firmware/b': sha(b'lib/firmware/b')})
-            self.assertEqual(made, [['lib/firmware/a'], ['lib/firmware/b']])
-            self.assertEqual(sorted(p.name for p in outputs.iterdir()), [pinned['sha256']])
 
     def test_remote_encrypted_root_and_img3(self):
         # Exercise range ZIP -> sparse DEFLATE -> AES -> UDIF -> HFS, plus IMG3.

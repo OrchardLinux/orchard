@@ -27,8 +27,6 @@ import tomllib
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
-from orchard import kernel as kernels  # noqa: E402
-from orchard.build import cache_root  # noqa: E402
 from orchard.manifests import platform_for  # noqa: E402
 
 # Python 3.14, as in the recovery: zstd root images need compression.zstd.
@@ -47,15 +45,17 @@ def main():
     release = args.release.resolve()
     manifest = tomllib.loads((release / 'release.toml').read_text())
     platform = platform_for(manifest, args.board)
-    devicetree = kernels.layout(ROOT, args.board)[1] + '.dtb'
-    work = cache_root() / 'work/qemu-install' / manifest['distro']
+    series = subprocess.check_output([sys.executable, str(ROOT / 'kernel/series.py'), '--resolve', args.board], text=True)
+    devicetree = series.split()[1] + '.dtb'
+    cache = Path(os.environ.get('ORCHARD_CACHE_DIR') or Path(os.environ.get('XDG_CACHE_HOME', Path.home() / '.cache')) / 'orchard')
+    work = cache.expanduser().resolve() / 'work/qemu-install' / manifest['distro']
     if work.exists():
         shutil.rmtree(work)
     work.mkdir(parents=True)
     podman = ['podman', *(['--connection', args.connection] if args.connection else [])]
     if not args.connection and os.geteuid():
         podman.insert(0, 'sudo')
-    subprocess.run([*podman, 'run', '--rm', '--privileged', '-v', f'{ROOT / "src/orchard"}:/orchard:ro',
+    subprocess.run([*podman, 'run', '--rm', '--privileged', '-v', f'{ROOT}:/orchard:ro',
                     '-v', f'{release}:/release:ro', '-v', f'{HERE}:/tool:ro', '-v', f'{work}:/work', IMAGE, 'sh', '-c',
                     f'mount -t devtmpfs devtmpfs /dev && apk add -q {PACKAGES} >/dev/null && '
                     f'python3 /tool/inside.py {args.board} {platform} {devicetree}'], check=True)

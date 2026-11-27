@@ -1,5 +1,7 @@
 """Checked LwVM snapshots, from Shayne Legault's LwVM installer (shaynelegault/orchard#94).
 
+The header as a host plans it: what the USB receiver's tests give it and compare with.
+
 All offsets are bytes. UUIDs in LwVM descriptors use network byte order.
 """
 import hashlib

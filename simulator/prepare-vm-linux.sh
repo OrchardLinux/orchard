@@ -58,10 +58,10 @@ umask 077
 [ -f "$OUT/credentials" ] || python3 -c 'import secrets; print(f"password={secrets.token_urlsafe(9)}\npin=123456")' > "$OUT/credentials"
 umask 022
 KEYS=$(awk '{print $1" "$2}' "$OUT"/ssh-keys 2>/dev/null || true)
-PYTHONPATH="$ROOT/src" python3 - "$MOUNT" "$OUT/credentials" "$KEYS" <<'PY'
+PYTHONPATH="$ROOT/boot/initramfs/install" python3 - "$MOUNT" "$OUT/credentials" "$KEYS" <<'PY'
 import sys
 from pathlib import Path
-from orchard import install_device as device
+import install_device as device
 root, values = Path(sys.argv[1]), dict(line.split('=', 1) for line in Path(sys.argv[2]).read_text().split())
 account = {'user': 'tablet', 'password': True, 'pin': True, 'passwordless_sudo': True,
            'ssh_keys': [k for k in sys.argv[3].splitlines() if k.strip()]}

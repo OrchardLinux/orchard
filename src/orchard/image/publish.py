@@ -154,13 +154,6 @@ def publish(directories, tag, output, *, distro):
             else:
                 hosted_index.setdefault('releases', {})[root] = pinned
         (stage / 'index.toml').write_text(toml(hosted_index))
-        installers = [directory / 'orchard-install.pyz' for directory, _, _ in roots.values()
-                      if (directory / 'orchard-install.pyz').is_file()]
-        if installers:
-            # The installer carries the published index; its loaders are the local build's.
-            from ..installer import loaders_from, release as add_installer
-            loaders = loaders_from(installers[0], temporary)
-            add_installer(stage, loaders=loaders, installer_url=base + '/orchard-install.pyz')
         stage.rename(output)
     return output / 'index.toml'
 

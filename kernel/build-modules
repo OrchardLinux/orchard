@@ -2,7 +2,7 @@
 set -euo pipefail
 # Recipes need only Python 3.11+ and its standard library; Orchard passes its own.
 # Cache: this script's text is not part of the cached kernel's key. If a change
-# alters what it produces, raise KERNEL_PRODUCER in src/orchard/build.py.
+# alters what it produces, raise kernel-producer in producers/contract.toml.
 python=${ORCHARD_PYTHON:-python3}
 here=$(cd "$(dirname "$0")" && pwd)
 

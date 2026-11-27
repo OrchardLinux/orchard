@@ -113,40 +113,6 @@ root compatible names the device, and hands the framed initramfs to Linux
 unexpanded. Boot `linux.bin` like any m1n1 payload: through Pongo (`orchard
 run` does this), the m1n1 proxy, or an installed m1n1.
 
-## Lower-level Python functions
-
-The Python functions are separated by responsibility:
-
-- `orchard.build.prepare_kernel(hardware=None, cache=None, device='j71b')`:
-  build/reuse a coherent kernel/DTB/module bundle only. Defaults to the active
-  hardware package and normal shared cache; does not build loaders, Pongo or tools.
-  A distro-owned producer can consume this bundle without any distro setup or
-  assembly knowledge in CLI. Uses exactly the same kernel keys and artifacts as
-  `prepare_components`, including when called from a fresh hardware checkout.
-- `orchard.build.prepare_components(hardware, cache, ...)`: shared component
-  building and cache reuse. Invokes hardware-owned kernel/tool/loader producers;
-  does not compose RAM roots, install systems or access a device.
-- `orchard.ram.assemble_ram(hardware, output, *, kernel, busybox, loader,
-  pongo, init, ...)`: RAM-root composition and boot-payload assembly from explicit
-  components. Supports `files={destination: source}`, custom boot arguments,
-  hostname, device DTB filename and optional modules.
-- `orchard.ram.build_directory(directory, ...)`: composes directory content,
-  delegating component preparation to `orchard.build`.
-- `orchard.boot.boot_ram(output)`: verification, confirmation and tethered
-  upload through existing USB/Pongo transport.
-- `orchard.boot.run_directory(directory)`: CLI run operation.
-
-Cache and acquisition policy is CLI-owned (`sources.py`, `build.py`). CLI also
-owns module-SDK export and reuse (`kernel.py`, `kernel_sdk.py`). Hardware supplies
-unchanged kernel/config/patch, module, DTB, staging and toolchain recipes. No new
-hardware API, package version or hardware commit is needed for these workflows.
-The broader hardware/CLI boundary remains open; example content and build/run
-commands do not depend on where those internals eventually settle.
-
-The CLI does not supply a startup script. Callers and examples own `/init`.
-
-There is no required Orchard device agent, installer protocol or device API.
-
 ## Cache behavior
 
 The shared cache contains retained upstream Git objects and immutable input-keyed

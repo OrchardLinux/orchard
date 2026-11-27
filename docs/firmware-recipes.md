@@ -28,13 +28,7 @@ implements.
   it is read once and checked against its own input hash.
   An output nobody has made from the real inputs yet has `pending` (why) in
   place of `sha256`. Builds don't install it, and every input it reads must
-  be pinned. Whoever has the inputs measures it and pins the hash:
-
-  ```sh
-  python -c "from orchard import firmware
-  from orchard.progress import Clock, Progress
-  print(firmware.measure('<profile>', Clock(), Progress(), hardware='.'))"
-  ```
+  be pinned. Whoever has the inputs measures it and pins the hash.
 
 The host reads `ipsw` sources. The in-app installer reads `device` sources
 when a recipe lists them, and falls back to the IPSW when an input is
@@ -120,12 +114,10 @@ Then:
    module too ("BCM4355C0 Kristoff MUR MCC").
 3. Find the files with `ls` and save them with `get`.
 4. Write the inputs and outputs. Check the whole recipe against Apple's
-   server, into an empty cache:
+   server:
 
    ```sh
-   ORCHARD_HOME=$(mktemp -d) python -c "from orchard import firmware
-   from orchard.progress import Clock, Progress
-   print(firmware.ensure('<profile>', Clock(), Progress(), hardware='.'))"
+   bin/orchard fw build <profile> --type peripheral --out "$(mktemp -d)"
    ```
 
 If a step is missing from the CLI, add it there first (Steps below).

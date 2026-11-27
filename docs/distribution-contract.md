@@ -10,24 +10,24 @@ holds them to it.
 ## The snapshot
 
 Every command runs from an orchard snapshot `ORCHARD`: a checkout, the
-newest nightly's tooling (what the `orchard` launcher runs), or a release's
+newest nightly's data (what the `orchard` command builds from), or a release's
 `orchard-source.tar.gz` unpacked. Its Python modules run as
 `PYTHONPATH=$ORCHARD/src python3 -m orchard.NAME`; its data (device trees,
 recovery runtime, recipes) are files under `$ORCHARD`. A build that runs
 under `orchard build` gets `ORCHARD_CHECKOUT` set to the snapshot; a build
 without orchard takes it as an argument.
 
-Under orchard2, the Rust tool, the build also gets `ORCHARD_TOOL`, the path of
-that tool. The entry then resolves its inputs with `$ORCHARD_TOOL inputs`
-instead of `orchard.inputs`: the same arguments and document, with paths into
-orchard2's cache (`ORCHARD_CACHE`). Every other command runs from the snapshot.
-orchard2's document has `shared.m1n1` and `shared.pongo` for 32-bit platforms
-too; the entry passes them to `orchard.installer` (`--m1n1`, `--pongo`), which
-would otherwise build its own.
+Under `orchard build` (the `orchard` command, OrchardLinux/tools) the build
+also gets `ORCHARD_TOOL`, the path of that command. The entry then resolves its
+inputs with `$ORCHARD_TOOL inputs` instead of `orchard.inputs`: the same
+arguments and document, with paths into its cache (`ORCHARD_CACHE`), and the
+components it builds or downloads itself. Every other command runs from the
+snapshot. Its document has `shared.m1n1` and `shared.pongo` for 32-bit
+platforms too.
 
 `orchard build` passes a developer's checkouts the same way, as paths, and
 does nothing with them itself: `ORCHARD_KERNEL_TREE` (`--kernel-tree`, or
-`kernel-tree` in `orchard.local.toml`), which `orchard.inputs` builds the
+`kernel-tree` in `orchard.local.toml`), which `$ORCHARD_TOOL inputs` builds the
 kernels from, and `ORCHARD_PACKAGES` (`--packages`, or `packages`, else a
 `packages` checkout beside the distribution's; `packages = false`: none), a
 checkout of the Orchard package repository (OrchardLinux/packages). With
@@ -41,12 +41,11 @@ and installs them in place of `[orchard]`'s. Unset, both change nothing.
 
 | Command | Does | Files |
 |---|---|---|
-| `orchard.inputs --output FILE [--platform P …] [--kernel-dir P=DIR …] [--m1n1 FILE] [--pongo FILE] [--tools DIR] [--loader BOARD=FILE …] [--kernel-tree DIR]` (`ORCHARD_KERNEL_TREE` too) | resolves what the build takes finished | `FILE`: per platform its kernel bundle and boards (board → DTB), the shared m1n1, Pongo and static tools, orchard's revision, and under `produced` how each was got (built: its commands; reused from the cache; downloaded from a nightly: tag, asset, sha256); paths into orchard's cache. With 32-bit platforms (`--platform apple-armv7`): `"architecture": "arm"`, ARMv7 tools under `shared`, and per platform `loaders` (board → its Cascadia loader) instead of m1n1 and Pongo; one document never mixes architectures |
+| `orchard.inputs --output FILE [--platform P …] --kernel-dir P=DIR … --m1n1 FILE --pongo FILE --tools DIR [--loader BOARD=FILE …]` | writes down what the build takes finished, every component given (e.g. from a release's component bundles); `$ORCHARD_TOOL inputs` takes the same arguments, builds or downloads what is not given, and takes `--kernel-tree DIR` | `FILE`: per platform its kernel bundle and boards (board → DTB), the shared m1n1, Pongo and static tools, orchard's revision, and under `produced` how each was got (built: its commands; reused from the cache; downloaded from a nightly: tag, asset, sha256; empty when everything was given). With 32-bit platforms (`--platform apple-armv7`): `"architecture": "arm"`, ARMv7 tools under `shared`, and per platform `loaders` (board → its Cascadia loader) instead of m1n1 and Pongo; one document never mixes architectures |
 | `orchard.image.platform P --output DIR --kernel-dir BUNDLE --busybox FILE [--receipt FILE]` | the platform layer of installed systems | `DIR/platform-P.tar.gz`, its receipt |
 | `orchard.image.platforms_index DIR (--release TAG [--platform P …] \| --inputs FILE \| --kernels DIR --tools DIR --commit SHA) [--architecture arm64\|arm] [--loader BOARD=FILE …]` | what a build takes from orchard: every arm64 platform layer, Pongo, m1n1, `install-tools.tar.gz` (the installer's static programs, the USB receiver `orchard-install-usb` among them, plus its start script `run`, `udhcpd.conf`, and the finishing program `install_device.py` with the `boot-entries` script it runs), and `platforms.toml` listing them; from a published orchard build (`--release`, which `orchard.image.publish` then links instead of copying), or built here. For 32-bit roots (`--architecture arm`, or an inputs document of them): `platforms-armv7.toml` next to it, with the ARMv7 layers, `install-tools-armv7.tar.gz` and per board `cascadia-BOARD.bin` | `DIR/*` |
 | `orchard.image.root_image ROOT.tar.* --output DIR` | a root as the block image the installer writes; needs Podman, or root on a native build | `DIR/root.blocks.zst`, `DIR/root.map.json`, `DIR/root-image.json` (the manifest's `[root]`) |
 | `orchard.image.recovery --dtb FILE … --loader FILE [--logo FILE] --kernel FILE --modules-dir DIR --busybox --dropbear --dropbearkey --wpa-supplicant --wpa-cli --iw FILE --base FILE --base-receipt FILE --root-receipt FILE --output FILE [--verbose]` | a platform's RAM recovery | the image and `IMAGE.json` |
-| `orchard.installer release DIR [--installer-url URL] [--pongo FILE] [--m1n1 FILE]` | the installer of a release | `DIR/install.sh`, `DIR/orchard-install.pyz` |
 | `$ORCHARD/producers/install_script.py --name NAME --index URL --url URL --output FILE` (by path) | a release's `install.sh`: it installs the `orchard` command and runs `orchard install` for the release whose `index.toml` is `--index`; `--url` is where the script is published, `NAME` the distribution as people read it. Beside a local build's `index.toml` it installs that build | `FILE` |
 | `orchard.manifests FILE … [--verify-local]` | checks release manifests | exit status |
 | `orchard.image.publish --distro NAME --tag TAG --release-dir DIR [--release-dir DIR] --output DIR` | the hosted release; one `--release-dir` per root architecture ([two roots](#two-roots-in-one-release)) | `DIR` |
@@ -82,7 +81,6 @@ distribution builds each into its own release directory (each with its own
 `index.toml` and `release.toml`) and publishes both together:
 
 ```sh
-python3 -m orchard.installer release out/aarch64      # the installer, once
 python3 -m orchard.image.publish --distro NAME --tag TAG \
   --release-dir out/aarch64 --release-dir out/armv7 --output out/publication
 ```
@@ -106,7 +104,7 @@ bytes = 2710
 sha256 = "…"
 ```
 
-The installer and `orchard install` take the manifest of the attached board's
+`orchard install` takes the manifest of the attached board's
 root architecture: `armv7` for a board with a 32-bit chip (the `apple-armv7`
 platform), `aarch64` otherwise, falling back to `[release]`. An index of one
 release (`[release]` alone, as every release before this) serves whatever that
@@ -114,5 +112,4 @@ manifest covers. A board whose architecture has no root in the release gets an
 error saying so. The 64-bit root's files keep their names; a file of the other
 root whose name is already taken by a different file gets the architecture
 added (`release-armv7.toml`, `root-armv7.blocks.zst`); files orchard published
-are linked, not copied, as before. The installer's `orchard-install.pyz`
-covers the boards of both roots.
+are linked, not copied, as before.

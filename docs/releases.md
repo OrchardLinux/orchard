@@ -1,17 +1,11 @@
 # Releases
 
-Every distribution release carries its installer, `install.sh` and
-`orchard-install.pyz` (orchard's core, the release's index and the device data and
-loaders of its boards), made by `orchard.installer release` from the orchard
-release the distribution pins. Releases built before orchard 0.2 install with the
-released Orchard 0.1.10: the `requirements.txt` of the
-[cli releases](https://github.com/OrchardLinux/cli/releases) selects the paired
-CLI and hardware wheels. Those releases stay as they are.
+Every distribution release carries its `install.sh`, which installs the
+`orchard` command (OrchardLinux/tools) and runs `orchard install` for that
+release.
 
 This repository's releases (a `v*` tag, see [GitHub builds](ci.md)) publish the
-component bundles, the loaders `m1n1.bin` and `pongo.bin`, `orchard-core.pyz`
-(the core with every device, which a distribution's command-line installer
-leaves and updates), source archives,
+component bundles, the loaders `m1n1.bin` and `pongo.bin`, source archives,
 `SHA256SUMS` and the attestation bundle. They publish no program: the `orchard`
 command is OrchardLinux/tools' and builds from these recipes and data.
 

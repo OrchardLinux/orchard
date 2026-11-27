@@ -299,7 +299,7 @@ def files(bundle, platform, board_dtbs, *, busybox, hardware=None):
                                  f'/usr/share/wireplumber: {name}')
             result[name] = (path.read_bytes(), 0o755 if path.stat().st_mode & 0o111 else 0o644)
     # One implementation of the entries, for the installer and every later kernel update.
-    result['usr/lib/orchard/boot-entries'] = ((hardware / 'src/orchard/boot-entries').read_bytes(), 0o755)
+    result['usr/lib/orchard/boot-entries'] = ((hardware / 'boot/initramfs/install/boot-entries').read_bytes(), 0o755)
     description = {'schema': SCHEMA, 'platform': platform, 'kernel_release': release,
                    'boards': dict(sorted(board_dtbs.items()))}
     if described['arch'] != ROOT_ARCH:

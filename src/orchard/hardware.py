@@ -1,11 +1,8 @@
-"""The one way to read device data: descriptors, features, boot methods, firmware recipes, loaders.
+"""Device data as orchard's producers read it: descriptors, chips, firmware recipes.
 
-Nothing else opens devices/, methods.toml or features.toml. data_root says where
-they are; `root` selects a checkout's data, for builds, which have to match their
-own checkout rather than the newest catalog.
+data_root says where the data is; `root` selects another checkout's.
 """
 from functools import cache
-import json
 import os
 from pathlib import Path
 import re
@@ -14,34 +11,18 @@ import tomllib
 
 # The repository root: devices/, kernel/, boot/ and schemas/ sit beside src/.
 ROOT = Path(__file__).resolve().parents[2]
-# What this version of the code can do; data can name methods newer than this code.
-IMPLEMENTED_METHODS = frozenset({'checkm8-pongo'})
-
-
-def published():
-    """Whether this code is a published orchard (a nightly, a release, a core), not a checkout."""
-    from .cache import cache_root, shared_cache_root
-    return any(parent.resolve() in ROOT.parents for parent in (shared_cache_root() / 'tooling', cache_root() / 'core'))
 
 
 @cache
 def data_root():
-    """Where device data is: ORCHARD_DATA, a checkout's own files, else the published catalog."""
+    """Where device data is: ORCHARD_DATA, else this checkout's own files."""
     override = os.environ.get('ORCHARD_DATA')
     if override:
         path = Path(override).expanduser()
         if not (path / 'devices').is_dir():
             raise ValueError(f'ORCHARD_DATA has no devices/: {path}')
         return path
-    if not published():
-        return ROOT
-    from .catalog import current
-    latest = current()
-    if latest is not None:
-        return latest['path']
-    if (ROOT / 'devices').is_dir():  # a clone made offline still has the data of its own commit
-        return ROOT
-    raise ValueError('No device catalog yet: connect to the network once')
+    return ROOT
 
 
 # What a release ships for installers that read only the release (board-data.tar.gz).
@@ -57,12 +38,6 @@ def board_data_files(root=None):
         for item in (sorted(p for p in path.rglob('*') if p.is_file()) if path.is_dir() else [path]):
             files[item.relative_to(root).as_posix()] = item
     return files
-
-
-def data_revision():
-    """What this run's device data is, for a log or a report."""
-    path = data_root()
-    return path.name[:12] if path.parent.name == 'catalog' else str(path)
 
 
 def device_path(profile, root=None):
@@ -91,51 +66,8 @@ def profiles(root=None):
                   if not path.is_symlink() and not path.parent.is_symlink())
 
 
-def features():
-    """Feature names and display labels for device.toml [features], in display order."""
-    return tomllib.loads((data_root() / 'features.toml').read_text())
-
-
-def methods():
-    """Boot methods a device.toml can list, and what each needs (methods.toml)."""
-    return tomllib.loads((data_root() / 'methods.toml').read_text())
-
-
 def device(profile, root=None):
     return tomllib.loads(device_path(profile, root).read_text())
-
-
-def install_blockers(profile, described=None):
-    """Why this Orchard can't install on a board: [] when it can.
-
-    Installation follows from what a board has, so experimental boards get it
-    as soon as it could work, even if other features don't work yet.
-    """
-    described = device(profile) if described is None else described
-    from . import launcher
-    blockers = []
-    if 'kernel' not in described:
-        blockers.append('it has no kernel or device tree yet')
-    listed = described.get('boot', {}).get('methods', [])
-    if not any(_method_usable(profile, name) for name in listed):
-        if any(launcher.delivers(name) and _method_listed(profile, name) for name in listed) and launcher.find() is None:
-            blockers.append(f'it starts through {launcher.NAME}, which is not installed')
-        else:
-            blockers.append('this Orchard has no boot method for it yet')
-    if 'firmware' not in described:
-        blockers.append('it has no firmware recipe yet')
-    if described.get('features', {}).get('storage_write', 'missing') == 'missing':
-        blockers.append('its internal storage cannot be written yet')
-    return blockers
-
-
-def has_recovery(described, root=None):
-    """Whether Orchard's recovery runs on a board: it follows from the board's kernel.
-
-    Recovery is built per platform with every board's device tree, on the arm64 root
-    distributions build, so 32-bit boards have none until a root of their own exists.
-    """
-    return 'kernel' in described and chip_architecture(described, root) == 'arm64'
 
 
 def chip_architecture(described, root=None):
@@ -151,24 +83,6 @@ def chip_architecture(described, root=None):
 def root_architecture(described, root=None):
     """The architecture of the root a board runs, as a distribution index names it: armv7 on a 32-bit chip, else aarch64."""
     return 'armv7' if chip_architecture(described, root) == 'arm' else 'aarch64'
-
-
-def method_implemented(name):
-    """Whether this Orchard can run boot method NAME: its own code, or orchard-launcher when installed."""
-    from . import launcher
-    return name in IMPLEMENTED_METHODS or (launcher.delivers(name) and launcher.find() is not None)
-
-
-def _method_usable(profile, name):
-    return method_implemented(name) and _method_listed(profile, name)
-
-
-def _method_listed(profile, name):
-    """Whether the board has what method NAME needs: its boot.json recipe, where the method takes one."""
-    if not methods()[name]['boot_json']:
-        return True
-    recipe = device_path(profile).parent / 'boot.json'
-    return recipe.is_file() and name in json.loads(recipe.read_text())['methods']
 
 
 def firmware_path(profile, root=None):
@@ -187,24 +101,6 @@ def firmware_path(profile, root=None):
     if not path.is_file():
         raise ValueError('Firmware recipe resource is missing')
     return path
-
-
-def loader(profile):
-    """The prebuilt Pongo and storage-capable m1n1 that start this device, if packaged.
-
-    `orchard launch` needs only these two: m1n1 then reads the device's boot
-    partition (docs/boot-contract.md), so launching depends on no distro and
-    on nothing an install left on the host. Both are built once for every
-    Apple device (boot/m1n1/build apple, boot/quiet/build-pongo.py); the
-    published wheel carries them in loaders/, a source checkout has none and
-    the CLI builds them instead. Returns {'pongo': Path, 'm1n1': Path} or None.
-    """
-    device_path(profile)
-    root = ROOT / 'loaders'
-    files = {'pongo': root / 'pongo.bin', 'm1n1': root / 'm1n1.bin'}
-    if all(path.is_file() and not path.is_symlink() for path in files.values()):
-        return files
-    return None
 
 
 def revision():

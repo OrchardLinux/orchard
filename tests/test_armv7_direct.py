@@ -3,13 +3,10 @@
 The same platform-layer kernel, initrd and install add-on; what orchard publishes for 32-bit
 roots sits next to the arm64 index, which stays as it was. No device is touched.
 """
-import copy
 import gzip
 import hashlib
 import io
-import json
 from pathlib import Path
-import struct
 import sys
 import tarfile
 import tempfile
@@ -17,15 +14,15 @@ import tomllib
 import unittest
 from unittest import mock
 
-from orchard import inputs, install_direct as direct, releases
+from orchard import inputs
 from orchard.hardware import ROOT
 from orchard.image import cascadia, platform, platforms_index
 
 sys.path.insert(0, str(ROOT / 'tools'))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from validate_manifest import ManifestError, validate  # noqa: E402
-from test_cascadia_loader import kernel, loader, tree  # noqa: E402
-from test_install_direct import layer as arm64_layer, manifest as arm64_manifest, receipt  # noqa: E402
+from test_cascadia_loader import kernel  # noqa: E402
+from test_install_direct import manifest as arm64_manifest, receipt  # noqa: E402
 
 P105 = cascadia.profile(ROOT / 'devices/p105/cascadia.toml')
 
@@ -53,69 +50,6 @@ def armv7_manifest():
     return document
 
 
-class Payload(unittest.TestCase):
-    def setUp(self):
-        work = tempfile.TemporaryDirectory()
-        self.addCleanup(work.cleanup)
-        self.work = Path(work.name)
-        self.dtb = cascadia.write_fdt(tree())
-        armv7_layer(self.work / 'layer', self.dtb)
-        (self.work / 'loader').write_bytes(loader(P105))
-        self.adapter = mock.Mock(PROFILE='p105', DEVICETREE='s5l8942x-p105.dtb', NAME='iPad mini 1 (Wi-Fi)')
-        self.assets = {'cascadia': self.work / 'loader', 'layer': self.work / 'layer', 'install_tools': self.work / 'tools'}
-
-    def test_the_bundle_is_loader_kernel_tree_then_initrd_and_add_on(self):
-        image = direct.boot_image(self.adapter, self.assets, b'ADD-ON')
-        config = cascadia.configuration(image)
-        self.assertEqual(image[0x8000:0x8000 + len(kernel())], kernel())
-        # One archive, as on 64-bit: the initrd, padded to four bytes, then the add-on.
-        self.assertEqual(image[config['initrd_offset']:], b'INITRD\0\0ADD-ON')
-        self.assertEqual(config['initrd_address'], 0x88000000)
-        tree_bytes = image[config['dtb_offset']:config['dtb_offset'] + config['dtb_size']]
-        chosen = cascadia.read_fdt(tree_bytes)[0]['children'][0]['properties']
-        self.assertEqual(chosen['bootargs'], b'old\0')    # the board's own
-        self.assertEqual(struct.unpack('>I', chosen['linux,initrd-start'])[0], 0x88000000)
-        self.assertEqual(struct.unpack('>I', chosen['linux,initrd-end'])[0], 0x88000000 + 14)
-
-    def test_the_loader_must_be_built_for_the_boards_addresses(self):
-        (self.work / 'loader').write_bytes(loader(dict(P105, initrd_address=0x98000000, initrd_limit=0x9e000000)))
-        with self.assertRaisesRegex(ValueError, 'differs from the handoff profile'):
-            direct.boot_image(self.adapter, self.assets, b'ADD-ON')
-
-    def test_64_bit_boards_get_exactly_m1n1s_payload(self):
-        (self.work / 'm1n1').write_bytes(b'M1N1')
-        arm64_layer(self.work / 'arm64-layer')
-        adapter = mock.Mock(PROFILE='j71b', DEVICETREE='t8010-j71b.dtb')
-        assets = {'m1n1': self.work / 'm1n1', 'layer': self.work / 'arm64-layer', 'pongo': self.work / 'pongo'}
-        self.assertEqual(direct.boot_image(adapter, assets, b'ADD-ON'),
-                         direct.payload(self.work / 'm1n1', None, self.work / 'arm64-layer', 't8010-j71b.dtb', b'ADD-ON'))
-        direct.start(adapter, {}, self.work / 'image', assets, None)
-        adapter.boot_payload.assert_called_once_with({}, self.work / 'image', self.work / 'pongo', None)
-
-    def test_a_cascadia_bundle_goes_to_orchard_launcher(self):
-        self.adapter.LAUNCHER_CHAIN = 'recovery-autogo'
-        with mock.patch.dict('os.environ', {'ORCHARD_LAUNCHER': str(self.work / 'absent')}), \
-                self.assertRaisesRegex(RuntimeError, 'needs orchard-launcher, which is not installed'):
-            direct.start(self.adapter, {}, self.work / 'image', self.assets, None)
-        with mock.patch('orchard.launcher.load') as load, \
-                mock.patch('orchard.apple.boot.wait_mode', return_value={'boot_id': 'B'}) as wait:
-            self.assertEqual(direct.start(self.adapter, {'ecid': 1}, self.work / 'image', self.assets, None), {'boot_id': 'B'})
-        self.assertEqual((load.call_args.args, load.call_args.kwargs['chain']), ((self.work / 'image',), 'recovery-autogo'))
-        self.assertEqual(wait.call_args.args[:2], ({'ecid': 1}, 'install'))
-        self.adapter.boot_payload.assert_not_called()
-
-    def test_the_devices_serial_number_goes_into_the_tree(self):
-        image = direct.boot_image(self.adapter, self.assets, b'ADD-ON', {'serial_number': 'F4KESER1AL00'})
-        config = cascadia.configuration(image)
-        root = cascadia.read_fdt(image[config['dtb_offset']:config['dtb_offset'] + config['dtb_size']])[0]
-        self.assertEqual(root['properties']['serial-number'], b'F4KESER1AL00\0')
-        self.assertEqual(image[config['initrd_offset']:], b'INITRD\0\0ADD-ON')
-        # No serial known: the tree is the board's, byte for byte.
-        plain = direct.boot_image(self.adapter, self.assets, b'ADD-ON', {})
-        self.assertEqual(plain, direct.boot_image(self.adapter, self.assets, b'ADD-ON'))
-        self.assertNotIn(b'serial-number', plain)
-
-
 class Release(unittest.TestCase):
     def test_a_32_bit_release_names_its_boards_loaders_instead_of_m1n1(self):
         validate(armv7_manifest())
@@ -127,20 +61,6 @@ class Release(unittest.TestCase):
         del neither['cascadia']
         with self.assertRaises(ManifestError):
             validate(neither)
-
-    def test_a_32_bit_boot_needs_the_layer_the_tools_and_its_boards_loader(self):
-        _, boot = releases.receipts_for(armv7_manifest(), 'p105', 'boot')
-        self.assertEqual(boot, {'layer': armv7_manifest()['platforms']['apple-armv7']['layer'],
-                                'cascadia': receipt('cascadia-p105.bin'),
-                                'install_tools': receipt('install-tools-armv7.tar.gz')})
-        _, install = releases.receipts_for(armv7_manifest(), 'p105', 'install')
-        self.assertEqual(sorted(install), ['cascadia', 'install_tools', 'layer', 'map', 'root'])
-        with self.assertRaisesRegex(ValueError, 'no Cascadia loader for j1'):
-            releases.receipts_for(armv7_manifest(), 'j1', 'boot')
-
-    def test_64_bit_releases_resolve_as_before(self):
-        _, boot = releases.receipts_for(arm64_manifest(), 'j71b', 'boot')
-        self.assertEqual(sorted(boot), ['install_tools', 'layer', 'logo', 'm1n1', 'pongo'])
 
 
 class Index(unittest.TestCase):
@@ -202,14 +122,8 @@ class Inputs(unittest.TestCase):
         (self.work / 'loader.bin').write_bytes(b'LOADER')
 
     def test_the_32_bit_root_gets_its_tools_kernel_and_loaders_and_no_m1n1(self):
-        with mock.patch('orchard.build.prepare_shared') as shared, \
-                mock.patch('orchard.build.prepare_payload_loader') as built_loader, \
-                mock.patch('orchard.build.prepare_tools') as built_tools, \
-                mock.patch('orchard.image.platform.kernel') as built_kernel:
-            document = inputs.resolve(['apple-armv7'], {'apple-armv7': self.work}, shared={'tools': self.tools},
-                                      loaders={'p105': self.work / 'loader.bin'})
-        for producer in (shared, built_loader, built_tools, built_kernel):
-            producer.assert_not_called()
+        document = inputs.resolve(['apple-armv7'], {'apple-armv7': self.work}, shared={'tools': self.tools},
+                                  loaders={'p105': self.work / 'loader.bin'})
         self.assertEqual(document['architecture'], 'arm')
         row = document['platforms']['apple-armv7']
         self.assertEqual(row['boards'], platform.boards('apple-armv7'))
@@ -224,6 +138,10 @@ class Inputs(unittest.TestCase):
             inputs.resolve(['apple-armv7'], shared={'m1n1': self.work / 'm1n1'})
         with self.assertRaisesRegex(ValueError, 'for ARMv7'):
             inputs.resolve(['apple-16k'], loaders={'p105': self.work / 'loader.bin'})
+
+    def test_a_board_with_a_profile_needs_its_loader(self):
+        with self.assertRaisesRegex(ValueError, '--loader p105=FILE is not given'):
+            inputs.resolve(['apple-armv7'], {'apple-armv7': self.work}, shared={'tools': self.tools})
 
 
 class Initrd(unittest.TestCase):

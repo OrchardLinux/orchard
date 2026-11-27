@@ -35,8 +35,8 @@ through the terminal before rebooting; they live only in RAM.
 - Edit `init` to change device startup.
 - Edit `rootfs/usr/bin/charger-test` for the experiment; retain its executable bit.
 - Add files under `rootfs/` at the paths where they should appear on the device.
-- Host tooling lives in `src/orchard/`: `build.py` builds/caches components,
-  `ram.py` composes RAM payloads, and `boot.py` confirms/uploads them.
+- The host side is the `orchard` command (OrchardLinux/tools): it builds and
+  caches components, composes the RAM payload and uploads it.
 - Kernel/driver changes are commits in OrchardLinux/linux (build a tree of
   your own with `--kernel-tree`) or modules in `kernel/modules/`.
 
@@ -75,11 +75,3 @@ This is a read-only observation baseline, not the advanced charging research.
 Loading a driver can itself mutate hardware. Review replacement experiments and
 obtain explicit authorization for elevated current, source swaps or suspend tests.
 RAM boot does not mean kernel initialization has no hardware side effects.
-
-## Offline tests
-
-```sh
-orchard python -m unittest discover -s tests -p test_ram.py -v
-```
-
-Tests use synthetic inputs and mocked USB, not the iPad.

@@ -14,12 +14,13 @@ Changes are frequent: many commits a day across orchard and the distributions, m
 
 ## Repositories (done)
 
-- **[OrchardLinux/orchard](https://github.com/OrchardLinux/orchard)**: hardware support and the `orchard` tool in one repository (formerly `hardware`, with `cli` merged in as a subtree, its commit IDs unchanged; `cli` is archived). A device change carries its descriptor, firmware recipe, converter steps, kernel patches and tests in one pull request.
+- **[OrchardLinux/orchard](https://github.com/OrchardLinux/orchard)**: hardware support: device data, recipes and producers (formerly `hardware`, with `cli` merged in as a subtree, its commit IDs unchanged; `cli` is archived).
+- **[OrchardLinux/tools](https://github.com/OrchardLinux/tools)**: the `orchard` command and the graphical installer, which read orchard as their data.
 - **omarchy-a** and **minimal-linux**: the two maintained distributions.
 
 Inside orchard, code is split by where it runs and how it is used:
 
-- `src/orchard/`: all Python imported on the host, one package.
+- `src/orchard/`: the producers and release checks a distribution's build runs as `python -m orchard.NAME` ([distribution contract](distribution-contract.md)), one package.
 - `devices/`, `schemas/`, `features.toml`: data.
 - `kernel/`, `boot/`: recipes, standalone programs. They run `producers/buildenv.py` by path and need only Python 3.11 and its standard library.
 - `producers/`: the standalone scripts recipes and distributions run by path (`buildenv.py`, `initramfs.py`, `assemble.py`, `cascadia.py`): standard library only, no orchard package. Their old paths in `src/orchard/` are small files that run them.
@@ -51,13 +52,6 @@ it builds from:
   data, called by its path (`~/src/orchard/bin/orchard build …`), from any
   directory: that is how to work on orchard itself, in a worktree per branch
   (`git worktree add ../orchard-gpu -b gpu-a10`).
-
-The Python command line is still in `src/orchard` and runs as
-`bin/orchard python -m orchard …`. A distribution's command-line installer is
-built from it (`python -m orchard.installer release`) and leaves its core as
-the user's `orchard`; for development nothing starts it any more, and
-`tools/launcher`, which ran it from the newest nightly, only names the
-install line.
 
 `bin/orchard python ARGS` runs Python in the checkout's environment. An `orchard = "PATH"` line in `orchard.local.toml`, which used to choose the checkout, is refused with what to use instead.
 
@@ -102,7 +96,7 @@ Not used: Docker/BuildKit layers are linear; Nix would rebuild every patch varia
 
 ## Python (done)
 
-Recipes run `$ORCHARD_PYTHON` (default `python3`), which `orchard` sets to its own interpreter. Python 3.11 is the minimum; CI tests 3.11 and 3.14.
+Recipes run `$ORCHARD_PYTHON` (default `python3`), which `orchard` sets to the interpreter it found. Python 3.11 is the minimum; CI tests 3.11 and 3.14.
 
 ## Next: distributions as projects, the device layer and the installer
 
@@ -120,39 +114,18 @@ board:
   pins, and records the build in `out/releases/latest.json`. `orchard run`
   builds, then boots that release's recovery for the attached board from RAM,
   installing nothing; `orchard install` without a source installs the last build.
-  Entries keep their parts with `orchard.distro.component` (keyed by their files
-  under `out/components/`) and take Pongo and the recovery tools from
-  `orchard.build.prepare_shared`; the kernels come from the platform layer as before.
+  Entries key their own parts by their files under `out/components/` and take
+  the kernels, Pongo and the static tools from the inputs document
+  ([distribution contract](distribution-contract.md)).
 - **The installer and the user's orchard,** below.
 
 ## The installer and the user's orchard
 
-Done; `src/orchard/installer.py` and `src/orchard/user.py`.
-
-- **Core:** the part of `src/orchard` that install and launch need (everything
-  but the development modules `installer.DEVELOPMENT`: building kernels, payloads
-  and distributions). Standard library only; `tests/test_core.py` checks every
-  import and imports every module without site-packages.
-- **Installer per distribution release:** `orchard.installer release DIR` adds
-  `orchard-install.pyz` (core, the release's `index.toml` and the `release.toml`
-  it pins, the device data of the release's boards, Pongo and the storage-capable
-  m1n1) and `install.sh` to a release directory. `install.sh` downloads a
-  hash-pinned standalone Python 3.14 into the store (`installer.PYTHON`) and the
-  zipapp (`--installer-url`, or the one next to it), checks both by SHA-256 and runs
-  `install`, prompting on the terminal even when piped from curl. No system
-  Python, no uv. The zipapp unpacks once into `STORE/core/VERSION-HASH`.
-- **The user's `orchard`:** a distribution's command-line installer
-  (`python -m orchard.installer release`, the Python one) still leaves
-  `STORE/core/current.json` and `~/.local/bin/orchard`, a launcher of the core
-  with `install`, `launch`, `devices` and `update`; its `update` installs the
-  latest orchard release's `orchard-core.pyz`. OrchardLinux/tools'
-  `install.sh` puts the Rust command in the same place.
-- **State:** the store and the build cache record their layout version
-  (`cache.STATE_VERSION`, `state.json`); an orchard that finds a newer one refuses
-  to touch it.
-- **Validation:** jsonschema is the `validate` extra and a development
-  dependency. `python -m orchard.manifests` and the tests validate against the
-  schemas; release CI installs `.[validate]`. The core checks what it relies on.
+The `orchard` command is one program, from OrchardLinux/tools, installed with
+its `install.sh`; a distribution release's `install.sh` installs it and runs
+`orchard install` for that release. jsonschema is the `validate` extra here and
+a development dependency: `python -m orchard.manifests` and the tests validate
+against the schemas; release CI installs `.[validate]`.
 
 ## Backlog
 

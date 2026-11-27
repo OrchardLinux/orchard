@@ -65,10 +65,8 @@ INSTALL_TOOLS = ('orchard-write', 'orchard-install-usb', 'dropbear', 'resize2fs'
 # receiver runs inside the new root with the boot-entries script it calls, packed beside
 # the tools so an installer that only has the release can build the add-on.
 INSTALL_FILES = ROOT / 'boot/initramfs/install'
-INSTALL_SOURCES = {'run': INSTALL_FILES / 'run', 'udhcpd.conf': INSTALL_FILES / 'udhcpd.conf',
-                   'install_device.py': ROOT / 'src/orchard/install_device.py',
-                   'boot-entries': ROOT / 'src/orchard/boot-entries'}
-INSTALL_DATA = tuple(INSTALL_SOURCES)
+INSTALL_DATA = ('run', 'udhcpd.conf', 'install_device.py', 'boot-entries')
+INSTALL_SOURCES = {name: INSTALL_FILES / name for name in INSTALL_DATA}
 LOADERS = ('pongo.bin', 'm1n1.bin')
 REPOSITORY = 'OrchardLinux/orchard'
 # The index of each root architecture (orchard's kernel ARCH names).

@@ -1,6 +1,6 @@
 # Install boot, sourced by orchard's initrd after its modules load. BusyBox and the tools beside this
 # file are all there is here. A host drives the install over raw USB through orchard-install-usb
-# (docs/install-protocol.md), or over SSH (src/orchard/install_direct.py, the Python CLI).
+# (docs/install-protocol.md), or over SSH.
 # Serial and SSH come up whatever happens later. Setting root hands back to the normal boot.
 board=$(tr '\000' '\n' < /proc/device-tree/compatible | head -1)
 mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run

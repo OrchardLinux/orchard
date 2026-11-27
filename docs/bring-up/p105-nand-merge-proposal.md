@@ -123,7 +123,7 @@ ports below.
 Not ported: the command-line write gates (the installer is the gate), the
 in-driver LwVM parser (block/partitions/lwvm.c already does it; Cascadia's
 `nand-volume` resizing belongs with the installer's LwVM writer in
-`src/orchard/lwvm.py`), and `apple_ppn` as a second controller driver.
+`tests/lwvm.py`), and `apple_ppn` as a second controller driver.
 
 ## What stays from Orchard's side (authored by Shayne Legault)
 
