@@ -97,6 +97,10 @@ is missing or empty.
 
 ### Building
 
+- The install receiver (`orchard-install-usb`) reads the LwVM disks of the
+  32-bit boards and adds a boot partition and a root to their table, from a
+  header the installer computes and the receiver checks
+  (docs/install-protocol.md). Not run on a device.
 - `orchard` is one program now: the Rust command line of OrchardLinux/tools,
   installed with its `install.sh` (`./setup` runs it) and kept current with
   `orchard update`. The shell launcher that ran the Python tool from the

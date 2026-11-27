@@ -13,6 +13,7 @@ import socket
 import stat
 import struct
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -31,6 +32,8 @@ BLOCK = 4096
 BLOCKS = 4 << 20        # a 16 GiB disk
 APFS = '7c3457ef-0000-11aa-aa11-00306543ecac'
 ECID = 0x1a2b3c4d5e6f
+BOOT_ID = 'b0070000-2222-4333-8444-555555555555'
+ROOT_ID = '66666666-7777-4888-8999-aaaaaaaaaaaa'
 
 # What the receiver runs, as the test needs it: each logs its call to DIR/calls.
 MOCKS = {
@@ -494,6 +497,134 @@ class WrongDevice(Receiver):
         info = self.ok(self.link.request(INFO))
         self.assertEqual((info['phase'], info['ecid'], info['error']['code']), ('failed', '999', 'wrong-device'))
         self.refused(self.link.request(INSPECT), 'wrong-device')
+
+
+class Lwvm(Receiver):
+    """An LwVM disk (32-bit boards): the header goes to the host as it is, and a plan's new header is
+    written only where it adds the planned entries over free chunks. Synthetic headers; no device."""
+    def setUp(self):
+        super().setUp()
+        sys.path.insert(0, str(ROOT / 'tests'))
+        from test_armv7_install import CHUNK, MEDIA
+        from test_armv7_install import header as make
+        from test_lwvm_free import SHRUNK
+        from orchard import lwvm
+        self.lwvm, self.chunk, self.media = lwvm, CHUNK, MEDIA
+        self.header = make(SHRUNK)
+        self.write(self.header)
+        # What the kernel made of it: its two partitions, in 512-byte sectors.
+        snapshot = lwvm.parse(self.header, self.header, MEDIA)
+        (self.dir / 'partitions').write_text(''.join(
+            f'{p["number"]} {p["extents"][0]["physical"] // 512} {p["bytes"] // 512}\n' for p in snapshot['partitions']))
+
+    def write(self, header):
+        with open(self.disk, 'wb') as disk:
+            disk.truncate(self.media)
+            disk.write(header)
+            disk.seek(self.chunk - 4096)
+            disk.write(header)
+
+    def copies(self):
+        with open(self.disk, 'rb') as disk:
+            primary = disk.read(4096)
+            disk.seek(self.chunk - 4096)
+            return primary, disk.read(4096)
+
+    def plan(self, header, *, boot=True, **changes):
+        """A plan for a boot entry over the first free chunks and a root over the rest."""
+        first, count = self.lwvm.free_space(self.header, self.lwvm.parse(self.header, self.header))[0]
+        sectors = self.chunk // BLOCK
+        image = {'bytes': len(self.image), 'sha256': hashlib.sha256(self.image).hexdigest(),
+                 'expanded_bytes': 1 << 30, 'map': self.root_map}
+        made = {'version': 2,
+                'disk': {'path': str(self.disk), 'sector': BLOCK, 'table': 'lwvm',
+                         'table_sha256': hashlib.sha256(self.header).hexdigest(), 'header': header.hex()},
+                'remove': None,
+                'boot': {'create': True, 'number': 3, 'start': first * sectors, 'blocks': 8 * sectors,
+                         'partuuid': BOOT_ID, 'fs_uuid': '1A2B3C4D'} if boot else None,
+                'root': {'create': True, 'number': 4 if boot else 3, 'start': (first + (8 if boot else 0)) * sectors,
+                         'blocks': (count - (8 if boot else 0)) * sectors, 'partuuid': ROOT_ID,
+                         'fs_uuid': '55555555-6666-4777-8888-999999999999', 'fs': 'ext4', 'label': 'minimal'},
+                'image': image,
+                'layer': {'path': '/run/orchard/platform.tar.gz', 'bytes': len(self.layer),
+                          'sha256': hashlib.sha256(self.layer).hexdigest(), 'expanded_bytes': 1 << 28},
+                'entry': {'id': 'minimal', 'title': 'Minimal', 'options': 'rootwait', 'devicetree': 's5l8942x-p105.dtb'},
+                'firmware': None, 'account': None}
+        made['disk'].update(changes)
+        return made
+
+    def added(self, boot=True):
+        """The header with the plan's entries, as the host computes it."""
+        first, count = self.lwvm.free_space(self.header, self.lwvm.parse(self.header, self.header))[0]
+        header = self.header
+        if boot:
+            header, _ = self.lwvm.allocate_free(header, header, BOOT_ID, first, 8)
+            first, count = first + 8, count - 8
+        header, _ = self.lwvm.allocate_free(header, header, ROOT_ID, first, count)
+        return header
+
+    def test_inspect_hands_the_header_and_the_kernels_partitions_to_the_host(self):
+        layout = self.ok(self.link.request(INSPECT))
+        self.assertEqual(layout['disk']['table'], 'lwvm')
+        self.assertEqual(bytes.fromhex(layout['disk']['header']), self.header)
+        self.assertEqual(layout['disk']['table_sha256'], hashlib.sha256(self.header).hexdigest())
+        self.assertEqual((layout['disk']['bytes'], layout['disk']['chunk_bytes']), (self.media, self.chunk))
+        self.assertEqual([p['number'] for p in layout['kernel']], [1, 2])
+
+    def test_a_plan_with_new_entries_writes_the_hosts_header_to_both_copies(self):
+        header = self.added()
+        self.put_all()
+        nodes = self.ok(self.link.request(PLAN, json.dumps(self.plan(header)).encode()))
+        self.assertEqual(self.copies(), (header, header))
+        self.assertTrue(nodes['root'].endswith('disk4') and nodes['boot'].endswith('disk3'), nodes)
+        # The boot partition got its FAT32 filesystem, at its chunks.
+        with open(self.disk, 'rb') as disk:
+            disk.seek(self.plan(header)['boot']['start'] * BLOCK)
+            self.assertEqual(disk.read(512)[82:90], b'FAT32   ')
+        kept = json.loads((self.dir / 'run/plan.json').read_text())
+        self.assertEqual(len(kept['present']), 4)
+
+    def test_a_root_alone_needs_no_boot_partition(self):
+        header = self.added(boot=False)
+        self.put_all()
+        nodes = self.ok(self.link.request(PLAN, json.dumps(self.plan(header, boot=False)).encode()))
+        self.assertEqual((nodes['root'].endswith('disk3'), nodes['boot']), (True, ''))
+        self.assertEqual(self.copies(), (header, header))
+
+    def test_a_header_that_touches_what_is_there_is_refused_and_nothing_is_written(self):
+        good = self.added()
+        cases = {}
+        # Another partition's range.
+        moved = bytearray(good)
+        moved[0x200 + 40] ^= 0x10
+        cases['an existing entry changed'] = moved
+        # A chunk that belongs to Data handed to the new root.
+        taken = bytearray(good)
+        struct.pack_into('<H', taken, 0x800 + 30 * 2, 3 << 12 | 0)
+        cases['a taken chunk given away'] = taken
+        for name, header in cases.items():
+            with self.subTest(name=name):
+                struct.pack_into('<I', header, 0x2c, 0)
+                struct.pack_into('<I', header, 0x2c, zlib.crc32(bytes(header)))
+                self.refused(self.link.request(PLAN, json.dumps(self.plan(bytes(header))).encode()), 'plan-mismatch')
+                self.assertEqual(self.copies(), (self.header, self.header))
+        with self.subTest(name='a header with a wrong checksum'):
+            torn = bytearray(good)
+            torn[0x900] ^= 1
+            self.refused(self.link.request(PLAN, json.dumps(self.plan(bytes(torn))).encode()), 'plan-mismatch')
+            self.assertEqual(self.copies(), (self.header, self.header))
+
+    def test_a_plan_for_another_table_is_layout_changed(self):
+        self.refused(self.link.request(PLAN, json.dumps(self.plan(self.added(), table_sha256='0' * 64)).encode()),
+                     'layout-changed')
+        self.assertEqual(self.copies(), (self.header, self.header))
+
+    def test_copies_that_disagree_stop_inspect_and_plan(self):
+        with open(self.disk, 'r+b') as disk:
+            disk.seek(self.chunk - 4096 + 0x300)
+            disk.write(b'\x01')
+        self.refused(self.link.request(INSPECT), 'disk')
+        self.refused(self.link.request(PLAN, json.dumps(self.plan(self.added())).encode()), 'disk')
 
 
 del Receiver
