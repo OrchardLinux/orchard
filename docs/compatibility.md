@@ -26,8 +26,8 @@ Every device Orchard installs on. ✅ works · ❌ doesn't work yet · – no su
 | iPad mini 3 (Wi-Fi) | A7 | 🤔 | ❌ | 🤔 | ❌ | ❌ | 🤔 | 🤔 | 🤔 | ❌ | – |
 | iPhone 5s (GSM) | A7 | 🤔 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
 | iPhone 5s (Global) | A7 | 🤔 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
-| iPad mini 4 (Cellular) | A8 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
-| iPad mini 4 (Wi-Fi) | A8 | 🤔 | 🤔 | 🤔 | ✅ | ❌ | ❌ | ❌ | 🤔 | ❌ | [tcballard](https://github.com/tcballard) |
+| iPad mini 4 (Cellular) | A8 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | ❌ | 🤔 | 🤔 | ❌ | – |
+| iPad mini 4 (Wi-Fi) | A8 | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ | [tcballard](https://github.com/tcballard) |
 | iPhone 6 | A8 | 🤔 | 🤔 | ✅ | 🤔 | 🤔 | ❌ | ❌ | 🤔 | ❌ | [amethyst-oak](https://github.com/amethyst-oak), [jeroentrappers](https://github.com/jeroentrappers) |
 | iPhone 6+ | A8 | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | ❌ | ❌ | 🤔 | ❌ | – |
 | iPod touch 6 | A8 | ✅ | ✅ | ✅ | ✅ | 🤔 | ❌ | ✅ | 🤔 | ❌ | [brkosebay](https://github.com/brkosebay) |
@@ -208,8 +208,8 @@ Boards Orchard builds for. States: working, untested, missing, none (no such har
 | `j87m` | untested | untested | untested | missing | untested | untested | missing | missing | untested | missing | untested | untested | missing | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | missing | untested | missing | missing | missing |
 | `n51` | untested | missing | untested | missing | missing | untested | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `n53` | untested | missing | untested | missing | missing | untested | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `j96` | working | untested | working | untested | untested | working | missing | missing | missing | missing | untested | untested | working | missing | missing | none | working | missing | missing | untested | untested | working | working | missing | missing | missing | missing | missing |
-| `j97` | untested | untested | untested | untested | untested | untested | missing | missing | missing | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `j96` | working | working | working | working | working | working | missing | missing | missing | missing | working | working | working | missing | missing | none | working | working | untested | working | working | working | working | missing | missing | missing | missing | missing |
+| `j97` | untested | untested | untested | untested | untested | untested | missing | missing | missing | missing | untested | untested | untested | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `n102` | working | untested | working | working | working | working | missing | missing | missing | none | working | working | working | untested | untested | none | working | working | working | untested | untested | working | untested | missing | missing | missing | missing | missing |
 | `n56` | untested | untested | untested | untested | missing | untested | missing | missing | missing | missing | untested | untested | untested | untested | untested | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `n61` | working | untested | untested | untested | working | untested | missing | missing | missing | missing | untested | untested | untested | untested | untested | missing | untested | missing | missing | untested | untested | working | untested | missing | missing | missing | missing | missing |
@@ -317,6 +317,8 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `j87` | Wi-Fi | untested, but no driver binds |
 | `n51` | Speakers | missing, but a driver binds |
 | `n53` | Speakers | missing, but a driver binds |
+| `j96` | Charging | working, but no driver binds |
+| `j97` | Charging | untested, but no driver binds |
 | `j81` | Light sensor | working, but no driver binds |
 | `j82` | Light sensor | untested, but no driver binds |
 | `j71s` | Microphone | untested, but no driver binds |

@@ -9,6 +9,18 @@ releasing, rename that section to the version (`## [0.3.0] - YYYY-MM-DD`). The
 release workflow uses that section as the GitHub release notes and fails if it
 is missing or empty.
 
+## [Unreleased]
+
+### Devices
+
+- iPad mini 4 (Wi-Fi) (A8): touchscreen (`apple_z2` geometry and shifted reply
+  header), GPU desktop (PowerVR via Zink on simpledrm with `disp0` disabled
+  until `adbe` modesets cleanly under wlroots), internal storage, Lightning
+  charging (Tristar + D2207), screen on/off, and suspend/resume work on an
+  installed Omarchy A system. Tested by tcballard (USB host 500 mA charging
+  verified; wall-adapter BrickID/DCP untested). The Cellular model (J97) shares
+  the device tree and touch/charging changes (untested).
+
 ## [0.3.10] - 2026-11-27
 
 ### Install & launch
