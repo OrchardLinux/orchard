@@ -62,6 +62,11 @@
         "zip": "Firmware/N841_Multitouch.im4p"
       },
       "sha256": "131d5e586060a755b104aed6330da430937a892720279678d86ba9956fe74f67"
+    },
+    "kernelcache": {
+      "ipsw": {
+        "kernelcache": true
+      }
     }
   },
   "outputs": [
@@ -168,6 +173,19 @@
           "profile": "C1FC2,1",
           "hbpp_version": 259,
           "blob_size": 1008
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/pmp-t8020.bin",
+      "sha256": "65c4fba612245015c5e4618fa5b7f9f00764d5d0da2ccdb276ced3bd2b4b1132",
+      "steps": [
+        {
+          "step": "section-from-kernelcache@1",
+          "input": "kernelcache",
+          "bundle": "com.apple.driver.AppleT8020PMPFirmware",
+          "segment": "__DATA",
+          "section": "fwFirmwareImage"
         }
       ]
     }

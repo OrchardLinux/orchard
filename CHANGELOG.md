@@ -105,7 +105,8 @@ is missing or empty.
   board entered (`orchard run --ibss`), with the display, touch, the
   internal storage, battery and charger, Wi-Fi and Bluetooth, CPU frequency
   scaling and SSH over USB. It needs no ticket of the phone. Its firmware
-  recipe converts the touch, Wi-Fi and Bluetooth firmware. Based on Project
+  recipe converts the touch, Wi-Fi and Bluetooth firmware and takes the
+  power management coprocessor's firmware from the kernelcache. Based on Project
   Cascadia's and badapple's A12 work (dr1408, kieroid).
 - The other A12 devices (iPhone XS and XS Max, iPad mini 5, iPad Air 3,
   iPad 8) are described with what all A12 devices share. None has been
