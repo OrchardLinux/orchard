@@ -52,9 +52,12 @@ it builds from:
   directory: that is how to work on orchard itself, in a worktree per branch
   (`git worktree add ../orchard-gpu -b gpu-a10`).
 
-The Python command line it replaced is still in `src/orchard` and runs as
-`bin/orchard python -m orchard …`. Nothing starts it any more; `tools/launcher`,
-which ran it from the newest nightly, only names the install line.
+The Python command line is still in `src/orchard` and runs as
+`bin/orchard python -m orchard …`. A distribution's command-line installer is
+built from it (`python -m orchard.installer release`) and leaves its core as
+the user's `orchard`; for development nothing starts it any more, and
+`tools/launcher`, which ran it from the newest nightly, only names the
+install line.
 
 `bin/orchard python ARGS` runs Python in the checkout's environment. An `orchard = "PATH"` line in `orchard.local.toml`, which used to choose the checkout, is refused with what to use instead.
 
