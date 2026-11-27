@@ -14,9 +14,9 @@ import sys
 import tarfile
 import tomllib
 
-sys.path.insert(0, '/orchard')
+sys.path.insert(0, '/orchard/src/orchard')
 import install_layout as L
-sys.path.insert(0, '/orchard/image')
+sys.path.insert(0, '/orchard/producers')
 from initramfs import write as write_initramfs
 
 release, work = Path('/release'), Path('/work')
@@ -88,7 +88,7 @@ def test_initrd():
 
 
 def device(disk, *args, stdin=None):
-    result = subprocess.run([sys.executable, '/orchard/install_device.py', *args], stdin=stdin,
+    result = subprocess.run([sys.executable, '/orchard/boot/initramfs/install/install_device.py', *args], stdin=stdin,
                             env={**os.environ, 'ORCHARD_INSTALL_DISK': disk}, capture_output=True, text=True)
     events = [json.loads(line) for line in result.stdout.splitlines() if line.startswith('{')]
     for event in events:

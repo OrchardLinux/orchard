@@ -1,17 +1,11 @@
 """ARMv7 producer boundaries use synthetic ELF and DTB inputs, with no device access."""
-import gzip
-import hashlib
-import io
 import json
 from pathlib import Path
 import struct
 import tarfile
 import tempfile
 import unittest
-from unittest import mock
 
-from orchard import build
-from orchard.hardware import ROOT
 from orchard.image import elf, platform
 
 
@@ -48,22 +42,6 @@ class Armv7ProducerTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.work = Path(temporary.name)
 
-    def test_arm_tools_do_not_reuse_the_arm64_published_bundle(self):
-        with mock.patch.object(build, '_build_context', return_value=(ROOT, self.work)), \
-                mock.patch('orchard.published.tools') as published, \
-                mock.patch.object(build, 'component_lock'), \
-                mock.patch.object(build, '_prepare_tools', return_value=self.work) as prepare:
-            self.assertEqual(build.prepare_tools(device='p105'), self.work)
-        published.assert_not_called()
-        prepare.assert_called_once_with(ROOT, self.work / 'components-v2', 'arm')
-
-    def test_cascadia_components_refuse_pongo_before_any_producer(self):
-        with mock.patch.object(build, 'prepare_payload_loader') as loader:
-            with self.assertRaisesRegex(ValueError, 'recovery-autogo firmware stages'):
-                build.prepare_components(ROOT, self.work, device='p105', kernel=self.work,
-                                         busybox=self.work / 'busybox', loader=self.work / 'loader',
-                                         pongo=self.work / 'pongo.bin')
-        loader.assert_not_called()
 
     def test_platform_selection_can_filter_by_architecture(self):
         self.assertEqual(platform.platforms(architecture='arm'), ['apple-armv7'])
@@ -129,35 +107,6 @@ class Armv7ProducerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'offset exceeds'):
             elf.needed(raw)
 
-    def test_armv7_ram_payload_uses_the_selected_profile_without_pongo(self):
-        from orchard import ram
-        from orchard.image import cascadia
-        from test_cascadia_loader import loader, kernel, tree
-        bundle = self.work / 'kernel'
-        (bundle / 'dtbs').mkdir(parents=True)
-        (bundle / 'kernel.release').write_text('test-armv7\n')
-        (bundle / 'zImage').write_bytes(kernel())
-        dtb = tree()
-        dtb['properties']['compatible'] = b'apple,p105ap\0apple,s5l8942x\0'
-        (bundle / 'dtbs/s5l8942x-p105.dtb').write_bytes(cascadia.write_fdt(dtb, [], 0))
-        busybox, trampoline, init = self.work / 'busybox', self.work / 'loader.bin', self.work / 'init'
-        busybox.write_bytes(executable())
-        trampoline.write_bytes(loader())
-        init.write_text('#!/bin/busybox sh\nexec /bin/busybox sh\n')
-        output = self.work / 'out'
-        ram.assemble_ram(ROOT, output, kernel=bundle, busybox=busybox, loader=trampoline,
-                         pongo=None, init=init, platform='apple-armv7', boards={'p105': 's5l8942x-p105'})
-        record = ram.verify_ram(output)
-        self.assertEqual(record['loader_format'], 'cascadia')
-        self.assertEqual(record['boot_method'], 'recovery-autogo')
-        self.assertEqual(set(record['files']), {'linux.bin'})
-        self.assertFalse((output / 'pongo.bin').exists())
-        assembled = json.loads((output / 'linux.bin.json').read_text())
-        self.assertEqual(assembled['initramfs_encoding'], 'cascadia-dtb')
-        self.assertEqual(assembled['architecture'], 'arm')
-        trampoline.write_bytes(b'changed')
-        with self.assertRaisesRegex(ValueError, 'changed; rebuild'):
-            ram.verify_ram(output)
 
     def test_cascadia_profile_requires_matching_dtb_compatible(self):
         from orchard.image import cascadia

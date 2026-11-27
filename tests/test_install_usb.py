@@ -13,16 +13,15 @@ import socket
 import stat
 import struct
 import subprocess
-import sys
 import tempfile
 import time
 import unittest
 import uuid
 import zlib
 
-from orchard import install_device as D
-from orchard import install_direct as direct
 from orchard import install_layout
+from install_files import install_device as D
+import host_tables
 from orchard.hardware import ROOT
 
 SOURCE = ROOT / 'boot/initramfs/recovery/orchard-install-usb.c'
@@ -75,7 +74,7 @@ def adt(ecid):
 def write_gpt(path):
     """A disk with an APFS container in its first GiB and free space after it, both GPT copies."""
     table = bytearray(128 * 128)
-    table[:128] = direct.entry_bytes(APFS, str(uuid.uuid4()), 6, 262144, 'Container')
+    table[:128] = host_tables.entry_bytes(APFS, str(uuid.uuid4()), 6, 262144, 'Container')
     first, last = 6, BLOCKS - 6
 
     def header(current, backup, entries):
@@ -347,11 +346,11 @@ class Requests(Receiver):
 
 
 class Plans(Receiver):
-    def test_a_valid_plan_writes_install_directs_tables_and_the_boot_filesystem(self):
+    def test_a_valid_plan_writes_the_planned_tables_and_the_boot_filesystem(self):
         layout = self.ok(self.link.request(INSPECT))
         plan = self.make_plan(layout)
         header, entries = read_gpt(self.disk)
-        writes, numbers = direct.new_tables(plan, BLOCK, header, entries)
+        writes, numbers = host_tables.new_tables(plan, BLOCK, header, entries)
         answer = self.ok(self.link.request(PLAN, plan))
         self.assertEqual(answer['root'], f'{self.disk}{numbers[plan["root"]["partuuid"]]}')
         self.assertEqual(answer['boot'], f'{self.disk}{numbers[plan["boot"]["partuuid"]]}')
@@ -504,11 +503,9 @@ class Lwvm(Receiver):
     written only where it adds the planned entries over free chunks. Synthetic headers; no device."""
     def setUp(self):
         super().setUp()
-        sys.path.insert(0, str(ROOT / 'tests'))
-        from test_armv7_install import CHUNK, MEDIA
-        from test_armv7_install import header as make
-        from test_lwvm_free import SHRUNK
-        from orchard import lwvm
+        from host_tables import CHUNK, MEDIA, SHRUNK
+        from host_tables import header as make
+        import lwvm
         self.lwvm, self.chunk, self.media = lwvm, CHUNK, MEDIA
         self.header = make(SHRUNK)
         self.write(self.header)

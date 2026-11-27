@@ -20,10 +20,11 @@ catalog marks the other boards `untested`, and their owners find out.
 ## What belongs here
 
 This repository holds device descriptions, kernel configuration, firmware
-recipes, the boot and recovery initramfs, and the
-`orchard` tool on the host (booting, installing, the host link, firmware
-conversion) in `src/orchard`. A device change and the converter steps or host
-support it needs go into one PR here. Desktops and distribution profiles
+recipes, the boot and recovery initramfs, and the producers that turn them
+into kernels, loaders and release files (`producers/`, `src/orchard`). The
+`orchard` command on the host (building, booting, installing, firmware
+conversion) is [OrchardLinux/tools](https://github.com/OrchardLinux/tools);
+a device change that needs host support is one PR here and one there. Desktops and distribution profiles
 belong in [omarchy-a](https://github.com/OrchardLinux/omarchy-a); work that
 also needs a distro change is one PR per repository, and each says which one
 it needs and in which order they merge. Kernel and m1n1 work are pull
@@ -39,7 +40,7 @@ it solves:
 - **A device:** its descriptor, firmware recipe, device tree, the driver
   changes it needs, the config options it needs and its documentation.
 - **A boot or runtime path,** such as a new root filesystem source.
-- **Shared build tooling:** `kernel/build`, `boot/m1n1/build`, `src/orchard/build.py`.
+- **Shared build tooling:** `kernel/build`, `boot/m1n1/build`, `producers/`.
   These change every device's build.
 - **CI.**
 

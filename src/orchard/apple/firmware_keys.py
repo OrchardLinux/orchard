@@ -8,15 +8,24 @@ import json
 import os
 from pathlib import Path
 import stat
+import sys
 
-from orchard.cache import cache_root
+
+def store():
+    """Orchard's store on this computer, where the launcher keeps its key cache."""
+    override = os.environ.get('ORCHARD_HOME')
+    if override:
+        return Path(override).expanduser().absolute()
+    if sys.platform == 'darwin':
+        return Path.home() / 'Library/Application Support/Orchard'
+    return Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'orchard'
 
 
 class KeyStore:
     def __init__(self, ipsw_sha256, path=None):
         self.ipsw_sha256 = ipsw_sha256
         self.path = Path(path or os.environ.get('ORCHARD_FIRMWARE_KEYS') or
-                         cache_root() / 'firmware-keys.json')
+                         store() / 'firmware-keys.json')
         self.document = None
 
     def get(self, member, kind):

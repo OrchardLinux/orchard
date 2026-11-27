@@ -39,12 +39,14 @@ of a distribution carries its installer:
 curl -fsSL https://github.com/OrchardLinux/omarchy-a/releases/latest/download/install.sh | sh
 ```
 
-It needs no Python, uv or checkout: `install.sh` downloads a pinned standalone
-Python and the release's `orchard-install.pyz`, checks both, and installs. It
-leaves the user's `orchard` on PATH (`install`, `launch`, `devices`, `update`),
-which a later installer replaces only with a newer one. Releases built before
-orchard 0.2 install with the released Orchard 0.1.10
-([OrchardLinux/cli releases](https://github.com/OrchardLinux/cli/releases)).
+It needs no Python, uv or checkout: `install.sh` installs the `orchard`
+command ([OrchardLinux/tools](https://github.com/OrchardLinux/tools)) and runs
+`orchard install` for that release. The command stays on PATH for `launch`,
+`devices` and the rest. To install only the command:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/OrchardLinux/tools/main/install.sh | sh
+```
 
 To start an installed system again, connect the device in DFU mode and run
 `orchard launch`. The host sends only Pongo and m1n1; m1n1 reads the boot entries
@@ -76,7 +78,9 @@ key each boot; to trust a new boot, remove the old address with
 
 ## Develop
 
-The `orchard` command builds from the newest nightly's recipes and board
+The `orchard` command is a program of its own, from
+[OrchardLinux/tools](https://github.com/OrchardLinux/tools); this repository is
+its data: the recipes, producers and board descriptions. It builds from the newest nightly's recipes and board
 data (`orchard data update` fetches them). To work on orchard itself, run a
 checkout's own `bin/orchard` by its path: it is the same command on that
 checkout's recipes and data, from any directory. `bin/orchard python …`
@@ -112,8 +116,6 @@ build entry (`name = "..."`, `[release] build = "tools/build.py"`). There
 - [RAM builds and development](docs/ram-development.md)
 - [Firmware recipes](docs/firmware-recipes.md)
 - [Device operation protocol](docs/device-protocol.md)
-- [Host adapter contract](docs/adapter-contract.md)
-- [SSH lifecycle](docs/ssh-lifecycle.md)
 - [Recovery tools](boot/initramfs/recovery/README.md)
 - [Quiet boot patches](boot/quiet/README.md)
 - [J71b compatibility audit and validation limits](docs/j71b-compatibility-audit.md)

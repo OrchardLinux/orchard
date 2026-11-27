@@ -12,7 +12,7 @@ space". The person has to type `create partition`. Then:
 
 1. The host reads both header copies (offset 0 and the end of the first
    chunk), which must agree and match what was inspected.
-2. The host computes the new header (`src/orchard/lwvm.py`,
+2. The host computes the new header (`tests/lwvm.py`,
    `allocate_free`): one Linux entry (`0fc63daf-…`, name `Linux`, no
    attributes) appended after the others, its virtual range after every
    other partition's, the free chunks mapped to it in order, the CRC

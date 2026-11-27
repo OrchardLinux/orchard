@@ -2,8 +2,8 @@
 
 How an installer on the computer drives the install system on the device over
 raw USB: no network, no SSH, no keys, no drivers. The receiver on the device
-is `orchard-install-usb` from `install-tools.tar.gz`; hosts are orchard2's
-`crates/usb` (the graphical installer) and, later, the Python CLI.
+is `orchard-install-usb` from `install-tools.tar.gz`; the host is the `orchard`
+command and the graphical installer (OrchardLinux/tools, `crates/usb`).
 
 Status: draft, protocol version 1. Covers GPT disks (64-bit boards) and LwVM
 disks (32-bit boards, [below](#lwvm-disks)); nothing of the LwVM part has run
@@ -17,8 +17,8 @@ initrd, as today (`install_direct.add_on`). The add-on needs only:
 - `install/ecid`: the device the host means, checked by the receiver;
 - the programs and files of `install-tools.tar.gz`, unchanged.
 
-`authorized_keys` and `host_key` are optional. The Python CLI still passes
-them while it drives installs over SSH; the graphical installer doesn't.
+`authorized_keys` and `host_key` are optional: an install over raw USB needs
+neither.
 
 The install system starts, in this order (`boot/initramfs/install/run`):
 
@@ -172,7 +172,7 @@ disk is the internal one (`nvme<N>n1`, or `asp<N>n1` on A7-A8X), waited for
 up to 30 seconds; a disk without a GPT, or a GPT whose checksums are wrong,
 answers `disk`. Whether
 there is room, and for what, is `install_layout.py`'s decision on the host,
-which `orchard2` mirrors. iOS's used space inside APFS is not visible here.
+which the `orchard` command mirrors. iOS's used space inside APFS is not visible here.
 
 ### Put
 

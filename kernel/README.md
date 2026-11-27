@@ -51,8 +51,8 @@ reset: save the edits, or build a tree of your own with `--kernel-tree`.
 Checkouts whose locks name different commits move the tree back and forth.
 A second build of the same tree waits for the first. The cache key of a built kernel is what
 determines it: the source tree, the config, the descriptor's arch, image and
-DTB directory, the toolchain image and `KERNEL_PRODUCER` in
-`src/orchard/build.py`, not the text of these scripts; raise that version when
+DTB directory, the toolchain image and `kernel-producer` in
+`producers/contract.toml`, not the text of these scripts; raise that version when
 a change alters what they produce. Compiled objects also go
 into a compiler cache (ccache) next to the trees, `.../orchard/ccache/kernel/`,
 so a new commit, in any worktree, compiles only the files it changed;

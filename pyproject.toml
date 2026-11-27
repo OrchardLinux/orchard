@@ -5,13 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "orchard"
 version = "0.3.10"
-description = "Linux on Apple devices: hardware support, recipes, and the orchard tool"
+description = "Linux on Apple devices: hardware support, recipes and their producers"
 readme = "README.md"
 license = "GPL-2.0-only AND GPL-2.0-or-later AND MIT AND ISC"
 license-files = ["LICENSE", "NOTICE", "LICENSES/*"]
 requires-python = ">=3.11"
-# The core (install, launch) needs only the standard library; jsonschema
-# validates manifests and descriptors in development and release CI.
+# The producers need only the standard library; jsonschema validates manifests
+# and descriptors in development and release CI.
 dependencies = []
 
 [project.optional-dependencies]
@@ -22,13 +22,11 @@ Repository = "https://github.com/OrchardLinux/orchard"
 Documentation = "https://github.com/OrchardLinux/orchard/blob/main/BUILD.md"
 Issues = "https://github.com/OrchardLinux/orchard/issues"
 
-[project.scripts]
-orchard = "orchard.command:main"
-orch = "orchard.command:main"
-
-# Only src/orchard is a Python package. Device data, recipes and device-side
-# code are files of this checkout, which orchard.hardware.ROOT points at, so
-# the tool runs from a checkout (an editable install), not from a wheel.
+# Only src/orchard is a Python package: the producers and release checks a
+# distribution's build runs as commands (docs/distribution-contract.md). Device
+# data, recipes and device-side code are files of this checkout, which
+# orchard.hardware.ROOT points at, so it runs from a checkout (an editable
+# install), not from a wheel. The orchard command is OrchardLinux/tools.
 [tool.setuptools]
 include-package-data = false
 package-dir = {"" = "src"}
@@ -36,21 +34,5 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.setuptools.package-data]
-orchard = ["py.typed", "boot-entries"]
-
 [dependency-groups]
-dev = ["mypy==1.18.2", "jsonschema>=4.25,<5"]
-
-[tool.mypy]
-python_version = "3.11"
-mypy_path = "src"
-files = ["src/orchard/contracts.py", "src/orchard/devices.py", "src/orchard/apple/device.py", "src/orchard/service.py", "src/orchard/command.py", "tests/typecheck_adapter.py"]
-check_untyped_defs = true
-follow_imports = "silent"
-ignore_missing_imports = true
-warn_unused_ignores = true
-
-[[tool.mypy.overrides]]
-module = ["orchard.contracts", "orchard.devices", "orchard.apple.device"]
-disallow_untyped_defs = true
+dev = ["jsonschema>=4.25,<5"]

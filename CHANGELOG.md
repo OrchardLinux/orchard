@@ -11,6 +11,23 @@ is missing or empty.
 
 ## [Unreleased]
 
+### Building
+
+- The Python `orchard` tool and its installer are removed from this
+  repository. `orchard` is the command of
+  [OrchardLinux/tools](https://github.com/OrchardLinux/tools)
+  (`curl -fsSL https://raw.githubusercontent.com/OrchardLinux/tools/main/install.sh | sh`),
+  and this repository is its data: device descriptions, recipes and
+  producers. The Python a build runs stays: `producers/`, and in
+  `src/orchard` the producers and release checks of the
+  [distribution contract](docs/distribution-contract.md). Changes to that
+  contract: `python -m orchard.inputs` takes every component as an argument
+  (`--kernel-dir`, `--m1n1`, `--pongo`, `--tools`, `--loader`) and builds or
+  downloads nothing, which `orchard build` and `orchard inputs` do;
+  `orchard.installer` is gone, and a release has no `orchard-core.pyz`. The
+  install script a device runs and `boot-entries` are now in
+  `boot/initramfs/install/`.
+
 ### Devices
 
 - iPad Air (Wi-Fi): Bluetooth audio works; input devices are untested. The

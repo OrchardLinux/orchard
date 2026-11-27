@@ -8,8 +8,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from orchard import install_device as D
 from orchard.image import platform
+from install_files import install_device as D
 
 
 class StorageFence(unittest.TestCase):
@@ -294,7 +294,6 @@ class RemoveOldEntries(unittest.TestCase):
 
 class Timezone(unittest.TestCase):
     def test_links_an_existing_zone_and_ignores_others(self):
-        from orchard import install_device as D
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             (root / 'etc').mkdir()

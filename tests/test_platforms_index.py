@@ -81,7 +81,7 @@ class PlatformsIndex(unittest.TestCase):
         self.assertTrue(all(member.mtime == 0 for member in members))
         with tarfile.open(archive) as opened:
             self.assertEqual(opened.extractfile('run').read(), (platforms_index.INSTALL_FILES / 'run').read_bytes())
-            self.assertEqual(opened.extractfile('install_device.py').read(), (ROOT / 'src/orchard/install_device.py').read_bytes())
+            self.assertEqual(opened.extractfile('install_device.py').read(), (ROOT / 'boot/initramfs/install/install_device.py').read_bytes())
             self.assertIn('orchard-install-usb', opened.getnames())
         archive.unlink()
         platforms_index.write_install_tools(self.tools, archive)

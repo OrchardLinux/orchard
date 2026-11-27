@@ -365,8 +365,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
     url, size, keys = args.ipsw, None, None
     if not url.startswith('https://'):
-        from orchard.firmware import recipe_for
-        source = recipe_for(url)['ipsw']
+        import json
+        from orchard.hardware import firmware_path
+        source = json.loads(firmware_path(url).read_text())['ipsw']
         url, size = source['url'], source['bytes']
         from .firmware_keys import KeyStore
         keys = KeyStore(source['sha256'])

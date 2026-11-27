@@ -3,21 +3,14 @@ import copy
 import hashlib
 import io
 from pathlib import Path
-import struct
-import subprocess
 import sys
 import tarfile
 import tempfile
 import tomllib
 import unittest
 import unittest.mock
-import uuid
-import zlib
 
-from orchard import install_device as D
-from orchard import install_direct as direct
-from orchard import releases
-from orchard.image import platforms_index, publish
+from orchard.image import publish
 from orchard.hardware import ROOT
 
 sys.path.insert(0, str(ROOT / 'tools'))
@@ -28,20 +21,6 @@ ENTRIES = 32   # entries in a block-sized table
 OTHER = '6d6ef1a7-44c7-4a4a-8a6b-3a2f4a0f0a01'
 
 
-def gpt(blocks=1 << 20):
-    """(header, entries) of a disk with one partition at blocks 100..199."""
-    table = bytearray(ENTRIES * 128)
-    table[:128] = direct.entry_bytes(D.ROOT_ARM64, OTHER, 100, 100, 'other')
-    header = bytearray(92)
-    header[:8] = b'EFI PART'
-    struct.pack_into('<II', header, 8, 0x10000, 92)
-    struct.pack_into('<QQQQ', header, 24, 1, blocks - 1, 6, blocks - 3)
-    header[56:72] = uuid.uuid4().bytes_le
-    struct.pack_into('<QIII', header, 72, 2, ENTRIES, 128, zlib.crc32(table))
-    struct.pack_into('<I', header, 16, zlib.crc32(header))
-    return bytes(header).ljust(BLOCK, b'\0'), bytes(table)
-
-
 def layer(path):
     with tarfile.open(path, 'w:gz') as archive:
         for name, data in (('usr/lib/modules/7.0/vmlinuz', b'KERNEL'), ('usr/lib/modules/7.0/initrd', b'INITRD'),
@@ -50,151 +29,6 @@ def layer(path):
             member = tarfile.TarInfo(name)
             member.size = len(data)
             archive.addfile(member, io.BytesIO(data))
-
-
-class Payload(unittest.TestCase):
-    def setUp(self):
-        work = tempfile.TemporaryDirectory()
-        self.addCleanup(work.cleanup)
-        self.work = Path(work.name)
-        self.tools = self.work / 'install-tools.tar.gz'
-        with tarfile.open(self.tools, 'w:gz') as archive:
-            for name in platforms_index.INSTALL_TOOLS:
-                member = tarfile.TarInfo(name)
-                data = name.encode()
-                member.size = len(data)
-                archive.addfile(member, io.BytesIO(data))
-
-    def test_the_payload_is_m1n1s_own_format_with_the_add_on_after_the_initrd(self):
-        (self.work / 'm1n1').write_bytes(b'M1N1')
-        (self.work / 'logo').write_bytes(b'LOGO')
-        layer(self.work / 'layer')
-        data = direct.payload(self.work / 'm1n1', self.work / 'logo', self.work / 'layer', 't8010-j71b.dtb', b'ADD-ON')
-        head = b'M1N1LOGOchosen.bootargs=' + direct.BOOT_ARGS.encode() + b'\nTREEKERNEL' + direct.INITRAMFS_MAGIC
-        initrd = b'INITRD\0\0ADD-ON'    # archives start on a 4-byte boundary
-        self.assertEqual(data, head + struct.pack('<I', len(initrd)) + initrd)
-
-    def test_the_add_on_carries_the_releases_tools_and_this_boots_identity(self):
-        archive = direct.add_on(self.tools, 0x1234, 'ssh-ed25519 KEY\n', b'HOST')
-        for name in (*platforms_index.INSTALL_TOOLS, 'run', 'udhcpd.conf', 'ecid', 'authorized_keys', 'host_key'):
-            self.assertIn(b'install/' + name.encode() + b'\0', archive)
-        self.assertIn(b'1234\n', archive)
-        self.assertIn(b'root:x:0:0', archive)
-        self.assertTrue(archive.startswith(b'070701'))
-
-    def test_the_start_script_comes_from_the_release_when_it_has_one(self):
-        self.assertEqual(direct.install_tools(self.tools)['run'], (direct.ADD_ON / 'run').read_bytes())
-        newer = self.work / 'newer.tar.gz'
-        with tarfile.open(newer, 'w:gz') as archive:
-            for name, data in [(name, name.encode()) for name in platforms_index.INSTALL_TOOLS] + \
-                    [('run', b'#!/bin/sh\nRELEASE\n'), ('udhcpd.conf', b'RELEASE-DHCP\n')]:
-                member = tarfile.TarInfo(name)
-                member.size = len(data)
-                archive.addfile(member, io.BytesIO(data))
-        archive = direct.add_on(newer, 0x1234, 'ssh-ed25519 KEY\n', b'HOST')
-        self.assertIn(b'#!/bin/sh\nRELEASE\n', archive)
-        self.assertIn(b'RELEASE-DHCP\n', archive)
-
-    def test_the_usb_receiver_brings_its_finishing_program_and_needs_no_ssh_keys(self):
-        archive = direct.add_on(self.tools, 0x1234)
-        for name in ('orchard-install-usb', 'install_device.py', 'boot-entries', 'ecid'):
-            self.assertIn(b'install/' + name.encode() + b'\0', archive)
-        self.assertIn(D.__doc__.splitlines()[0].encode(), archive)    # this checkout's, the release has none
-        for name in ('authorized_keys', 'host_key'):
-            self.assertNotIn(b'install/' + name.encode() + b'\0', archive)
-
-    def test_a_release_without_the_receiver_still_makes_the_ssh_add_on(self):
-        older = self.work / 'older.tar.gz'
-        with tarfile.open(older, 'w:gz') as archive:
-            for name in ('orchard-write', 'dropbear', 'resize2fs', 'tune2fs'):
-                member = tarfile.TarInfo(name)
-                member.size = len(name)
-                archive.addfile(member, io.BytesIO(name.encode()))
-        archive = direct.add_on(older, 0x1234, 'ssh-ed25519 KEY\n', b'HOST')
-        for name in ('orchard-write', 'authorized_keys', 'host_key', 'run'):
-            self.assertIn(b'install/' + name.encode() + b'\0', archive)
-        for name in ('orchard-install-usb', 'install_device.py'):
-            self.assertNotIn(b'install/' + name.encode() + b'\0', archive)
-
-    def test_a_key_made_for_ssh_converts_to_dropbears_form(self):
-        path = self.work / 'key'
-        subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', path], check=True)
-        converted = direct.dropbear_key(path.read_text())
-        self.assertTrue(converted.startswith(struct.pack('>I', 11) + b'ssh-ed25519' + struct.pack('>I', 64)))
-        self.assertEqual(len(converted), 4 + 11 + 4 + 64)
-        with self.assertRaises(ValueError):
-            direct.dropbear_key('-----BEGIN-----\nAAAA\n-----END-----\n')
-
-
-class Inspection(unittest.TestCase):
-    def test_the_installers_system_starts_with_this_computers_keys_and_writes_nothing(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            work = Path(temporary)
-            for name in ('m1n1', 'pongo'):
-                (work / name).write_bytes(name.encode())
-            layer(work / 'layer')
-            with tarfile.open(work / 'tools', 'w:gz') as archive:
-                for name in platforms_index.INSTALL_TOOLS:
-                    member = tarfile.TarInfo(name)
-                    archive.addfile(member, io.BytesIO(b''))
-            adapter = unittest.mock.Mock(DEVICETREE='t8010-j71b.dtb')
-            sent = []
-            adapter.boot_payload.side_effect = lambda device, image, pongo, progress: sent.append(image.read_bytes())
-            assets = {'m1n1': work / 'm1n1', 'pongo': work / 'pongo', 'layer': work / 'layer', 'install_tools': work / 'tools'}
-            with unittest.mock.patch('orchard.computer_key.public_keys', return_value=['ssh-ed25519 MINE']):
-                direct.start_for_inspection(adapter, {}, assets, 0x12, None)
-            self.assertIn(b'ssh-ed25519 MINE\n', sent[0])
-            adapter.install.assert_not_called()
-
-
-class Tables(unittest.TestCase):
-    def plan(self, boot=True):
-        return {'boot': {'create': boot, 'partuuid': str(uuid.uuid4()), 'start': 1000, 'blocks': 100},
-                'root': {'partuuid': str(uuid.uuid4()), 'start': 2000, 'blocks': 500, 'label': 'omarchy'}}
-
-    def apply(self, plan):
-        header, entries = gpt()
-        writes, numbers = direct.new_tables(plan, BLOCK, header, entries)
-        return writes, numbers, header
-
-    def test_both_copies_are_valid_and_keep_the_other_partition(self):
-        plan = self.plan()
-        writes, numbers, _ = self.apply(plan)
-        self.assertEqual([lba for lba, _ in writes][:2], [(1 << 20) - 2, (1 << 20) - 1], 'the backup goes first')
-        for (_, table), (_, raw) in ((writes[0], writes[1]), (writes[2], writes[3])):
-            size = struct.unpack_from('<I', raw, 12)[0]
-            blank = bytearray(raw[:size])
-            struct.pack_into('<I', blank, 16, 0)
-            self.assertEqual(struct.unpack_from('<I', raw, 16)[0], zlib.crc32(blank))
-            self.assertEqual(struct.unpack_from('<I', raw, 88)[0], zlib.crc32(table))
-            _, partitions, _ = D.parse_gpt('disk', BLOCK, raw, table)
-            found = {p['partuuid']: (p['start'], p['blocks']) for p in partitions}
-            self.assertEqual(found, {OTHER: (100, 100), plan['boot']['partuuid']: (1000, 100),
-                                     plan['root']['partuuid']: (2000, 500)})
-        self.assertEqual(sorted(numbers.values()), [2, 3])
-
-    def test_a_replaced_partition_leaves_the_table(self):
-        plan = self.plan(boot=False)
-        plan['remove'] = {'number': 1, 'partuuid': OTHER}
-        writes, numbers, _ = self.apply(plan)
-        _, partitions, _ = D.parse_gpt('disk', BLOCK, writes[3][1], writes[2][1])
-        self.assertEqual([p['partuuid'] for p in partitions], [plan['root']['partuuid']])
-        self.assertEqual(list(numbers.values()), [1])
-
-    def test_the_probe_reads_filesystems_without_blkid(self):
-        ext4 = bytearray(4096)
-        ext4[1080:1082] = b'\x53\xef'
-        uid = uuid.uuid4()
-        ext4[1128:1144] = uid.bytes
-        ext4[1144:1148] = b'root'
-        self.assertEqual(direct.probe(bytes(ext4)), {'fs': 'ext4', 'fs_uuid': str(uid), 'label': 'root'})
-        self.assertIsNone(direct.probe(bytes(4096))['fs'])
-
-
-class LinkLocal(unittest.TestCase):
-    def test_the_new_interface_is_tried_before_dhcp(self):
-        with unittest.mock.patch.object(direct, 'link_local_interfaces', return_value={'en1', 'en9'}):
-            self.assertEqual(direct.device_hosts({'en1'}), ['fe80::1%en9', direct.HOST])
 
 
 def receipt(name, data=b'x'):
@@ -221,12 +55,6 @@ class Release(unittest.TestCase):
             del broken[name]
             with self.subTest(name=name), self.assertRaises(ManifestError):
                 validate(broken)
-
-    def test_starting_the_device_needs_only_the_small_files(self):
-        _, boot = releases.receipts_for(manifest(), 'j71b', 'boot')
-        self.assertEqual(sorted(boot), ['install_tools', 'layer', 'logo', 'm1n1', 'pongo'])
-        _, install = releases.receipts_for(manifest(), 'j71b', 'install')
-        self.assertEqual(sorted(install), ['install_tools', 'layer', 'logo', 'm1n1', 'map', 'pongo', 'root'])
 
 
 class Publishing(unittest.TestCase):

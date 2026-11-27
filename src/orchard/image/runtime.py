@@ -64,6 +64,6 @@ def recovery_files():
     source = PROJECT / 'runtime/recovery'
     result = {prefix + name: ((source / name).read_bytes(), 0o755)
               for name in ('device.py', 'identity.py', 'storage-fence', 'start.py')}
-    result[prefix + 'adt.py'] = ((PROJECT / 'src/orchard/apple/adt.py').read_bytes(), 0o644)
+    result[prefix + 'adt.py'] = ((source / 'adt.py').read_bytes(), 0o644)
     result['usr/bin/orchard-device'] = (b'#!/bin/sh\nexec /usr/bin/python3 /usr/libexec/orchard/device.py "$@"\n', 0o755)
     return result

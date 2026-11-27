@@ -1,12 +1,16 @@
 """A builder's umask must not reach image modes or recipe keys (orchard#50)."""
+import importlib.util
 import os
 from pathlib import Path
 import stat
 import tempfile
 import unittest
 
-from orchard import build
 from orchard.image import initramfs
+
+_spec = importlib.util.spec_from_file_location('ci_keys', Path(__file__).resolve().parents[1] / 'ci/keys.py')
+keys_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(keys_module)
 
 
 def tree(base, umask):
@@ -40,7 +44,7 @@ class BuilderUmaskTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory:
                 base = Path(directory)
                 tree(base, umask)
-                keys.append(build.recipe_entries(base, ['etc', 'init']))
+                keys.append(keys_module.recipe_entries(base, ['etc', 'init']))
         self.assertEqual(keys[0], keys[1])
         self.assertEqual(keys[0]['etc/motd'].split(':')[0], str(0o644))
         self.assertEqual(keys[0]['init'].split(':')[0], str(0o755))

@@ -22,9 +22,6 @@ class N61Data(unittest.TestCase):
         self.assertEqual(self.device['kernel'], {'platform': 'apple-4k', 'dtb': 't7000-n61'})
         self.assertEqual(self.device['boot'], {'methods': ['checkm8-pongo']})
 
-    def test_installation_follows_the_shared_a8_storage(self):
-        # ANS1 is on for every A8 board, so storage writes are untested, not missing.
-        self.assertEqual(data.install_blockers('n61'), [])
 
     def test_touch_recipe_selects_the_pinned_n61_gen1_profile(self):
         path = data.firmware_path('n61')
@@ -36,7 +33,6 @@ class N61Data(unittest.TestCase):
         self.assertEqual(output['steps'], [{'step': 'z2fw-from-mtprops@3', 'input': 'N61.mtprops',
             'profile': 'C1F59,1', 'packet': 'Z2', 'touch_maximum': 1024, 'prox_maximum': 128,
             'fll_mval': 6099, 'ref_clk_div': 2, 'clk32_clock_enable': 1}])
-
 
 
 class DescriptorSchema(unittest.TestCase):
