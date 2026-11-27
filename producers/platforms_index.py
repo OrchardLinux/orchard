@@ -178,9 +178,20 @@ def from_inputs(directory, inputs):
 
 def fetch(url, path, entry=None):
     """URL into PATH, checked against ENTRY's receipt when given."""
+    import time
     from urllib.request import urlopen
-    with urlopen(url, timeout=60) as response, path.open('xb') as output:
-        shutil.copyfileobj(response, output, 1 << 20)
+    # A download that drops (CI runners lose the network for seconds at a
+    # time) is tried again; the receipt still decides.
+    for attempt in range(5):
+        try:
+            with urlopen(url, timeout=60) as response, path.open('wb') as output:
+                shutil.copyfileobj(response, output, 1 << 20)
+            break
+        except OSError:
+            path.unlink(missing_ok=True)
+            if attempt == 4:
+                raise
+            time.sleep(5 * (attempt + 1))
     if entry and sha(path) != entry['sha256']:
         raise ValueError(f'{url} differs from its receipt')
 
