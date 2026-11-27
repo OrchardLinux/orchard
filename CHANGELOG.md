@@ -22,6 +22,9 @@ is missing or empty.
   instead of staying off until the next sleep and wake.
 - A7 devices: listed as having no H.265 decoder, since the A7's video decoder
   has none.
+- iPad Air (Wi-Fi): the gyroscope works. Its three axes are the
+  accelerometer's, and a positive rate is a right-hand turn about each.
+  Nothing on the desktop uses it yet. Tested by ricktav.
 
 ## [0.3.11] - 2026-11-28
 
