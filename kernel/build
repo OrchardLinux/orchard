@@ -54,10 +54,10 @@ if [[ -z $tree ]]; then
     echo "Unexpected kernel lock ${lock#"$here"/../}" >&2; exit 1;
   }
 fi
-# One tree per platform and kernel commit, shared by every hardware checkout
-# and worktree in the Orchard cache: a new checkout continues from the last
-# build. A new commit starts a new tree; the compiler cache below carries the
-# objects of the files it did not change.
+# One tree per platform, shared by every checkout and worktree in the Orchard
+# cache: a new checkout continues from the last build. Another kernel commit
+# moves a clean tree in place (see below); checkouts whose locks name
+# different commits move it back and forth.
 cache=${ORCHARD_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/orchard}
 if [[ -n $tree ]]; then
   # A kernel tree builds inside itself, in a directory its git ignores: the
@@ -67,7 +67,7 @@ if [[ -n $tree ]]; then
   [[ $exclude == /* ]] || exclude=$tree/$exclude
   grep -qxF '/.orchard-out/' "$exclude" 2>/dev/null || { mkdir -p "$(dirname "$exclude")"; echo '/.orchard-out/' >> "$exclude"; }
 else
-  work=${work:-"$cache/kernel-work/$platform-${commit:0:12}"}
+  work=${work:-"$cache/kernel-work/$platform"}
 fi
 # Compiled objects keyed by preprocessed content, shared by every tree: a tree
 # that returns to a state built before compiles it from the cache.
@@ -118,17 +118,35 @@ if [[ ! -d "$source/.git" ]]; then
   echo "Fetching kernel source at $commit (this may take a while)..."
   git -C "$source" fetch --progress --depth 1 origin "$commit"
   git -C "$source" checkout -q --detach FETCH_HEAD
-  # The marks orchard2 reads: no patches on top, and the tree as fetched.
-  : > "$applied"
   snapshot > "$prepared"
 else
-  [[ $(git -C "$source" remote get-url origin) == "$url" &&
-     $(git -C "$source" rev-parse HEAD) == "$commit" ]] || {
+  [[ $(git -C "$source" remote get-url origin) == "$url" ]] || {
     echo "Unexpected kernel source in $source" >&2; exit 1;
   }
-  [[ -f "$applied" ]] || : > "$applied"
-  [[ -f "$prepared" ]] || snapshot > "$prepared"
+  if [[ $(git -C "$source" rev-parse HEAD) != "$commit" ]]; then
+    # Another commit than the tree is on. Edits in it are never discarded.
+    current=$(snapshot)
+    [[ $current == "$(git -C "$source" rev-parse 'HEAD^{tree}')" || $current == "$(cat "$prepared" 2>/dev/null)" ]] || {
+      echo "The kernel commit changed and $source has local edits." >&2
+      echo 'Save them elsewhere (git diff) and undo them, or build a kernel tree of your own with --kernel-tree.' >&2
+      exit 1
+    }
+    echo "Moving the kernel tree to ${commit:0:12}..."
+    git -C "$source" cat-file -e "$commit^{commit}" 2>/dev/null ||
+      git -C "$source" fetch --progress --depth 1 origin "$commit"
+    # Checkout writes only the files that differ, so make compiles only those.
+    git -C "$source" checkout -q --detach "$commit"
+    snapshot > "$prepared"
+  fi
+  [[ $(git -C "$source" rev-parse HEAD) == "$commit" ]] || {
+    echo "Unexpected kernel source in $source" >&2; exit 1;
+  }
 fi
+# The marks a tree is recognised by: the commit it is on, and what its
+# checkout gave (written above), which tells edits apart. Where that is not
+# known it is the commit's tree, so an edit made meanwhile still counts.
+[[ -f "$applied" && $(cat "$applied") == "$commit" ]] || echo "$commit" > "$applied"
+[[ -f "$prepared" ]] || git -C "$source" rev-parse 'HEAD^{tree}' > "$prepared"
 fi
 mkdir -p "$build_output"
 [[ -n $tree ]] || cp "$config" "$build_output/.config"

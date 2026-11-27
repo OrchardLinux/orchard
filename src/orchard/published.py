@@ -41,12 +41,11 @@ def source_inputs(hardware, platform):
     def series(*args):
         return subprocess.check_output([sys.executable, str(hardware / 'kernel/series.py'), *args], text=True)
     described = json.loads(series('--platform', platform))
-    patches = [str(Path(line).resolve().relative_to(hardware.resolve())) for line in series(platform).splitlines()]
     return {
         'platform': platform,
         'build': {key: described[key] for key in ('arch', 'image', 'dtbs')},
-        'recipes': recipe_entries(hardware, [described['upstream'], described['series'], described['config'],
-                                             'kernel/Containerfile', 'kernel/install-toolchain', *patches]),
+        'recipes': recipe_entries(hardware, [described['upstream'], described['config'],
+                                             'kernel/Containerfile', 'kernel/install-toolchain']),
         'producer': KERNEL_PRODUCER,
     }
 

@@ -97,6 +97,14 @@ is missing or empty.
 
 ### Building
 
+- A platform no longer has a `series` entry (`platforms/*.toml`,
+  `kernel/series/`): its kernel is OrchardLinux/linux at the lock's commit.
+  The kernel source keys change with it, so the next nightly compiles every
+  kernel once.
+- One kernel tree per platform in the cache (`kernel-work/<platform>`). When
+  the lock names another commit, a clean tree moves to it in place and only
+  the changed files compile again; a tree with local edits is refused. Trees
+  of the old naming are unused: `orchard cache` removes them.
 - The nightly's publishing steps no longer use the Python tool's package: the
   source keys (`ci/keys.py`), the kernel reuse checks and the platform layers
   and index (`producers/platform_layer.py`, `producers/platforms_index.py`) are

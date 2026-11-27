@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Kernel platforms: descriptor, ordered patches, and device -> platform/DTB.
+"""Kernel platforms: descriptor, and device -> platform/DTB.
 
-  series.py PLATFORM_OR_DEVICE            print the ordered patch files
   series.py --resolve PLATFORM_OR_DEVICE  print "platform dtb" (dtb is "-" for a platform)
   series.py --platform PLATFORM_OR_DEVICE print the platform descriptor's kernel table as JSON
 
 A platform is described by platforms/<name>.toml: its architecture, image,
-DTB directory, upstream base, patch series and config.
+DTB directory, the lock that names its commit of OrchardLinux/linux, and its
+config. The file keeps its name from when a platform also had a patch series.
 """
 import json
 from pathlib import Path
@@ -65,9 +65,9 @@ def platform(name):
         raise ValueError(f'{descriptor}: kernel.arch must be one of {sorted(ARCHES)}')
     if not re.fullmatch(r'[A-Za-z0-9_.-]+', str(kernel.get('image', ''))):
         raise ValueError(f'{descriptor}: invalid kernel.image')
-    for key in ('dtbs', 'upstream', 'series', 'config'):
+    for key in ('dtbs', 'upstream', 'config'):
         _inside(kernel.get(key), f'kernel.{key}', descriptor)
-    for key in ('upstream', 'series', 'config'):
+    for key in ('upstream', 'config'):
         if not (REPO / kernel[key]).is_file():
             raise ValueError(f'{descriptor}: kernel.{key} {kernel[key]} does not exist')
     if not re.fullmatch(r'[a-z0-9][a-z0-9_]*_defconfig', str(kernel.get('defconfig', ''))):
@@ -77,21 +77,7 @@ def platform(name):
     if kernel.get('loader') not in LOADERS:
         raise ValueError(f'{descriptor}: kernel.loader must be one of {sorted(LOADERS)}')
     return {'platform': platform_name, **{key: kernel[key] for key in
-            ('arch', 'image', 'dtbs', 'upstream', 'series', 'config', 'defconfig', 'branch', 'loader')}}
-
-
-def patches(name):
-    series = REPO / platform(name)['series']
-    result = []
-    for line in series.read_text().splitlines():
-        line = line.split('#', 1)[0].strip()
-        if not line:
-            continue
-        layer = (ROOT / line).resolve()
-        if ROOT not in layer.parents or not layer.is_dir():
-            raise ValueError(f'Invalid patch layer in {series}: {line}')
-        result += sorted(layer.rglob('*.patch'))
-    return result
+            ('arch', 'image', 'dtbs', 'upstream', 'config', 'defconfig', 'branch', 'loader')}}
 
 
 if __name__ == '__main__':
@@ -102,7 +88,6 @@ if __name__ == '__main__':
         elif sys.argv[1] == '--platform':
             print(json.dumps(platform(sys.argv[2])))
         else:
-            for patch in patches(sys.argv[1]):
-                print(patch)
-    except ValueError as error:
+            sys.exit(__doc__.split('\n\n')[1])
+    except (ValueError, IndexError) as error:
         sys.exit(str(error))

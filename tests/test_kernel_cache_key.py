@@ -8,7 +8,7 @@ from unittest.mock import patch
 from orchard import build, kernel
 
 DESCRIPTOR = {'platform': 'apple-16k', 'arch': 'arm64', 'image': 'Image.gz', 'dtbs': 'arch/arm64/boot/dts/apple',
-              'upstream': 'kernel/upstream.lock', 'series': 'kernel/series/apple-16k',
+              'upstream': 'kernel/upstream.lock',
               'config': 'kernel/configs/apple-16k/config', 'defconfig': 'orchard_apple16k_defconfig',
               'branch': 'main'}
 

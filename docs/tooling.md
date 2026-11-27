@@ -91,7 +91,7 @@ All shared by every checkout in `~/.cache/orchard`:
 
 | Layer | |
 |---|---|
-| Source | shared Git object store (`git/`), one kernel tree per platform and upstream pin (`kernel-work/`) |
+| Source | shared Git object store (`git/`), one kernel tree per platform (`kernel-work/`) |
 | Intermediate | the kernel tree's incremental output; ccache (`ccache/kernel/`); recipe work directories (`work/RECIPE/KEY`) |
 | Result | content-addressed components (`components-v2/`), each file stored once; `orchard cache --prune` keeps the most recently used |
 

@@ -18,7 +18,6 @@ arch = "arm"
 image = "zImage"
 dtbs = "arch/arm/boot/dts/apple"
 upstream = "kernel/upstream.lock"
-series = "kernel/series/test-arm"
 config = "kernel/configs/test-arm/config"
 defconfig = "test_arm_defconfig"
 branch = "test"
@@ -41,7 +40,7 @@ class Platforms(unittest.TestCase):
                 result = self.series('--platform', name)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 described = json.loads(result.stdout)
-                for key in ('upstream', 'series', 'config'):
+                for key in ('upstream', 'config'):
                     self.assertTrue((SOURCE / described[key]).is_file(), described[key])
 
     def layout(self, descriptor):
@@ -51,7 +50,7 @@ class Platforms(unittest.TestCase):
         (root / 'kernel').mkdir()
         shutil.copy2(SOURCE / 'kernel/series.py', root / 'kernel/series.py')
         for name, text in {'kernel/upstream.lock': 'url=x\ncommit=y\n',
-                           'kernel/series/test-arm': '', 'kernel/configs/test-arm/config': '',
+                           'kernel/configs/test-arm/config': '',
                            'platforms/test-arm.toml': descriptor}.items():
             (root / name).parent.mkdir(parents=True, exist_ok=True)
             (root / name).write_text(text)
@@ -67,7 +66,7 @@ class Platforms(unittest.TestCase):
         cases = {
             'unknown arch': VALID.replace('arch = "arm"', 'arch = "x86"'),
             'config outside the repository': VALID.replace('kernel/configs/test-arm/config', '../config'),
-            'missing series': VALID.replace('kernel/series/test-arm', 'kernel/series/none'),
+            'missing lock': VALID.replace('kernel/upstream.lock', 'kernel/none.lock'),
             'image with a path': VALID.replace('"zImage"', '"../zImage"'),
             'other name': VALID.replace('name = "test-arm"', 'name = "other"'),
             'other schema': VALID.replace('schema = 1', 'schema = 2'),

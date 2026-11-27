@@ -16,7 +16,6 @@ A platform is one kernel build shared by every board that names it in
 | `image` | make target and payload file | `Image.gz` | `zImage` |
 | `dtbs` | where `make dtbs` leaves the boards' DTBs | `arch/arm64/boot/dts/apple` | `arch/arm/boot/dts/apple` |
 | `upstream` | lock naming the commit of OrchardLinux/linux to build | `kernel/upstream.lock` (on v7.3-rc1) | `kernel/upstream-armv7.lock` (on v6.12) |
-| `series` | no patch layers any more; kept for released tools | `kernel/series/<name>` | `kernel/series/apple-armv7` |
 | `config` | expanded copy of the tree's defconfig | `kernel/configs/<name>/config` | `kernel/configs/apple-armv7/config` |
 | `defconfig` | the config, in OrchardLinux/linux | `orchard_apple16k_defconfig`, … | `orchard_applearmv7_defconfig` |
 | `branch` | its branch in OrchardLinux/linux | `main` | `armv7` |
@@ -373,9 +372,9 @@ gone (November 2026).
   artifact), so testing a kernel change needs no compile at all.
 
 **Done:** a distribution build takes the nightly's kernel instead of
-compiling it when the platform's *source key* matches (`orchard.published`):
-a hash of the files that decide the kernel (upstream lock, series and every
-patch, config, toolchain recipes, build fields, `KERNEL_PRODUCER`), which any
+compiling it when the platform's *source key* matches (`ci/keys.py`):
+a hash of the files that decide the kernel (upstream lock, config, toolchain
+recipes, build fields, `KERNEL_PRODUCER`), which any
 checkout computes without a kernel tree. CI publishes the keys
 (`component-keys.json`, in `SHA256SUMS`); the bundle is checked against
 `SHA256SUMS` before use and cached (`kernel-published-PLATFORM`). Another
