@@ -59,4 +59,4 @@ usb_host = "missing"
 audio_output = "working" # CS42L81 speakers on SPI3 + MCA0; "iPad Air Speakers" card came up and a browser game played through the speakers, with MCA0's interrupt left alone (#230, installed Omarchy A, J71 2026-11-24). After s2idle a browser tab stayed silent until reloaded; again on the released linux-orchard-apple-4k 0.3.8-1 and omarchy-a 0.3.6, J71 2026-11-26: both speakers play, also after s2idle
 audio_input = "missing"
 camera = "missing"
-video_decode_hevc = "missing"
+video_decode_hevc = "none" # the A7 decoder is an H.264-generation VXD: Apple's device tree gives it vxd-version 4 and only an h264-playback-level, iOS 12.5.8 drives it with AppleVXD393, and Apple's HEVC rule (AppleD5500) takes vxd-version 7, 9 and 10 only

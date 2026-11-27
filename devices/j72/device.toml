@@ -61,4 +61,4 @@ usb_host = "missing"
 audio_output = "working" # left and right channels played and confirmed separately on Omarchy A 0.3.6 (thisiscamk, 2026-11-25, #232)
 audio_input = "missing"
 camera = "missing"
-video_decode_hevc = "missing"
+video_decode_hevc = "none" # the A7 decoder is an H.264-generation VXD: Apple's device tree gives it vxd-version 4 and only an h264-playback-level, iOS 12.5.8 drives it with AppleVXD393, and Apple's HEVC rule (AppleD5500) takes vxd-version 7, 9 and 10 only
