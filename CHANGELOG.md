@@ -9,6 +9,14 @@ releasing, rename that section to the version (`## [0.3.0] - YYYY-MM-DD`). The
 release workflow uses that section as the GitHub release notes and fails if it
 is missing or empty.
 
+## [Unreleased]
+
+### Building
+
+- The iPad mini's (p105) own kernel modules are part of its platform's
+  kernel key: a first payload for it takes the published kernel instead of
+  compiling one.
+
 ## [0.3.11] - 2026-11-28
 
 ### Building
