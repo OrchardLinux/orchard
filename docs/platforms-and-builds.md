@@ -349,8 +349,9 @@ gone (November 2026).
   the current directory: a checkout's `bin/orchard` runs that checkout. Its
   kernels, m1n1 and tools then come from that nightly (same files, same
   source keys) and its Pongo too (`git describe` finds the nightly's tag).
-  `orchard update` installs the newest nightly's launcher, and a launcher
-  older than the nightly it runs says so.
+  A launcher that differs from the newest nightly's replaces itself with it
+  and carries on; with a pinned version it says so and `orchard update`
+  installs that version's.
   The user core an installer leaves (install, launch, devices) stays on
   stable releases; the two meet in the Rust launcher.
 - The installed CLI is thin, like `bin/flutter`: in a project checkout

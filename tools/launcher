@@ -79,6 +79,7 @@ orchard2_on() {
 needs_orchard2() {
     command -v orchard2 >/dev/null 2>&1 || {
         echo 'orchard: orchard2 is switched on (ORCHARD2 or ~/.config/orchard/config.toml) but not on PATH' >&2
+        echo '  Install it: curl -fsSL https://raw.githubusercontent.com/OrchardLinux/tools/main/install.sh | sh' >&2
         exit 1
     }
 }
@@ -199,8 +200,19 @@ case ${1:-} in
         fi
         exit 0 ;;
 esac
+# The newest nightly brings its launcher: it takes this one's place and
+# carries on with the command. Not for a pinned version (its launcher may be
+# older), nor through a link (the file behind it is somebody's checkout).
 if [ -z "$checkout" ] && [ -f "$root/tools/launcher" ] && ! cmp -s "$self" "$root/tools/launcher"; then
-    echo "orchard: a newer launcher is in $(basename "$root"); run orchard update" >&2
+    if [ -z "${ORCHARD_VERSION:-}" ] && [ -z "${ORCHARD_LAUNCHER_REPLACED:-}" ] && [ ! -L "$0" ] && [ -w "$(dirname "$self")" ]; then
+        partial=$(dirname "$self")/.orchard-$$
+        if cp "$root/tools/launcher" "$partial" && chmod 755 "$partial" && mv -f "$partial" "$self"; then
+            echo "orchard: the launcher is $(basename "$root")'s now" >&2
+            ORCHARD_LAUNCHER_REPLACED=1 exec "$self" "$@"
+        fi
+        rm -f "$partial"
+    fi
+    echo "orchard: another launcher is in $(basename "$root"); run orchard update" >&2
 fi
 case ${1:-} in
     build|inputs|devices|doctor|shell|exec|ssh-access)
