@@ -46,6 +46,12 @@
         "rootfs": "usr/share/firmware/multitouch/J87.mtprops"
       },
       "sha256": "05a9b027bf1985ae2ff80c69dbe16fb6083327f350aae47f6b2f4963d6bbdef2"
+    },
+    "CoreMotionOscarFirmware.image": {
+      "ipsw": {
+        "rootfs": "usr/standalone/firmware/oscar/CoreMotionOscarFirmware.image"
+      },
+      "sha256": "515adeca57c3021722b2e0553c21779a8035133955525a3db9cd25bf23d879a2"
     }
   },
   "outputs": [
@@ -94,6 +100,16 @@
           "step": "smartio-from-kernelcache@2",
           "input": "kernelcache",
           "kext": "com.apple.driver.AppleS5L8960XSmartIO"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/s5l8960x-oscar.bin",
+      "sha256": "515adeca57c3021722b2e0553c21779a8035133955525a3db9cd25bf23d879a2",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "CoreMotionOscarFirmware.image"
         }
       ]
     }

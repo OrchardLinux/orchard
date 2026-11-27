@@ -274,11 +274,13 @@
       "wifi"
     ],
     "j71": [
+      "accelerometer",
       "audio_output",
       "backlight",
       "battery",
       "buttons",
       "charging",
+      "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
@@ -348,11 +350,13 @@
       "wifi"
     ],
     "j72": [
+      "accelerometer",
       "audio_output",
       "backlight",
       "battery",
       "buttons",
       "charging",
+      "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
@@ -422,11 +426,13 @@
       "wifi"
     ],
     "j73": [
+      "accelerometer",
       "audio_output",
       "backlight",
       "battery",
       "buttons",
       "charging",
+      "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
@@ -465,11 +471,13 @@
       "wifi"
     ],
     "j85": [
+      "accelerometer",
       "audio_output",
       "backlight",
       "battery",
       "buttons",
       "charging",
+      "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
@@ -478,11 +486,13 @@
       "usb_serial"
     ],
     "j85m": [
+      "accelerometer",
       "audio_output",
       "backlight",
       "battery",
       "buttons",
       "charging",
+      "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
@@ -491,11 +501,13 @@
       "usb_serial"
     ],
     "j86": [
+      "accelerometer",
       "audio_output",
       "backlight",
       "battery",
       "buttons",
       "charging",
+      "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
@@ -504,11 +516,13 @@
       "usb_serial"
     ],
     "j86m": [
+      "accelerometer",
       "audio_output",
       "backlight",
       "battery",
       "buttons",
       "charging",
+      "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
@@ -517,11 +531,13 @@
       "usb_serial"
     ],
     "j87": [
+      "accelerometer",
       "audio_output",
       "backlight",
       "battery",
       "buttons",
       "charging",
+      "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
@@ -530,11 +546,13 @@
       "usb_serial"
     ],
     "j87m": [
+      "accelerometer",
       "audio_output",
       "backlight",
       "battery",
       "buttons",
       "charging",
+      "gyroscope",
       "light_sensor",
       "storage_read",
       "storage_write",
