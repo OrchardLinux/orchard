@@ -37,6 +37,16 @@ class PublishedKernel(unittest.TestCase):
         self.assertEqual(loader['files'],
                          ['m1n1.bin', 'm1n1-idevice.macho', 'monitor-stub.macho', 'm1n1-armv7.macho'])
 
+    def test_the_ci_script_writes_the_same_keys(self):
+        # ci/keys.py computes them for the nightly without this package; both read producers/contract.toml.
+        import subprocess
+        import sys
+        with tempfile.TemporaryDirectory() as directory:
+            published.write_keys(ROOT, ['apple-4k', 'apple-armv7'], Path(directory) / 'package.json')
+            subprocess.run([sys.executable, '-I', str(ROOT / 'ci/keys.py'), '--output', str(Path(directory) / 'ci.json'),
+                            'apple-4k', 'apple-armv7'], check=True, capture_output=True)
+            self.assertEqual((Path(directory) / 'ci.json').read_bytes(), (Path(directory) / 'package.json').read_bytes())
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

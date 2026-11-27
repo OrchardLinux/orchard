@@ -6,7 +6,7 @@
 A kernel job asks this before it installs a compiler. The nightly's kernel is
 taken when both hold:
 
-- the platform's source key (orchard.published: upstream pin, series, patches,
+- the platform's source key (ci/keys.py: upstream pin, series, patches,
   config, toolchain recipes) equals the one the nightly published in
   component-keys.json, and
 - the build scripts the key leaves out (GUARDED) are the same files as in the
@@ -24,15 +24,17 @@ platform's source key) and `reused` (the nightly's name, or empty).
 """
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
-import sys
 import tarfile
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'src'))
+spec = importlib.util.spec_from_file_location('keys', ROOT / 'ci/keys.py')
+keys = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(keys)
 
 # What builds a kernel besides the inputs of its source key. A directory counts
 # with everything below it; a path may be missing on both sides.
@@ -67,9 +69,8 @@ def archived_scripts(archive):
 
 
 def download(url, path, checksum):
-    from orchard.http import open_url
     digest, size = hashlib.sha256(), 0
-    with open_url(url, timeout=300) as response, path.open('xb') as out:
+    with keys.open_url(url, timeout=300) as response, path.open('xb') as out:
         while block := response.read(1024 * 1024):
             size += len(block)
             if size > LIMIT:
@@ -98,19 +99,17 @@ def kernel_artifact(bundle, output):
 
 def reuse(platform, output, *, root=ROOT, releases=None):
     """The nightly's name when its kernel of PLATFORM now lies in OUTPUT; raises ValueError when it can't be used."""
-    from orchard import published
-    from orchard.build import RELEASES
-    releases = releases or RELEASES
-    key = published.source_key(root, platform)
+    releases = releases or keys.RELEASES
+    key = keys.source_key(Path(root), platform)
     try:
-        tag = json.loads(published._fetch(f'{releases}/{published.TAG}/latest.json', 64 * 1024))['name']
-        sums = published._sums(published._fetch(f'{releases}/{tag}/{published.SUMS}', 1024 * 1024).decode())
-        keys = published._fetch(f'{releases}/{tag}/{published.KEYS}', 1024 * 1024)
+        tag = json.loads(keys.fetch(f'{releases}/{keys.TAG}/latest.json', 64 * 1024))['name']
+        sums = keys.sums(keys.fetch(f'{releases}/{tag}/{keys.SUMS}', 1024 * 1024).decode())
+        published = keys.fetch(f'{releases}/{tag}/{keys.KEYS}', 1024 * 1024)
     except (OSError, KeyError) as error:
         raise ValueError(f'no nightly to ask ({error})') from error
-    if hashlib.sha256(keys).hexdigest() != sums.get(published.KEYS):
-        raise ValueError(f'{tag}: {published.KEYS} does not match its {published.SUMS}')
-    entry = json.loads(keys).get('platforms', {}).get(platform) or {}
+    if hashlib.sha256(published).hexdigest() != sums.get(keys.KEYS):
+        raise ValueError(f'{tag}: {keys.KEYS} does not match its {keys.SUMS}')
+    entry = json.loads(published).get('platforms', {}).get(platform) or {}
     if entry.get('key') != key:
         raise ValueError(f'{tag} has another kernel state')
     bundle, source = entry['asset'], f'kernel-source-{platform}.tar.gz'
@@ -142,8 +141,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--rebuild', action='store_true', help='do not ask the nightly; the job compiles')
     args = parser.parse_args()
-    from orchard import published
-    key, tag = published.source_key(ROOT, args.platform), ''
+    key, tag = keys.source_key(ROOT, args.platform), ''
     try:
         if args.rebuild:
             raise ValueError('a rebuild was asked for')

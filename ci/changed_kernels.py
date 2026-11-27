@@ -4,7 +4,7 @@
   ci/changed_kernels.py BASE PLATFORM...
 
 BASE is a checkout of the commit the pull request merges into. A platform
-counts as changed when its source key (orchard.published: upstream pin,
+counts as changed when its source key (ci/keys.py: upstream pin,
 series, patches, config, toolchain recipes, producer) or one of the build
 scripts the key leaves out (ci/reuse_kernel.py GUARDED) differs between BASE
 and this checkout: exactly what would stop the nightly's kernel from being
@@ -33,9 +33,8 @@ def source_key(root, platform):
     """PLATFORM's source key in the checkout ROOT by ROOT's own code, or None when it has none."""
     with tempfile.TemporaryDirectory(prefix='changed-kernels-') as temporary:
         output = Path(temporary) / 'keys.json'
-        env = {**os.environ, 'PYTHONPATH': str(Path(root) / 'src')}
-        done = subprocess.run([sys.executable, '-m', 'orchard.published', 'keys', '--output', str(output), platform],
-                              cwd=root, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        done = subprocess.run([sys.executable, str(Path(root) / 'ci/keys.py'), '--output', str(output), platform],
+                              cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if done.returncode != 0:
             return None
         return json.loads(output.read_text())['platforms'][platform]['key']
