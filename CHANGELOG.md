@@ -19,6 +19,13 @@ is missing or empty.
   through the board's firmware recipe. Headphones pair and play (A2DP, AAC).
   The iPad Air (Cellular, China) share the device tree, untested. Tested by
   ricktav.
+- A7 iPads (iPad Air, iPad mini 2 and 3): the accelerometer and gyroscope
+  sit behind the M7 motion coprocessor, which the kernel's new apple-oscar
+  driver powers and boots with its firmware from the restore image (a new
+  recipe output, `lib/firmware/apple/s5l8960x-oscar.bin`). On the iPad Air
+  (J71) the screen turns with the iPad in Omarchy A, also after sleep; the
+  other A7 iPads are untested. Needs the kernel from OrchardLinux/linux
+  with the M7 driver.
 
 ## [0.3.10] - 2026-11-27
 

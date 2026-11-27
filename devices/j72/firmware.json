@@ -43,6 +43,12 @@
         "rootfs": "usr/share/firmware/wifi/4324b5/dureza-m-mt.txt"
       },
       "sha256": "05ac070b4f81a264f315222c32cbda9c8fcd196872cd8ce09c94a6b85e455289"
+    },
+    "CoreMotionOscarFirmware.image": {
+      "ipsw": {
+        "rootfs": "usr/standalone/firmware/oscar/CoreMotionOscarFirmware.image"
+      },
+      "sha256": "515adeca57c3021722b2e0553c21779a8035133955525a3db9cd25bf23d879a2"
     }
   },
   "outputs": [
@@ -93,6 +99,16 @@
           "input": "dureza.trx",
           "nvram": "dureza-m-mt.txt",
           "placeholder_mac": "02:00:00:00:00:00"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/s5l8960x-oscar.bin",
+      "sha256": "515adeca57c3021722b2e0553c21779a8035133955525a3db9cd25bf23d879a2",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "CoreMotionOscarFirmware.image"
         }
       ]
     }
