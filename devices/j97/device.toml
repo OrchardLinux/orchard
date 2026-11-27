@@ -31,7 +31,7 @@ status = "experimental"
 # (tools/catalog/drivers.json), plus the display's boot console.
 [features]
 display = "untested"
-screen_off = "untested" # Display pipe enabled on every A8 board, as on the N61
+screen_off = "untested" # Backlight darkens on idle (disp0 disabled in t7000-mini4.dtsi)
 backlight = "untested"
 gpu_desktop = "untested"
 touch = "untested" # apple_z2 with the J96 data (C1F14,4): the ADT and mtprops match the J96's.
@@ -47,8 +47,8 @@ bluetooth_input = "missing" # BlueTool has two Zinfandel patchrams per vendor (b
 bluetooth_audio = "missing" # Same as Bluetooth input
 cellular = "missing"
 battery = "untested" # bq27xxx over HDQ (W1_MASTER_UART), as on the J96.
-charging = "missing"
-charging_control = "missing"
+charging = "untested" # Tristar + D2207 in shared t7000-mini4.dtsi
+charging_control = "untested" # Tristar + D2207 in shared t7000-mini4.dtsi
 suspend = "untested"
 resume = "untested"
 usb_serial = "untested"

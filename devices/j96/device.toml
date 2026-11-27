@@ -15,7 +15,7 @@ chip = 0x7000
 board = 0x08
 
 [boot]
-methods = ["checkm8-pongo"] # palera1n's device list (palera.in); not run with Orchard yet.
+methods = ["checkm8-pongo"] # Tested with orchard-install.pyz install and launch (Omarchy A 0.3.6).
 
 [kernel]
 platform = "apple-4k"
@@ -28,36 +28,35 @@ recipe = "firmware.json" # Pins this board's public IPSW; the GPU firmware comes
 status = "experimental"
 tested_by = ["tcballard"] # omarchy-a issue #69; GPU in #196
 
-# States: working, untested, missing, none (features.toml). "working" entries were seen
-# working on this board on the J96 bring-up kernel (Hoolock 6831bc7 plus this board's
-# t7000 device-tree patches, RAM-booted through checkm8/Pongo), not yet on Orchard's
-# build: display (simpledrm, Labwc), backlight (apple-dwi), buttons, Wi-Fi (BCM4350 C5,
-# 2.4/5 GHz, WPA2), battery (bq27540 over HDQ, UPower) and the USB gadget console and
-# network (ACM, NCM). "untested" means a driver binds in the device tree
-# (tools/catalog/drivers.json) and nobody has tried it here: touch worked only on a local
-# bring-up driver, not on apple_z2.
+# States: working, untested, missing, none (features.toml). Verified on an
+# installed Omarchy A 0.3.6 system on Orchard's apple-4k kernel (with
+# OrchardLinux/linux#10 for touch, Tristar D2207 charging, and disp0 disabled):
+# display (simpledrm), GPU desktop (PowerVR via Zink), backlight (apple-dwi),
+# screen on/off, touch (apple_z2 C1F14,4), buttons, internal storage (ANS1/asp),
+# Wi-Fi (BCM4350 C5), battery (bq27540 over HDQ), Lightning charging (USB host
+# 500 mA), s2idle suspend/resume, and USB gadget console/network.
 [features]
 display = "working"
-screen_off = "untested" # Display pipe enabled on every A8 board, as on the N61
+screen_off = "working" # Backlight darkens on idle and lights again on Home (21-29 ms wake)
 backlight = "working"
-gpu_desktop = "untested" # GPU driver, Vulkan and GPU buffers on the display pass here (tcballard, #196); the desktop itself not yet run on the GPU
-touch = "untested" # apple_z2 (C1F14,4) never run here; multitouch worked on a local bring-up driver.
+gpu_desktop = "working" # PowerVR Apple A8 via Zink on simpledrm; omarchy-gpu-probe passes in 1.1 s
+touch = "working" # apple_z2 (C1F14,4): family 20, 32x24, 11980x15974, shifted_reply_header
 buttons = "working"
 accelerometer = "missing"
 gyroscope = "missing"
 light_sensor = "missing"
 touch_id = "missing"
-storage_read = "untested" # ANS1 on every A8 board (t7000-common.dtsi), as on the N102
-storage_write = "untested" # Same ANS1 and asp driver as the N102
+storage_read = "working" # ANS1/asp on installed Omarchy A 0.3.6
+storage_write = "working" # ANS1/asp on installed Omarchy A 0.3.6
 wifi = "working" # BCM4350 over PCIe (brcmfmac); C2 and C5 modules exist, C5 seen working.
 bluetooth_input = "missing" # BlueTool has two Zinfandel patchrams per vendor (by controller revision); hci_bcm chooses by vendor only, so a unit's one isn't decidable yet
 bluetooth_audio = "missing" # Same as Bluetooth input
 cellular = "none"
 battery = "working" # bq27xxx over HDQ (W1_MASTER_UART).
-charging = "missing"
-charging_control = "missing"
-suspend = "untested"
-resume = "untested"
+charging = "working" # Tristar + D2207 (apple_tristar_charger): host USB [SDP] 500 mA verified; wall adapter untested
+charging_control = "untested" # USB role handoff across sleep verified; wall-adapter BrickID/unplug withdrawal not yet tested
+suspend = "working" # s2idle on idle, ANS and USB session survive sleep
+resume = "working" # Home wakes in ~21-29 ms; display, touch, GPU, Wi-Fi, USB network return
 usb_serial = "working"
 usb_network = "working"
 usb_host = "missing"
