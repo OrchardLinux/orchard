@@ -6,6 +6,7 @@
   tools/catalog/generate kernel --kernel PLATFORM=DIR ...
                                                record which drivers each board's device tree binds
   tools/catalog/generate matrix [--check]      write docs/compatibility.md from the catalog
+  tools/catalog/generate screens               write every board's screen.json from Apple's data (macOS, Xcode)
   tools/catalog/generate publish --output DIR  write the archive and pointer CLIs download
 
 `write` and `check` read api.ipsw.me, each IPSW's BuildManifest and boot files
@@ -649,6 +650,248 @@ def publish(output, commit):
     return []
 
 
+# ------------------------------------------------------------------ screens
+#
+# A board's screen shape, from Apple: the corner radius its own device tree
+# gives (/product display-corner-radius, physical pixels and the artwork
+# scale), and the outline of the lit area (rounded corners, a notch) from the
+# framebuffer mask Xcode's simulator profile keeps under the framebuffer
+# identifier that same device tree names. devices/<board>/screen.json holds
+# them; the platform layer gathers its boards' into usr/lib/orchard/screens.json
+# (producers/platform_layer.py), for any distribution's desktop to read.
+
+SIMULATOR_PROFILES = (Path('/Library/Developer/CoreSimulator/Profiles/DeviceTypes'),
+                      Path('/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform'
+                           '/Library/Developer/CoreSimulator/Profiles/DeviceTypes'))
+
+
+def im4p_payload(data):
+    """The payload of an IM4P, LZFSE-decoded where Apple compressed it (macOS's libcompression)."""
+    def element(at):
+        tag, length = data[at], data[at + 1]
+        at += 2
+        if length & 0x80:
+            count = length & 0x7f
+            length, at = int.from_bytes(data[at:at + count], 'big'), at + count
+        return tag, at, length
+    _, at, length = element(0)
+    end, payload = at + length, None
+    while at < end:
+        tag, start, length = element(at)
+        if tag == 0x04:
+            payload = data[start:start + length]
+            break
+        at = start + length
+    if payload is None:
+        raise ValueError('IM4P has no payload')
+    if payload[:4] in (b'bvx2', b'bvx1', b'bvxn', b'bvx-'):
+        import ctypes
+        library = ctypes.CDLL('/usr/lib/libcompression.dylib')
+        output = ctypes.create_string_buffer(16 << 20)
+        size = library.compression_decode_buffer(output, len(output), payload, len(payload), None, 0x801)
+        if size <= 0:
+            raise ValueError('LZFSE payload did not decode')
+        payload = output.raw[:size]
+    return payload
+
+
+def adt_node(data, path):
+    """{property: bytes} of one node of an Apple device tree, by its path of names, or None."""
+    def walk(offset):
+        count, children = struct.unpack_from('<II', data, offset)
+        offset += 8
+        properties = {}
+        for _ in range(count):
+            name = data[offset:offset + 32].split(b'\0')[0].decode()
+            length = struct.unpack_from('<I', data, offset + 32)[0] & 0x7fffffff
+            properties[name] = data[offset + 36:offset + 36 + length]
+            offset += 36 + ((length + 3) & ~3)
+        nodes = []
+        for _ in range(children):
+            child, offset = walk(offset)
+            nodes.append(child)
+        return (properties, nodes), offset
+    node = walk(0)[0]
+    if node[0].get('name', b'').split(b'\0')[0].decode() != path[0]:
+        return None
+    for name in path[1:]:
+        node = next((child for child in node[1] if child[0].get('name', b'').split(b'\0')[0].decode() == name), None)
+        if node is None:
+            return None
+    return node[0]
+
+
+def pdf_outline(document):
+    """(width, height, SVG path) of the filled shape in a one-page PDF mask, y down, in its pixels."""
+    import zlib
+    width, height = (float(n) for n in re.findall(rb'/MediaBox\s*\[([^\]]*)\]', document)[0].split()[2:4])
+    # Only the page's own content: forms and colour profiles are not the shape.
+    objects = {int(number): body for number, body in
+               re.findall(rb'(?:^|[\r\n])(\d+) 0 obj(.*?)endobj', document, re.S)}
+    page = next(body for body in objects.values() if re.search(rb'/Type\s*/Page\b', body))
+    contents = re.search(rb'/Contents\s*(\[[^\]]*\]|\d+ 0 R)', page)[1]
+    shapes = []
+    for number in re.findall(rb'(\d+) 0 R', contents):
+        body = objects[int(number)]
+        header, _, rest = body.partition(b'stream')
+        raw = rest.lstrip(b'\r\n')
+        raw = raw[:raw.rindex(b'endstream')]
+        text = (zlib.decompress(raw) if b'Flate' in header else raw).decode('latin1')
+        matrix, clip, stack, operands, current, path, clipping = [1, 0, 0, 1, 0, 0], None, [], [], (0, 0), [], False
+
+        def point(x, y):
+            a, b, c, d, e, f = matrix
+            return (a * x + c * y + e, height - (b * x + d * y + f))
+
+        def covers_page(shape):
+            # A straight-sided shape over the whole page; a rounded outline touches every edge too.
+            if any(segment[0] == 'C' for segment in shape):
+                return False
+            points = [p for segment in shape for p in segment[1:]]
+            return bool(points) and min(x for x, _ in points) <= 0.5 and min(y for _, y in points) <= 0.5 and \
+                max(x for x, _ in points) >= width - 0.5 and max(y for _, y in points) >= height - 0.5
+
+        def painted(shape):
+            # A fill over the whole page inside a clip paints the clip's shape.
+            return clip if clip is not None and covers_page(shape) else shape
+
+        for token in re.findall(r'[-+]?(?:\d+\.?\d*|\.\d+)|[A-Za-z*\']+|/\S+', text):
+            if re.fullmatch(r'[-+]?(?:\d+\.?\d*|\.\d+)', token):
+                operands.append(float(token))
+                continue
+            o = operands
+            if token == 'q':
+                stack.append((matrix[:], clip))
+            elif token == 'Q':
+                matrix, clip = stack.pop() if stack else (matrix, clip)
+            elif token == 'cm' and len(o) >= 6:
+                a, b, c, d, e, f = o[-6:]
+                A, B, C, D, E, F = matrix
+                matrix = [a * A + b * C, a * B + b * D, c * A + d * C, c * B + d * D, e * A + f * C + E, e * B + f * D + F]
+            elif token == 'm' and len(o) >= 2:
+                current = o[-2:]
+                path.append(('M', point(*current)))
+            elif token == 'l' and len(o) >= 2:
+                current = o[-2:]
+                path.append(('L', point(*current)))
+            elif token == 'c' and len(o) >= 6:
+                path.append(('C', point(*o[-6:-4]), point(*o[-4:-2]), point(*o[-2:])))
+                current = o[-2:]
+            elif token == 'v' and len(o) >= 4:
+                path.append(('C', point(*current), point(*o[-4:-2]), point(*o[-2:])))
+                current = o[-2:]
+            elif token == 'y' and len(o) >= 4:
+                path.append(('C', point(*o[-4:-2]), point(*o[-2:]), point(*o[-2:])))
+                current = o[-2:]
+            elif token == 're' and len(o) >= 4:
+                x, y, w, h = o[-4:]
+                path += [('M', point(x, y)), ('L', point(x + w, y)), ('L', point(x + w, y + h)),
+                         ('L', point(x, y + h)), ('Z',)]
+            elif token == 'h':
+                path.append(('Z',))
+            elif token in ('W', 'W*'):
+                clipping = True
+            elif token in ('f', 'f*', 'F', 'B', 'B*', 'b', 'b*', 'n', 'S', 's'):
+                if token in ('f', 'f*', 'F', 'B', 'B*', 'b', 'b*') and path:
+                    shapes.append(painted(path))
+                if clipping and path and not covers_page(path):
+                    clip = path  # a page-sized clip clips nothing
+                path, clipping = [], False
+            elif token == 'Do' and clip is not None:
+                shapes.append(clip)  # a form drawn through the clip: the clip is the shape
+            operands = []
+    unique = []
+    for shape in shapes:
+        if shape and shape not in unique:
+            unique.append(shape)
+    shapes = unique
+    if len(shapes) != 1:
+        raise ValueError(f'the mask has {len(shapes)} filled shapes, not one')
+    number = lambda value: f'{round(value, 3):g}'
+    out = []
+    for segment in shapes[0]:
+        out.append(segment[0] + ' '.join(f'{number(x)} {number(y)}' for x, y in segment[1:]))
+    return int(width), int(height), ' '.join(out)
+
+
+def simulator_mask(identifier, product):
+    """Xcode's framebuffer mask for this device: by the identifier its device tree names,
+    else by its model identifier (later device trees name none). None if Xcode has none."""
+    for directory in SIMULATOR_PROFILES:
+        for found in sorted(directory.glob('*.simdevicetype/Contents/Resources/profile.plist')):
+            profile = plistlib.loads(found.read_bytes())
+            mask = profile.get('framebufferMask')
+            models = [profile.get('modelIdentifier')] + profile.get('representedModelIdentifiers', [])
+            if mask and (mask == identifier if identifier else product in models):
+                return mask, (found.parent / f'{mask}.pdf').read_bytes()
+    return None
+
+
+def board_screen(board):
+    """screen.json of one board, from its device tree in its boot.json firmware."""
+    boot = json.loads((DEVICES / board / 'boot.json').read_text())
+    firmware = boot['firmware'][0]
+    tree = firmware['inputs'].get('DeviceTree')
+    if tree is None:
+        return None
+    data = zipfile.ZipFile(RemoteFile(firmware['ipsw']['url'])).read(tree['ipsw']['zip'])
+    if hashlib.sha256(data).hexdigest() != tree['sha256']:
+        raise ValueError('DeviceTree differs from boot.json')
+    if data[:4] == b'3gmI':
+        # IMG3 (the 32-bit boards, often encrypted): all square screens with a Home
+        # button, from before Apple's device trees gave a corner radius. No entry
+        # means square to every reader.
+        return None
+    payload = im4p_payload(data)
+    product = adt_node(payload, ['device-tree', 'product']) or {}
+    source = {'ipsw': firmware['ipsw']['build'], 'device_tree': tree['ipsw']['zip']}
+    scale = product.get('artwork-scale-factor', b'')
+    screen = {'schema': 1, 'device': boot['device'], 'source': source,
+              'scale': struct.unpack_from('<I', scale)[0] if len(scale) >= 4 else 1}
+    radius = product.get('display-corner-radius', b'')
+    if len(radius) >= 4 and struct.unpack_from('<I', radius)[0]:
+        # Points, as a fraction: 83/2 on the iPhone XR, 39/1 on the XS Max. Device trees
+        # older than the XS give none, so its absence does not mean a square screen.
+        numerator = struct.unpack_from('<I', radius)[0]
+        denominator = struct.unpack_from('<I', radius, 4)[0] if len(radius) >= 8 else 1
+        value = numerator / (denominator or 1)
+        screen['corner_radius'] = int(value) if value == int(value) else value
+    identifier = product.get('framebuffer-identifier', b'').split(b'\0')[0].decode()
+    if not re.fullmatch(r'[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}', identifier):
+        identifier = ''  # square screens name "0"
+    found = simulator_mask(identifier, boot['device'])
+    if found is not None:
+        source['framebuffer'] = found[0]
+        source['outline'] = 'Xcode simulator framebuffer mask'
+        width, height, path = pdf_outline(found[1])
+        screen.update(width=width, height=height, outline=path)
+    elif identifier:
+        raise ValueError(f'Xcode has no framebuffer mask {identifier}; install its simulator profiles')
+    # A board Apple gives no shape for (the square screens) has no file.
+    return screen if 'corner_radius' in screen or 'outline' in screen else None
+
+
+def screens():
+    """Write devices/<board>/screen.json for every board (macOS with Xcode)."""
+    if sys.platform != 'darwin':
+        return ['screens reads Apple formats with macOS libraries; run it on a Mac with Xcode']
+    boards = sorted(path.parent.name for path in DEVICES.glob('*/boot.json'))
+    failures = []
+    with concurrent.futures.ThreadPoolExecutor(8) as pool:
+        futures = {pool.submit(board_screen, board): board for board in boards}
+        for future in concurrent.futures.as_completed(futures):
+            board = futures[future]
+            try:
+                screen = future.result()
+            except Exception as error:  # Report every board, not only the first failure.
+                failures.append(f'{board}: {error}')
+                continue
+            if screen is not None:
+                (DEVICES / board / 'screen.json').write_text(json.dumps(screen, indent=2) + '\n')
+    print(f'{len(boards)} boards, {len(failures)} failed')
+    return failures
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest='command', required=True)
@@ -658,6 +901,7 @@ def main():
     commands.add_parser('kernel').add_argument('--kernel', action='append', required=True, metavar='PLATFORM=DIR',
                                                help='a built kernel of that platform; repeat per platform')
     commands.add_parser('matrix').add_argument('--check', action='store_true', help='fail if it is out of date')
+    commands.add_parser('screens')
     published = commands.add_parser('publish')
     published.add_argument('--output', type=Path, required=True)
     published.add_argument('--commit', required=True)
@@ -668,6 +912,8 @@ def main():
         failures = check(arguments.linux)
     elif arguments.command == 'publish':
         failures = publish(arguments.output, arguments.commit)
+    elif arguments.command == 'screens':
+        failures = screens()
     elif arguments.command == 'kernel':
         failures = kernel_report(dict(value.split('=', 1) for value in arguments.kernel))
     else:

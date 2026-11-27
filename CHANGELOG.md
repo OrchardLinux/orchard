@@ -22,6 +22,12 @@ is missing or empty.
   instead of staying off until the next sleep and wake.
 - A7 devices: listed as having no H.265 decoder, since the A7's video decoder
   has none.
+- Rounded corners and notches: every installed system now says how its screen
+  is shaped, in `/usr/lib/orchard/screens.json`, so a desktop can keep its
+  content out of the corners and the notch. The shapes are Apple's own (the
+  device tree's corner radius, Xcode's screen masks) for all 21 iPhones and
+  iPads with rounded corners or a notch; each one reaches the file once its
+  Linux device tree is in orchard (the iPhone X now).
 
 ## [0.3.11] - 2026-11-28
 
