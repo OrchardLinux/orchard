@@ -1,12 +1,11 @@
 #!/bin/sh
-# This checkout's orchard: runs exactly the code next to it, wherever it is
-# called from. uv installs the checkout editable, so an edit to a .py file
-# counts from the next command; nothing is packaged.
+# This checkout's orchard: the orchard command with this checkout's recipes
+# and board data, wherever it is called from.
 #
-#   bin/orchard ARGS          orchard ARGS, from this checkout
-#   bin/orchard python ARGS   Python in this checkout's environment
+#   bin/orchard ARGS          orchard ARGS, on this checkout
+#   bin/orchard python ARGS   Python in this checkout's environment (uv)
 #
-# The `orchard` on PATH is tools/launcher, which runs the newest nightly.
+# The `orchard` on PATH alone uses the newest nightly's recipes and data.
 set -eu
 
 script=$0
@@ -19,28 +18,25 @@ while [ -L "$script" ]; do
 done
 root=$(CDPATH= cd -- "$(dirname -- "$script")/.." && pwd -P)
 
-# An older setup linked ~/.local/bin/orchard to mainline's bin/orchard; that
-# role is tools/launcher's now (the newest nightly), until orchard update
-# installs it in the link's place.
-cache=${ORCHARD_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/orchard}
-if [ "$root" = "$(cd "$cache/orchard-main" 2>/dev/null && pwd -P)" ] && [ -f "$root/tools/launcher" ]; then
-    [ "${1:-}" = update ] || echo 'orchard: run orchard update once to install the new launcher' >&2
-    exec sh "$root/tools/launcher" "$@"
-fi
-
-command -v uv >/dev/null 2>&1 || {
-    echo 'orchard: install uv: https://docs.astral.sh/uv/getting-started/installation/' >&2
-    exit 1
-}
-export UV_PROJECT_ENVIRONMENT="$root/.venv"
-# These can go to orchard2; tools/launcher has the switch.
 case ${1:-} in
-    build|inputs|install|launch|distros|devices|doctor|shell|exec|ssh-access|cache|run)
-        if [ -f "$root/tools/launcher" ]; then
-            ORCHARD_LAUNCH_CHECKOUT=$root exec sh "$root/tools/launcher" "$@"
-        fi ;;
+    python)
+        command -v uv >/dev/null 2>&1 || {
+            echo 'orchard: install uv: https://docs.astral.sh/uv/getting-started/installation/' >&2
+            exit 1
+        }
+        shift
+        UV_PROJECT_ENVIRONMENT="$root/.venv" exec uv run --quiet --project "$root" python "$@" ;;
 esac
-case ${1:-} in
-    python) shift; exec uv run --quiet --project "$root" python "$@" ;;
-    *) exec uv run --quiet --project "$root" orchard "$@" ;;
-esac
+# The program on PATH, never this file again.
+old=$IFS
+IFS=:
+for directory in $PATH; do
+    IFS=$old
+    if [ -x "$directory/orchard" ] && [ ! "$directory/orchard" -ef "$script" ] &&
+       ! grep -qs 'the orchard command is a program of its own now' "$directory/orchard"; then
+        ORCHARD_DATA=${ORCHARD_DATA:-$root} exec "$directory/orchard" "$@"
+    fi
+done
+echo 'orchard: the orchard command is not installed. Install it:' >&2
+echo '  curl -fsSL https://raw.githubusercontent.com/OrchardLinux/tools/main/install.sh | sh' >&2
+exit 1

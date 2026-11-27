@@ -341,18 +341,11 @@ gone (November 2026).
   installing. A stable distribution release pins, and for now bundles, a
   stable orchard release; until one exists, distribution releases are
   previews on a nightly.
-- **Done, first part:** the `orchard` on PATH (`tools/launcher`) runs the
-  newest nightly (looked up per command through `latest.json`, a shallow
-  clone of its tag in `tooling/NAME`), offline the newest cached one, and
-  says so when neither exists; `ORCHARD_VERSION` pins one. Nothing looks at
-  the current directory: a checkout's `bin/orchard` runs that checkout. Its
-  kernels, m1n1 and tools then come from that nightly (same files, same
-  source keys) and its Pongo too (`git describe` finds the nightly's tag).
-  A launcher that differs from the newest nightly's replaces itself with it
-  and carries on; with a pinned version it says so and `orchard update`
-  installs that version's.
-  The user core an installer leaves (install, launch, devices) stays on
-  stable releases; the two meet in the Rust launcher.
+- **Done:** the `orchard` on PATH (OrchardLinux/tools) builds from the
+  newest nightly's recipes and board data, kept in its cache, offline from
+  the copy it has; `--data DIR` names a checkout instead, which is what a
+  checkout's `bin/orchard` does. Its kernels, m1n1 and tools come from that
+  nightly where the source keys match (same files, same keys).
 - The installed CLI is thin, like `bin/flutter`: in a project checkout
   (`git clone omarchy-a && cd omarchy-a && orchard run`) it resolves the
   newest nightly once at the start of the build, fetches its tooling
