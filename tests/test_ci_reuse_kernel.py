@@ -14,7 +14,7 @@ spec = importlib.util.spec_from_file_location('reuse_kernel', ROOT / 'ci/reuse_k
 reuse_kernel = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(reuse_kernel)
 
-from orchard import published  # noqa: E402
+published = reuse_kernel.keys
 
 TAG = 'nightly-20260101-000000000000'
 BASE = 'https://example.invalid/download'
@@ -73,7 +73,7 @@ class ReuseKernel(unittest.TestCase):
             if hashlib.sha256(data).hexdigest() != checksum:
                 raise ValueError(f'{path.name} does not match SHA256SUMS')
             path.write_bytes(data)
-        with mock.patch.object(published, '_fetch', fetch), mock.patch.object(reuse_kernel, 'download', download):
+        with mock.patch.object(published, 'fetch', fetch), mock.patch.object(reuse_kernel, 'download', download):
             return reuse_kernel.reuse('apple-armv7', self.output, releases=BASE)
 
     def test_same_key_and_scripts_give_the_kernel_artifact_and_the_unchanged_source(self):

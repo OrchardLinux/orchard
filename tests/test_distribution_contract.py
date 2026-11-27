@@ -48,6 +48,7 @@ class DistributionContract(unittest.TestCase):
     def test_the_by_path_scripts_need_no_orchard_package(self):
         # The producers, and the paths they had inside the package, which stay as shims.
         for script in ('producers/assemble.py', 'producers/cascadia.py', 'producers/initramfs.py', 'producers/buildenv.py',
+                       'producers/platform.py', 'producers/platforms_index.py', 'ci/keys.py', 'ci/reuse_kernel.py',
                        'boot/cascadia/build', 'src/orchard/image/assemble.py', 'src/orchard/image/cascadia.py',
                        'src/orchard/image/initramfs.py', 'src/orchard/buildenv.py'):
             with self.subTest(script=script):

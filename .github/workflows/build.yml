@@ -212,19 +212,25 @@ jobs:
         run: |
           stage="$PWD/out/p105-measurement"
           (cd "$stage" && sha256sum --check --status SHA256SUMS)
-          PYTHONPATH=src python3 - "$stage" <<'PY'
+          python3 - "$stage" <<'PY'
+          import importlib.util
+          import json
           from pathlib import Path
+          import subprocess
           import sys
-          from orchard.hardware import device
-          from orchard.image.cascadia import check_compatible
-          from orchard.kernel import descriptor, layout
+          import tomllib
 
           root, stage = Path.cwd(), Path(sys.argv[1])
-          platform, dtb = layout(root, 'p105')
-          if not (stage / descriptor(root, platform)['image']).stat().st_size:
+          def series(*arguments):
+              return subprocess.check_output([sys.executable, str(root / 'kernel/series.py'), *arguments], text=True)
+          spec = importlib.util.spec_from_file_location('cascadia', root / 'producers/cascadia.py')
+          cascadia = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(cascadia)
+          platform, dtb = series('--resolve', 'p105').split()
+          if not (stage / json.loads(series('--platform', platform))['image']).stat().st_size:
               sys.exit('Empty P105 kernel image')
-          check_compatible((stage / 'dtbs' / (dtb + '.dtb')).read_bytes(),
-                           device('p105', root)['device']['dt_compatible'])
+          described = tomllib.loads((root / 'devices/p105/device.toml').read_text())
+          cascadia.check_compatible((stage / 'dtbs' / (dtb + '.dtb')).read_bytes(), described['device']['dt_compatible'])
           PY
           release=$(cat "$stage/kernel.release")
           test -s "$stage/lib/modules/$release/modules.dep"
@@ -481,20 +487,20 @@ jobs:
             --pongo out/components/quiet/pongo.bin --m1n1 out/components/quiet/m1n1.bin
           # Each platform's finished kernel, the installer's tools, and the index a
           # distribution builds its release from, so it stops copying any of them.
-          python -m orchard.image.platforms_index out/publication --kernels out/platforms \
+          python producers/platforms_index.py out/publication --kernels out/platforms \
             --tools out/components/boot --commit "$GITHUB_SHA"
           # The same for 32-bit roots, next to it: platforms-armv7.toml.
           loaders=()
           for loader in out/components/cascadia/*/loader.bin; do
             loaders+=(--loader "$(basename "$(dirname "$loader")")=$loader")
           done
-          python -m orchard.image.platforms_index out/publication --architecture arm --kernels out/platforms \
+          python producers/platforms_index.py out/publication --architecture arm --kernels out/platforms \
             --tools out/components/boot-arm --commit "$GITHUB_SHA" "${loaders[@]}"
           # tool-components.tar.gz stays: a distribution build takes its tools from it.
           rm out/publication/kernel-components-*.tar.gz out/publication/quiet-pongo.tar.gz
           # Source keys of each platform's kernel, m1n1 and the tools: a distribution build
           # with the same state uses these instead of building them (orchard.published).
-          python -m orchard.published keys --output out/publication/component-keys.json apple-16k apple-4k apple-armv7
+          python ci/keys.py --output out/publication/component-keys.json apple-16k apple-4k apple-armv7
           git archive --format=tar.gz -o out/publication/orchard-source.tar.gz HEAD
           (cd out/publication && sha256sum ./*.tar.gz ./*.bin ./*.macho ./*.pyz ./component-keys.json ./platforms.toml ./platforms-armv7.toml > SHA256SUMS)
       - name: Attest public build
