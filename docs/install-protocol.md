@@ -5,8 +5,9 @@ raw USB: no network, no SSH, no keys, no drivers. The receiver on the device
 is `orchard-install-usb` from `install-tools.tar.gz`; hosts are orchard2's
 `crates/usb` (the graphical installer) and, later, the Python CLI.
 
-Status: draft, protocol version 1. Covers GPT disks (64-bit boards). LwVM
-disks (32-bit boards) follow as version 2 with their own plan shape.
+Status: draft, protocol version 1. Covers GPT disks (64-bit boards) and LwVM
+disks (32-bit boards, [below](#lwvm-disks)); nothing of the LwVM part has run
+on a device.
 
 ## The boot it talks to
 
@@ -237,7 +238,7 @@ before it changes anything (`install_device.check_plan`): the table must
 still match `table_sha256` and `sector`, `disk.path` must be the device's
 disk, new partitions lie only in free space or the one replaced Linux
 partition, and APFS and every non-Linux partition stay untouched. A plan for
-an LwVM disk (`boot` `null` or `disk.table` `lwvm`) answers `plan-version`.
+an LwVM disk is checked and carried out as [LwVM disks](#lwvm-disks) says.
 Then it writes both copies of the new table as `install_direct.new_tables`
 computes them, waits for the partition nodes, reads the table back, writes
 the empty FAT32 boot filesystem when the plan creates the boot partition,
@@ -343,3 +344,53 @@ The install never needs SSH. A user who wants it afterwards gets it two ways:
 - after the install, an `orchard` command that signs in once on the installed
   system's USB serial console with the user's password and adds the
   computer's public key. Planned, not built yet.
+
+## LwVM disks
+
+On the 32-bit boards the disk is iOS's flash behind its translation layer
+(`applesftl<N>`), partitioned with LwVM: one 4 KiB header at the start and a
+copy at the end of the first chunk, up to eight entries, and a map that says
+which entry owns each chunk. The host reads and computes headers
+(`orchard_formats::lwvm`, as `lwvm.py`); the receiver checks and writes them.
+
+**Inspect** answers the header as it is and what the kernel made of it:
+
+```json
+{"disk": {"path": "/dev/applesftl0", "sector": 4096, "bytes": 15938355200, "table": "lwvm",
+          "table_sha256": "…", "chunk_bytes": 16777216, "header": "<8192 hex digits>"},
+ "kernel": [{"number": 1, "start": 32768, "sectors": 3145728, "fs": null, "fs_uuid": null, "label": null}]}
+```
+
+`table_sha256` is the header's hash. Both copies have to agree, carry a right
+checksum and name the medium's size, else `disk`. `kernel` lists the
+partitions the kernel added, in 512-byte sectors, each probed like a GPT
+partition; the kernel's reader skips an entry whose chunks are scattered.
+
+**Plan** has `disk.table` `lwvm`, `remove` `null`, and numbers in `root` and
+`boot` (`boot` may be `null`: the entry and its files then go to the root's
+own `/boot`, and nothing on the device can start it):
+
+```json
+"disk": {"path": "/dev/applesftl0", "sector": 4096, "table": "lwvm", "table_sha256": "…", "header": "<8192 hex digits>"},
+"boot": {"create": true, "number": 3, "start": 2461696, "blocks": 131072, "partuuid": "…", "fs_uuid": "1A2B3C4D"},
+"root": {"create": true, "number": 4, "start": 2592768, "blocks": 1310720, "partuuid": "…", "fs_uuid": "…", "fs": "ext4", "label": "…"}
+```
+
+`start` and `blocks` are where the partition lies on the medium, in sectors.
+An entry with `create` false is the one that is there: its number, identity
+and kind (Linux for the root, XBOOTLDR for the boot partition) have to be the
+header's, without attributes, and the kernel has to show it where the plan
+has it. For entries with `create` true the plan carries `disk.header`, the
+whole new header. The receiver takes it only if it is the old header with
+exactly the planned entries added over free chunks: every entry that was
+there, every chunk that was taken and every other byte stay as they are, the
+checksum is right, and each new entry owns the planned chunks in order. Else
+`plan-mismatch`, and nothing is written.
+
+The copy at the end of the first chunk is written first, then the primary,
+each read back. Stopped between the two, the copies disagree, the kernel
+keeps the old primary, and `Inspect` answers `disk` until someone looks. The
+kernel then re-reads the table and has to show the new partitions where they
+were planned; a new boot partition gets its FAT32 filesystem. `present` in
+`plan.json` is every entry's identity. In the installed system `/etc/fstab`
+names both filesystems by UUID, since blkid reads no LwVM.

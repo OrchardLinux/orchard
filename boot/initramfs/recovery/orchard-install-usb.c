@@ -1,4 +1,5 @@
-/* The install receiver: the device side of docs/install-protocol.md (protocol 1, GPT disks).
+/* The install receiver: the device side of docs/install-protocol.md (protocol 1: GPT disks, and
+ * the LwVM disks of the 32-bit boards).
  *
  *   orchard-install-usb              in the install boot (boot/initramfs/install/run), on the
  *                                    FunctionFS instance mounted at /dev/usb-ffs/install
@@ -992,15 +993,17 @@ static void identify(void)
 
 /* --- the disk ------------------------------------------------------------------------------- */
 
-/* nvme<N>n1 (A9 and later) or asp<N>n1 (A7-A8X): the first namespace, where iOS and Linux live. */
+/* nvme<N>n1 (A9 and later) or asp<N>n1 (A7-A8X): the first namespace, where iOS and Linux live.
+ * applesftl<N> on the 32-bit boards: the flash behind its translation layer. */
 static int internal_disk(const char *name)
 {
-    const char *p = !strncmp(name, "nvme", 4) ? name + 4 : !strncmp(name, "asp", 3) ? name + 3 : NULL;
+    int flash = !strncmp(name, "applesftl", 9);
+    const char *p = flash ? name + 9 : !strncmp(name, "nvme", 4) ? name + 4 : !strncmp(name, "asp", 3) ? name + 3 : NULL;
     if (!p || !isdigit((unsigned char)*p))
         return 0;
     while (isdigit((unsigned char)*p))
         p++;
-    return !strcmp(p, "n1");
+    return flash ? !*p : !strcmp(p, "n1");
 }
 
 static int find_disk(char *message, size_t size)
@@ -1301,6 +1304,150 @@ static void probe(int fd, uint64_t offset, struct buf *b)
     }
 }
 
+/* --- LwVM, the 32-bit boards' partition scheme ------------------------------------------------
+ * One 4 KiB header at the start of the medium and a copy at the end of its first chunk. The host
+ * reads the header (it is sent whole) and computes a new one; this checks the pair, hands it over,
+ * and writes a new header only where it leaves every existing entry and every taken chunk as it is. */
+
+#define LWVM_HEADER 4096
+#define LWVM_FREE 0xf111
+static const unsigned char LWVM_MAGIC[16] = {0x6a, 0x90, 0x88, 0xcf, 0x8a, 0xfd, 0x63, 0x0a,
+                                             0xe3, 0x51, 0xe2, 0x48, 0x87, 0xe0, 0xb9, 0x8b};
+
+struct lwvm { unsigned char header[LWVM_HEADER]; uint64_t media, chunk; unsigned sector; char sha[65]; };
+struct seen { int number; uint64_t start, sectors; };
+
+static uint64_t lwvm_chunk(uint64_t media)
+{
+    if (media < 8192 || media % LWVM_HEADER)
+        return 0;
+    uint64_t shifted = (media - 1) >> 10, chunk = 1;
+    if (!shifted || shifted > 0xffffffffull)
+        return 0;
+    while (shifted) {
+        chunk <<= 1;
+        shifted >>= 1;
+    }
+    return chunk >= 2 * LWVM_HEADER && media / chunk >= 2 ? chunk : 0;
+}
+
+static int lwvm_sound(const unsigned char *h)
+{
+    unsigned char checked[LWVM_HEADER];
+    memcpy(checked, h, LWVM_HEADER);
+    memset(checked + 0x2c, 0, 4);
+    return !memcmp(h, LWVM_MAGIC, 16) && crc32(checked, LWVM_HEADER) == le32(h + 0x2c);
+}
+
+static int is_lwvm(int fd)
+{
+    unsigned char magic[16];
+    return !read_exact_at(fd, magic, sizeof(magic), 0) && !memcmp(magic, LWVM_MAGIC, 16);
+}
+
+/* Both copies of the header, which have to agree, and the medium they describe. */
+static int read_lwvm(int fd, struct lwvm *l, char *message, size_t size)
+{
+    unsigned char copy[LWVM_HEADER];
+    memset(l, 0, sizeof(*l));
+    l->sector = sector_size();
+    l->media = disk_bytes(fd);
+    l->chunk = lwvm_chunk(l->media);
+    if (!l->sector || !l->chunk) {
+        snprintf(message, size, "%s: the size of the LwVM medium is unsupported", cfg.disk);
+        return -1;
+    }
+    if (read_exact_at(fd, l->header, LWVM_HEADER, 0) || read_exact_at(fd, copy, LWVM_HEADER, l->chunk - LWVM_HEADER)) {
+        snprintf(message, size, "Reading the LwVM headers failed: %s", strerror(errno));
+        return -1;
+    }
+    if (memcmp(l->header, copy, LWVM_HEADER) || !lwvm_sound(l->header) || le64(l->header + 0x20) != l->media) {
+        snprintf(message, size, "%s: the LwVM header pair is incomplete, disagrees or is for another medium", cfg.disk);
+        return -1;
+    }
+    struct sha h;
+    sha_init(&h);
+    sha_update(&h, l->header, LWVM_HEADER);
+    sha_hex(&h, l->sha);
+    return 0;
+}
+
+/* The partitions the kernel added on the disk: number, start and size in 512-byte sectors.
+ * Tests list them in DIR/partitions, one "NUMBER START SECTORS" per line. */
+static int kernel_partitions(struct seen *out, int most)
+{
+    int count = 0;
+    if (cfg.test) {
+        char path[400];
+        struct buf b = {0};
+        join(path, sizeof(path), cfg.dir, "partitions");
+        if (!read_file(path, &b, 65536)) {
+            add(&b, "", 1);
+            for (char *line = b.data; line && *line && count < most; line = strchr(line, '\n') ? strchr(line, '\n') + 1 : NULL)
+                if (sscanf(line, "%d %" SCNu64 " %" SCNu64, &out[count].number, &out[count].start, &out[count].sectors) == 3)
+                    count++;
+        }
+        free(b.data);
+        return count;
+    }
+    const char *name = strrchr(cfg.disk, '/') + 1;
+    char directory[300];
+    snprintf(directory, sizeof(directory), "/sys/class/block/%s", name);
+    DIR *d = opendir(directory);
+    struct dirent *e;
+    while (d && (e = readdir(d)) && count < most) {
+        if (strncmp(e->d_name, name, strlen(name)))
+            continue;
+        char path[700], text[32];
+        snprintf(path, sizeof(path), "%s/%s/partition", directory, e->d_name);
+        first_line(path, text, sizeof(text));
+        if (!text[0])
+            continue;
+        out[count].number = atoi(text);
+        snprintf(path, sizeof(path), "%s/%s/start", directory, e->d_name);
+        first_line(path, text, sizeof(text));
+        out[count].start = strtoull(text, NULL, 10);
+        snprintf(path, sizeof(path), "%s/%s/size", directory, e->d_name);
+        first_line(path, text, sizeof(text));
+        out[count].sectors = strtoull(text, NULL, 10);
+        count++;
+    }
+    if (d)
+        closedir(d);
+    return count;
+}
+
+/* Inspect on an LwVM disk: the header as it is, for the host to read, and what the kernel made
+ * of it (the kernel's reader skips a partition whose chunks are scattered). */
+static void inspect_lwvm(int fd)
+{
+    char message[300];
+    struct lwvm l;
+    if (read_lwvm(fd, &l, message, sizeof(message))) {
+        answer_error("disk", message);
+        return;
+    }
+    struct buf b = {0};
+    add_text(&b, "{\"disk\": {\"path\": ");
+    add_string(&b, cfg.disk);
+    addf(&b, ", \"sector\": %u, \"bytes\": %" PRIu64 ", \"table\": \"lwvm\", \"table_sha256\": \"%s\", "
+             "\"chunk_bytes\": %" PRIu64 ", \"header\": \"", l.sector, l.media, l.sha, l.chunk);
+    for (int i = 0; i < LWVM_HEADER; i++)
+        addf(&b, "%02x", l.header[i]);
+    add_text(&b, "\"}, \"kernel\": [");
+    struct seen found[16];
+    int count = kernel_partitions(found, 16);
+    for (int i = 0; i < count; i++) {
+        addf(&b, "%s{\"number\": %d, \"start\": %" PRIu64 ", \"sectors\": %" PRIu64, i ? ", " : "", found[i].number,
+             found[i].start, found[i].sectors);
+        probe(fd, found[i].start * 512, &b);
+        add_text(&b, "}");
+    }
+    add_text(&b, "]}");
+    send_message(OK, &b, 0);
+    free(b.data);
+}
+
 static int open_disk(int flags, char *message, size_t size)
 {
     if (find_disk(message, size))
@@ -1318,6 +1465,11 @@ static void inspect(void)
     int fd = open_disk(O_RDONLY, message, sizeof(message));
     if (fd < 0) {
         answer_error("disk", message);
+        return;
+    }
+    if (is_lwvm(fd)) {
+        inspect_lwvm(fd);
+        close(fd);
         return;
     }
     if (read_gpt(fd, &g, message, sizeof(message))) {
@@ -1687,6 +1839,278 @@ static const char *write_partitions(int fd, struct gpt *g, struct planned *pl, s
     return NULL;
 }
 
+/* An identifier as LwVM stores it: sixteen bytes in network order. */
+static void lwvm_uuid_text(const unsigned char *b, char out[37])
+{
+    snprintf(out, 37, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", b[0], b[1], b[2], b[3],
+             b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
+}
+
+static int hex_bytes(const char *text, unsigned char *out, size_t size)
+{
+    if (!text || strlen(text) != size * 2)
+        return -1;
+    for (size_t i = 0; i < size; i++) {
+        unsigned value;
+        if (!isxdigit((unsigned char)text[i * 2]) || !isxdigit((unsigned char)text[i * 2 + 1]) ||
+            sscanf(text + i * 2, "%2x", &value) != 1)
+            return -1;
+        out[i] = value;
+    }
+    return 0;
+}
+
+/* Whether NEXT is OLD with entries added over free chunks and nothing else changed: the entries
+ * that were there, every chunk that was taken, and the rest of the header stay byte for byte. */
+static int lwvm_only_adds(const unsigned char *old, const unsigned char *next, int *old_count, int *new_count)
+{
+    *old_count = le32(old + 0x28);
+    *new_count = le32(next + 0x28);
+    if (!lwvm_sound(next) || *old_count < 1 || *new_count <= *old_count || *new_count > 8)
+        return 0;
+    if (memcmp(old, next, 0x28) || memcmp(old + 0x30, next + 0x30, 0x200 - 0x30) ||
+        memcmp(old + 0x200, next + 0x200, (size_t)*old_count * 128) ||
+        memcmp(old + 0x200 + *new_count * 128, next + 0x200 + *new_count * 128, 0x800 - 0x200 - (size_t)*new_count * 128))
+        return 0;
+    for (int physical = 0; physical < 1024; physical++) {
+        unsigned was = old[0x800 + physical * 2] | old[0x801 + physical * 2] << 8;
+        unsigned now = next[0x800 + physical * 2] | next[0x801 + physical * 2] << 8;
+        if (was == now)
+            continue;
+        if (was != LWVM_FREE || (int)(now >> 12) < *old_count || (int)(now >> 12) >= *new_count)
+            return 0;
+    }
+    return 1;
+}
+
+/* Whether entry NUMBER of HEADER is the partition PARTUUID over the chunks FIRST.., in order. */
+static int lwvm_entry_is(const unsigned char *header, int number, const char *partuuid, uint64_t first, uint64_t chunks,
+                         uint64_t chunk)
+{
+    const unsigned char *raw = header + 0x200 + (number - 1) * 128;
+    char text[37];
+    lwvm_uuid_text(raw + 16, text);
+    if (strcasecmp(text, partuuid) || le64(raw + 40) - le64(raw + 32) != chunks * chunk)
+        return 0;
+    uint64_t owned = 0;
+    for (int physical = 0; physical < 1024; physical++) {
+        unsigned word = header[0x800 + physical * 2] | header[0x801 + physical * 2] << 8;
+        if ((int)(word >> 12) != number - 1)
+            continue;
+        if ((uint64_t)physical < first || (uint64_t)physical >= first + chunks || (word & 0xfff) != physical - first)
+            return 0;
+        owned++;
+    }
+    return owned == chunks;
+}
+
+/* The kernel's partition NUMBER, where the plan has it. */
+static int kernel_has(int number, uint64_t start, uint64_t blocks, unsigned sector)
+{
+    struct seen found[16];
+    int count = kernel_partitions(found, 16);
+    for (int i = 0; i < count; i++)
+        if (found[i].number == number)
+            return found[i].start == start * sector / 512 && found[i].sectors == blocks * sector / 512;
+    return 0;
+}
+
+/* Plan on an LwVM disk. The root goes into a Linux partition that is there, or into a new entry;
+ * a boot partition, where the plan has one, is there or is a new entry too. New entries come as
+ * the whole new header (disk.header), computed by the host, which this takes only if it adds
+ * entries over free chunks and changes nothing else. The copy at the end of the first chunk is
+ * written first, then the primary, each read back. Stopped between the two, the copies disagree
+ * and the disk is refused until someone looks. */
+static void do_plan_lwvm(int fd, struct json *p, const char *text, size_t size)
+{
+    char message[300];
+    const char *code = NULL;
+    struct lwvm l;
+    long long value, root_number = 0, root_start = 0, root_blocks = 0, boot_number = 0, boot_start = 0, boot_blocks = 0;
+    struct json *disk = jobj(p, "disk"), *root = jobj(p, "root"), *boot = jobj(p, "boot");
+    int root_create, boot_create = 0;
+    uint32_t volume_id = 0;
+    unsigned char next[LWVM_HEADER], back[LWVM_HEADER], guid[16];
+    int had = 0, have = 0;
+#define STOP(c, ...) do { snprintf(message, sizeof(message), __VA_ARGS__); code = c; goto out; } while (0)
+    if (read_lwvm(fd, &l, message, sizeof(message))) {
+        code = "disk";
+        goto out;
+    }
+    if (jint(p, "version", &value) || value != 2 || !disk || !jstr(disk, "table") || strcmp(jstr(disk, "table"), "lwvm"))
+        STOP("plan-version", "The disk is an LwVM disk; the plan is not for one");
+    if (!jstr(disk, "table_sha256") || strcmp(jstr(disk, "table_sha256"), l.sha) || jint(disk, "sector", &value) ||
+        value != l.sector)
+        STOP("layout-changed", "The partition table changed since it was inspected; inspect again");
+    if (!jstr(disk, "path") || strcmp(jstr(disk, "path"), cfg.disk))
+        STOP("plan-mismatch", "The plan is for another disk");
+    if (jget(p, "remove") && jget(p, "remove")->type != J_NULL)
+        STOP("plan-mismatch", "On an LwVM disk no partition is removed");
+    if (!root || jint(root, "number", &root_number) || jint(root, "start", &root_start) || jint(root, "blocks", &root_blocks) ||
+        root_number < 1 || root_number > 8 || root_start <= 0 || root_blocks <= 0 || guid_bytes(jstr(root, "partuuid"), guid) ||
+        guid_bytes(jstr(root, "fs_uuid"), guid) || !text_ok(jstr(root, "label"), 16))
+        STOP("plan-mismatch", "The plan's root is incomplete");
+    root_create = jget(root, "create") && jget(root, "create")->type == J_BOOL && jget(root, "create")->boolean;
+    if (boot) {
+        boot_create = jget(boot, "create") && jget(boot, "create")->type == J_BOOL && jget(boot, "create")->boolean;
+        const char *volume = jstr(boot, "fs_uuid");
+        char *end = NULL;
+        if (jint(boot, "number", &boot_number) || jint(boot, "start", &boot_start) || jint(boot, "blocks", &boot_blocks) ||
+            boot_number < 1 || boot_number > 8 || boot_number == root_number || boot_start <= 0 || boot_blocks <= 0 ||
+            guid_bytes(jstr(boot, "partuuid"), guid))
+            STOP("plan-mismatch", "The plan's boot partition is incomplete");
+        if (boot_create) {
+            if (!volume || strlen(volume) != 8)
+                STOP("plan-mismatch", "The plan's boot partition is incomplete");
+            volume_id = strtoul(volume, &end, 16);
+            struct region regions[6];
+            if (*end || fat32_regions(boot_blocks, l.sector, 0, regions))
+                STOP("plan-mismatch", "The boot partition is too small for FAT32");
+            free(regions[0].data); free(regions[1].data); free(regions[4].data);
+        }
+    }
+    struct json *image = jobj(p, "image"), *map = jobj(image, "map"), *layer = jobj(p, "layer");
+    struct json *files[3] = {layer, jobj(p, "firmware"), jobj(p, "kernel_package")};
+    if (!image || jint(image, "bytes", &value) || value <= 0 || !sha_text(jstr(image, "sha256")) || !map ||
+        jint(map, "block_size", &value) || value != 4096 || !jget(map, "ranges") || jget(map, "ranges")->type != J_ARR ||
+        !layer || !jobj(p, "entry"))
+        STOP("plan-mismatch", "The plan's image, layer or boot entry is incomplete");
+    for (int i = 0; i < 3; i++)
+        if (files[i] && (!staged_name(jstr(files[i], "path")) || jint(files[i], "bytes", &value) || value < 0 ||
+                         !sha_text(jstr(files[i], "sha256"))))
+            STOP("plan-mismatch", "Every file the plan names must be a staged file, /run/orchard/NAME, with its bytes and sha256");
+
+    memcpy(next, l.header, LWVM_HEADER);
+    had = have = le32(l.header + 0x28);
+    if (root_create || boot_create) {
+        /* The new header, which may only add the planned entries over free chunks. */
+        if (hex_bytes(jstr(disk, "header"), next, LWVM_HEADER) || !lwvm_only_adds(l.header, next, &had, &have) ||
+            le64(next + 0x20) != l.media || have != had + root_create + boot_create)
+            STOP("plan-mismatch", "The new LwVM header does more than add the planned entries over free space");
+        for (int k = 0; k < 2; k++) {
+            long long number = k ? boot_number : root_number, start = k ? boot_start : root_start,
+                      blocks = k ? boot_blocks : root_blocks;
+            if (!(k ? boot_create : root_create))
+                continue;
+            if (number <= had || number > have || (start * l.sector) % l.chunk || (blocks * l.sector) % l.chunk ||
+                !lwvm_entry_is(next, number, jstr(k ? boot : root, "partuuid"), start * l.sector / l.chunk,
+                               blocks * l.sector / l.chunk, l.chunk))
+                STOP("plan-mismatch", "A new LwVM entry is not as planned");
+        }
+    }
+    /* What is reused has to be the kernel's partition where the plan has it, an entry of its kind. */
+    for (int k = 0; k < 2; k++) {
+        long long number = k ? boot_number : root_number;
+        if ((k && !boot) || (k ? boot_create : root_create))
+            continue;
+        char type[37], identity[37];
+        lwvm_uuid_text(l.header + 0x200 + (number - 1) * 128, type);
+        lwvm_uuid_text(l.header + 0x200 + (number - 1) * 128 + 16, identity);
+        if (number > had || strcasecmp(identity, jstr(k ? boot : root, "partuuid")) ||
+            strcasecmp(type, k ? XBOOTLDR : LINUX_DATA) || le64(l.header + 0x200 + (number - 1) * 128 + 48) ||
+            !kernel_has(number, k ? boot_start : root_start, k ? boot_blocks : root_blocks, l.sector))
+            STOP("plan-mismatch", k ? "The boot partition to reuse is not the inspected one"
+                                    : "The partition to replace is not the inspected Linux partition");
+    }
+    if (root_create || boot_create) {
+        const uint64_t places[2] = {l.chunk - LWVM_HEADER, 0};
+        for (int k = 0; k < 2; k++) {
+            if (write_exact_at(fd, next, LWVM_HEADER, places[k]) || fsync(fd) ||
+                read_exact_at(fd, back, LWVM_HEADER, places[k]) || memcmp(back, next, LWVM_HEADER)) {
+                snprintf(message, sizeof(message), "The LwVM header %s reads back differently or was not written; "
+                         "the table is in an uncertain state", k ? "primary" : "copy");
+                code = "disk";
+                fail("disk", "%s", message);    /* only a fresh start and a look at the disk are safe */
+                goto out;
+            }
+        }
+        mark("partition table written");
+        if (!cfg.test) {
+            int created[2], wanted = 0;
+            if (root_create)
+                created[wanted++] = root_number;
+            if (boot_create)
+                created[wanted++] = boot_number;
+            /* A re-read right after the write can be refused while the disk settles, so keep asking. */
+            for (int tries = 0; tries < 150 && !all_nodes(created, wanted); tries++) {
+#ifdef BLKRRPART
+                ioctl(fd, BLKRRPART);
+#endif
+                usleep(100000);
+            }
+            if (!all_nodes(created, wanted) || (root_create && !kernel_has(root_number, root_start, root_blocks, l.sector)) ||
+                (boot_create && !kernel_has(boot_number, boot_start, boot_blocks, l.sector))) {
+                snprintf(message, sizeof(message), "The kernel does not show the new partitions where they were planned");
+                code = "disk";
+                fail("disk", "%s", message);
+                goto out;
+            }
+        }
+    }
+    if (boot_create) {
+        struct region regions[6];
+        fat32_regions(boot_blocks, l.sector, volume_id, regions);
+        int bad = 0;
+        for (int i = 0; i < 6; i++)
+            bad = bad || write_exact_at(fd, regions[i].data, regions[i].size, boot_start * l.sector + regions[i].offset);
+        if (!bad) {
+            /* the root cluster, one sector after the FATs, is empty */
+            unsigned char *zero = calloc(1, l.sector);
+            bad = write_exact_at(fd, zero, l.sector, boot_start * l.sector + regions[5].offset + regions[5].size);
+            free(zero);
+        }
+        bad = bad || fsync(fd);
+        free(regions[0].data); free(regions[1].data); free(regions[4].data);
+        if (bad) {
+            snprintf(message, sizeof(message), "Writing the boot filesystem failed: %s", strerror(errno));
+            code = "disk";
+            fail("disk", "%s", message);
+            goto out;
+        }
+    }
+    {
+        /* plan.json is the plan as sent, with every entry's identity (`present`) added. */
+        struct buf saved = {0};
+        size_t end = size;
+        while (end && text[end - 1] != '}')
+            end--;
+        add(&saved, text, end - 1);
+        add_text(&saved, ", \"present\": [");
+        for (int i = 0; i < have; i++) {
+            char identity[37];
+            lwvm_uuid_text(next + 0x200 + i * 128 + 16, identity);
+            addf(&saved, "%s\"%s\"", i ? ", " : "", identity);
+        }
+        add_text(&saved, "]}\n");
+        if (write_private("plan.json", saved.data, saved.size)) {
+            snprintf(message, sizeof(message), "Keeping the plan failed: %s", strerror(errno));
+            code = "disk";
+            fail("disk", "%s", message);
+        } else {
+            json_free(&plan);
+            if (json_parse(saved.data, saved.size, &plan))
+                die("plan.json");
+            have_plan = 1;
+        }
+        free(saved.data);
+    }
+#undef STOP
+out:
+    if (code) {
+        answer_error(code, message);
+        return;
+    }
+    node_path(root_node, sizeof(root_node), root_number);
+    boot_node[0] = 0;
+    if (boot)
+        node_path(boot_node, sizeof(boot_node), boot_number);
+    set_phase(PLANNED);
+    mark("planned");
+    char ok[700];
+    snprintf(ok, sizeof(ok), "{\"root\": \"%s\", \"boot\": \"%s\"}", root_node, boot_node);
+    answer_ok(ok);
+}
+
 static void do_plan(const char *text, size_t size)
 {
     char message[300];
@@ -1700,6 +2124,12 @@ static void do_plan(const char *text, size_t size)
     if (fd < 0) {
         json_free(&p);
         answer_error("disk", message);
+        return;
+    }
+    if (is_lwvm(fd)) {
+        do_plan_lwvm(fd, &p, text, size);
+        close(fd);
+        json_free(&p);
         return;
     }
     struct gpt g;
@@ -2144,12 +2574,16 @@ static const char MOUNT[] =
     "mount -t tmpfs -o mode=0755 tmpfs \"$3/run\"\n"
     "mkdir -p \"$3/run/orchard\" \"$3/boot\"\n"
     "mount --bind \"$4\" \"$3/run/orchard\"\n"
-    "mount -t vfat \"$2\" \"$3/boot\"\n"
+    /* without a boot partition (an LwVM disk may have none) /boot is a directory of the root */
+    "[ -z \"$2\" ] || mount -t vfat \"$2\" \"$3/boot\"\n"
     "cp \"$3/etc/os-release\" \"$4/os-release\"\n";
 /* Everything on storage: install_direct.unmount_new_root. */
 static const char UNMOUNT[] =
     "sync\n"
-    "for point in boot run/orchard run dev sys proc ''; do umount \"$1/$point\" || exit 1; done\n"
+    "for point in boot run/orchard run dev sys proc ''; do\n"
+    "  if [ \"$point\" = boot ] && ! grep -q \" $1/boot \" /proc/mounts; then continue; fi\n"
+    "  umount \"$1/$point\" || exit 1\n"
+    "done\n"
     "sync\n";
 
 static void os_field(const char *text, const char *key, struct buf *out)

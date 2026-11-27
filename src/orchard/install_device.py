@@ -831,7 +831,13 @@ def finish(plan, target, present, secrets):
     gone = remove_old_entries(boot_mount, present | {plan['root']['partuuid']} | ({boot['partuuid']} if boot else set()))
     emit('step', step='remove-old-entries', state='done', entries=gone)
     entry = plan['entry']
-    if boot:
+    if boot and plan['disk'].get('table') == 'lwvm':
+        # blkid reads no LwVM, so both are named by their filesystems (FAT's volume ID as XXXX-XXXX).
+        volume = boot['fs_uuid'].upper()
+        write_text(target / 'etc/fstab',
+                   f'UUID={plan["root"]["fs_uuid"]} / ext4 rw,relatime 0 1\n'
+                   f'UUID={volume[:4]}-{volume[4:]} /boot vfat rw,relatime,fmask=0077,dmask=0077 0 2\n')
+    elif boot:
         write_text(target / 'etc/fstab',
                    f'PARTUUID={plan["root"]["partuuid"]} / ext4 rw,relatime 0 1\n'
                    f'PARTUUID={boot["partuuid"]} /boot vfat rw,relatime,fmask=0077,dmask=0077 0 2\n')
