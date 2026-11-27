@@ -17,6 +17,9 @@ is missing or empty.
   minutes after boot; the touch driver now resets the controller and touch
   is back in about 1.5 s. Bluetooth keyboards and other input devices work
   too. Tested by ricktav.
+- iPad Pro 10.5-inch and 12.9-inch (2nd generation): touch comes back by
+  itself after a touch-controller error, the way it does on the iPad Air,
+  instead of staying off until the next sleep and wake.
 - A7 devices: listed as having no H.265 decoder, since the A7's video decoder
   has none.
 
