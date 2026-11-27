@@ -1,2 +1,0 @@
-# The apple-armv7 kernel has no patch layers in orchard: its source is OrchardLinux/linux,
-# branch armv7, at the commit its lock names (kernel/README.md).

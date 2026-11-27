@@ -1,2 +1,0 @@
-# The apple-4k kernel has no patch layers in orchard: its source is OrchardLinux/linux,
-# branch main, at the commit its lock names (kernel/README.md).

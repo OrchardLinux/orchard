@@ -56,9 +56,9 @@ def shared_tree(hardware):
 def work_directory(hardware, device, tree=None):
     """The incremental kernel tree hardware's kernel/build compiles in.
 
-    Current hardware shares one tree per platform and upstream pin between all
+    Current hardware shares one tree per platform and kernel commit between all
     checkouts, in the Orchard cache; older hardware keeps it in the checkout.
-    Never move or reset it: it holds editable source and compiler output. A
+    Never reset it: it holds editable source and compiler output. A
     developer's kernel tree (TREE) builds inside itself, TREE/.orchard-out/
     PLATFORM, which git ignores there: its output lives and goes with the tree.
     """
@@ -138,15 +138,9 @@ def tree_lock(hardware, device, tree=None):
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 
-def patch_identity(hardware, device):
-    """Ordered series patches and the marker kernel/build writes for them."""
-    kernel = Path(hardware).resolve() / 'kernel'
-    patches = [Path(line) for line in _series(hardware, device).splitlines() if line]
-    # One git process for the series; it prints the hashes in argument order.
-    hashes = subprocess.check_output(['git', 'hash-object', *map(str, patches)]).split() if patches else []
-    marker = b''.join(object_id + b' ' + str(p.resolve().relative_to(kernel)).encode() + b'\n'
-                      for object_id, p in zip(hashes, patches))
-    return patches, marker
+def tree_marks(hardware, device):
+    """What applied-patches may hold: the kernel commit, as kernel/build writes it, or nothing (an older tree)."""
+    return ((pin(hardware, device)['commit'] + '\n').encode(), b'')
 
 
 def source_tree(hardware, cache, device):
@@ -159,9 +153,8 @@ def source_tree(hardware, cache, device):
     selected = pin(hardware, device)
     work = work_directory(hardware, device)
     source = work / 'source'
-    patches, expected = patch_identity(hardware, device)
-    declared = sources.declared_tree(selected['url'], selected['commit'], patches,
-                                     cache=cache, donor=source)
+    expected = tree_marks(hardware, device)
+    declared = sources.declared_tree(selected['url'], selected['commit'], cache=cache, donor=source)
     if not (source / '.git').exists():
         return declared
     if (sources.git(source, 'rev-parse', 'HEAD').decode() != selected['commit'] or
@@ -170,10 +163,10 @@ def source_tree(hardware, cache, device):
     current = sources.working_tree(source)
     marker = work / 'applied-patches'
     baseline = work / 'prepared-tree'
-    if marker.exists() and marker.read_bytes() != expected:
+    if marker.exists() and marker.read_bytes() not in expected:
         if current == declared or (baseline.exists() and current == baseline.read_text().strip()):
             return declared
-        raise ValueError('Kernel patches changed with local edits or an unrecorded baseline; '
+        raise ValueError('The kernel tree was prepared for another state and has local edits; '
                          'refusing to discard edits or select an unrelated cached kernel')
     if marker.exists() and current == declared and not baseline.exists():
         # Upgrade legacy metadata on a verified clean cache hit, without
@@ -194,45 +187,14 @@ def prepare_source(hardware, cache, device):
     if (sources.git(source, 'rev-parse', 'HEAD').decode() != selected['commit'] or
             sources.git(source, 'remote', 'get-url', 'origin').decode() != selected['url']):
         raise ValueError('Local kernel revision/remote differs from upstream.lock; sources were not reset')
-    patches, expected = patch_identity(hardware, device)
+    expected = tree_marks(hardware, device)
     marker = work / 'applied-patches'
     baseline = work / 'prepared-tree'
-    declared = sources.declared_tree(selected['url'], selected['commit'], patches,
-                                     cache=cache, donor=source)
-    if marker.exists():
-        if marker.read_bytes() != expected:
-            # source_tree rejects ambiguous/dirty transitions before any write.
-            desired = source_tree(hardware, cache, device)
-            current = sources.working_tree(source)
-            if current != desired:
-                with sources.repository(selected['url'], selected['commit'], cache=cache) as bare:
-                    # The current tree's objects live in the source: a series
-                    # built by hardware's kernel/build alone was never declared
-                    # in the shared store.
-                    objects = Path(os.fsdecode(sources.git(source, 'rev-parse', '--git-path', 'objects')))
-                    env = {**os.environ, 'GIT_ALTERNATE_OBJECT_DIRECTORIES': str(
-                        objects if objects.is_absolute() else source / objects)}
-                    # Patch bytes are not text identifiers: stripping their
-                    # trailing whitespace corrupts blank context/binary data.
-                    delta = subprocess.check_output(
-                        ['git', '-C', str(bare), 'diff', '--binary', current, desired],
-                        stderr=subprocess.PIPE, env=env)
-                for flags in (['--check'], []):
-                    subprocess.run(['git', '-C', str(source), 'apply', *flags, '-'],
-                                   input=delta, check=True)
-                if sources.working_tree(source) != desired:
-                    raise ValueError('Kernel patch transition verification failed; compiler not started')
-            # Retain compiler objects and unchanged source mtimes for make.
-            marker.write_bytes(expected)
-            baseline.write_text(declared + '\n')
-    else:
-        for patch in patches:
-            try:
-                sources.git(source, 'apply', '--reverse', '--check', patch)
-            except subprocess.CalledProcessError:
-                sources.git(source, 'apply', '--check', patch)
-                sources.git(source, 'apply', patch)
-        marker.write_bytes(expected)
+    declared = sources.declared_tree(selected['url'], selected['commit'], cache=cache, donor=source)
+    if not marker.exists() or marker.read_bytes() not in expected:
+        # source_tree refuses a tree of another state that has edits.
+        source_tree(hardware, cache, device)
+        marker.write_bytes(expected[0])
         baseline.write_text(declared + '\n')
     # Safely migrate an older workspace only when its source is exactly declared.
     if sources.working_tree(source) == declared:

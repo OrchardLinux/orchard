@@ -56,7 +56,7 @@ class ChangedKernels(unittest.TestCase):
         self.assertEqual(self.changed(), PLATFORMS)
 
     def test_a_platform_the_base_lacks_is_changed(self):
-        (self.base / 'kernel/series/apple-armv7').unlink()
+        (self.base / 'platforms/apple-armv7.toml').unlink()
         self.assertEqual(self.changed(), ['apple-armv7'])
 
 

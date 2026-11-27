@@ -2,8 +2,8 @@
 """The source keys of what a build publishes: component-keys.json.
 
 A component's source key is a hash of the files that decide it: for a
-platform's kernel the upstream lock, the series and every patch it applies,
-the config, the toolchain recipes, the descriptor's build fields and the
+platform's kernel the upstream lock (its commit of OrchardLinux/linux), the
+config, the toolchain recipes, the descriptor's build fields and the
 kernel producers' version; for m1n1 and the static tools their recipes
 (producers/contract.toml names them). Anyone with a checkout computes them
 without building anything; a build whose checkout gives the same key takes
@@ -64,12 +64,11 @@ def source_key(root, platform):
     def series(*args):
         return subprocess.check_output([sys.executable, str(root / 'kernel/series.py'), *args], text=True)
     described = json.loads(series('--platform', platform))
-    patches = [str(Path(line).resolve().relative_to(root.resolve())) for line in series(platform).splitlines()]
     return _hash({
         'platform': platform,
         'build': {key: described[key] for key in ('arch', 'image', 'dtbs')},
-        'recipes': recipe_entries(root, [described['upstream'], described['series'], described['config'],
-                                         'kernel/Containerfile', 'kernel/install-toolchain', *patches]),
+        'recipes': recipe_entries(root, [described['upstream'], described['config'],
+                                         'kernel/Containerfile', 'kernel/install-toolchain']),
         'producer': contract(root)['kernel-producer'],
     })
 

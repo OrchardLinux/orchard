@@ -74,21 +74,10 @@ def checkout(url, commit, source, *, cache=None):
             stage.rename(source)
 
 
-def declared_tree(url, commit, patches, *, cache=None, donor=None):
-    """Tree produced by the declared patches, without checking out Linux."""
+def declared_tree(url, commit, *, cache=None, donor=None):
+    """The tree of COMMIT, without checking out Linux."""
     with repository(url, commit, cache=cache, donor=donor) as bare:
-        with tempfile.TemporaryDirectory(prefix='orchard-index-') as temporary:
-            env = {**os.environ, 'GIT_INDEX_FILE': str(Path(temporary) / 'index')}
-            git(bare, 'read-tree', commit, env=env)
-            # One apply for the whole series writes Linux's large index once,
-            # not once per patch (13 s for 358 patches).
-            if patches:
-                git(bare, 'apply', '--cached', '--whitespace=nowarn',
-                    *(Path(patch).resolve() for patch in patches), env=env)
-            tree = git(bare, 'write-tree', env=env).decode()
-            # Keep patch-generated objects reachable as well as upstream commits.
-            git(bare, 'update-ref', 'refs/orchard/trees/' + tree, tree)
-            return tree
+        return git(bare, 'rev-parse', commit + '^{tree}').decode()
 
 
 def working_tree(source, *, force=True):

@@ -10,7 +10,6 @@ arch = "arm64"                          # make ARCH=
 image = "Image.gz"                      # make target; the payload's kernel file
 dtbs = "arch/arm64/boot/dts/apple"      # where make dtbs leaves the boards' DTBs
 upstream = "kernel/upstream.lock" # the commit of OrchardLinux/linux to build
-series = "kernel/series/apple-4k" # no layers: the source is that commit
 config = "kernel/configs/apple-4k/config"
 defconfig = "orchard_apple4k_defconfig" # the config as the tree has it; config above is its expanded copy
 branch = "main"                    # its branch in OrchardLinux/linux

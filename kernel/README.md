@@ -31,8 +31,7 @@ commit: cache keys, CI, the nightly and a release follow the lock.
 `arch/<arch>/configs/<defconfig>`. They are one config and the tree's is the
 source: change an option in the defconfig, in the kernel pull request. The
 build refuses a config that is not what the commit's defconfig gives. The
-series files (`kernel/series/`) name no patch layers any more; they and the
-config copy stay while released tools still read them.
+copy stays: tests read option values from it.
 
 ## How it builds
 
@@ -42,10 +41,14 @@ with `kernel/build` directly: it holds the shared tree's lock (see
 [AGENTS.md](../AGENTS.md)). `--kernel-tree DIR` builds a kernel tree of your
 own instead, as it is, with its own defconfig.
 
-The source and compiler output live in one tree per platform and kernel
-commit, shared by every hardware checkout and worktree:
-`${ORCHARD_CACHE_DIR:-${XDG_CACHE_HOME:-~/.cache}/orchard}/kernel-work/<platform>-<commit>/`
-(`--work-dir` chooses another). A new commit starts a new tree.
+The source and compiler output live in one tree per platform, shared by
+every checkout:
+`${ORCHARD_CACHE_DIR:-${XDG_CACHE_HOME:-~/.cache}/orchard}/kernel-work/<platform>/`
+(`--work-dir` chooses another). When the lock names another commit, a clean
+tree is checked out to it in place: only the files that differ are written,
+so only those compile again. A tree with local edits is refused, never
+reset: save the edits, or build a tree of your own with `--kernel-tree`.
+Checkouts whose locks name different commits move the tree back and forth.
 A second build of the same tree waits for the first. The cache key of a built kernel is what
 determines it: the source tree, the config, the descriptor's arch, image and
 DTB directory, the toolchain image and `KERNEL_PRODUCER` in

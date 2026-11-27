@@ -10,7 +10,6 @@ arch = "arm"                            # make ARCH=
 image = "zImage"                        # make target; the payload's kernel file
 dtbs = "arch/arm/boot/dts/apple"        # where make dtbs leaves the boards' DTBs
 upstream = "kernel/upstream-armv7.lock" # the commit of OrchardLinux/linux to build
-series = "kernel/series/apple-armv7" # no layers: the source is that commit
 config = "kernel/configs/apple-armv7/config"
 defconfig = "orchard_applearmv7_defconfig" # the config as the tree has it; config above is its expanded copy
 branch = "armv7"                   # its branch in OrchardLinux/linux
