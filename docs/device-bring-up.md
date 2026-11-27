@@ -3,7 +3,8 @@
 Bring an unknown device, reuse the closest port, attempt a RAM boot, and contribute what you learn. A boot log or partial port is enough for a PR. A desktop and installer can wait; no distribution is needed.
 
 Field reports include the iPad mini 2 [Wi-Fi (J85)](bring-up/j85.md) and
-[Cellular (J86)](bring-up/j86.md). These record experimental observations,
+[Cellular (J86)](bring-up/j86.md), and the [iPhone XR (N841)](bring-up/n841.md),
+the first A12 board. These record experimental observations,
 not supported installation profiles.
 
 ## 1. Set up
