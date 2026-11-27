@@ -481,6 +481,12 @@ jobs:
           cp out/components/quiet/m1n1.bin out/components/quiet/m1n1-idevice.macho \
             out/components/quiet/monitor-stub.macho out/components/quiet/m1n1-armv7.macho \
             out/components/quiet/pongo.bin out/publication/
+          # The core with every device and both loaders: what the installer a
+          # distribution's release carries (orchard.installer) leaves as the
+          # user's orchard, and what that one's update fetches.
+          python -m pip install -e .
+          python -m orchard.installer core out/publication/orchard-core.pyz \
+            --pongo out/components/quiet/pongo.bin --m1n1 out/components/quiet/m1n1.bin
           # Each platform's finished kernel, the installer's tools, and the index a
           # distribution builds its release from, so it stops copying any of them.
           python producers/platforms_index.py out/publication --kernels out/platforms \
