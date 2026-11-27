@@ -97,6 +97,9 @@ is missing or empty.
 
 ### Building
 
+- The `orchard` command on PATH replaces itself with the newest nightly's
+  launcher when that differs and carries on with the command, instead of
+  asking for `orchard update` each time.
 - The nightly publishes `m1n1-armv7.macho`, the 32-bit m1n1 for the A5 to
   A6X chips, built from the same source as the others. Not run on a device.
 - The kernel and m1n1 are built from their own repositories,

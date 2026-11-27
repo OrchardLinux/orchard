@@ -20,7 +20,7 @@ class Fixture(unittest.TestCase):
         repo = self.root / 'repo'
         (repo / 'tools').mkdir(parents=True)
         (repo / 'pyproject.toml').write_text('[project]\nname = "orchard"\n')
-        (repo / 'tools/launcher').write_text('the nightly launcher\n')
+        shutil.copy2(ORCHARD, repo / 'tools/launcher')
         git = ['git', '-C', str(repo), '-c', 'user.email=t@example.invalid', '-c', 'user.name=t']
         subprocess.run(['git', 'init', '-q', str(repo)], check=True)
         subprocess.run([*git, 'add', '.'], check=True)
@@ -77,18 +77,32 @@ class ToolingVersion(Fixture):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('no longer read', result.stderr)
 
-    def test_an_older_launcher_says_so_and_update_installs_the_nightlys(self):
-        self.assertIn(f'a newer launcher is in {NAME}', self.run_orchard('build').stderr)
-        update = self.run_orchard('update')
+    def test_another_launcher_takes_the_nightlys_place_and_carries_on(self):
+        nightly = ORCHARD.read_text()
+        self.launcher.write_text(nightly + '# an older one\n')
+        result = self.run_orchard('build')
+        self.assertIn(f"the launcher is {NAME}'s now", result.stderr)
+        self.assertEqual(self.launcher.read_text(), nightly)
+        # The command ran, once, with the new launcher (the fake uv prints the project).
+        self.assertEqual(result.stdout.count('\n'), 1, result.stdout)
+        self.assertNotIn('launcher', self.run_orchard('build').stderr)
+
+    def test_a_pinned_version_keeps_this_launcher_and_update_installs_its(self):
+        mine = ORCHARD.read_text() + '# another one\n'
+        self.launcher.write_text(mine)
+        result = self.run_orchard('build', ORCHARD_VERSION=NAME)
+        self.assertIn(f'another launcher is in {NAME}', result.stderr)
+        self.assertEqual(self.launcher.read_text(), mine)
+        update = self.run_orchard('update', ORCHARD_VERSION=NAME)
         self.assertEqual(update.returncode, 0, update.stderr)
-        self.assertEqual(self.launcher.read_text(), 'the nightly launcher\n')
+        self.assertEqual(self.launcher.read_text(), ORCHARD.read_text())
 
     def test_update_replaces_the_link_an_older_setup_made(self):
         self.launcher.unlink()
         self.launcher.symlink_to(ORCHARD)
         self.assertEqual(self.run_orchard('update').returncode, 0)
         self.assertFalse(self.launcher.is_symlink())
-        self.assertEqual(self.launcher.read_text(), 'the nightly launcher\n')
+        self.assertEqual(self.launcher.read_text(), ORCHARD.read_text())
 
 
 @unittest.skipUnless(shutil.which('git') and shutil.which('curl'), 'needs git and curl')

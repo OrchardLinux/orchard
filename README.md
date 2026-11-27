@@ -77,8 +77,7 @@ key each boot; to trust a new boot, remove the old address with
 
 The `orchard` command `./setup` puts on your PATH (`tools/launcher`) runs the
 newest nightly of orchard, its tooling and its components, looked up once per
-command; `ORCHARD_VERSION` pins one, and `orchard update` installs the newest
-nightly's launcher. To work on orchard itself, run a checkout's own
+command, and keeps itself current with it; `ORCHARD_VERSION` pins one. To work on orchard itself, run a checkout's own
 `bin/orchard` by its path: it runs that checkout, from any directory, with
 its hardware data and recipes beside `src/`.
 
