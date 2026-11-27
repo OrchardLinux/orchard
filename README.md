@@ -16,12 +16,13 @@ git clone https://github.com/OrchardLinux/orchard && cd orchard
 orchard run examples/minimal-boot
 ```
 
-`./setup` shows what this computer needs to build and boot (uv, Podman, libusb,
-palera1n, the `orchard` command), asks, and sets it up; rerun it until it says
-Ready. `orchard doctor` shows the same without changing anything. Put the device
-in DFU mode before `orchard run`: it builds what is missing for the attached
-board, then boots it. The first build compiles Linux, which takes a while; later
-ones reuse it.
+`./setup` installs the `orchard` command (one program, from
+[OrchardLinux/tools](https://github.com/OrchardLinux/tools)) and shows what
+this computer has and lacks for building and booting (Podman, git, Python,
+USB access on Linux); `orchard setup NAME` gets one of them, and `orchard
+doctor` shows the list again. Put the device in DFU mode before `orchard
+run`: it builds what is missing for the attached board, then boots it. The
+first build compiles Linux, which takes a while; later ones reuse it.
 
 ## Supported hardware
 
@@ -75,11 +76,11 @@ key each boot; to trust a new boot, remove the old address with
 
 ## Develop
 
-The `orchard` command `./setup` puts on your PATH (`tools/launcher`) runs the
-newest nightly of orchard, its tooling and its components, looked up once per
-command, and keeps itself current with it; `ORCHARD_VERSION` pins one. To work on orchard itself, run a checkout's own
-`bin/orchard` by its path: it runs that checkout, from any directory, with
-its hardware data and recipes beside `src/`.
+The `orchard` command builds from the newest nightly's recipes and board
+data (`orchard data update` fetches them). To work on orchard itself, run a
+checkout's own `bin/orchard` by its path: it is the same command on that
+checkout's recipes and data, from any directory. `bin/orchard python …`
+runs Python in the checkout's environment.
 
 A payload is built for every board of one platform (`out/apple-16k/`, `out/apple-4k/`).
 `orchard run` takes the platform from the attached board; `orchard build` from

@@ -9,10 +9,9 @@ released Orchard 0.1.10: the `requirements.txt` of the
 CLI and hardware wheels. Those releases stay as they are.
 
 This repository's releases (a `v*` tag, see [GitHub builds](ci.md)) publish the
-component bundles, the loaders `m1n1.bin` and `pongo.bin`, `orchard-core.pyz`
-(the core with every device, which `orchard update` installs), source archives,
-`SHA256SUMS` and the attestation bundle. They publish no Python package: `orchard`
-runs from a checkout for development, and as the core for users.
+component bundles, the loaders `m1n1.bin` and `pongo.bin`, source archives,
+`SHA256SUMS` and the attestation bundle. They publish no program: the `orchard`
+command is OrchardLinux/tools' and builds from these recipes and data.
 
 Publish deliberately: a tag creates a **draft** release; `publish.yml` checks
 the checksums and the build attestation before publishing the exact assets.

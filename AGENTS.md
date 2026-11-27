@@ -20,9 +20,9 @@ catalog marks the other boards `untested`, and their owners find out.
 
 ## Which orchard runs
 
-- `orchard` on PATH (`tools/launcher`) runs the newest nightly of orchard,
-  looked up once per command; `ORCHARD_VERSION=nightly-…` pins one. It does
-  not look at the current directory.
+- `orchard` on PATH is the Rust command line from OrchardLinux/tools. Alone
+  it builds from the newest nightly's recipes and board data, whatever the
+  current directory.
 - To run the code of a checkout or worktree, call its own launcher by path:
   `/path/to/checkout/bin/orchard build …`. Nothing else selects a checkout.
 - Build with `orchard build` and boot with `orchard run` (RAM) or

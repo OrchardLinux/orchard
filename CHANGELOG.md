@@ -97,6 +97,15 @@ is missing or empty.
 
 ### Building
 
+- `orchard` is one program now: the Rust command line of OrchardLinux/tools,
+  installed with its `install.sh` (`./setup` runs it) and kept current with
+  `orchard update`. The shell launcher that ran the Python tool from the
+  newest nightly only names that install line; an installed copy replaces
+  itself with it. `ORCHARD2` and `orchard2 = true` are gone with it.
+- A checkout's `bin/orchard` is that command on the checkout's recipes and
+  board data. `bin/orchard python …` still runs Python in the checkout's
+  environment; the Python command line is no longer started by anything.
+- The nightly no longer publishes `orchard-core.pyz`.
 - A platform no longer has a `series` entry (`platforms/*.toml`,
   `kernel/series/`): its kernel is OrchardLinux/linux at the lock's commit.
   The kernel source keys change with it, so the next nightly compiles every

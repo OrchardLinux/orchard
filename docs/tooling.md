@@ -30,37 +30,33 @@ There is no wheel: orchard runs from a checkout. One version for the repository 
 
 ## Getting started (done)
 
-`git clone`, `./setup`, `orchard run examples/minimal-boot`. `./setup` (and `orchard
-setup`) shows every host requirement as ready, todo or yours, asks once, and can be
-rerun until everything is ready; `orchard doctor` shows the same and changes
-nothing. The requirements are one list shared with the installer's boot tools
-(`setup-host`): OpenSSH, libusb, palera1n and Linux USB permissions for booting;
-git, Podman (and its machine on macOS), the `orchard` command and PATH for building.
-Packages come from glu, then Homebrew on macOS (neither is installed for you), or
-apt, dnf or pacman. The `orchard` command is a copy of `tools/launcher`,
-which runs the newest nightly, so it does not depend on any clone. Pongo comes from the latest release while its recipe
-is unchanged, so most builds need no Xcode.
+`git clone`, `./setup`, `orchard run examples/minimal-boot`. `./setup` installs
+the `orchard` command with OrchardLinux/tools' `install.sh` and runs `orchard
+doctor`, which shows what the computer has and lacks, each with what it is
+needed for; `orchard setup NAME` gets one. `orchard update` replaces the
+command with its newest build. Pongo comes from the latest release while its
+recipe is unchanged, so most builds need no Xcode.
 
 ## Development: which orchard runs (done)
 
-Two launchers, and neither looks at the current directory:
+`orchard` is one program, the Rust command line of
+[OrchardLinux/tools](https://github.com/OrchardLinux/tools), whose `docs/`
+describe every command. It does not look at the current directory for what
+it builds from:
 
-- **`orchard` on PATH** is `tools/launcher` (`./setup` installs it; it replaces itself with the newest nightly's when that differs, and `orchard update` does so for a pinned version). Every command runs the newest nightly: looked up once (`nightly/latest.json`), a shallow clone of its tag in `~/.cache/orchard/tooling/NAME`, so a command runs one version from start to end. Offline: the newest cached nightly. `ORCHARD_VERSION=nightly-YYYYMMDD-COMMIT` (or `vX.Y.Z`) pins one, e.g. to reproduce a bug. A launcher older than the nightly it runs says so.
-- **A checkout's `bin/orchard`** runs that checkout, called by its path (`~/src/orchard/bin/orchard build …`), from any directory: that is how to work on orchard itself, in a worktree per branch (`git worktree add ../orchard-gpu -b gpu-a10`). uv installs it editable; an edit counts from the next command.
+- **`orchard` on PATH** builds from the newest nightly's recipes and board
+  data, kept in its cache; `orchard data update` fetches the newest, and
+  `--data DIR` (or `ORCHARD_DATA`) names a checkout instead.
+- **A checkout's `bin/orchard`** is that command with the checkout as its
+  data, called by its path (`~/src/orchard/bin/orchard build …`), from any
+  directory: that is how to work on orchard itself, in a worktree per branch
+  (`git worktree add ../orchard-gpu -b gpu-a10`).
 
-**orchard2 builds where it is switched on** for the computer: `ORCHARD2=1` (`0`: off), else `orchard2 = true` in `~/.config/orchard/config.toml`. Both launchers then hand `build`, `inputs`, `install`, `launch`, `devices`, `doctor`, `shell`, `exec`, `ssh-access`, `cache` and `run` to the `orchard2` on PATH, with the recipes and Python environment of the version they run; everything else stays in Python. orchard2 has a cache of its own, with its own spelling (`orchard cache ls`, `rm`, `prune`, `clear`); `cache` also says what Python's uses. `doctor` then lists what orchard2 uses of the computer; `setup` stays in Python, which installs the `orchard` command itself. `shell`, `exec` and `ssh-access` use orchard2's own keys: they reach what orchard2 installed or built, and `exec` takes its command after `--`.
+The Python command line it replaced is still in `src/orchard` and runs as
+`bin/orchard python -m orchard …`. Nothing starts it any more; `tools/launcher`,
+which ran it from the newest nightly, only names the install line.
 
-What `install` and `launch` do then is described in OrchardLinux/tools, [`crates/cli`](https://github.com/OrchardLinux/tools/blob/main/crates/cli/README.md). Compared with Python's:
-
-- `install` puts the system into the space after iPadOS and erases the partitions there, after a yes (`--yes`); `--split [GB]` resizes iPadOS first. Python asks for a place and never resizes. It takes a name (`omarchy-a`: the newest release of `OrchardLinux/NAME`), a URL, or an index or manifest file, and without one, in a distribution checkout, its last build. `distros` is refused: it has no registered names.
-- Both start from DFU mode only, and show the steps of the device that is connected in another mode. A running recovery is not resumed, and a Pongo or m1n1 that waits is not used.
-- `launch` starts the one installed system; with several it lets you choose with the arrow keys. `launch --list` prints them and starts nothing; `--entry ID` starts that one.
-- Only one iPhone or iPad may be connected. 32-bit boards are refused.
-- The boot route is the first in `routes.toml` that fits the board's chip, palera1n today. `--via ROUTE` (and `ORCHARD_VIA`) become `ORCHARD_BOOT=ROUTE`, as orchard2's own `--boot ROUTE`: `checkra1n`, or `ibss` for gaster and Apple's patched iBSS. Python follows the board's `[boot] entries` instead.
-- `run DIRECTORY` is `orchard2 run DIRECTORY`, which builds the project and boots what it built, with run's build options. `--via` chooses the boot route as for `launch`; `-y` is not needed, orchard2 does not ask. In a distribution checkout it builds the release and starts its installer system from RAM. A device orchard2 has no boot route for is booted by Python after orchard2 built for it, which it says before touching the device.
-- The operation lock of the Python commands is held while orchard2 works on a device.
-
-`orchard python ARGS` runs Python in the running version's environment, for a distribution's own scripts. An `orchard = "PATH"` line in `orchard.local.toml`, which used to choose the checkout, is refused with what to use instead.
+`bin/orchard python ARGS` runs Python in the checkout's environment. An `orchard = "PATH"` line in `orchard.local.toml`, which used to choose the checkout, is refused with what to use instead.
 
 ## Files (done)
 
@@ -142,13 +138,10 @@ Done; `src/orchard/installer.py` and `src/orchard/user.py`.
   zipapp (`--installer-url`, or the one next to it), checks both by SHA-256 and runs
   `install`, prompting on the terminal even when piped from curl. No system
   Python, no uv. The zipapp unpacks once into `STORE/core/VERSION-HASH`.
-- **The user's `orchard`:** `STORE/core/current.json` and `~/.local/bin/orchard`,
-  a launcher of the core with `install`, `launch`, `devices` and `update`. An
-  installer writes it before installing (so `orchard launch` remains even if the
-  install stops) and replaces it only with a newer core; a development orchard on
-  PATH (the nightly launcher `./setup` installs) stays. `orchard update` installs the latest
-  orchard release's `orchard-core.pyz` if it is newer. Later a self-contained Rust/C
-  binary.
+- **The user's `orchard`** is the command OrchardLinux/tools' `install.sh`
+  installs: one program, which `orchard update` replaces with its newest
+  build. The Python core an earlier installer left
+  (`STORE/core`, `orchard-core.pyz`) is no longer published.
 - **State:** the store and the build cache record their layout version
   (`cache.STATE_VERSION`, `state.json`); an orchard that finds a newer one refuses
   to touch it.
