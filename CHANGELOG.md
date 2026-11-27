@@ -99,7 +99,7 @@ is missing or empty.
 
 - The nightly's publishing steps no longer use the Python tool's package: the
   source keys (`ci/keys.py`), the kernel reuse checks and the platform layers
-  and index (`producers/platform.py`, `producers/platforms_index.py`) are
+  and index (`producers/platform_layer.py`, `producers/platforms_index.py`) are
   standalone scripts. Their old module names still work.
 - The `orchard` command on PATH replaces itself with the newest nightly's
   launcher when that differs and carries on with the command, instead of

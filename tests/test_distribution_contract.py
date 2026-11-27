@@ -48,13 +48,20 @@ class DistributionContract(unittest.TestCase):
     def test_the_by_path_scripts_need_no_orchard_package(self):
         # The producers, and the paths they had inside the package, which stay as shims.
         for script in ('producers/assemble.py', 'producers/cascadia.py', 'producers/initramfs.py', 'producers/buildenv.py',
-                       'producers/platform.py', 'producers/platforms_index.py', 'ci/keys.py', 'ci/reuse_kernel.py',
+                       'producers/platform_layer.py', 'producers/platforms_index.py', 'ci/keys.py', 'ci/reuse_kernel.py',
                        'boot/cascadia/build', 'src/orchard/image/assemble.py', 'src/orchard/image/cascadia.py',
                        'src/orchard/image/initramfs.py', 'src/orchard/buildenv.py'):
             with self.subTest(script=script):
                 result = subprocess.run([sys.executable, '-I', str(ROOT / script), '--help'], capture_output=True,
                                         text=True, cwd=tempfile.gettempdir())
                 self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_no_script_run_by_path_hides_a_standard_module(self):
+        # A script's directory comes first on its import path: producers/platform.py
+        # once stood in for the standard `platform` that buildenv.py imports.
+        for directory in ('producers', 'ci', 'kernel'):
+            for script in (ROOT / directory).glob('*.py'):
+                self.assertNotIn(script.stem, sys.stdlib_module_names, script)
 
     def test_inputs_names_every_path_a_distribution_takes(self):
         with tempfile.TemporaryDirectory() as temporary:

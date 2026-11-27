@@ -27,7 +27,7 @@ ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / '
 try:
     from . import platform          # under its old module path
 except ImportError:
-    _spec = importlib.util.spec_from_file_location('orchard_producer_platform', ROOT / 'producers/platform.py')
+    _spec = importlib.util.spec_from_file_location('orchard_producer_platform', ROOT / 'producers/platform_layer.py')
     platform = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(platform)
 sha = platform.sha
