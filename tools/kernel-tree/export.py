@@ -184,5 +184,4 @@ with tempfile.TemporaryDirectory() as t:
                        ':(exclude,glob)arch/*/configs/orchard_*_defconfig']).returncode:
         sys.exit('Check failed: the written patches do not reproduce the branch')
 print(f'Wrote {len(written)} patch(es) and {len(configs)} config(s); applied to {args.base} they '
-      f'reproduce {args.branch} exactly.\n'
-      'Run tools/kernel-tree/regenerate after committing to check them in series order.')
+      f'reproduce {args.branch} exactly.')

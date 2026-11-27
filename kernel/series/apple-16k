@@ -1,7 +1,2 @@
-# Ordered patch layers for the apple-16k platform (A9 and later: 16 KiB pages),
-# relative to kernel/. Every *.patch below each directory is applied in
-# path order.
-patches/hoolock
-patches/import/pauli1go
-patches/drivers
-patches/devices
+# The apple-16k kernel has no patch layers in orchard: its source is OrchardLinux/linux,
+# branch main, at the commit its lock names (kernel/README.md).

@@ -9,10 +9,10 @@ description = "Apple 32-bit SoCs (A5, A5X, A6, A6X): Project Cascadia's port on 
 arch = "arm"                            # make ARCH=
 image = "zImage"                        # make target; the payload's kernel file
 dtbs = "arch/arm/boot/dts/apple"        # where make dtbs leaves the boards' DTBs
-upstream = "kernel/upstream-v6.12.lock" # base the series applies to
-series = "kernel/series/apple-armv7"    # ordered patch layers
+upstream = "kernel/upstream-armv7.lock" # the commit of OrchardLinux/linux to build
+series = "kernel/series/apple-armv7" # no layers: the source is that commit
 config = "kernel/configs/apple-armv7/config"
-defconfig = "orchard_applearmv7_defconfig"   # the same config in OrchardLinux/linux
+defconfig = "orchard_applearmv7_defconfig" # the config as the tree has it; config above is its expanded copy
 branch = "armv7"                   # its branch in OrchardLinux/linux
 loader = "cascadia"                # the payload format that boots this kernel
 

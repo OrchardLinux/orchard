@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""Take a newer kernel: point orchard at commits of OrchardLinux/linux.
+
+  orchard python tools/kernel-tree/take [--linux DIR] [BRANCH[=COMMIT] ...]
+
+Orchard builds, per platform, the commit of OrchardLinux/linux its lock names
+(platforms/<name>.toml: upstream, branch). This moves the locks of the named
+branches (default: every branch a platform names) to COMMIT, or to the
+branch's head, and writes each platform's kernel/configs/<platform>/config
+again from the defconfig that commit has (`make <defconfig>` in the kernel
+toolchain container), because the build refuses a config that is not the
+tree's.
+
+--linux DIR is a clone that has the commits; without it they are fetched,
+without history, into a temporary repository. Nothing is committed: review
+the diff and commit it with the change that needs the new kernel, saying
+what the kernel gained.
+"""
+import argparse
+import collections
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+if sys.version_info < (3, 11):
+    sys.exit('Needs Python 3.11 or later: run it as orchard python tools/kernel-tree/take ...')
+import tomllib
+
+ORCHARD = Path(__file__).resolve().parents[2]
+IMAGE = 'localhost/orchard-hardware-kernel-toolchain:bookworm'
+
+parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
+parser.add_argument('--linux', type=Path, help='clone of OrchardLinux/linux that has the commits')
+parser.add_argument('branches', nargs='*', metavar='BRANCH[=COMMIT]')
+args = parser.parse_args()
+
+
+def run(*command, input=None):
+    done = subprocess.run([str(c) for c in command], input=input, capture_output=True)
+    if done.returncode:
+        sys.exit(f'{" ".join(map(str, command[:6]))} failed:\n{done.stderr.decode()}')
+    return done.stdout
+
+
+# branch -> its platforms' [kernel] tables; platforms on one branch share a lock.
+platforms = collections.defaultdict(dict)
+for descriptor in sorted((ORCHARD / 'platforms').glob('*.toml')):
+    kernel = tomllib.loads(descriptor.read_text())['kernel']
+    platforms[kernel['branch']][descriptor.stem] = kernel
+wanted = dict(item.partition('=')[::2] for item in args.branches) or dict.fromkeys(platforms, '')
+for branch in wanted:
+    if branch not in platforms:
+        sys.exit(f'No platform names the branch {branch}; known: {", ".join(sorted(platforms))}')
+
+with tempfile.TemporaryDirectory(prefix='take-kernel-') as temporary:
+    work = Path(temporary)
+    for branch, commit in sorted(wanted.items()):
+        described = platforms[branch]
+        locks = {kernel['upstream'] for kernel in described.values()}
+        if len(locks) != 1:
+            sys.exit(f'The platforms of {branch} name different locks: {", ".join(sorted(locks))}')
+        lock = ORCHARD / locks.pop()
+        current = dict(line.split('=', 1) for line in lock.read_text().splitlines() if '=' in line)
+        url = current['url']
+        if not commit:
+            listed = run('git', 'ls-remote', url, f'refs/heads/{branch}').split()
+            if not listed:
+                sys.exit(f'{url} has no branch {branch}')
+            commit = listed[0].decode()
+        repository = args.linux
+        if repository is None or subprocess.run(['git', '-C', repository, 'cat-file', '-e', commit + '^{commit}'],
+                                                capture_output=True).returncode:
+            repository = work / f'linux-{branch.replace("/", "-")}'
+            run('git', 'init', '-q', '--bare', repository)
+            print(f'{branch}: fetching {commit[:12]} from {url}', flush=True)
+            run('git', '-C', repository, 'fetch', '-q', '--no-tags', '--depth', '1', url, commit)
+        commit = run('git', '-C', repository, 'rev-parse', commit + '^{commit}').decode().strip()
+
+        out = work / f'configs-{branch.replace("/", "-")}'
+        out.mkdir()
+        (out / 'platforms').write_text(''.join(f'{name} {kernel["arch"]} {kernel["defconfig"]}\n'
+                                               for name, kernel in sorted(described.items())))
+        if subprocess.run(['podman', 'image', 'exists', IMAGE]).returncode:
+            run('podman', 'build', '-q', '-t', IMAGE, '-f', ORCHARD / 'kernel/Containerfile', ORCHARD / 'kernel')
+        print(f'{branch}: making the configs of {commit[:12]} in the toolchain container...', flush=True)
+        run('podman', 'run', '--rm', '-i', '--userns', 'keep-id', '-v', f'{out}:/out', IMAGE, 'bash', '-euc', '''
+            mkdir /tmp/src && tar -x -C /tmp/src
+            while read -r name arch defconfig; do
+              mkdir -p "/tmp/b/$name"
+              make -s -C /tmp/src O="/tmp/b/$name" LLVM=-19 ARCH="$arch" "$defconfig"
+              cp "/tmp/b/$name/.config" "/out/$name.config"
+            done < /out/platforms''', input=run('git', '-C', repository, 'archive', commit))
+
+        moved = current['commit'] != commit
+        lock.write_text(f'url={url}\ncommit={commit}\n')
+        print(f'{branch}: {lock.relative_to(ORCHARD)} {current["commit"][:12]} -> {commit[:12]}'
+              if moved else f'{branch}: {lock.relative_to(ORCHARD)} already at {commit[:12]}')
+        for name, kernel in sorted(described.items()):
+            config = ORCHARD / kernel['config']
+            new = (out / f'{name}.config').read_bytes()
+            if config.read_bytes() != new:
+                config.write_bytes(new)
+                print(f'{branch}: wrote {kernel["config"]} from {kernel["defconfig"]}')
