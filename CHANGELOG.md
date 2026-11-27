@@ -9,6 +9,17 @@ releasing, rename that section to the version (`## [0.3.0] - YYYY-MM-DD`). The
 release workflow uses that section as the GitHub release notes and fails if it
 is missing or empty.
 
+## [Unreleased]
+
+### Devices
+
+- iPad Air (Wi-Fi): Bluetooth audio works; input devices are untested. The
+  BCM4324B5 on UART1 comes up with hci_bcm, takes the unit's address from
+  m1n1 and runs at 1.5 Mbit/s; the Patchram comes from the 16H88 IPSW
+  through the board's firmware recipe. Headphones pair and play (A2DP, AAC).
+  The iPad Air (Cellular, China) share the device tree, untested. Tested by
+  ricktav.
+
 ## [0.3.10] - 2026-11-27
 
 ### Install & launch

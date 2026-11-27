@@ -15,9 +15,9 @@ Every device Orchard installs on. ✅ works · ❌ doesn't work yet · – no su
 
 | Device | Chip | Installs | GPU | Touch | Wi-Fi | Bluetooth | Sound | Charges | Sleep | Rotation | Tested by |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| iPad Air (Cellular) | A7 | ✅ | ❌ | ✅ | ✅ | ❌ | ✅ | ✅ | 🤔 | ❌ | [thisiscamk](https://github.com/thisiscamk) |
-| iPad Air (China) | A7 | 🤔 | ❌ | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | ❌ | – |
-| iPad Air (Wi-Fi) | A7 | ✅ | ❌ | 🤔 | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | [ricktav](https://github.com/ricktav) |
+| iPad Air (Cellular) | A7 | ✅ | ❌ | ✅ | ✅ | 🤔 | ✅ | ✅ | 🤔 | ❌ | [thisiscamk](https://github.com/thisiscamk) |
+| iPad Air (China) | A7 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | – |
+| iPad Air (Wi-Fi) | A7 | ✅ | ❌ | 🤔 | ✅ | 🤔 | ✅ | ✅ | ✅ | ❌ | [ricktav](https://github.com/ricktav) |
 | iPad mini 2 (Cellular) | A7 | ✅ | ❌ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | [perryraskin](https://github.com/perryraskin) |
 | iPad mini 2 (China) | A7 | 🤔 | ❌ | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | ❌ | – |
 | iPad mini 2 (Wi-Fi) | A7 | ✅ | ❌ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | [ricktav](https://github.com/ricktav) |
@@ -197,9 +197,9 @@ Boards Orchard builds for. States: working, untested, missing, none (no such har
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `p105` | working | untested | untested | missing | untested | untested | missing | missing | missing | missing | working | working | untested | untested | untested | none | untested | untested | untested | missing | missing | working | working | missing | untested | missing | missing | missing |
 | `j1` | untested | missing | untested | missing | untested | missing | missing | missing | missing | none | missing | missing | untested | untested | missing | none | untested | missing | missing | missing | missing | untested | untested | missing | untested | untested | missing | missing |
-| `j71` | working | working | working | missing | untested | working | missing | missing | working | missing | working | working | working | missing | missing | none | working | working | working | working | working | working | working | missing | working | missing | missing | missing |
-| `j72` | working | working | working | missing | working | working | missing | missing | untested | none | working | working | working | missing | missing | missing | working | working | working | untested | untested | working | working | missing | working | missing | missing | missing |
-| `j73` | untested | untested | untested | missing | untested | untested | missing | missing | untested | missing | untested | untested | untested | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | missing | untested | missing | missing | missing |
+| `j71` | working | working | working | missing | untested | working | missing | missing | working | missing | working | working | working | untested | working | none | working | working | working | working | working | working | working | missing | working | missing | missing | missing |
+| `j72` | working | working | working | missing | working | working | missing | missing | untested | none | working | working | working | untested | untested | missing | working | working | working | untested | untested | working | working | missing | working | missing | missing | missing |
+| `j73` | untested | untested | untested | missing | untested | untested | missing | missing | untested | missing | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | untested | untested | missing | untested | missing | missing | missing |
 | `j85` | working | working | working | missing | working | working | missing | missing | working | missing | working | working | working | missing | missing | missing | working | working | working | working | working | working | working | missing | working | missing | missing | missing |
 | `j85m` | untested | untested | untested | missing | untested | untested | missing | missing | untested | missing | untested | untested | missing | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | missing | untested | missing | missing | missing |
 | `j86` | working | untested | untested | missing | working | untested | missing | missing | untested | missing | working | working | working | missing | missing | missing | untested | working | untested | working | working | untested | working | missing | working | missing | missing | missing |
@@ -254,9 +254,9 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 
 | Board | Status | Backlight | Touchscreen | Buttons | Accelerometer | Gyroscope | Light sensor | Internal storage read | Internal storage write | Wi-Fi | Bluetooth input devices | Bluetooth audio | Battery status | Charging | USB serial | USB network | USB host | Speakers | Microphone | Hardware H.265 video decoding |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `j71` | experimental | yes | yes | yes | – | – | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | yes | – | – |
-| `j72` | experimental | yes | yes | yes | – | – | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | yes | – | – |
-| `j73` | experimental | yes | yes | yes | – | – | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | yes | – | – |
+| `j71` | experimental | yes | yes | yes | – | – | yes | yes | yes | – | yes | yes | yes | yes | yes | yes | – | yes | – | – |
+| `j72` | experimental | yes | yes | yes | – | – | yes | yes | yes | – | yes | yes | yes | yes | yes | yes | – | yes | – | – |
+| `j73` | experimental | yes | yes | yes | – | – | yes | yes | yes | – | yes | yes | yes | yes | yes | yes | – | yes | – | – |
 | `j85` | experimental | yes | yes | yes | – | – | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | yes | – | – |
 | `j85m` | experimental | yes | yes | yes | – | – | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | yes | – | – |
 | `j86` | experimental | yes | yes | yes | – | – | yes | yes | yes | – | – | – | yes | yes | yes | yes | – | yes | – | – |
