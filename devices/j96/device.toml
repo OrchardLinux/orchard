@@ -15,7 +15,7 @@ chip = 0x7000
 board = 0x08
 
 [boot]
-methods = ["checkm8-pongo"] # Tested with orchard-install.pyz install and launch (Omarchy A 0.3.6).
+methods = ["checkm8-pongo"] # Tested with install and launch (Omarchy A 0.3.6).
 
 [kernel]
 platform = "apple-4k"

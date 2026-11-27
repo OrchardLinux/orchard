@@ -3,8 +3,8 @@
 
 A component's source key is a hash of the files that decide it: for a
 platform's kernel the upstream lock (its commit of OrchardLinux/linux), the
-config, the toolchain recipes, the descriptor's build fields and the
-kernel producers' version; for m1n1 and the static tools their recipes
+config, the toolchain recipes, its boards' own modules, the descriptor's
+build fields and the kernel producers' version; for m1n1 and the static tools their recipes
 (producers/contract.toml names them). Anyone with a checkout computes them
 without building anything; a build whose checkout gives the same key takes
 the published component instead of making it.
@@ -59,16 +59,30 @@ def _hash(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
+def boards(root, platform):
+    """The boards of PLATFORM, sorted: those whose device.toml names it as their kernel's."""
+    found = []
+    for path in sorted((root / 'devices').glob('*/device.toml')):
+        with path.open('rb') as stream:
+            if tomllib.load(stream).get('kernel', {}).get('platform') == platform:
+                found.append(path.parent.name)
+    return found
+
+
 def source_key(root, platform):
     """The key of PLATFORM's compiled kernel, from the checkout's files alone."""
     def series(*args):
         return subprocess.check_output([sys.executable, str(root / 'kernel/series.py'), *args], text=True)
     described = json.loads(series('--platform', platform))
+    paths = [described['upstream'], described['config'], 'kernel/Containerfile', 'kernel/install-toolchain']
+    # The modules its boards bring are built into the same bundle.
+    modules = contract(root).get('board-modules')
+    if modules:
+        paths += [f'{modules}/{board}' for board in boards(root, platform) if (root / modules / board).is_dir()]
     return _hash({
         'platform': platform,
         'build': {key: described[key] for key in ('arch', 'image', 'dtbs')},
-        'recipes': recipe_entries(root, [described['upstream'], described['config'],
-                                         'kernel/Containerfile', 'kernel/install-toolchain']),
+        'recipes': recipe_entries(root, paths),
         'producer': contract(root)['kernel-producer'],
     })
 
