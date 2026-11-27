@@ -26,14 +26,13 @@ class J71bData(unittest.TestCase):
         self.assertTrue(all(part not in ('', '.', '..') for part in relative.split('/')))
         self.assertFalse(self.recipe_path.is_symlink())
 
-    def test_upstream_source_pins(self):
-        for relative, url, commit in (
-                # torvalds v7.3-rc1; Hoolock and contributors are patch layers.
-                ('kernel/upstream.lock', 'https://github.com/torvalds/linux.git',
-                 'cee9395acd8043be0644b25c34bfa86623f2b935'),):
+    def test_kernel_and_loader_locks_name_orchard_repositories(self):
+        for relative, url in (('kernel/upstream.lock', 'https://github.com/OrchardLinux/linux.git'),
+                              ('kernel/upstream-armv7.lock', 'https://github.com/OrchardLinux/linux.git'),
+                              ('boot/m1n1/upstream.lock', 'https://github.com/OrchardLinux/m1n1.git')):
             lock = dict(line.split('=', 1) for line in (HARDWARE / relative).read_text().splitlines() if '=' in line)
             self.assertEqual(lock['url'], url)
-            self.assertEqual(lock['commit'], commit)
+            self.assertRegex(lock['commit'], r'^[0-9a-f]{40}$')
 
     def test_firmware_recipe_integrity(self):
         self.assertEqual(hashlib.sha256(self.recipe_path.read_bytes()).hexdigest(), RECIPE_SHA256)

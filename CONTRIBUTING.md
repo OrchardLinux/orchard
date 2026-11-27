@@ -68,33 +68,30 @@ through the merge, and code that isn't in the tree yet is tagged
 bring-up doc in `docs/bring-up/`) lists that code under "Unmerged code" and
 the follow-ups under "Open work", so you can pick them up from there.
 
-## Where kernel patches go
+## Where kernel changes go
 
-Patches are applied in the layer order of `kernel/series/<platform>`; within a
-directory, in file-name order.
+The kernel's source is [OrchardLinux/linux](https://github.com/OrchardLinux/linux):
+branch `main` for the arm64 boards, `armv7` for the 32-bit ones. Kernel work is
+a pull request there, against the source; orchard holds no kernel patches. Its
+checks compile every platform of the branch and run orchard's tests of the
+kernel source.
 
-- `kernel/patches/drivers/<subsystem>/`: changes to drivers and their
-  bindings, including new drivers. Use the subsystem directory that matches the
-  kernel's (`spi`, `input`, `power`, …); add one when none fits.
-- `kernel/patches/devices/<soc>/`: device trees only (`.dts`, `.dtsi`), named
-  by SoC (`t7000`, `t8010`, …).
-- `kernel/patches/hoolock/` and `kernel/patches/import/`: other trees we
-  carry, exported unchanged. Their origin is recorded in `kernel/sources.toml`.
-  Don't edit these; fix them with a later patch in `drivers/` or `devices/`.
+- Keep driver changes and device trees in separate commits: a device tree
+  commit that also changes a driver hides that it changes behaviour on other
+  devices.
+- Build your branch with `orchard build … --kernel-tree DIR`.
+- What a board needs beside its kernel (its `devices/<board>/` data, firmware
+  recipe, docs) is a pull request in orchard. When it needs the new kernel, it
+  takes it in the same pull request: `tools/kernel-tree/take`, described in
+  `kernel/README.md`. The kernel pull request merges first.
 
-Number a new patch with the next free number in its directory. Don't renumber
-existing patches.
-
-A driver patch filed under `devices/` hides that it changes behaviour on other
-devices, which is why the split matters.
-
-m1n1 is different: its source is [OrchardLinux/m1n1](https://github.com/OrchardLinux/m1n1),
+m1n1 works the same way: its source is [OrchardLinux/m1n1](https://github.com/OrchardLinux/m1n1),
 and m1n1 work is a pull request there. `boot/m1n1/upstream.lock` names the
 commit orchard builds; see `boot/m1n1/README.md`.
 
-## Writing patches
+## Writing kernel commits
 
-Write patches as you would for upstream Linux:
+Write commits as you would for upstream Linux:
 
 - Subject in the subsystem's style (`Input: apple_z2: …`,
   `arm64: dts: apple: …`), one logical change per patch, and a body that says
@@ -110,18 +107,18 @@ Write patches as you would for upstream Linux:
 
 ## Kernel configuration
 
-`kernel/configs/<platform>/config` builds every device on that platform:
-`apple-4k` covers A7, A8 and A8X, `apple-16k` covers A9 and later.
-`platforms/<platform>.toml` names that config together with the platform's
-architecture, image, upstream lock and patch series; a new platform is a new
-descriptor. For each
-change, the commit message says which options change, which device or feature
-needs them, and why. That covers options you turn off too, and options you
-switch from module (`=m`) to built-in (`=y`).
+One config builds every device on a platform: `apple-4k` covers A7, A8 and
+A8X, `apple-16k` covers A9 and later, `apple-armv7` the 32-bit boards. Its
+source is the platform's defconfig in the kernel tree
+(`arch/<arch>/configs/orchard_<platform>_defconfig`); change it there, with
+`make savedefconfig`, in the kernel pull request. For each change, the commit
+message says which options change, which device or feature needs them, and
+why. That covers options you turn off too, and options you switch from module
+(`=m`) to built-in (`=y`). Make a change in both arm64 defconfigs unless it's
+only about the page size.
 
-Make a change in both configs unless it's only about the page size. Resolve
-each with `olddefconfig` as described in `kernel/configs/apple-16k/README.md`,
-and commit the resolved file.
+`kernel/configs/<platform>/config` in orchard is the expanded copy;
+`tools/kernel-tree/take` writes it when orchard takes the kernel commit.
 
 ## Bring-up material
 

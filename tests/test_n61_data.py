@@ -111,13 +111,12 @@ class Apple4kKernelConfig(unittest.TestCase):
         self.assertEqual(settings['CONFIG_USB_G_MULTI'], 'm')
         self.assertEqual(self.config('apple-16k')['CONFIG_USB_G_MULTI'], 'm')
 
-    def test_both_platforms_reuse_the_same_ordered_patch_layers(self):
+    def test_the_board_is_on_the_4k_platform(self):
         spec = importlib.util.spec_from_file_location('n61_kernel_series', HARDWARE / 'kernel/series.py')
         series = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(series)
         self.assertEqual(series.resolve('n61'), ('apple-4k', 't7000-n61'))
-        self.assertEqual(series.patches('apple-4k'), series.patches('apple-16k'))
-        self.assertTrue(series.patches('apple-4k'))
+        self.assertEqual(series.platform('apple-4k')['upstream'], series.platform('apple-16k')['upstream'])
 
 
 if __name__ == '__main__':

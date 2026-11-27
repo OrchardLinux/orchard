@@ -1,5 +1,8 @@
 # Every repository whose kernel work Orchard carries. Authorship lives in each
-# patch; this file records where it came from and what state the import is in.
+# commit of OrchardLinux/linux; this file records where the work came from and
+# what state the import is in. "patches" names the layer: until November 2026 a
+# directory under kernel/patches (orchard tag kernel-patches-final), now the
+# merge commits of that name at the start of the branch.
 # status: found | imported | reviewed | integrated | upstreamed
 
 [base]
@@ -47,7 +50,7 @@ name = "cascadia"
 url = "https://github.com/rzxvx/Project-Cascadia.git"
 branch = "main"
 commit = "d92da7dd0ad356ad103af33d9129752843c33f0e"
-base = "torvalds v6.12 (kernel/upstream-v6.12.lock), not [base]"
+base = "torvalds v6.12 (adc218676eef), not [base]"
 contributors = ["rzxvx", "Simone99", "Stephen Cox", "liquidmetal-Hg", "Marcolist", "Alberto Giancarlo Ferrario", "Earl Co", "K <k@Ks-MacBook-Pro-4.local>", "Claude <noreply@anthropic.com>"]
 devices = ["p105 (iPad mini 1 Wi-Fi)", "j1 (iPad 3 Wi-Fi)", "k93 (iPad 2 Wi-Fi)"]
 platforms = ["apple-armv7"]

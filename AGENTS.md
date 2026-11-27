@@ -37,20 +37,20 @@ catalog marks the other boards `untested`, and their owners find out.
   pull request there, and never add m1n1 patch files to orchard. Orchard
   builds the commit in `boot/m1n1/upstream.lock`; move it in the orchard
   pull request that needs the new m1n1 (`boot/m1n1/README.md`).
-- Kernel: work on a branch of OrchardLinux/linux in a worktree under
+- Kernel: OrchardLinux/linux is the source (`main` for arm64, `armv7` for
+  the 32-bit boards). Work on a branch there in a worktree under
   `~/projects/OrchardLinux/trees/` (a case-sensitive volume), as ordinary
-  source. Build it with `orchard build … --kernel-tree DIR`; its build output
-  stays inside the tree, in `.orchard-out/` (git ignores it there).
+  source, and open the pull request there. Never add kernel patch files to
+  orchard. Build a tree with `orchard build … --kernel-tree DIR`; its build
+  output stays inside the tree, in `.orchard-out/` (git ignores it there).
 - Commits in upstream style: one topic each, `Assisted-by: LLM`, no
   Signed-off-by, the author from the global git config.
-- When it works on hardware, `tools/kernel-tree/export.py` turns the branch
-  into orchard's patch files (defconfig changes become orchard's config).
-  Don't pick or reserve patch numbers: a branch needs none, and export
-  numbers its patches after those already in each directory.
-  For the kernel, orchard's patch files are the source of truth: the
-  branches of OrchardLinux/linux are generated from them by
-  `tools/kernel-tree/regenerate` (which refuses a branch with commits it did
-  not make); never commit to those branches by hand.
+- Never rewrite `main` or `armv7` of OrchardLinux/linux, or `main` of
+  OrchardLinux/m1n1: no force-push, no rebase of what is merged.
+- Orchard builds the kernel commit its lock names. When orchard needs a
+  merged kernel change, `tools/kernel-tree/take` moves the lock and rewrites
+  the config copies; commit that in the orchard pull request that needs it
+  (`kernel/README.md`).
 
 ## Distributions
 

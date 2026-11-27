@@ -116,7 +116,7 @@ class PublishedKernel(unittest.TestCase):
     def test_the_key_follows_the_kernel_files_not_the_rest(self):
         inputs = published.source_inputs(ROOT, 'apple-16k')
         self.assertIn('kernel/configs/apple-16k/config', inputs['recipes'])
-        self.assertTrue(any(name.startswith('kernel/patches/') for name in inputs['recipes']))
+        self.assertIn('kernel/upstream.lock', inputs['recipes'])
         self.assertFalse(any(name.startswith(('devices/', 'docs/', 'src/')) for name in inputs['recipes']))
 
 

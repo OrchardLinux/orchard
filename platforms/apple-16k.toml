@@ -9,9 +9,9 @@ description = "A9 and later: 16 KiB pages"
 arch = "arm64"                          # make ARCH=
 image = "Image.gz"                      # make target; the payload's kernel file
 dtbs = "arch/arm64/boot/dts/apple"      # where make dtbs leaves the boards' DTBs
-upstream = "kernel/upstream.lock"       # base the series applies to
-series = "kernel/series/apple-16k"       # ordered patch layers
+upstream = "kernel/upstream.lock" # the commit of OrchardLinux/linux to build
+series = "kernel/series/apple-16k" # no layers: the source is that commit
 config = "kernel/configs/apple-16k/config"
-defconfig = "orchard_apple16k_defconfig"   # the same config in OrchardLinux/linux
+defconfig = "orchard_apple16k_defconfig" # the config as the tree has it; config above is its expanded copy
 branch = "main"                    # its branch in OrchardLinux/linux
 loader = "m1n1"                    # the payload format that boots this kernel

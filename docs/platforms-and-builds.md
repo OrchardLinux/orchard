@@ -15,10 +15,10 @@ A platform is one kernel build shared by every board that names it in
 | `arch` | `make ARCH=` | `arm64` | `arm` |
 | `image` | make target and payload file | `Image.gz` | `zImage` |
 | `dtbs` | where `make dtbs` leaves the boards' DTBs | `arch/arm64/boot/dts/apple` | `arch/arm/boot/dts/apple` |
-| `upstream` | lock of the base the series applies to | `kernel/upstream.lock` (v7.3-rc1) | `kernel/upstream-v6.12.lock` |
-| `series` | ordered patch layers | `kernel/series/<name>` | `kernel/series/apple-armv7` |
-| `config` | full config | `kernel/configs/<name>/config` | `kernel/configs/apple-armv7/config` |
-| `defconfig` | the same config in OrchardLinux/linux | `orchard_apple16k_defconfig`, … | `orchard_applearmv7_defconfig` |
+| `upstream` | lock naming the commit of OrchardLinux/linux to build | `kernel/upstream.lock` (on v7.3-rc1) | `kernel/upstream-armv7.lock` (on v6.12) |
+| `series` | no patch layers any more; kept for released tools | `kernel/series/<name>` | `kernel/series/apple-armv7` |
+| `config` | expanded copy of the tree's defconfig | `kernel/configs/<name>/config` | `kernel/configs/apple-armv7/config` |
+| `defconfig` | the config, in OrchardLinux/linux | `orchard_apple16k_defconfig`, … | `orchard_applearmv7_defconfig` |
 | `branch` | its branch in OrchardLinux/linux | `main` | `armv7` |
 | `loader` | the payload format its kernel boots in | `m1n1` | `cascadia` |
 
@@ -42,30 +42,23 @@ from the platform.
 **Done:** [OrchardLinux/linux](https://github.com/OrchardLinux/linux) (fork of
 torvalds/linux) and [OrchardLinux/m1n1](https://github.com/OrchardLinux/m1n1)
 (fork of AsahiLinux/m1n1). m1n1 is built from its repository, at the commit
-in `boot/m1n1/upstream.lock`, and m1n1 work is a pull request there. For the
-kernel the patch layers here stay authoritative and the tree is generated from them by
-[tools/kernel-tree](../tools/kernel-tree/README.md): one commit per patch,
-one merge per patch directory, the defconfigs on top, one branch per
-platform base. Regeneration is stable: unchanged topics keep their SHAs.
-`export.py` turns a branch into patch files for an orchard PR.
+in `boot/m1n1/upstream.lock`, and m1n1 work is a pull request there. The
+kernel is the same: built from OrchardLinux/linux at the commit in the
+platform's lock (`kernel/upstream.lock`, `kernel/upstream-armv7.lock`), with
+kernel work as pull requests there (`kernel/README.md`). Orchard carried both
+as patch layers until November 2026; the branches start as those layers, one
+commit per patch and one merge per layer.
 
-**Planned, at the switch:** the trees become authoritative and the patch
-directories a generated export for one release. The kernel stays a patch
-queue on top of upstream, not a fork:
+The kernel stays a series on top of upstream, not a fork that merges
+upstream in, and its branches are never rewritten. A move to a newer upstream,
+a re-import of a layer or a re-ordering is added on top: a marker commit on
+the new base that has the old branch as a second parent, then the series
+replayed after it. Everything since the latest marker is the current series,
+exportable as plain patches.
 
-- an upstream bump is a rebase onto the new tag, never a merge of upstream
-  into a branch; commits that landed upstream drop out by patch-id;
-- the state before a rebase stays as a tag per base (`orchard/v7.3`);
-- the delta is exportable as a plain series at any time.
-
-Configs live in the tree as defconfigs (`arch/<arch>/configs/`); orchard only
-names them. Until the switch, `kernel/configs` is authoritative: regenerate
-makes the tree's defconfigs from it and checks they reproduce it byte for
-byte. **Done:** what differs from the source of truth is refused, never
-corrected silently. `export.py` carries a branch's defconfig change into
-`kernel/configs/<platform>/config` (`make olddefconfig`), so it reaches orchard
-the way any change does; regenerate refuses to move a branch whose
-defconfig holds a change orchard does not have, and says to export it.
+Configs live in the tree as defconfigs (`arch/<arch>/configs/`).
+`kernel/configs` keeps an expanded copy that the build checks against the
+tree's, while released tools still read it.
 
 ## Imported work (done)
 

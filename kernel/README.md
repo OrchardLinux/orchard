@@ -1,39 +1,78 @@
 # Kernel build
 
+Orchard's kernel lives in its own repository,
+[OrchardLinux/linux](https://github.com/OrchardLinux/linux): upstream Linux
+with the Apple A-series work on top. Kernel work is a pull request there,
+against the source (see [CONTRIBUTING.md](../CONTRIBUTING.md)).
+
 A platform is described in one file, `platforms/<platform>.toml`: its
-architecture, kernel image, DTB directory, upstream lock, patch series and
-config. `build` reads it, fetches the pinned revision, applies the ordered
-patch layers and config, and compiles one kernel, its modules and every DTB of
-the platform. A device name resolves to its platform through
+architecture, kernel image, DTB directory, its branch in OrchardLinux/linux,
+the lock that names the commit to build, and its config. `build` reads it,
+fetches that commit and compiles one kernel, its modules and every DTB of the
+platform. A device name resolves to its platform through
 `devices/<device>/device.toml` `[kernel]` and additionally copies its DTB to
 `DIRECTORY/<device>.dtb`. Git and Podman are required. `series.py --platform
 NAME` prints the checked descriptor of a platform or device.
 
+| Platform | Branch | Lock |
+|---|---|---|
+| `apple-16k` (A9 and later), `apple-4k` (A7 to A8X) | `main`, on upstream v7.3-rc1 | `kernel/upstream.lock` |
+| `apple-armv7` (A5 to A6X) | `armv7`, on upstream v6.12 | `kernel/upstream-armv7.lock` |
+
+## Taking a newer kernel
+
+`tools/kernel-tree/take` moves a lock to its branch's head (or to a commit you
+name) and writes the platform configs again from the tree's defconfigs. Commit
+the result in the pull request that needs the new kernel, and say in the
+message what the kernel gained, not that a line moved. Nothing else names the
+commit: cache keys, CI, the nightly and a release follow the lock.
+
+`kernel/configs/<platform>/config` is the expanded copy of the tree's
+`arch/<arch>/configs/<defconfig>`. They are one config and the tree's is the
+source: change an option in the defconfig, in the kernel pull request. The
+build refuses a config that is not what the commit's defconfig gives. The
+series files (`kernel/series/`) name no patch layers any more; they and the
+config copy stay while released tools still read them.
+
+## How it builds
+
 `orchard build` runs it; build with `orchard build --device j71b` (platform
 `apple-16k` plus the j71b DTB) or `orchard build --platform apple-16k`, not
-with `kernel/build` directly. It holds the shared tree's lock and switches the
-tree between patch series for every checkout (see [AGENTS.md](../AGENTS.md)).
+with `kernel/build` directly: it holds the shared tree's lock (see
+[AGENTS.md](../AGENTS.md)). `--kernel-tree DIR` builds a kernel tree of your
+own instead, as it is, with its own defconfig.
 
-The source and compiler output live in one incremental tree per platform and
-upstream pin, shared by every hardware checkout and worktree:
-`${ORCHARD_CACHE_DIR:-${XDG_CACHE_HOME:-~/.cache}/orchard}/kernel-work/<platform>-<pin>/`
-(`--work-dir` chooses another). Every build continues that tree: a changed patch
-series resets the files the old series touched and applies the new one, so only
-affected files recompile. Hand edits in the tree are refused rather than lost.
+The source and compiler output live in one tree per platform and kernel
+commit, shared by every hardware checkout and worktree:
+`${ORCHARD_CACHE_DIR:-${XDG_CACHE_HOME:-~/.cache}/orchard}/kernel-work/<platform>-<commit>/`
+(`--work-dir` chooses another). A new commit starts a new tree.
 A second build of the same tree waits for the first. The cache key of a built kernel is what
 determines it: the source tree, the config, the descriptor's arch, image and
 DTB directory, the toolchain image and `KERNEL_PRODUCER` in
 `src/orchard/build.py`, not the text of these scripts; raise that version when
 a change alters what they produce. Compiled objects also go
 into a compiler cache (ccache) next to the trees, `.../orchard/ccache/kernel/`,
-so a tree that returns to a patch set built before, in any worktree, compiles it
-from the cache; it keeps itself under 2 GB. ccache stands in for `clang-19` on the recipe's PATH, so the
+so a new commit, in any worktree, compiles only the files it changed;
+it keeps itself under 2 GB. ccache stands in for `clang-19` on the recipe's PATH, so the
 recorded compiler commands are the same with and without it; `ORCHARD_CCACHE=0`
 builds without it and rebuilds nothing by itself. `make` runs one job per CPU of
 the build environment (the Podman machine's CPUs); `ORCHARD_KERNEL_JOBS=N`
 chooses another number. `--output` must name a new
 directory; it receives the image the descriptor names (`Image.gz` for arm64), `<device>.dtb`, `dtbs/`, `kernel.release` and
 `lib/modules/`.
+
+## Where the history is
+
+The branches of OrchardLinux/linux start as the patch layers orchard carried
+until November 2026: one commit per patch and one merge commit per layer, in
+the order they applied (`hoolock`, `import/pauli1go`, `drivers/<subsystem>`,
+`devices/<soc>` on `main`; `import/cascadia`, `armv7/<subsystem>` on `armv7`),
+then the platform defconfigs. `kernel/sources.toml` records where each layer
+came from. Documents written before then name a patch by its old path
+(`kernel/patches/<layer>/NNNN-subject.patch`): find it in OrchardLinux/linux by
+its subject, or as a file in orchard's history up to the tag
+`kernel-patches-final`. `tools/kernel-tree/README.md` says how to go back to
+patch files.
 
 The kernel has no device-specific NVMe fences. Protecting Apple's data is
 the installer's job: the recovery keeps every NVMe partition and every

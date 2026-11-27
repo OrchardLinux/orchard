@@ -99,12 +99,16 @@ is missing or empty.
 
 - The nightly publishes `m1n1-armv7.macho`, the 32-bit m1n1 for the A5 to
   A6X chips, built from the same source as the others. Not run on a device.
-- m1n1 is built from its own repository,
+- The kernel and m1n1 are built from their own repositories,
+  [OrchardLinux/linux](https://github.com/OrchardLinux/linux) and
   [OrchardLinux/m1n1](https://github.com/OrchardLinux/m1n1), instead of from
-  patch files in orchard. m1n1 changes are pull requests there, against the
-  real source; orchard names the commit it builds in `boot/m1n1/upstream.lock`.
-  The quiet boot screen is part of that m1n1 now. Kernel changes still go into
-  orchard as patch files.
+  patch files in orchard. Kernel and m1n1 changes are pull requests there,
+  against the real source, and kernel pull requests are compiled for every
+  platform of their branch. Orchard names the commits it builds
+  (`kernel/upstream.lock`, `kernel/upstream-armv7.lock`,
+  `boot/m1n1/upstream.lock`); `tools/kernel-tree/take` takes a newer kernel.
+  The quiet boot screen is part of that m1n1 now. The patch files stay in
+  orchard's history (tags `kernel-patches-final`, `m1n1-patches-final`).
 - The scripts recipes and distributions run by path moved to `producers/`
   (`buildenv.py`, `initramfs.py`, `assemble.py`, `cascadia.py`). Their old paths
   and module names still work. m1n1, the static tools and the Cascadia loader
