@@ -37,8 +37,8 @@ through the terminal before rebooting; they live only in RAM.
 - Add files under `rootfs/` at the paths where they should appear on the device.
 - Host tooling lives in `src/orchard/`: `build.py` builds/caches components,
   `ram.py` composes RAM payloads, and `boot.py` confirms/uploads them.
-- Kernel/driver changes are patches in `kernel/patches/` or modules in
-  `kernel/modules/`; the shared kernel tree applies them on the next build.
+- Kernel/driver changes are commits in OrchardLinux/linux (build a tree of
+  your own with `--kernel-tree`) or modules in `kernel/modules/`.
 
 No Linux partition, distro image or release is needed; the orchard checkout you
 work in is editable as it is. Upstream Git objects, built components, the kernel

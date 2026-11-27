@@ -1,5 +1,5 @@
 # iPad mini 4 (Wi-Fi) (J96): identity from public sources (tools/catalog/generate),
-# hardware description from kernel/patches/devices/t7000/0003-0006. Bring-up record:
+# hardware description in OrchardLinux/linux (arm64: dts: apple: t7000-mini4). Bring-up record:
 # docs/bring-up/j96.md.
 schema = 1
 kind = "hardware.device"

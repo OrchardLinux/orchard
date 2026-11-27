@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import Project Cascadia's A5 kernel as orchard patch files.
+"""Import Project Cascadia's A5 kernel as commits on its upstream base.
 
 Cascadia (https://github.com/rzxvx/Project-Cascadia) is not a kernel tree: its
 build takes torvalds v6.12, copies patches/files/, applies patches/tree/*.patch
@@ -16,12 +16,15 @@ v6.12, reproduce Cascadia's tree; the tool checks that before writing.
 Cascadia compiles its boards' device trees (dts/*.dts) with dtc outside the
 kernel. One commit per board in BOARDS adds its tree to arch/arm/boot/dts/apple/,
 named like the arm64 Apple trees and built by make dtbs, content unchanged.
-Orchard's own commits on top of the import (--then, patch files as
-format-patch writes them) are applied last with their author and message.
-The patch files in OUT are replaced.
 
-usage: import-cascadia.py --cascadia DIR --commit REV --linux DIR --base REV --out DIR
-                          [--then PATCH ...]
+The commits are left in the linux repository at REF (default
+refs/orchard/cascadia-import); nothing else there is touched. A refresh then
+replays the armv7 series onto them (tools/kernel-tree/README.md). --out DIR
+also writes the commits as patch files, as orchard carried them until
+November 2026; --then PATCH applies patch files on top, last.
+
+usage: import-cascadia.py --cascadia DIR --commit REV --linux DIR --base REV
+                          [--ref REF] [--out DIR] [--then PATCH ...]
 """
 import argparse
 import atexit
@@ -40,11 +43,13 @@ parser.add_argument('--cascadia', required=True, type=Path, help='clone of Proje
 parser.add_argument('--commit', required=True, help='Cascadia commit to import')
 parser.add_argument('--linux', required=True, type=Path, help='linux repository holding BASE')
 parser.add_argument('--base', required=True, help='v6.12 in the linux repository')
-parser.add_argument('--out', required=True, type=Path, help='directory for the patch files')
+parser.add_argument('--ref', default='refs/orchard/cascadia-import', help='where the commits are left')
+parser.add_argument('--out', type=Path, help='also write the commits as patch files into this directory')
 parser.add_argument('--then', nargs='*', default=[], type=Path,
-                    help="orchard's own patches on top of the import, applied last in this order")
+                    help='patch files to apply on top of the import, last, in this order')
 args = parser.parse_args()
-args.out = args.out.resolve()  # git writes the files from inside the linux repository
+if args.out is not None:
+    args.out = args.out.resolve()  # git writes the files from inside the linux repository
 URL = 'https://github.com/rzxvx/Project-Cascadia'
 SANDCASTLE = 'https://github.com/corellium/linux-sandcastle'
 
@@ -262,9 +267,10 @@ for path in changed:
 
 # --then patches are read before OUT's patch files are replaced: they may be among them.
 then = [(p.name, p.read_bytes()) for p in args.then]
-args.out.mkdir(parents=True, exist_ok=True)
-for old in args.out.glob('*.patch'):
-    old.unlink()
+if args.out is not None:
+    args.out.mkdir(parents=True, exist_ok=True)
+    for old in args.out.glob('*.patch'):
+        old.unlink()
 parent = lgit('rev-parse', args.base + '^{commit}')
 lgit('read-tree', args.base)
 written = []
@@ -286,7 +292,7 @@ def credits(commits):
 
 
 def commit_index(message, author, email, date, committer=None):
-    """Commit the index on parent and write it as the next patch file."""
+    """Commit the index on parent; with --out, also write it as the next patch file."""
     global parent
     cname, cmail, cdate = committer or (author, email, date)
     tree = lgit('write-tree')
@@ -295,6 +301,9 @@ def commit_index(message, author, email, date, committer=None):
                          'GIT_COMMITTER_NAME': cname, 'GIT_COMMITTER_EMAIL': cmail,
                          'GIT_COMMITTER_DATE': cdate})
     number = len(written) + 1
+    if args.out is None:
+        written.append(parent)
+        return number
     # A fixed abbreviation, so the files do not depend on the repository's size.
     name = lgit('format-patch', '--zero-commit', '--no-signature', '--abbrev=12', '--start-number', str(number),
                 '-o', str(args.out), '-1', parent)
@@ -395,6 +404,7 @@ for filename, data in then:
     number = commit_index(message, fields['Author'], fields['Email'], fields['Date'])
     print(f'{number:04d} {fields["Author"]:<16}          {fields["Subject"]} (from {filename})')
 
-lgit('update-ref', 'refs/orchard/cascadia-import', parent)
-print(f'{len(written)} patches in {args.out}; applied to {args.base}, the first {imported} give Cascadia '
-      f'{commit} exactly (tree {assembled[:12]}).')
+lgit('update-ref', args.ref, parent)
+print(f'{len(written)} commits at {args.ref} ({parent[:12]}) on {args.base}'
+      + (f', and as patch files in {args.out}' if args.out is not None else '')
+      + f'; the first {imported} give Cascadia {commit} exactly (tree {assembled[:12]}).')

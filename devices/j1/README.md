@@ -2,7 +2,7 @@
 
 The first A5X (S5L8945X) board of the apple-armv7 platform. It runs Project
 Cascadia's A5 port with the iPad mini 1's drivers, plus a few J1 changes. The
-device tree is `s5l8945x-j1.dts` (kernel/patches/import/cascadia/0025), from
+device tree is `s5l8945x-j1.dts` (OrchardLinux/linux `armv7`, "ARM: dts: apple: Add the iPad 3 (J1)"), from
 Cascadia's `devices/a5/dts/j1ap.dts`. Cascadia's
 [j1-a5x.md](https://github.com/rzxvx/Project-Cascadia/blob/main/devices/a5/docs/research/j1-a5x.md)
 records the bring-up: addresses, the boot chain, the PMU, touch and Wi-Fi.
@@ -14,7 +14,7 @@ Everything ran on one iPad3,1 (A1416) from RAM, booted with the
 [J1 boot kit](https://github.com/stephencox/cascadia-j1-boot).
 
 On 2026-11-06 orchard's tree ran: the base and all of
-`kernel/patches/import/cascadia` applied, and the `s5l8945x-j1.dtb` that
+the Cascadia import applied, and the `s5l8945x-j1.dtb` that
 orchard builds. The zImage was built with GCC 11.4 and the kit's config and
 initramfs, because the kit's loader hooks the decompressor at offsets that hold
 only for that compiler. Orchard's own build (clang 19, the platform's config)

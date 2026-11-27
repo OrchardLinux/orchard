@@ -1,5 +1,10 @@
 # Kernel base migration: Hoolock fork → torvalds + patch series
 
+> **History.** This is the plan for moving the kernel from the Hoolock fork to upstream Linux plus patch layers, carried out in October 2026. The patch layers it describes became the
+> branches of OrchardLinux/linux in November 2026 and orchard no longer carries
+> patch files; `kernel/README.md` describes the kernel today. Paths such as
+> `patches/…` are in orchard's history up to the tag `kernel-patches-final`.
+
 ## Goal
 
 Build every device from a torvalds/linux tag plus ordered patch series with clear

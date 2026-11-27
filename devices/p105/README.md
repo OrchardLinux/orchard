@@ -56,7 +56,7 @@ disabled. See [the alignment check](../../docs/bring-up/p105-alignment.md).
 
 - Storage: the NAND driver (OrchardLinux/orchard#86, #87), the iOS disk
   translation layer and its append writes (#89, #91) are in
-  `kernel/patches/armv7/mtd`; the disk is `applesftlN`, on the 64 GB model
+  OrchardLinux/linux `armv7` (`drivers/mtd`); the disk is `applesftlN`, on the 64 GB model
   only. Reclamation (#93) is unfinished: until it lands, writes stop once
   the blank flash blocks are used up.
 - Installing: `orchard install` writes a root into an existing Linux LwVM
@@ -72,7 +72,7 @@ disabled. See [the alignment check](../../docs/bring-up/p105-alignment.md).
 ## Unmerged code
 
 - #85's per-patch platform scopes (007a95b, also carried by #86/#87):
-  reverted; 32-bit patches live in `kernel/patches/armv7`.
+  reverted; 32-bit kernel work is on the `armv7` branch of OrchardLinux/linux.
 - #87's `MTD_APPLE_H2FMI_WRITE` build option (fa59001): removed, programming
   is part of the driver.
 - #89's read budget and lifetime module parameters (ffa74e8, source

@@ -53,8 +53,8 @@ The kernel stays a series on top of upstream, not a fork that merges
 upstream in, and its branches are never rewritten. A move to a newer upstream,
 a re-import of a layer or a re-ordering is added on top: a marker commit on
 the new base that has the old branch as a second parent, then the series
-replayed after it. Everything since the latest marker is the current series,
-exportable as plain patches.
+replayed after it (`tools/kernel-tree/replay`). Everything since the latest
+marker is the current series, exportable as plain patches.
 
 Configs live in the tree as defconfigs (`arch/<arch>/configs/`).
 `kernel/configs` keeps an expanded copy that the build checks against the

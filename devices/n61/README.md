@@ -7,7 +7,7 @@ open work, and contributed code that is not in the tree yet.
 ## Needs testing
 
 **GPU (A8, PowerVR GX6450).** The board has the iPod touch 6's A8 GPU, and
-its device tree enables it (`kernel/patches/devices/t7000/0012`). The
+its device tree enables it (OrchardLinux/linux, "arm64: dts: apple: t7000: Enable the GPU on the other T7000 …"). The
 driver has only run on the iPod touch 6 (N102) so far. Test with
 [`examples/ipod-gpu-drm`](../../examples/ipod-gpu-drm/README.md)
 (`--device n61`) and report the output of `a8-gpu-drm-test probe` with
