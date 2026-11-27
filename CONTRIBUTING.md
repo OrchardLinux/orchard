@@ -19,14 +19,15 @@ catalog marks the other boards `untested`, and their owners find out.
 
 ## What belongs here
 
-This repository holds device descriptions, kernel patches and configuration,
-firmware recipes, the boot and recovery initramfs, and the
+This repository holds device descriptions, kernel configuration, firmware
+recipes, the boot and recovery initramfs, and the
 `orchard` tool on the host (booting, installing, the host link, firmware
 conversion) in `src/orchard`. A device change and the converter steps or host
 support it needs go into one PR here. Desktops and distribution profiles
 belong in [omarchy-a](https://github.com/OrchardLinux/omarchy-a); work that
 also needs a distro change is one PR per repository, and each says which one
-it needs and in which order they merge. m1n1 work is a pull request in
+it needs and in which order they merge. Kernel and m1n1 work are pull
+requests in [OrchardLinux/linux](https://github.com/OrchardLinux/linux) and
 [OrchardLinux/m1n1](https://github.com/OrchardLinux/m1n1), never patch files
 here.
 
