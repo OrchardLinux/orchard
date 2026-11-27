@@ -5922,6 +5922,7 @@ CONFIG_APPLE_AOP_GYRO=m
 # CONFIG_ADIS16475 is not set
 # CONFIG_ADIS16480 is not set
 # CONFIG_ADIS16550 is not set
+# CONFIG_APPLE_OSCAR is not set
 # CONFIG_BMI160_I2C is not set
 # CONFIG_BMI160_SPI is not set
 # CONFIG_BMI270_I2C is not set
