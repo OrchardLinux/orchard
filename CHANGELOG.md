@@ -9,6 +9,48 @@ releasing, rename that section to the version (`## [0.3.0] - YYYY-MM-DD`). The
 release workflow uses that section as the GitHub release notes and fails if it
 is missing or empty.
 
+## [0.3.10] - 2026-11-27
+
+### Install & launch
+
+- `orchard` is one program now: the Rust command line of
+  [OrchardLinux/tools](https://github.com/OrchardLinux/tools), installed with
+  `curl -fsSL https://raw.githubusercontent.com/OrchardLinux/tools/main/install.sh | sh`
+  (`./setup` runs it) and kept current with `orchard update`. The shell
+  launcher that ran the Python tool from the newest nightly only names that
+  line; an installed copy replaces itself with it. `ORCHARD2` and
+  `orchard2 = true` are gone with it.
+- Older 32-bit devices (iPad mini, iPad 2): the install system reads their
+  disk (LwVM) and adds a boot partition and a root to its table, from a
+  header the installer computes and the install system checks
+  (docs/install-protocol.md), so that m1n1 can start the installed system
+  from the device. Not run on a device.
+
+### Building
+
+- The kernel is built from its own repository,
+  [OrchardLinux/linux](https://github.com/OrchardLinux/linux), not from
+  patch files in orchard. Kernel changes are pull requests there, against
+  the real source, compiled for every platform of their branch. Orchard
+  names the commits it builds (`kernel/upstream.lock`,
+  `kernel/upstream-armv7.lock`); `tools/kernel-tree/take` takes a newer one.
+  The patch files stay in orchard's history (tag `kernel-patches-final`).
+- A platform no longer has a `series` entry (`platforms/*.toml`,
+  `kernel/series/`): its kernel is OrchardLinux/linux at the lock's commit.
+- One kernel tree per platform in the cache (`kernel-work/<platform>`). When
+  the lock names another commit, a clean tree moves to it in place and only
+  the changed files compile again; a tree with local edits or commits is
+  refused. Trees of the old naming are unused: `orchard cache rm
+  kernel-tree/NAME` removes them.
+- A checkout's `bin/orchard` is the `orchard` command on that checkout's
+  recipes and board data. `bin/orchard python …` still runs Python in the
+  checkout's environment. The Python command line stays in the repository: a
+  distribution's command-line installer is built from it.
+- The nightly's publishing steps no longer use the Python tool's package: the
+  source keys (`ci/keys.py`), the kernel reuse checks and the platform layers
+  and index (`producers/platform_layer.py`, `producers/platforms_index.py`) are
+  standalone scripts. Their old module names still work.
+
 ## [0.3.9] - 2026-11-27
 
 ### Devices
@@ -97,51 +139,19 @@ is missing or empty.
 
 ### Building
 
-- The install receiver (`orchard-install-usb`) reads the LwVM disks of the
-  32-bit boards and adds a boot partition and a root to their table, from a
-  header the installer computes and the receiver checks
-  (docs/install-protocol.md). Not run on a device.
-- `orchard` is one program now: the Rust command line of OrchardLinux/tools,
-  installed with its `install.sh` (`./setup` runs it) and kept current with
-  `orchard update`. The shell launcher that ran the Python tool from the
-  newest nightly only names that install line; an installed copy replaces
-  itself with it. `ORCHARD2` and `orchard2 = true` are gone with it.
-- A checkout's `bin/orchard` is that command on the checkout's recipes and
-  board data. `bin/orchard python …` still runs Python in the checkout's
-  environment. The Python command line stays: a distribution's command-line
-  installer is built from it.
-- A platform no longer has a `series` entry (`platforms/*.toml`,
-  `kernel/series/`): its kernel is OrchardLinux/linux at the lock's commit.
-  The kernel source keys change with it, so the next nightly compiles every
-  kernel once.
-- One kernel tree per platform in the cache (`kernel-work/<platform>`). When
-  the lock names another commit, a clean tree moves to it in place and only
-  the changed files compile again; a tree with local edits is refused. Trees
-  of the old naming are unused: `orchard cache` removes them.
-- The nightly's publishing steps no longer use the Python tool's package: the
-  source keys (`ci/keys.py`), the kernel reuse checks and the platform layers
-  and index (`producers/platform_layer.py`, `producers/platforms_index.py`) are
-  standalone scripts. Their old module names still work.
-- The `orchard` command on PATH replaces itself with the newest nightly's
-  launcher when that differs and carries on with the command, instead of
-  asking for `orchard update` each time.
 - The nightly publishes `m1n1-armv7.macho`, the 32-bit m1n1 for the A5 to
   A6X chips, built from the same source as the others. Not run on a device.
-- The kernel and m1n1 are built from their own repositories,
-  [OrchardLinux/linux](https://github.com/OrchardLinux/linux) and
+- m1n1 is built from its own repository,
   [OrchardLinux/m1n1](https://github.com/OrchardLinux/m1n1), instead of from
-  patch files in orchard. Kernel and m1n1 changes are pull requests there,
-  against the real source, and kernel pull requests are compiled for every
-  platform of their branch. Orchard names the commits it builds
-  (`kernel/upstream.lock`, `kernel/upstream-armv7.lock`,
-  `boot/m1n1/upstream.lock`); `tools/kernel-tree/take` takes a newer kernel.
-  The quiet boot screen is part of that m1n1 now. The patch files stay in
-  orchard's history (tags `kernel-patches-final`, `m1n1-patches-final`).
+  patch files in orchard. m1n1 changes are pull requests there, against the
+  real source; orchard names the commit it builds in `boot/m1n1/upstream.lock`.
+  The quiet boot screen is part of that m1n1 now. Kernel changes still go into
+  orchard as patch files.
 - The scripts recipes and distributions run by path moved to `producers/`
   (`buildenv.py`, `initramfs.py`, `assemble.py`, `cascadia.py`). Their old paths
   and module names still work. m1n1, the static tools and the Cascadia loader
   are built once more, because their keys name the new paths.
-- `orchard build`, `inputs`, `install`, `launch`, `devices`, `doctor`, `shell`, `exec`, `ssh-access`, `cache` and
+- `orchard build`, `inputs`, `install`, `launch`, `devices`, `doctor`, `cache` and
   `run` can go to orchard2, the Rust tool (docs/tooling.md says what
   differs): `ORCHARD2=1`, or `orchard2 = true` in
   `~/.config/orchard/config.toml`. Off by default.
