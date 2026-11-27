@@ -18,6 +18,20 @@ hardware is absent, or there is evidence that it breaks that board.
 **"Untested" is never a reason.** Neither is "I only have one device". The
 catalog marks the other boards `untested`, and their owners find out.
 
+## Short timeouts, checked results
+
+Nobody waits for something that has long failed.
+
+- Give every command a short timeout that fits what it does (`timeout -k 5 N`):
+  seconds for a query, a few minutes for a build step. Never an open-ended wait.
+- Check that each command succeeded before you go on: its exit status and its
+  output. Don't stack the next step on an unchecked one.
+- A background job, build or CI run: check within a minute that it is really
+  progressing, and stop it as soon as it fails, hangs or stops moving. Read the
+  first failure, fix the cause, then start again.
+- CI: watch the run's jobs, not only its end; a failed job means the run has
+  failed, so act on it at once instead of waiting for the rest.
+
 ## Which orchard runs
 
 - `orchard` on PATH is the Rust command line from OrchardLinux/tools. Alone
