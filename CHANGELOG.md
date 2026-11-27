@@ -32,6 +32,13 @@ is missing or empty.
   the display engine sets modes on this board. The Cellular model shares the
   device tree, untested. Tested by tcballard.
 
+### Distributions
+
+- A release's `install.sh` comes from orchard: `producers/install_script.py`
+  writes it for any distribution. It installs the `orchard` command and runs
+  `orchard install` for that release
+  ([distribution-contract.md](docs/distribution-contract.md)).
+
 ## [0.3.10] - 2026-11-27
 
 ### Install & launch

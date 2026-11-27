@@ -52,14 +52,22 @@ jobs:
         run: |
           (cd assets && sha256sum --check --strict SHA256SUMS)
           gh attestation verify assets/SHA256SUMS --repo "$GH_REPO"
-      - name: Publish the exact existing assets without rebuilding or overwriting
+      # The build of a tag leaves a draft with these files. It is published as
+      # it is when every file in it is the verified one; a release that is
+      # already public is never changed.
+      - name: Publish the draft, or create the release
         run: |
-          if gh release view "$TAG" --json assets >/dev/null 2>&1; then
-            [[ "$(gh release view "$TAG" --json assets --jq '.assets | length')" == 0 ]]
-            gh release upload "$TAG" assets/*
+          if gh release view "$TAG" --json isDraft >/dev/null 2>&1; then
+            [[ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" == true ]] || {
+              echo "$TAG is already published" >&2; exit 1; }
+            gh release view "$TAG" --json assets --jq '.assets[] | "\(.digest)  \(.name)"' | sort -k2 > draft.txt
+            (cd assets && for file in *; do printf 'sha256:%s  %s\n' "$(sha256sum "$file" | cut -d' ' -f1)" "$file"; done) |
+              sort -k2 > verified.txt
+            diff verified.txt draft.txt || { echo "The draft's files are not the verified ones" >&2; exit 1; }
+            gh release edit "$TAG" --draft=false --latest
           else
             { (cd source && ci/release-notes "$TAG")
-              printf '\n---\n\n%s\n' 'Automated build and checksum verification passed. Experimental: physical-device qualification is not claimed.'
+              printf '\n---\n\n%s\n' 'Automated build and checksum verification passed.'
             } > notes.md
             gh release create "$TAG" assets/* --target "$SOURCE_SHA" --latest --title "$TAG" \
               --notes-file notes.md
