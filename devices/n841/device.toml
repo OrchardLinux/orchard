@@ -7,6 +7,7 @@ kind = "hardware.device"
 profile = "n841"
 name = "iPhone XR"
 apple_products = ["iPhone11,8"]
+dt_compatible = ["apple,n841"]
 
 [match.dfu]
 chip = 0x8020
@@ -15,3 +16,45 @@ board = 0x0c
 [boot]
 methods = ["custom-dfu-recovery"]
 entries = ["usbliter8"]
+
+[firmware]
+recipe = "firmware.json" # Relative to this device.toml; public recipe, not firmware bytes.
+
+[kernel]
+platform = "apple-16k"
+dtb = "t8020-n841" # arch/arm64/boot/dts/apple/<dtb>.dtb
+
+[support]
+status = "experimental"
+tested_by = ["henrikklee"]
+
+# States: working, untested, missing, none (features.toml).
+[features]
+display = "working" # Boot loader's framebuffer (simpledrm), 828x1792
+screen_off = "missing"
+backlight = "missing"
+gpu_desktop = "missing"
+touch = "working" # apple_hidspi_ts, read on a timer; orientation against the picture not checked yet
+buttons = "untested" # macsmc-input binds
+accelerometer = "missing"
+gyroscope = "missing"
+light_sensor = "missing"
+touch_id = "none" # Face ID
+storage_read = "working"
+storage_write = "untested"
+wifi = "untested" # BCM4357 boots its firmware and scans; the NVRAM for the unit's module maker is not picked yet
+bluetooth_input = "missing"
+bluetooth_audio = "missing"
+cellular = "missing"
+battery = "working"
+charging = "untested" # The battery reports charging over USB
+charging_control = "missing"
+suspend = "untested"
+resume = "untested"
+usb_serial = "working"
+usb_network = "working"
+usb_host = "missing"
+audio_output = "missing"
+audio_input = "missing"
+camera = "missing"
+video_decode_hevc = "missing"

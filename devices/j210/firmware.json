@@ -1,0 +1,20 @@
+{
+  "schema": 2,
+  "device": "iPad11,1",
+  "ipsw": {
+    "version": "18.6.2",
+    "build": "22G100",
+    "url": "https://updates.cdn-apple.com/2025SummerFCS/fullrestores/093-20986/FFBD784F-01EF-4943-9858-07A3B038CB84/iPad_Spring_2019_18.6.2_22G100_Restore.ipsw",
+    "bytes": 8530689783,
+    "sha256": "1ae7835b88d1b5a2d087140914367962e9ba044734c994915510eb02d41337d5"
+  },
+  "inputs": {
+    "DeviceTree.im4p": {
+      "ipsw": {
+        "zip": "Firmware/all_flash/DeviceTree.j210ap.im4p"
+      },
+      "sha256": "e48c5e9bb9200ec7dfa8b41090518f5fb1436d6aaaac39c09a581299f56deee0"
+    }
+  },
+  "outputs": []
+}

@@ -39,5 +39,11 @@
       }
     }
   ],
-  "methods": {}
+  "methods": {
+    "custom-dfu-recovery": {
+      "build": "22G100",
+      "iboot_patcher": "anchor-based",
+      "source": "rzxvx/Project-Cascadia@091d441 devices/a12/boot/patch_iboot.py"
+    }
+  }
 }
