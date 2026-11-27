@@ -59,4 +59,4 @@ usb_host = "missing"
 audio_output = "working" # the shared CS35L19 driver: "iPad mini Speakers" (audio-graph-card2, two CS35L19 on I2C2, MCA over SmartIO with apple_sio_dma and clk_apple_nco) played a sine left then right at -20 dB; J85 2026-11-26, main d54bb4ca kernel RAM boot. The headphone jack (CS42L81) has no card yet
 audio_input = "missing"
 camera = "missing"
-video_decode_hevc = "missing"
+video_decode_hevc = "none" # the A7 decoder is an H.264-generation VXD: Apple's device tree gives it vxd-version 4 and only an h264-playback-level, iOS 12.5.8 drives it with AppleVXD393, and Apple's HEVC rule (AppleD5500) takes vxd-version 7, 9 and 10 only

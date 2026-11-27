@@ -58,4 +58,4 @@ usb_host = "missing"
 audio_output = "untested" # two CS35L19 on I2C2 + MCA1, the same as the J85 (ADT i2c2/audio-speaker0/1, mca1); "iPad mini Speakers" card; not yet run on this board
 audio_input = "missing"
 camera = "missing"
-video_decode_hevc = "missing"
+video_decode_hevc = "none" # the A7 decoder is an H.264-generation VXD: Apple's device tree gives it vxd-version 4 and only an h264-playback-level, iOS 12.5.8 drives it with AppleVXD393, and Apple's HEVC rule (AppleD5500) takes vxd-version 7, 9 and 10 only
