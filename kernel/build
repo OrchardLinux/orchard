@@ -124,10 +124,18 @@ else
     echo "Unexpected kernel source in $source" >&2; exit 1;
   }
   if [[ $(git -C "$source" rev-parse HEAD) != "$commit" ]]; then
-    # Another commit than the tree is on. Edits in it are never discarded.
-    current=$(snapshot)
-    [[ $current == "$(git -C "$source" rev-parse 'HEAD^{tree}')" || $current == "$(cat "$prepared" 2>/dev/null)" ]] || {
-      echo "The kernel commit changed and $source has local edits." >&2
+    # Another commit than the tree is on. Nothing of anyone's is discarded:
+    # no edit, and no commit, branch, stash or staged change made in it.
+    # The tree has to be what its checkout gave (the mark; without one, its
+    # commit's tree), on the commit orchard put it on.
+    current=$(snapshot) head=$(git -C "$source" rev-parse HEAD)
+    baseline=$(cat "$prepared" 2>/dev/null || git -C "$source" rev-parse 'HEAD^{tree}')
+    was=$(cat "$applied" 2>/dev/null || true)
+    [[ $current == "$baseline" && ( -z $was || $was == "$head" ) &&
+       -z $(git -C "$source" for-each-ref --format='%(refname)') &&
+       -z $(git -C "$source" reflog show --format=%H HEAD | grep -vx "$head") ]] &&
+      git -C "$source" diff --cached --quiet || {
+      echo "The kernel commit changed and $source has local edits or commits." >&2
       echo 'Save them elsewhere (git diff) and undo them, or build a kernel tree of your own with --kernel-tree.' >&2
       exit 1
     }
@@ -136,6 +144,9 @@ else
       git -C "$source" fetch --progress --depth 1 origin "$commit"
     # Checkout writes only the files that differ, so make compiles only those.
     git -C "$source" checkout -q --detach "$commit"
+    # It held no commit of anyone's: the log of where HEAD was goes, so the
+    # tree again reads as one that can be made anew.
+    git -C "$source" reflog expire --expire=all --all
     snapshot > "$prepared"
   fi
   [[ $(git -C "$source" rev-parse HEAD) == "$commit" ]] || {
