@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""producers/platform.py under its old path and import name.
+"""producers/platform_layer.py under its old path and import name.
 
 The producer is a standalone script outside the package and takes the kernel
 bundle and BusyBox as given. This file runs its text as this module and adds
@@ -8,7 +8,7 @@ none is given.
 """
 from pathlib import Path
 
-_producer = Path(__file__).resolve().parents[3] / 'producers/platform.py'
+_producer = Path(__file__).resolve().parents[3] / 'producers/platform_layer.py'
 _text, _run, _ = _producer.read_text().rpartition("\n\nif __name__ == '__main__':\n    main()\n")
 exec(compile(_text, str(_producer), 'exec'))
 
