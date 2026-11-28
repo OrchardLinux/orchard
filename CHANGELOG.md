@@ -22,8 +22,36 @@ is missing or empty.
 - iPad Pro 10.5-inch and 12.9-inch (2nd generation): touch comes back by
   itself after a touch-controller error, the way it does on the iPad Air,
   instead of staying off until the next sleep and wake.
+- iPad Air: the built-in microphones record, and the kernel boots the A7's
+  GPU firmware (Rick's work; the GPU still needs `powervr.exp_hw_support=1`).
+- iPhone 6s Plus: the built-in microphones record (Rick's work).
+- iPhone 8 Plus: the kernel brings up Bluetooth, and a paired game
+  controller's input works (ryzensnyper's work).
 - A7 devices: listed as having no H.265 decoder, since the A7's video decoder
   has none.
+- iPad Air (Wi-Fi): the gyroscope works. Its three axes are the
+  accelerometer's, and a positive rate is a right-hand turn about each.
+  Nothing on the desktop uses it yet. Tested by ricktav.
+- Rounded corners and notches: every installed system now says how its screen
+  is shaped, in `/usr/lib/orchard/screens.json`, so a desktop can keep its
+  content out of the corners and the notch. The shapes are Apple's own (the
+  device tree's corner radius, Xcode's screen masks) for all 21 iPhones and
+  iPads with rounded corners or a notch; each one reaches the file once its
+  Linux device tree is in orchard (the iPhone X now).
+
+### Hardware
+
+- `examples/hardware-check` checks the Bluetooth controller (registered, its
+  firmware line, no HCI timeout) and the accelerometer and gyroscope (readable,
+  1 g in total at rest) on any board that has them. `hardware-check motion`
+  prints both for 20 seconds while the device is turned, and
+  `hardware-check bluetooth` runs the Bluetooth check alone.
+
+### Building
+
+- The iPad mini's (p105) own kernel modules are part of its platform's
+  kernel key: a first payload for it takes the published kernel instead of
+  compiling one.
 
 ## [0.3.11] - 2026-11-28
 

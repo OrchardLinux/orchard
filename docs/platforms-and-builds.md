@@ -275,7 +275,7 @@ separately from the CLI's own code, so a data change needs no CLI update:
 
 - Every change on main publishes `catalog-v1/catalog.json` and the archive it names
   (`.github/workflows/catalog.yml`), after the data tests pass.
-- A published orchard (a nightly, a release, an installed core) checks for a newer
+- The `orchard` command checks for a newer
   catalog at most once an hour and keeps it in `catalog/` in the Orchard cache. Without
   network it uses the cached one. It bundles no device data and pins none.
 - A checkout's `bin/orchard` reads its own files, so a change can be tested before

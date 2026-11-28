@@ -11,6 +11,10 @@ schema = 1
 # is not part of a kernel's key; raise this when a change alters what they make.
 kernel-producer = 3  # 3: strip module debug sections from staged outputs
 
+# Where boards keep kernel modules of their own (DIR/BOARD). They are built
+# into their platform's kernel bundle, so its key covers them.
+board-modules = "kernel/modules"
+
 # The files and directories that decide each component, in the order they are
 # hashed.
 [inputs]

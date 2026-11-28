@@ -52,6 +52,19 @@
         "rootfs": "usr/standalone/firmware/oscar/CoreMotionOscarFirmware.image"
       },
       "sha256": "515adeca57c3021722b2e0553c21779a8035133955525a3db9cd25bf23d879a2"
+    },
+    "kernelcache-j85ap-16H88": {
+      "ipsw": {
+        "kernelcache": "j85ap",
+        "restore": {
+          "version": "12.5.8",
+          "build": "16H88",
+          "url": "https://updates.cdn-apple.com/2026WinterFCS/fullrestores/047-28446/9ED122D9-755C-403E-B95E-7C36998B9838/iPad_64bit_12.5.8_16H88_Restore.ipsw",
+          "bytes": 2963007018,
+          "sha256": "8d0c6a232e720246d8b699bfe2240833560221e8a4bf10fcb707b73be412b5f3"
+        }
+      },
+      "sha256": "d173a651d02329a02d2f23c2859e1e54308a5e94da86ba729777efeb3503da08"
     }
   },
   "outputs": [
@@ -112,6 +125,26 @@
         {
           "step": "copy@1",
           "input": "CoreMotionOscarFirmware.image"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/gfx-s5l8960x.bin",
+      "sha256": "44816730098c99124190c8e4933ddbac6b1b50eb86555e886da567a24dc0eb88",
+      "steps": [
+        {
+          "step": "agx-g3-ldr-from-kernelcache@1",
+          "input": "kernelcache-j85ap-16H88"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/gfx-s5l8960x-border.bin",
+      "sha256": "785c7290e93bab010d5676ddedbdbae27147bf1997106fe532b05889536fd024",
+      "steps": [
+        {
+          "step": "agx-g4p-border-from-kernelcache@1",
+          "input": "kernelcache-j85ap-16H88"
         }
       ]
     }

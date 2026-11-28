@@ -8,6 +8,8 @@
 #   hardware-check keys      press the buttons for 20 s
 #   hardware-check wifi      only the Wi-Fi checks
 #   hardware-check charge    live charger view; plug sources in and out (Ctrl-C ends)
+#   hardware-check motion    accelerometer and gyroscope; turn the device for 20 s
+#   hardware-check bluetooth the Bluetooth controller: registered, firmware, address
 #
 # Results: /run/hardware-check.txt, kernel log /run/dmesg.txt. Over USB
 # networking both are at http://172.16.42.1:8080/.
@@ -208,6 +210,96 @@ check_display() {
     [ "$found" = 1 ] || result SKIP "no backlight"
 }
 
+iio_named() { # CHANNEL: IIO devices that have in_CHANNEL_x_raw
+    for d in /sys/bus/iio/devices/iio:device*; do
+        [ -e "$d/in_$1_x_raw" ] && echo "$d"
+    done
+}
+
+# One reading of a three-axis IIO device, scaled: "x y z" in the unit the
+# scale gives (m/s^2 for an accelerometer, rad/s for a gyroscope).
+iio_xyz() {
+    scale=$(cat "$1/in_$2_scale" 2>/dev/null || echo 1)
+    x=$(cat "$1/in_$2_x_raw" 2>/dev/null) && y=$(cat "$1/in_$2_y_raw" 2>/dev/null) &&
+        z=$(cat "$1/in_$2_z_raw" 2>/dev/null) || return 1
+    awk -v s="$scale" -v x="$x" -v y="$y" -v z="$z" 'BEGIN { printf "%.2f %.2f %.2f\n", x * s, y * s, z * s }'
+}
+
+check_motion() {
+    section "Motion sensors"
+    # A motion coprocessor loads its firmware first; give its devices time.
+    i=0
+    while [ -z "$(iio_named accel)" ] && [ "$i" -lt "${1:-5}" ]; do sleep 1; i=$((i + 1)); done
+    if [ -z "$(iio_named accel)$(iio_named anglvel)" ]; then
+        result SKIP "no accelerometer or gyroscope (IIO)"
+        return
+    fi
+    for d in $(iio_named accel); do
+        name=$(cat "$d/name" 2>/dev/null)
+        if ! xyz=$(iio_xyz "$d" accel); then
+            result FAIL "$name: accelerometer read failed"
+            continue
+        fi
+        # At rest the three axes add up to gravity, 9.8 m/s^2, whichever way it lies.
+        if awk -v v="$xyz" 'BEGIN { split(v, a, " "); n = a[1] * a[1] + a[2] * a[2] + a[3] * a[3]; exit !(n > 61 && n < 139) }'; then
+            result PASS "$name: accelerometer $xyz m/s^2, about 1 g in total"
+        else
+            result FAIL "$name: accelerometer $xyz m/s^2 is not 1 g in total (at rest?)"
+        fi
+        matrix=$(cat "$d/in_mount_matrix" "$d/in_accel_mount_matrix" 2>/dev/null | head -1)
+        [ -z "$matrix" ] || say "  mount matrix: $matrix"
+    done
+    for d in $(iio_named anglvel); do
+        name=$(cat "$d/name" 2>/dev/null)
+        if xyz=$(iio_xyz "$d" anglvel); then result PASS "$name: gyroscope reads $xyz rad/s"
+        else result FAIL "$name: gyroscope read failed"; fi
+    done
+}
+
+# Turn the device and watch which axis carries gravity.
+watch_motion() {
+    check_motion 30
+    d=$(iio_named accel | head -1)
+    [ -n "$d" ] || return
+    g=$(iio_named anglvel | head -1)
+    echo "Turn the device for 20 seconds: flat, upright, on each side."
+    n=0
+    while [ "$n" -lt 40 ]; do
+        line="accel $(iio_xyz "$d" accel || echo read failed) m/s^2"
+        [ -z "$g" ] || line="$line   gyro $(iio_xyz "$g" anglvel || echo read failed) rad/s"
+        say "  $line"
+        sleep 0.5
+        n=$((n + 1))
+    done
+}
+
+check_bluetooth() {
+    section "Bluetooth"
+    i=0
+    while ! ls /sys/class/bluetooth/hci* >/dev/null 2>&1 && [ "$i" -lt "${1:-5}" ]; do sleep 1; i=$((i + 1)); done
+    if ! ls /sys/class/bluetooth/hci* >/dev/null 2>&1; then
+        if dmesg | grep -qiE 'bluetooth|hci_uart|btbcm'; then
+            result FAIL "a Bluetooth driver logged messages but no controller registered"
+        else
+            result SKIP "no Bluetooth controller"
+        fi
+        return
+    fi
+    for h in /sys/class/bluetooth/hci*; do
+        [ -e "$h" ] || continue
+        driver=$(basename "$(readlink "$h/device/driver" 2>/dev/null)" 2>/dev/null)
+        result PASS "${h##*/} registered (driver ${driver:-unknown}) after ${i}s"
+    done
+    # The firmware and chip lines, without the unit's address.
+    dmesg | grep -iE 'hci[0-9]+: (BCM|QCA|RTL|MTK)|Bluetooth: hci[0-9]+:' |
+        sed -E 's/^\[[^]]*\] //; s/([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}/xx:xx:xx:xx:xx:xx/g' | sed 's/^/    /' | tee -a "$REPORT"
+    if dmesg | grep -qiE 'hci[0-9]+: .*(timeout|failed|error)'; then
+        result FAIL "the controller logged a timeout or an error (see above)"
+    else
+        result PASS "no HCI timeout or error in the kernel log"
+    fi
+}
+
 check_log() {
     section "Kernel log"
     dmesg > /run/dmesg.txt
@@ -255,7 +347,7 @@ case "${1:-all}" in
     all)
         : > "$REPORT"
         dmesg > /run/dmesg-boot.txt
-        check_system; check_storage; check_pcie; check_wifi; check_battery; check_display; check_log
+        check_system; check_storage; check_pcie; check_wifi; check_bluetooth; check_motion; check_battery; check_display; check_log
         say ""
         say "Report: $REPORT, kernel log: /run/dmesg.txt (also at http://172.16.42.1:8080/)"
         ;;
@@ -264,5 +356,7 @@ case "${1:-all}" in
     keys) section "Keys"; watch_input 'gpio-keys|button|keys' keys 'Press each button a few times' ;;
     wifi) : > "$REPORT"; dmesg > /run/dmesg-boot.txt; check_system; check_wifi; dmesg > /run/dmesg.txt; say "DONE" ;;
     charge) charge ;;
-    *) echo "usage: hardware-check [storage|wifi|touch|keys|charge]"; exit 2 ;;
+    motion) watch_motion ;;
+    bluetooth) check_bluetooth 30 ;;
+    *) echo "usage: hardware-check [storage|wifi|touch|keys|charge|motion|bluetooth]"; exit 2 ;;
 esac
