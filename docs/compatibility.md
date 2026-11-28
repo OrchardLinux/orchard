@@ -30,7 +30,7 @@ Every device Orchard installs on. ✅ works · ❌ doesn't work yet · – no su
 | iPad mini 4 (Wi-Fi) | A8 | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ | [tcballard](https://github.com/tcballard) |
 | iPhone 6 | A8 | 🤔 | 🤔 | ✅ | 🤔 | 🤔 | ❌ | ❌ | 🤔 | ❌ | [amethyst-oak](https://github.com/amethyst-oak), [jeroentrappers](https://github.com/jeroentrappers) |
 | iPhone 6+ | A8 | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | ❌ | ❌ | 🤔 | ❌ | – |
-| iPod touch 6 | A8 | ✅ | ✅ | ✅ | ✅ | 🤔 | ❌ | ✅ | 🤔 | ❌ | [brkosebay](https://github.com/brkosebay) |
+| iPod touch 6 | A8 | ✅ | ✅ | ✅ | ✅ | 🤔 | ❌ | ✅ | ✅ | ❌ | [brkosebay](https://github.com/brkosebay) |
 | iPad Air 2 (Cellular) | A8X | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | – |
 | iPad Air 2 (Wi-Fi) | A8X | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [ricktav](https://github.com/ricktav), [mattonik](https://github.com/mattonik) |
 | iPad 5 (Cellular) | A9, Samsung | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | – |
@@ -210,7 +210,7 @@ Boards Orchard builds for. States: working, untested, missing, none (no such har
 | `n53` | untested | missing | untested | missing | missing | untested | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | missing | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | none |
 | `j96` | working | working | working | working | working | working | missing | missing | missing | missing | working | working | working | missing | missing | none | working | working | untested | working | working | working | working | missing | missing | missing | missing | missing |
 | `j97` | untested | untested | untested | untested | untested | untested | missing | missing | missing | missing | untested | untested | untested | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `n102` | working | untested | working | working | working | working | missing | missing | missing | none | working | working | working | untested | untested | none | working | working | working | untested | untested | working | untested | missing | missing | missing | missing | missing |
+| `n102` | working | working | working | working | working | working | missing | missing | missing | none | working | working | working | untested | untested | none | working | working | working | working | working | working | untested | missing | missing | missing | missing | missing |
 | `n56` | untested | untested | untested | untested | missing | untested | missing | missing | missing | missing | untested | untested | untested | untested | untested | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `n61` | working | untested | untested | untested | working | untested | missing | missing | missing | missing | untested | untested | untested | untested | untested | missing | untested | missing | missing | untested | untested | working | untested | missing | missing | missing | missing | missing |
 | `j81` | working | working | working | missing | working | working | missing | missing | working | missing | working | working | working | working | working | none | working | working | working | working | working | working | working | missing | working | missing | missing | missing |
