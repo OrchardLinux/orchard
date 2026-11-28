@@ -5,3 +5,5 @@
 SUBSYSTEM=="block", KERNEL=="asp*", IMPORT{builtin}="blkid"
 SUBSYSTEM=="block", KERNEL=="asp*", ENV{DEVTYPE}=="partition", ENV{PARTUUID}=="?*", SYMLINK+="disk/by-partuuid/$env{PARTUUID}"
 SUBSYSTEM=="block", KERNEL=="asp*", ENV{ID_FS_UUID_ENC}=="?*", SYMLINK+="disk/by-uuid/$env{ID_FS_UUID_ENC}"
+# Solid-state Apple ANS1 flash: direct blk-mq dispatch avoids mq-deadline overhead.
+ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", KERNEL=="asp[0-9]*n[0-9]*", ATTR{queue/scheduler}="none"

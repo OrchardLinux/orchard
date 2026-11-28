@@ -47,7 +47,7 @@ def record(out, inode, name, mode, data):
 def write(files, output):
     """FILES (from entries) as one newc/gzip archive at OUTPUT."""
     output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open('xb') as raw, gzip.GzipFile(fileobj=raw, mode='wb', filename='', mtime=0) as out:
+    with output.open('xb') as raw, gzip.GzipFile(fileobj=raw, mode='wb', compresslevel=1, filename='', mtime=0) as out:
         for index, (name, (mode, data)) in enumerate(sorted(files.items()), 1):
             record(out, index, name, mode, data)
         record(out, len(files) + 1, 'TRAILER!!!', 0, b'')

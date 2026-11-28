@@ -3,7 +3,7 @@
 # root=PARTUUID= names (on a GPT or LwVM disk), start its init. The same for every distribution and
 # init system; only BusyBox and the platform's storage modules are inside.
 export PATH=/bin
-/bin/busybox --install -s /bin
+[ -e /bin/mount ] || /bin/busybox --install -s /bin
 mount -t proc -o nodev,noexec,nosuid proc /proc
 mount -t sysfs -o nodev,noexec,nosuid sysfs /sys
 mount -t devtmpfs -o mode=0755,nosuid dev /dev
@@ -64,7 +64,7 @@ lwvm_partuuid() {
 }
 
 device=
-seconds=0
+ticks=0
 while [ -z "$device" ]; do
     for number in /sys/class/block/*/partition; do
         [ -e "$number" ] || continue
@@ -80,9 +80,14 @@ while [ -z "$device" ]; do
         fi
     done
     [ -n "$device" ] && break
-    seconds=$((seconds + 1))
-    [ "$seconds" -le 30 ] || stop "no partition $root after 30 s"
-    sleep 1
+    if sleep 0.05 2>/dev/null; then
+        ticks=$((ticks + 1))
+        [ "$ticks" -le 600 ] || stop "no partition $root after 30 s"
+    else
+        ticks=$((ticks + 20))
+        [ "$ticks" -le 600 ] || stop "no partition $root after 30 s"
+        sleep 1
+    fi
 done
 
 mkdir -p /newroot
