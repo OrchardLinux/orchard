@@ -144,6 +144,7 @@ The CLI used to do that; it isn't needed for recipes any more.
 | `agx-g5p-ldr-from-kernelcache@1` | `input` (kernelcache) | the A9 GPU firmware (a META LDR) from AGXFirmwareKextG5P; size and digest are pinned |
 | `agx-g4p-ldr-from-kernelcache@1` | `input` (kernelcache) | the A8 GPU firmware (a META LDR) from AGXFirmwareKextG4P: the LDR whose hash is the output's |
 | `agx-g4p-border-from-kernelcache@1` | `input` (kernelcache) | the A8 GPU's border colour table, 0x800 bytes of AGXG4P's data, whose hash is the output's |
+| `agx-g3-ldr-from-kernelcache@1` | `input` (kernelcache) | the A7 GPU firmware (a META LDR) from AGXFirmwareKextG3: the LDR whose hash is the output's |
 | `im4p-payload@1` | `input` | the payload of an IM4P container |
 | `aop-image@1` | `coprocessor` | one image (`AOP`, `AOP_ext`) of an AOP firmware container, the OSSerializeBinary payload of `Firmware/AOP/aopfw-*.im4p` |
 | `z2fw-from-mtprops@1` | `input`, `profile`, `packet`, `load_address`, `hbpp_version` | Z2 touch firmware with calibration records |
@@ -291,3 +292,26 @@ The iOS 12 kernelcaches have no per-kext load addresses in their prelink
 metadata, so both steps find their data by structure: every LDR whose
 records walk cleanly; the 0x800-byte table that starts with 0x440 zero
 bytes and the word 0x02040000. The output's hash selects the one installed.
+
+## S5L8960X G3 META firmware
+
+powervr's A7 path (the A8's variant with the A7's differences) loads two
+files on every A7 board (J71, J72, J73, J85, J85m, J86, J86m, J87, J87m,
+N51, N53): `apple/gfx-s5l8960x.bin`, the META LDR from
+`com.apple.AGXFirmwareKextG3`, byte for byte, with step
+`agx-g3-ldr-from-kernelcache@1`, and `apple/gfx-s5l8960x-border.bin`,
+AGXG3's border colour table (Apple's
+`clamp_to_zero_border_color_table_noastc`), with the A8's border step: it is
+the one table of that structure in the A7 kernelcaches. The recipes read
+the J85 kernelcache of iOS 12.5.8 (16H88) and pin both:
+
+| File | Bytes | SHA-256 |
+|---|---|---|
+| `gfx-s5l8960x.bin` | 117782 | `44816730098c99124190c8e4933ddbac6b1b50eb86555e886da567a24dc0eb88` |
+| `gfx-s5l8960x-border.bin` | 2048 | `785c7290e93bab010d5676ddedbdbae27147bf1997106fe532b05889536fd024` |
+
+The J71, J85 and N51 kernelcaches of 16H88 hold the same files. J72's own
+image, 16H81, holds another LDR build
+(`9c9f33af3ce06f5b7ff80b07e150edc8169f69102b525a2bdf4fbf6ef9e2fac0`). The
+GPU is experimental there (`powervr.exp_hw_support=1`;
+[bring-up/gpu/a7-g3.md](bring-up/gpu/a7-g3.md)).
