@@ -28,7 +28,7 @@ Every device Orchard installs on. ✅ works · ❌ doesn't work yet · – no su
 | iPhone 5s (Global) | A7 | 🤔 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🤔 | ❌ | – |
 | iPad mini 4 (Cellular) | A8 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | ❌ | 🤔 | 🤔 | ❌ | – |
 | iPad mini 4 (Wi-Fi) | A8 | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ | [tcballard](https://github.com/tcballard) |
-| iPhone 6 | A8 | 🤔 | 🤔 | ✅ | 🤔 | 🤔 | ❌ | ❌ | 🤔 | ❌ | [amethyst-oak](https://github.com/amethyst-oak), [jeroentrappers](https://github.com/jeroentrappers) |
+| iPhone 6 | A8 | 🤔 | 🤔 | ✅ | 🤔 | 🤔 | ❌ | ✅ | 🤔 | ❌ | [amethyst-oak](https://github.com/amethyst-oak), [jeroentrappers](https://github.com/jeroentrappers) |
 | iPhone 6+ | A8 | 🤔 | 🤔 | ❌ | 🤔 | 🤔 | ❌ | ❌ | 🤔 | ❌ | – |
 | iPod touch 6 | A8 | ✅ | ✅ | ✅ | ✅ | 🤔 | ❌ | ✅ | ✅ | ❌ | [brkosebay](https://github.com/brkosebay) |
 | iPad Air 2 (Cellular) | A8X | 🤔 | ❌ | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | 🤔 | ❌ | – |
@@ -212,7 +212,7 @@ Boards Orchard builds for. States: working, untested, missing, none (no such har
 | `j97` | untested | untested | untested | untested | untested | untested | missing | missing | missing | missing | untested | untested | untested | missing | missing | missing | untested | untested | untested | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `n102` | working | working | working | working | working | working | missing | missing | missing | none | working | working | working | untested | untested | none | working | working | working | working | working | working | untested | missing | missing | missing | missing | missing |
 | `n56` | untested | untested | untested | untested | missing | untested | missing | missing | missing | missing | untested | untested | untested | untested | untested | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
-| `n61` | working | untested | untested | untested | working | untested | missing | missing | missing | missing | untested | untested | untested | untested | untested | missing | untested | missing | missing | untested | untested | working | untested | missing | missing | missing | missing | missing |
+| `n61` | working | untested | untested | untested | working | untested | missing | missing | missing | missing | untested | untested | untested | untested | untested | missing | working | working | missing | untested | untested | working | untested | missing | missing | missing | missing | missing |
 | `j81` | working | working | working | missing | working | working | missing | missing | working | missing | working | working | working | working | working | none | working | working | working | working | working | working | working | missing | working | missing | missing | missing |
 | `j82` | untested | untested | untested | missing | untested | untested | missing | missing | untested | missing | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | untested | untested | missing | untested | missing | missing | missing |
 | `j71s` | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested | untested | untested | untested | untested | none | untested | untested | untested | untested | untested | untested | untested | untested | untested | untested | missing | untested |
@@ -319,6 +319,7 @@ A yes means an enabled device tree node binds a driver in `7.3.0-rc1-orchard-app
 | `n53` | Speakers | missing, but a driver binds |
 | `j96` | Charging | working, but no driver binds |
 | `j97` | Charging | untested, but no driver binds |
+| `n61` | Charging | working, but no driver binds |
 | `j81` | Light sensor | working, but no driver binds |
 | `j82` | Light sensor | untested, but no driver binds |
 | `j71s` | Microphone | untested, but no driver binds |

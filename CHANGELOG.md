@@ -27,6 +27,8 @@ is missing or empty.
 - iPhone 6s Plus: the built-in microphones record (Rick's work).
 - iPhone 8 Plus: the kernel brings up Bluetooth, and a paired game
   controller's input works (ryzensnyper's work).
+- iPhone 6: the battery reads and it charges, following what the USB host
+  allows and the battery temperature (tcballard's work).
 - A7 devices: listed as having no H.265 decoder, since the A7's video decoder
   has none.
 - iPad Air (Wi-Fi): the gyroscope works. Its three axes are the
