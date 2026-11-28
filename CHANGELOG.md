@@ -24,6 +24,7 @@ is missing or empty.
   instead of staying off until the next sleep and wake.
 - iPad Air: the built-in microphones record, and the kernel boots the A7's
   GPU firmware (Rick's work; the GPU still needs `powervr.exp_hw_support=1`).
+  A GPU job after the GPU slept starts in about a tenth of the time.
 - iPhone 6s Plus: the built-in microphones record (Rick's work).
 - iPhone 8 Plus: the kernel brings up Bluetooth, and a paired game
   controller's input works (ryzensnyper's work).
