@@ -22,6 +22,9 @@ is missing or empty.
   instead of staying off until the next sleep and wake.
 - A7 devices: listed as having no H.265 decoder, since the A7's video decoder
   has none.
+- iPad Air (Wi-Fi): the gyroscope works. Its three axes are the
+  accelerometer's, and a positive rate is a right-hand turn about each.
+  Nothing on the desktop uses it yet. Tested by ricktav.
 - Rounded corners and notches: every installed system now says how its screen
   is shaped, in `/usr/lib/orchard/screens.json`, so a desktop can keep its
   content out of the corners and the notch. The shapes are Apple's own (the
