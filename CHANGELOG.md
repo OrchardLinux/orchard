@@ -40,6 +40,12 @@ is missing or empty.
   prints both for 20 seconds while the device is turned, and
   `hardware-check bluetooth` runs the Bluetooth check alone.
 
+### Building
+
+- The iPad mini's (p105) own kernel modules are part of its platform's
+  kernel key: a first payload for it takes the published kernel instead of
+  compiling one.
+
 ## [0.3.11] - 2026-11-28
 
 ### Building

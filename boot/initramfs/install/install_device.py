@@ -934,7 +934,7 @@ def main(argv):
             wait_for_storage()
             inspect(disk)
         elif len(argv) == 3 and argv[1] == 'finish':
-            # Inside the new root, which the host has written and mounted (install_direct.py).
+            # Inside the new root, which the host has written and mounted (the install system).
             plan = json.loads(Path(argv[2]).read_text())
             account = plan.get('account')
             secrets = read_secrets(SECRETS, account) if account and (account['password'] or account['pin']) else None
