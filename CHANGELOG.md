@@ -13,6 +13,8 @@ is missing or empty.
 
 ### Devices
 
+- iPhone 8 Plus: Bluetooth works (BCM4357B1 on UART1, Patchram from the
+  recipe); a game controller pairs and its input reaches the desktop.
 - iPad Air (Wi-Fi): touch keeps working. Touch used to stop for good 5 to 40
   minutes after boot; the touch driver now resets the controller and touch
   is back in about 1.5 s. Bluetooth keyboards and other input devices work
