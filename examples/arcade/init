@@ -1,0 +1,242 @@
+#!/bin/busybox sh
+# PID 1 of arcade: three games on the device's own screen, RAM only, on any
+# board with a framebuffer (the N66 and the J71, J85 and J81 iPads so far).
+# The console runs the ARCADE picker (/usr/bin/arcade) in a respawn loop; it
+# starts VOIDMOTHS, HEDGEWICK or GLINT (/usr/bin/voidmoths, hedgewick, glint).
+# The USB serial root shell, USB networking and SSH stay up, so `orchard
+# shell/exec` still reach the device. Nothing mounts storage.
+#
+# One init for every board: what it loads depends on what the device tree
+# describes, never on the board's name. The only driver modules it loads are
+#   - the touchscreen's (apple_z2), when the tree has a touchscreen0 alias;
+#   - the AOP's and its accelerometer's (GLINT's tilt), when the tree has an
+#     enabled "apple,s8000-aop" (the N66; the iPads have none);
+#   - the loudspeaker's, when the tree's speaker card is "iPhone Speaker"
+#     (the N66; an iPad's own speaker card is never brought up);
+#   - as a fallback, the button driver.
+# The programs themselves look for what is there (an input device with
+# multitouch axes, an IIO device "apple-aop-accel", the ALSA card "iPhone
+# Speaker") and do without what is not.
+set -eu
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+/bin/busybox --install -s /bin
+mount -t proc -o nosuid,nodev,noexec proc /proc
+mount -t sysfs -o nosuid,nodev,noexec sysfs /sys
+mount -t devtmpfs -o nosuid devtmpfs /dev
+mount -t tmpfs -o nosuid,nodev tmpfs /run
+mkdir -p /dev/pts /var/run /tmp
+mount -t devpts devpts /dev/pts
+exec </dev/console >/dev/console 2>&1
+
+# Kernel messages stay in dmesg (and reach the USB shell) but off the game
+# screen: console loglevel 1 = emergencies only.
+dmesg -n 1 2>/dev/null || echo 1 > /proc/sys/kernel/printk
+
+# Modules are staged but not autoloaded: no uevent helper (the kernel's
+# CONFIG_UEVENT_HELPER_PATH is empty), no coldplug. Explicit request_module()
+# calls (filesystems, crypto) may still load theirs. So the firmware layer
+# (firmware = true) starts nothing by itself: Wi-Fi, Bluetooth, the GPU and
+# the video decoder are modules nobody loads here.
+echo /bin/modprobe > /proc/sys/kernel/modprobe
+
+# The device tree as the kernel sees it.
+dt=/proc/device-tree
+dtstr() { tr -d '\000' < "$1" 2>/dev/null || true; }
+# an enabled platform device whose compatible list holds $1
+has_compatible() {
+    for c in /sys/bus/platform/devices/*/of_node/compatible; do
+        [ -r "$c" ] && tr '\000' '\n' < "$c" | grep -qx "$1" && return 0
+    done
+    return 1
+}
+
+# Buttons: gpio-keys is built into the Orchard kernels and appears as an
+# input device "gpio-keys". With a kernel where it is a module, load it.
+if ! grep -qs gpio-keys /sys/class/input/event*/device/name; then
+    modprobe -q gpio_keys 2>/dev/null || true
+    modprobe -q evdev 2>/dev/null || true
+fi
+
+# Touchscreen: Apple's Z2 controller on SPI, the touchscreen0 alias the boot
+# loader fills with the ADT's calibration (N66 s800x-iphone.dtsi, J71
+# s5l8960x-air1.dtsi, J85 s5l8960x-mini2.dtsi, J81 t7001-air2.dtsi).
+#   apple_z2   input/touchscreen/apple_z2.ko: loads the controller firmware
+#              named by the node's firmware-name (apple/<board>-fwstart.z2fw,
+#              from the firmware layer) and reports multitouch protocol B.
+# The SPI controller, its clocks and the touch regulator are built in; the
+# touchscreen needs no SmartIO DMA. The games find it by its axes
+# (ABS_MT_POSITION_X/Y, INPUT_PROP_DIRECT), not by its name.
+# Log: /run/touch.log.
+(
+    p=$(dtstr $dt/aliases/touchscreen0)
+    if [ -z "$p" ]; then
+        echo "no touchscreen0 alias in the device tree: buttons only"
+        exit 0
+    fi
+    st=$(dtstr "$dt$p/status"); st=${st:-okay}
+    echo "touchscreen0 = $p, status $st, firmware $(dtstr "$dt$p/firmware-name")"
+    if [ "$st" != okay ] && [ "$st" != ok ]; then
+        echo "disabled in the device tree: buttons only"
+        exit 0
+    fi
+    fw=$(dtstr "$dt$p/firmware-name")
+    [ -z "$fw" ] || [ -e "/lib/firmware/$fw" ] ||
+        echo "no /lib/firmware/$fw (no firmware layer?): the touchscreen cannot start"
+    modprobe apple_z2 || echo "modprobe apple_z2 failed"
+    sleep 8
+    echo "== input devices after 8 s"
+    for d in /sys/class/input/event*; do
+        [ -e "$d/device/name" ] && echo "${d##*/}: $(cat "$d/device/name")"
+    done
+    echo "== dmesg (z2, spi)"
+    dmesg | grep -iE 'z2|spi|touch' | tail -n 30
+) >/run/touch.log 2>&1 &
+
+# Motion sensor (the N66 only): the accelerometer (MPU6800) sits behind the
+# AOP. Only when the tree has an enabled AOP; the iPads' trees have none and
+# their kernel (apple-4k) has no AOP modules.
+#   apple_aop        soc/apple/apple-aop.ko: loads apple/aop-s8000.bin and
+#                    apple/aop-s8000-ext.bin (firmware layer), starts the AOP
+#                    once, creates the accel/gyro/pressure devices.
+#   apple_aop_accel  iio/accel/apple_aop_accel.ko: the IIO device
+#                    "apple-aop-accel" GLINT reads.
+# The AOP starts once per boot: nothing here (or in the games) ever unbinds or
+# reloads it. Without the sensor ARCADE shows GLINT grey, "needs a motion
+# sensor". Log: /run/motion.log.
+(
+    if ! has_compatible apple,s8000-aop; then
+        echo "no enabled apple,s8000-aop in the device tree: no motion sensor"
+        exit 0
+    fi
+    for f in aop-s8000.bin aop-s8000-ext.bin; do
+        [ -e /lib/firmware/apple/$f ] || echo "no /lib/firmware/apple/$f: the AOP cannot start, no motion sensor"
+    done
+    for m in apple_aop apple_aop_accel; do
+        modprobe "$m" || echo "modprobe $m failed"
+    done
+    sleep 10
+    echo "== IIO devices after 10 s"
+    for d in /sys/bus/iio/devices/iio:device*; do
+        [ -e "$d/name" ] || continue
+        echo "${d##*/}: $(cat "$d/name")"
+        for f in in_accel_scale in_accel_mount_matrix sampling_frequency in_accel_x_raw in_accel_y_raw in_accel_z_raw; do
+            [ -r "$d/$f" ] && echo "  $f = $(cat "$d/$f" 2>&1)"
+        done
+    done
+    echo "== dmesg (aop, accel, rtkit)"
+    dmesg | grep -iE 'aop|accel|rtkit' | tail -n 40
+) >/run/motion.log 2>&1 &
+
+# Sound (the N66 only): the loudspeaker path, by name. Only when the tree's
+# /sound-speaker card is "iPhone Speaker" (N66 s800x-6s.dtsi); the iPads'
+# cards ("iPad Air Speakers", "iPad mini Speakers", "J81 Speakers") are
+# never brought up, and the games would not open them either.
+#   clk_apple_nco            NCO, MCA2's bit clock
+#   apple_sio apple_sio_dma  SmartIO, the DMA engine MCA2 streams through
+#                            (apple/s8000-smartio.bin, firmware layer)
+#   snd_soc_apple_s8000_mca  MCA2 in TDM mode
+#   snd_soc_cs35l19          the speaker amp (CS35L21) on i2c1 at 0x40
+#   snd_soc_simple_card      /sound-speaker: the card "iPhone Speaker"
+# The CS42L71 codec has no driver at all. The games set the amp to -20 dB
+# (never above -6 dB). Log: /run/sound.log.
+(
+    if [ "$(dtstr $dt/sound-speaker/simple-audio-card,name)" != "iPhone Speaker" ] ||
+       [ ! -e /sys/bus/platform/devices/sound-speaker ]; then
+        echo "no enabled /sound-speaker \"iPhone Speaker\" in the device tree: silent"
+        exit 0
+    fi
+    for m in clk_apple_nco apple_sio apple_sio_dma snd_soc_apple_s8000_mca \
+             snd_soc_cs35l19 snd_soc_simple_card; do
+        modprobe "$m" || echo "modprobe $m failed"
+    done
+    [ -e /lib/firmware/apple/s8000-smartio.bin ] ||
+        echo "no /lib/firmware/apple/s8000-smartio.bin: SmartIO cannot start, no speaker card"
+    sleep 10
+    echo "== /proc/asound/cards after 10 s"
+    cat /proc/asound/cards 2>/dev/null || echo "(none: ALSA not loaded)"
+) >/run/sound.log 2>&1 &
+
+# Storage: no NVMe driver is loaded. Should anything bind NVMe anyway, fence
+# every namespace and partition read-only (one device per blockdev call).
+(
+    i=0
+    while [ "$i" -lt 12 ]; do
+        sleep 5
+        for d in /sys/class/block/nvme*; do
+            [ -e "$d" ] && blockdev --setro "/dev/${d##*/}"
+        done
+        i=$((i + 1))
+    done
+    echo "$i" > /run/storage-fence
+) &
+
+# USB serial, USB network and SSH for `orchard shell/exec/push/pull`.
+sh /usr/libexec/orchard/usb-session || echo 'USB session failed; see above'
+name=$(cat /etc/hostname 2>/dev/null || echo arcade)
+echo "$name: RAM-only. USB root shell is unauthenticated; trusted host only."
+
+# The games on the screen. ARCADE, the picker, shows the three games and
+# starts the chosen one with the console handed over (--tty /dev/tty1 --hi
+# /run/<game>.hi, GLINT /run/glint.best; stderr to /run/<game>.log); when the
+# game exits (hold Home, or the top left corner of the screen, 2 s on its
+# title) the picker comes back. Controls follow what the device has: Vol
+# Up/Down choose and Home plays; without volume keys Power chooses; with one
+# button a tap chooses and a 0.6 s hold plays; a touchscreen chooses with a
+# tap and plays with a second tap. Everything draws through the mmap()ed
+# framebuffer (simpledrm's fbdev) and puts tty1 in KD_GRAPHICS mode while it
+# runs, so fbcon stays off the screen; every exit they can catch puts tty1
+# back into text mode. Only SIGKILL cannot be caught: `arcade --restore-tty`
+# after each run covers that, and also lights the backlight again if a
+# program was killed with the screen off (Power; src/backlight.h). Without a usable /dev/fb0 the picker exits with
+# status 4 and the loop runs VOIDMOTHS, which falls back to text on tty1.
+# Over USB: `touch /run/game.stop; killall arcade` frees the console (the
+# running game goes with it); `rm /run/game.stop` lets the loop start it
+# again. Errors: /run/arcade.log, /run/voidmoths.log, /run/hedgewick.log,
+# /run/glint.log. Add --mute, or --vol DB (at most -6), to the arcade line
+# below for the speaker (the picker passes them on to the games).
+# Notices: `notice TEXT` (e.g. `orchard exec -- notice "step 3 done"` from the
+# Mac) writes /run/notice; the picker and the games show it for 6 s.
+(
+    sleep 2
+    while :; do
+        if [ ! -e /run/game.stop ]; then
+            rc=0
+            arcade --tty /dev/tty1 </dev/null >/dev/null 2>>/run/arcade.log || rc=$?
+            arcade --restore-tty /dev/tty1 2>>/run/arcade.log || true
+            if [ "$rc" = 4 ]; then
+                voidmoths --tty /dev/tty1 --hi /run/voidmoths.hi </dev/null >/dev/null 2>>/run/voidmoths.log || true
+                voidmoths --restore-tty /dev/tty1 2>>/run/voidmoths.log || true
+                sleep 5
+            fi
+        fi
+        sleep 1
+    done
+) &
+
+# busybox reboot, poweroff and halt only signal PID 1 (TERM, USR2, USR1), and a
+# shell ignores signals it has no trap for. Stop everything, sync and ask the
+# kernel directly. Without a power-off driver poweroff ends as halt.
+shutdown_to() {
+    trap '' TERM USR1 USR2
+    echo "$name: $1"
+    kill -TERM -1 2>/dev/null || true
+    sleep 1
+    kill -KILL -1 2>/dev/null || true
+    sync
+    "$1" -f
+}
+trap 'shutdown_to reboot' TERM
+trap 'shutdown_to poweroff' USR2
+trap 'shutdown_to halt' USR1
+
+# The USB shell runs in the background: a trap only runs while the shell waits.
+(
+    while :; do
+        setsid -c sh -i </dev/ttyGS0 >/dev/ttyGS0 2>&1 || true
+        sleep 1
+    done
+) &
+while :; do
+    wait || true
+    sleep 1
+done

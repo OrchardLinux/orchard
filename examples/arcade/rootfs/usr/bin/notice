@@ -1,0 +1,18 @@
+#!/bin/sh
+# notice TEXT...: show TEXT on the VOIDMOTHS screen for 6 s, with a soft
+# chime (the game shows the first line, at most 60 characters, as ASCII).
+# Writes /run/notice atomically: a temporary file next to it, then mv over
+# it, so the game never reads half a message. The game checks the file twice
+# a second; notices written closer together than that can merge.
+# NOTICE_FILE overrides the path (for tests).
+set -eu
+f=${NOTICE_FILE:-/run/notice}
+if [ $# -eq 0 ]; then
+    echo "usage: notice TEXT..." >&2
+    exit 2
+fi
+tmp=$f.tmp.$$
+trap 'rm -f "$tmp"' EXIT
+printf '%s\n' "$*" >"$tmp"
+mv -f "$tmp" "$f"
+trap - EXIT
