@@ -9,14 +9,21 @@ releasing, rename that section to the version (`## [0.3.0] - YYYY-MM-DD`). The
 release workflow uses that section as the GitHub release notes and fails if it
 is missing or empty.
 
-## Unreleased
+## [0.3.12] - 2026-11-28
 
 ### Devices
 
 - iPhone 6: internal storage reads, backlight, Wi-Fi (BCM4345/5), and USB
   network work in RAM boot. Tested by tcballard.
 - iPhone 8 Plus: Bluetooth works (BCM4357B1 on UART1, Patchram from the
-  recipe); a game controller pairs and its input reaches the desktop.
+  recipe); a game controller pairs and its input reaches the desktop
+  (ryzensnyper's work).
+- iPhone XR (A12): `orchard run --ibss` starts Linux in RAM on an iPhone XR
+  whose boot ROM a usbliter8 board entered, with the display, touch, storage,
+  battery, Wi-Fi, Bluetooth and SSH over USB. The other A12 iPhones and iPads
+  join the catalog, untested.
+- iPod touch 6: suspend, resume and screen off work (brkosebay's work).
+- iPad mini 2 and 3: Bluetooth works (Rick's work).
 - iPad Air (Wi-Fi): touch keeps working. Touch used to stop for good 5 to 40
   minutes after boot; the touch driver now resets the controller and touch
   is back in about 1.5 s. Bluetooth keyboards and other input devices work
@@ -28,8 +35,6 @@ is missing or empty.
   GPU firmware (Rick's work; the GPU still needs `powervr.exp_hw_support=1`).
   A GPU job after the GPU slept starts in about a tenth of the time.
 - iPhone 6s Plus: the built-in microphones record (Rick's work).
-- iPhone 8 Plus: the kernel brings up Bluetooth, and a paired game
-  controller's input works (ryzensnyper's work).
 - iPhone 6: the battery reads and it charges, following what the USB host
   allows and the battery temperature (tcballard's work).
 - A7 devices: listed as having no H.265 decoder, since the A7's video decoder
