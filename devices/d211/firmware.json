@@ -62,6 +62,13 @@
         "zip": "Firmware/AOP/aopfw-iphone10aop.im4p"
       },
       "sha256": "46e0a6b6ca0b6910e81989ed51c22cdbb8848d7682a53518dd5afdd02e3f2e22"
+    },
+    "BlueTool": {
+      "ipsw": {
+        "rootfs": "usr/sbin/BlueTool"
+      },
+      "device": "/usr/sbin/BlueTool",
+      "sha256": "5eec00a4a2a710688bc5ee453c1f3c875966374258b3d455f4347a7458cbff90"
     }
   },
   "outputs": [
@@ -160,6 +167,36 @@
         {
           "step": "aop-image@1",
           "coprocessor": "AOP_ext"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,d211-MUR.hcd",
+      "sha256": "4ae043458e1a6b3fec548df3edc372394dd0da341fae772a709740514c2552a7",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,d211-USI.hcd",
+      "sha256": "9e153c3c3dc012c0823aea9805831a2c26a7c5cfe110667814c4fca16b65e64e",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,d211.hcd",
+      "sha256": "4ae043458e1a6b3fec548df3edc372394dd0da341fae772a709740514c2552a7",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
         }
       ]
     }
