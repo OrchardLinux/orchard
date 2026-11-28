@@ -13,6 +13,8 @@ is missing or empty.
 
 ### Devices
 
+- iPhone 6: internal storage reads, backlight, Wi-Fi (BCM4345/5), and USB
+  network work in RAM boot. Tested by tcballard.
 - iPhone 8 Plus: Bluetooth works (BCM4357B1 on UART1, Patchram from the
   recipe); a game controller pairs and its input reaches the desktop.
 - iPad Air (Wi-Fi): touch keeps working. Touch used to stop for good 5 to 40
