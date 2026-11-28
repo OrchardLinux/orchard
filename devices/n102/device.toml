@@ -32,7 +32,7 @@ tested_by = ["brkosebay"]
 # binds in its device tree (tools/catalog/drivers.json).
 [features]
 display = "working" # The console and the desktop.
-screen_off = "untested" # Display pipe enabled on every A8 board, as on the N61
+screen_off = "working" # The screen goes fully dark in sleep and lights again on a Home press (2026-11-28)
 backlight = "working" # DWI and the LM3534: brightness set and read back.
 gpu_desktop = "working"
 touch = "working" # N1 on apple_z2: 640x1136, several contacts.
@@ -50,8 +50,8 @@ cellular = "none"
 battery = "working" # No fuel gauge: the D2186 PMIC's ADC and charger status (apple_d2186_battery).
 charging = "working" # The D2186 input limit follows the USB host's grant, up to 1500 mA: Mac port, 0.4-0.9 A in, battery 83 -> 99 % in 10 min (Omarchy A from storage, 2026-11-26). The charge current stays as the boot loader set it (690 mA)
 charging_control = "working" # The input limit only (apple_d2186_battery): input_current_limit reads 1500000 (2026-11-26)
-suspend = "untested"
-resume = "untested"
+suspend = "working" # s2idle from the idle timer and from systemctl suspend, two cycles in a row (2026-11-28). The PMIC RTC has no wake alarm yet, so only a button wakes it
+resume = "working" # Home press: storage, touch, Bluetooth, USB, Wi-Fi scan, the GPU (GL 3.2 through Zink) and the charge grant after each wake (2026-11-28)
 usb_serial = "working" # The RAM shell over USB serial (CDC ACM).
 usb_network = "untested"
 usb_host = "missing"
