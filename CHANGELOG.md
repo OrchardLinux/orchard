@@ -23,6 +23,14 @@ is missing or empty.
 - A7 devices: listed as having no H.265 decoder, since the A7's video decoder
   has none.
 
+### Hardware
+
+- `examples/hardware-check` checks the Bluetooth controller (registered, its
+  firmware line, no HCI timeout) and the accelerometer and gyroscope (readable,
+  1 g in total at rest) on any board that has them. `hardware-check motion`
+  prints both for 20 seconds while the device is turned, and
+  `hardware-check bluetooth` runs the Bluetooth check alone.
+
 ## [0.3.11] - 2026-11-28
 
 ### Building
