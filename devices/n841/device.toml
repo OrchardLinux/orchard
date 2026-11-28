@@ -7,6 +7,7 @@ kind = "hardware.device"
 profile = "n841"
 name = "iPhone XR"
 apple_products = ["iPhone11,8"]
+dt_compatible = ["apple,n841"]
 
 [match.dfu]
 chip = 0x8020
@@ -15,3 +16,45 @@ board = 0x0c
 [boot]
 methods = ["custom-dfu-recovery"]
 entries = ["usbliter8"]
+
+[firmware]
+recipe = "firmware.json" # Relative to this device.toml; public recipe, not firmware bytes.
+
+[kernel]
+platform = "apple-16k"
+dtb = "t8020-n841" # arch/arm64/boot/dts/apple/<dtb>.dtb
+
+[support]
+status = "experimental"
+tested_by = ["henrikklee"]
+
+# States: working, untested, missing, none (features.toml).
+[features]
+display = "working" # Boot loader's framebuffer (simpledrm), 828x1792
+screen_off = "working" # omarchy-powerd darkens the DWI backlight; over sleep the panel is switched off as on iOS
+backlight = "working" # DWI backlight, 2047 levels (confirmed 2026-11-28)
+gpu_desktop = "missing"
+touch = "working" # apple_hidspi_ts on its interrupt (AOP GPIO 19, group 6), every read acknowledged
+buttons = "working" # power and volume keys through the SMC; power wakes from sleep
+accelerometer = "missing"
+gyroscope = "missing"
+light_sensor = "missing"
+touch_id = "none" # Face ID
+storage_read = "working"
+storage_write = "working" # installed system runs read-write from NVMe
+wifi = "working" # BCM4357, OTP picks the NVRAM; joins networks, reconnects after sleep
+bluetooth_input = "working" # BCM4357 Bluetooth; a Magic Keyboard paired and typed (Henrik, 2026-11-27)
+bluetooth_audio = "missing"
+cellular = "missing"
+battery = "working"
+charging = "working" # charges over USB (SMC reports Charging, charge counter rises)
+charging_control = "working" # charge_behaviour auto / inhibit-charge / force-discharge through the SMC
+suspend = "working" # s2idle with the panel off and cores powered down; about 120 mA asleep
+resume = "working" # one power press wakes, lit in about 70 ms
+usb_serial = "working"
+usb_network = "working"
+usb_host = "missing"
+audio_output = "missing"
+audio_input = "missing"
+camera = "missing"
+video_decode_hevc = "missing"

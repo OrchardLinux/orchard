@@ -8,6 +8,10 @@ core = "vortex"
 architecture = "arm64"
 page_size = 16384
 image_format = "im4p"
+platform = "apple-16k"
+stages = ["iBSS"]
+patcher = "cascadia-anchor"
+entry = "usbliter8"
 reference_version = "18.7.10"
 
 [evidence]

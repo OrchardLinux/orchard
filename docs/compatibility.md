@@ -84,7 +84,7 @@ Which A9 do I have? iOS doesn't show it. In DFU mode, `orchard install` names th
 | A10 | T8010 | `0x8010` | hurricane | 16384 | apple-16k | iBSS | – | 8 | 8 | 8 |
 | A10X | T8011 | `0x8011` | hurricane | 16384 | apple-16k | iBSS | – | 4 | 4 | 4 |
 | A11 | T8015 | `0x8015` | monsoon | 16384 | apple-16k | iBSS | – | 6 | 6 | 6 |
-| A12 | T8020 | `0x8020` | vortex | 16384 | – | – | – | 10 | 0 | 0 |
+| A12 | T8020 | `0x8020` | vortex | 16384 | apple-16k | iBSS | – | 10 | 10 | 10 |
 | A12X | T8027 | `0x8027` | vortex | 16384 | – | – | – | 12 | 0 | 0 |
 | A13 | T8030 | `0x8030` | lightning | 16384 | – | – | – | 6 | 0 | 0 |
 
@@ -160,16 +160,16 @@ Which A9 do I have? iOS doesn't show it. In DFU mode, `orchard install` names th
 | A11 | iPhone 8 Plus (GSM) | `d211` | iPhone10,5 | experimental | yes | checkm8-pongo | yes | yes | 20H392 |
 | A11 | iPhone X (Global) | `d22` | iPhone10,3 | experimental | yes | checkm8-pongo | yes | yes | 20H392 |
 | A11 | iPhone X (GSM) | `d221` | iPhone10,6 | experimental | yes | checkm8-pongo | yes | yes | 20H392 |
-| A12 | iPhone XS | `d321` | iPhone11,2 | known | – | – | – | – | 22H374 |
-| A12 | iPhone XS Max (China) | `d331` | iPhone11,4 | known | – | – | – | – | 22H374 |
-| A12 | iPhone XS Max | `d331p` | iPhone11,6 | known | – | – | – | – | 22H374 |
-| A12 | iPad 8 (Wi-Fi) | `j171a` | iPad11,6 | known | – | – | – | – | 22G100 |
-| A12 | iPad 8 (Cellular) | `j172a` | iPad11,7 | known | – | – | – | – | 22G100 |
-| A12 | iPad mini 5 (Wi-Fi) | `j210` | iPad11,1 | known | – | – | – | – | 22G100 |
-| A12 | iPad mini 5 (Cellular) | `j211` | iPad11,2 | known | – | – | – | – | 22G100 |
-| A12 | iPad Air 3 (Wi-Fi) | `j217` | iPad11,3 | known | – | – | – | – | 22G100 |
-| A12 | iPad Air 3 (Cellular) | `j218` | iPad11,4 | known | – | – | – | – | 22G100 |
-| A12 | iPhone XR | `n841` | iPhone11,8 | known | – | custom-dfu-recovery | – | – | 22H374 |
+| A12 | iPhone XS | `d321` | iPhone11,2 | experimental | – | custom-dfu-recovery | yes | yes | 22H374 |
+| A12 | iPhone XS Max (China) | `d331` | iPhone11,4 | experimental | – | custom-dfu-recovery | yes | yes | 22H374 |
+| A12 | iPhone XS Max | `d331p` | iPhone11,6 | experimental | – | custom-dfu-recovery | yes | yes | 22H374 |
+| A12 | iPad 8 (Wi-Fi) | `j171a` | iPad11,6 | experimental | – | custom-dfu-recovery | yes | yes | 22G100 |
+| A12 | iPad 8 (Cellular) | `j172a` | iPad11,7 | experimental | – | custom-dfu-recovery | yes | yes | 22G100 |
+| A12 | iPad mini 5 (Wi-Fi) | `j210` | iPad11,1 | experimental | – | custom-dfu-recovery | yes | yes | 22G100 |
+| A12 | iPad mini 5 (Cellular) | `j211` | iPad11,2 | experimental | – | custom-dfu-recovery | yes | yes | 22G100 |
+| A12 | iPad Air 3 (Wi-Fi) | `j217` | iPad11,3 | experimental | – | custom-dfu-recovery | yes | yes | 22G100 |
+| A12 | iPad Air 3 (Cellular) | `j218` | iPad11,4 | experimental | – | custom-dfu-recovery | yes | yes | 22G100 |
+| A12 | iPhone XR | `n841` | iPhone11,8 | experimental | – | custom-dfu-recovery | yes | yes | 22H374 |
 | A12X | iPad Pro 3 (11-inch, Wi-Fi) | `j317` | iPad8,1 | known | – | – | – | – | 22G100 |
 | A12X | iPad Pro 3 (11-inch, Wi-Fi, 1TB Model) | `j317x` | iPad8,2 | known | – | – | – | – | 22G100 |
 | A12X | iPad Pro 3 (11-inch, Cellular) | `j318` | iPad8,3 | known | – | – | – | – | 22G100 |
@@ -247,6 +247,16 @@ Boards Orchard builds for. States: working, untested, missing, none (no such har
 | `d211` | untested | untested | untested | missing | missing | untested | untested | untested | missing | missing | untested | untested | untested | untested | untested | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `d22` | untested | untested | untested | missing | untested | untested | missing | missing | missing | missing | untested | untested | untested | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
 | `d221` | working | working | working | missing | working | working | missing | missing | missing | none | working | working | untested | missing | missing | missing | working | missing | missing | untested | untested | working | untested | missing | missing | missing | missing | missing |
+| `d321` | untested | missing | missing | missing | missing | untested | missing | missing | missing | none | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `d331` | untested | missing | missing | missing | missing | untested | missing | missing | missing | none | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `d331p` | untested | missing | missing | missing | missing | untested | missing | missing | missing | none | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `j171a` | untested | missing | missing | missing | missing | untested | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `j172a` | untested | missing | missing | missing | missing | untested | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `j210` | untested | missing | missing | missing | missing | untested | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `j211` | untested | missing | missing | missing | missing | untested | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `j217` | untested | missing | missing | missing | missing | untested | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `j218` | untested | missing | missing | missing | missing | untested | missing | missing | missing | missing | untested | untested | missing | missing | missing | missing | untested | missing | missing | untested | untested | untested | untested | missing | missing | missing | missing | missing |
+| `n841` | working | working | working | missing | working | working | missing | missing | missing | none | working | working | working | working | missing | missing | working | working | working | working | working | working | working | missing | missing | missing | missing | missing |
 
 ## Drivers
 

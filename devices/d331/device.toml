@@ -7,7 +7,56 @@ kind = "hardware.device"
 profile = "d331"
 name = "iPhone XS Max (China)"
 apple_products = ["iPhone11,4"]
+dt_compatible = ["apple,d331"]
 
 [match.dfu]
 chip = 0x8020
 board = 0x0a
+
+[boot]
+# The patched iBSS builds for this board (`orchard fw build`); not started on one yet.
+methods = ["custom-dfu-recovery"]
+entries = ["usbliter8"]
+
+[kernel]
+platform = "apple-16k"
+dtb = "t8020-d331" # arch/arm64/boot/dts/apple/<dtb>.dtb
+
+[firmware]
+recipe = "firmware.json" # Pins this board's public IPSW; converts nothing until bring-up needs it.
+
+[support]
+status = "experimental"
+
+# States: working, untested, missing, none (features.toml). Nothing here has run on
+# this board with Orchard: "untested" means a driver binds through the shared A12
+# device tree, as it does on the iPhone XR.
+[features]
+display = "untested" # Boot loader's framebuffer, shared A12 file
+screen_off = "missing"
+backlight = "missing"
+gpu_desktop = "missing"
+touch = "missing"
+buttons = "untested" # macsmc-input, shared A12 file
+accelerometer = "missing"
+gyroscope = "missing"
+light_sensor = "missing"
+touch_id = "none" # Face ID
+storage_read = "untested"
+storage_write = "untested"
+wifi = "missing"
+bluetooth_input = "missing"
+bluetooth_audio = "missing"
+cellular = "missing"
+battery = "untested"
+charging = "missing"
+charging_control = "missing"
+suspend = "untested"
+resume = "untested"
+usb_serial = "untested"
+usb_network = "untested"
+usb_host = "missing"
+audio_output = "missing"
+audio_input = "missing"
+camera = "missing"
+video_decode_hevc = "missing"

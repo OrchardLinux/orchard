@@ -1,0 +1,193 @@
+{
+  "schema": 2,
+  "device": "iPhone11,8",
+  "ipsw": {
+    "version": "17.7",
+    "build": "21H16",
+    "url": "https://updates.cdn-apple.com/2024FallFCS/fullrestores/062-79020/99513170-4693-44A2-8D10-3DDCDC053B51/iPhone11,8_17.7_21H16_Restore.ipsw",
+    "bytes": 7621660505,
+    "sha256": "d97a1278f89b600fb8a09597a9230c0ffd54daea652496c479186e69f92ebb12"
+  },
+  "inputs": {
+    "yodak.trx": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/yodak.trx"
+      },
+      "sha256": "977a66d5b9a4edaffa769dcaa16dd0062bd733c4d35b79ea026fcae4c3da984e"
+    },
+    "yodak.clmb": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/yodak.clmb"
+      },
+      "sha256": "ba9779e5e05d937027997d5563083d3daaedeae23c704cb37c4e0462d2b92cc6"
+    },
+    "yodak.txcb": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/yodak.txcb"
+      },
+      "sha256": "05b8e2daa68c774d776417c35948bddaba94d5cc2ecda2664c9d5eecdc1c5ebe"
+    },
+    "P-yodak_M-DRDO_V-m__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/P-yodak_M-DRDO_V-m__m-2.1.txt"
+      },
+      "sha256": "070515abfd7c36c7b1c580acb3ef3e326777dc24f7e70a93f258c576a4fbcbba"
+    },
+    "P-yodak_M-DRDO_V-m__m-3.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/P-yodak_M-DRDO_V-m__m-3.1.txt"
+      },
+      "sha256": "070515abfd7c36c7b1c580acb3ef3e326777dc24f7e70a93f258c576a4fbcbba"
+    },
+    "P-yodak_M-DRDO_V-u__m-2.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/P-yodak_M-DRDO_V-u__m-2.1.txt"
+      },
+      "sha256": "257728e31aaf634adac37e65fc32edfbd27de8edc1167d39e4750ef361107785"
+    },
+    "P-yodak_M-DRDO_V-u__m-3.1.txt": {
+      "ipsw": {
+        "rootfs": "System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/Firmware/C-4357__s-B1/P-yodak_M-DRDO_V-u__m-3.1.txt"
+      },
+      "sha256": "257728e31aaf634adac37e65fc32edfbd27de8edc1167d39e4750ef361107785"
+    },
+    "BlueTool": {
+      "ipsw": {
+        "rootfs": "usr/sbin/BlueTool"
+      },
+      "sha256": "f03cb03e02e5e246b97ff1f8b60923f3067cfc2237b627f7cf7a1a42cf24a86f"
+    },
+    "N841_Multitouch.im4p": {
+      "ipsw": {
+        "zip": "Firmware/N841_Multitouch.im4p"
+      },
+      "sha256": "131d5e586060a755b104aed6330da430937a892720279678d86ba9956fe74f67"
+    },
+    "kernelcache": {
+      "ipsw": {
+        "kernelcache": true
+      }
+    }
+  },
+  "outputs": [
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,yodak.bin",
+      "sha256": "977a66d5b9a4edaffa769dcaa16dd0062bd733c4d35b79ea026fcae4c3da984e",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "yodak.trx"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,yodak.clm_blob",
+      "sha256": "ba9779e5e05d937027997d5563083d3daaedeae23c704cb37c4e0462d2b92cc6",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "yodak.clmb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,yodak.txcap_blob",
+      "sha256": "05b8e2daa68c774d776417c35948bddaba94d5cc2ecda2664c9d5eecdc1c5ebe",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "yodak.txcb"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,yodak-DRDO-m-2.1.txt",
+      "sha256": "070515abfd7c36c7b1c580acb3ef3e326777dc24f7e70a93f258c576a4fbcbba",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-yodak_M-DRDO_V-m__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,yodak-DRDO-m-3.1.txt",
+      "sha256": "070515abfd7c36c7b1c580acb3ef3e326777dc24f7e70a93f258c576a4fbcbba",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-yodak_M-DRDO_V-m__m-3.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,yodak-DRDO-u-2.1.txt",
+      "sha256": "257728e31aaf634adac37e65fc32edfbd27de8edc1167d39e4750ef361107785",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-yodak_M-DRDO_V-u__m-2.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/brcmfmac4357-pcie.apple,yodak-DRDO-u-3.1.txt",
+      "sha256": "257728e31aaf634adac37e65fc32edfbd27de8edc1167d39e4750ef361107785",
+      "steps": [
+        {
+          "step": "copy@1",
+          "input": "P-yodak_M-DRDO_V-u__m-3.1.txt"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,n841-MUR.hcd",
+      "sha256": "6ec9276784671b793479d7ac0377ba14c5d082c386c309fcf67477a3f732e6f7",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,n841-USI.hcd",
+      "sha256": "9cbde2943a779a4e5bfd7ab2ed6bd96598c40699609fd9f718041a6aee84e365",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/n841-touch-C1FC2,1.bin",
+      "sha256": "e9f9a6d0e0653e21c1db2500d187159fcc23b3db4260b67f2bd3435bf65e7d62",
+      "steps": [
+        {
+          "step": "im4p-payload@1",
+          "input": "N841_Multitouch.im4p"
+        },
+        {
+          "step": "hidspi-from-mtfw@2",
+          "profile": "C1FC2,1",
+          "hbpp_version": 259,
+          "blob_size": 1008
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/apple/pmp-t8020.bin",
+      "sha256": "65c4fba612245015c5e4618fa5b7f9f00764d5d0da2ccdb276ced3bd2b4b1132",
+      "steps": [
+        {
+          "step": "section-from-kernelcache@1",
+          "input": "kernelcache",
+          "bundle": "com.apple.driver.AppleT8020PMPFirmware",
+          "segment": "__DATA",
+          "section": "fwFirmwareImage"
+        }
+      ]
+    }
+  ]
+}

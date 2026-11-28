@@ -26,7 +26,7 @@ source = "https://checkra.in: iPhone 5s to iPhone X (A7 to A11)"
 # checkm8 from a Pico entered, or from kDFU.
 [boot.ibss]
 ends = "m1n1"
-fits = [{ chips = ["s5l8960x", "t7000", "t7001", "s8000", "s8001", "s8003", "t8010", "t8011", "t8015", "s5l8940x", "s5l8942x"] }]
+fits = [{ chips = ["s5l8960x", "t7000", "t7001", "s8000", "s8001", "s8003", "t8010", "t8011", "t8015", "t8020", "s5l8940x", "s5l8942x"] }]
 source = "HoolockLinux/remote_boot@e254a58: gaster and a patched iBSS (and iBEC) on A7 to A11; rzxvx/Project-Cascadia@091d441 devices/a5: patched iBSS and iBEC, devicetree and bootx on A5"
 
 [boot.autogo]
