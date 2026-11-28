@@ -23,8 +23,8 @@ is missing or empty.
 - iPad Air: the built-in microphones record, and the kernel boots the A7's
   GPU firmware (Rick's work; the GPU still needs `powervr.exp_hw_support=1`).
 - iPhone 6s Plus: the built-in microphones record (Rick's work).
-- iPhone 8 Plus: the kernel brings up Bluetooth, and Xbox-style controllers
-  that send a short report descriptor work (ryzensnyper's work).
+- iPhone 8 Plus: the kernel brings up Bluetooth, and a paired game
+  controller's input works (ryzensnyper's work).
 - A7 devices: listed as having no H.265 decoder, since the A7's video decoder
   has none.
 - iPad Air (Wi-Fi): the gyroscope works. Its three axes are the
