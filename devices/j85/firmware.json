@@ -39,6 +39,12 @@
       },
       "sha256": "1eec8270b7e1d241daa6ae3aab737fd766976a71427c898acb32d835e8a97f7b"
     },
+    "BlueTool": {
+      "ipsw": {
+        "rootfs": "usr/sbin/BlueTool"
+      },
+      "device": "/usr/sbin/BlueTool"
+    },
     "kernelcache": {
       "ipsw": {
         "kernelcache": true
@@ -89,6 +95,26 @@
           "input": "vidal.trx",
           "nvram": "vidal-m-mt.txt",
           "placeholder_mac": "02:00:00:00:00:00"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,j85.hcd",
+      "sha256": "7d9947c1f159d293e196ce131a83684572f40e8f6e6e0fc7cd59c9a4b9833739",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
+        }
+      ]
+    },
+    {
+      "destination": "lib/firmware/brcm/BCM.apple,j85-MUR.hcd",
+      "sha256": "22f0e449d6e1da438071ec24ed2e87cecc1ba2253baf135a481e9547ca3683af",
+      "steps": [
+        {
+          "step": "bluetool-hcd@1",
+          "input": "BlueTool"
         }
       ]
     },

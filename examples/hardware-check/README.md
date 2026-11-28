@@ -19,6 +19,8 @@ At the shell, run `hardware-check`. It takes about three minutes and checks:
 - storage (a 1 GiB NVMe read, or a 4 KiB read on P105);
 - PCIe devices and their drivers;
 - Wi-Fi: firmware load, scan, association, DHCP, the gateway, a timed download;
+- the Bluetooth controller: registered, its firmware line, no HCI timeout;
+- accelerometer and gyroscope: readable, and 1 g in total at rest;
 - the battery gauge and other power supplies;
 - display and backlight;
 - the kernel log (IOMMU faults, NVMe timeouts, warnings, oopses).
@@ -32,7 +34,11 @@ read fails the check.
 
 Then, if you want: `hardware-check touch`, `hardware-check keys` and
 `hardware-check charge` (plug chargers in and out). `hardware-check wifi` runs
-only the Wi-Fi checks.
+only the Wi-Fi checks. `hardware-check motion` prints the accelerometer and
+gyroscope for 20 seconds while you turn the device, which shows the axis that
+carries gravity in each position. `hardware-check bluetooth` runs only the
+Bluetooth check and waits longer for the controller. The report never has the
+controller's address.
 
 The report is `/run/hardware-check.txt`, the kernel log `/run/dmesg.txt`. With USB
 networking up (the host gets 172.16.42.2), both are at `http://172.16.42.1:8080/`.

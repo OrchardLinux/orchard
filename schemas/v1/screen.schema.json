@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/OrchardLinux/orchard/schemas/v1/screen.schema.json",
+  "title": "A board's screen shape (devices/<board>/screen.json)",
+  "description": "Written by tools/catalog/generate screens from Apple's data; the platform layer gathers it into usr/lib/orchard/screens.json.",
+  "type": "object",
+  "required": ["schema", "device", "source", "scale"],
+  "anyOf": [{"required": ["corner_radius"]}, {"required": ["outline"]}],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": 1},
+    "device": {"type": "string", "pattern": "^(iPad|iPhone|iPod)[0-9]+,[0-9]+$"},
+    "source": {
+      "type": "object",
+      "required": ["ipsw", "device_tree"],
+      "additionalProperties": false,
+      "properties": {
+        "ipsw": {"type": "string", "description": "The build whose device tree was read."},
+        "device_tree": {"type": "string", "description": "Its member in the IPSW."},
+        "framebuffer": {"type": "string", "pattern": "^[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}$"},
+        "outline": {"const": "Xcode simulator framebuffer mask"}
+      }
+    },
+    "scale": {"type": "integer", "minimum": 1, "description": "Physical pixels per point (artwork-scale-factor)."},
+    "corner_radius": {"type": "number", "exclusiveMinimum": 0, "description": "Points, from the device tree's display-corner-radius. Absent where the device tree gives none."},
+    "width": {"type": "integer", "minimum": 1, "description": "Physical pixels, held upright."},
+    "height": {"type": "integer", "minimum": 1},
+    "outline": {"type": "string", "pattern": "^M[-0-9. MLCZ]+$", "description": "The lit area as an SVG path in physical pixels, y down."}
+  },
+  "dependentRequired": {"outline": ["width", "height"]}
+}
