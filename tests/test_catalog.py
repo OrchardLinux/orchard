@@ -119,6 +119,67 @@ class Catalog(unittest.TestCase):
         for path in DESCRIPTORS:
             with self.subTest(board=path.parent.name):
                 device.validate(tomllib.loads(path.read_text()))
+        screen = Draft202012Validator(json.loads((ROOT / 'schemas/v1/screen.schema.json').read_text()))
+        for path in sorted(ROOT.glob('devices/*/screen.json')):
+            with self.subTest(board=path.parent.name):
+                screen.validate(json.loads(path.read_text()))
+
+    def test_a_screen_belongs_to_its_board(self):
+        screens = sorted(ROOT.glob('devices/*/screen.json'))
+        self.assertIn(ROOT / 'devices/n841/screen.json', screens)
+        for path in screens:
+            with self.subTest(board=path.parent.name):
+                screen = json.loads(path.read_text())
+                described = tomllib.loads((path.parent / 'device.toml').read_text())
+                self.assertIn(screen['device'], described['device']['apple_products'])
+                boot = json.loads((path.parent / 'boot.json').read_text())
+                self.assertIn(screen['source']['ipsw'], [f['ipsw']['build'] for f in boot['firmware']])
+                if 'outline' in screen:
+                    numbers = [float(n) for n in re.findall(r'-?[0-9.]+', screen['outline'])]
+                    xs, ys = numbers[0::2], numbers[1::2]
+                    # The outline stays on the panel, and reaches near all four edges.
+                    self.assertGreaterEqual(min(xs + ys), -1)
+                    self.assertLessEqual(max(xs), screen['width'] + 1)
+                    self.assertLessEqual(max(ys), screen['height'] + 1)
+                    self.assertLess(min(xs), screen['width'] * 0.05)
+                    self.assertGreater(max(ys), screen['height'] * 0.95)
+
+    def test_the_iphone_xr_screen_is_apples(self):
+        screen = json.loads((ROOT / 'devices/n841/screen.json').read_text())
+        # Its device tree: display-corner-radius 83/2 points; artwork-scale-factor 2.
+        self.assertEqual((screen['corner_radius'], screen['scale']), (41.5, 2))
+        self.assertEqual((screen['width'], screen['height']), (828, 1792))
+        # The notch: 66 pixels deep, its flat bottom from x 249.3 to 578.7.
+        self.assertTrue(screen['outline'].startswith('M249.302 66.015 L578.698 66.015 '))
+
+    def test_the_mask_reader_takes_a_clipped_page_fill_as_the_shape(self):
+        generate = tool()
+        # A 100x200 page: a clip with a curved corner, then the whole page filled through it.
+        content = (b'q 0 0 m 100 0 l 100 190 l 100 195 95 200 90 200 c 0 200 l h W* n '
+                   b'-10 -10 120 220 re f Q')
+        document = (b'%PDF-1.3\n1 0 obj\n<< /Type /Page /MediaBox [0 0 100 200] /Contents 2 0 R >>\nendobj\n'
+                    b'2 0 obj\n<< /Length ' + str(len(content)).encode() + b' >>\nstream\n' + content +
+                    b'\nendstream\nendobj\n')
+        width, height, path = generate.pdf_outline(document)
+        self.assertEqual((width, height), (100, 200))
+        # y is flipped to point down: the curved corner is at the top right.
+        self.assertEqual(path, 'M0 200 L100 200 L100 10 C100 5 95 0 90 0 L0 0 Z')
+
+    def test_the_device_tree_reader_finds_a_node_by_its_path(self):
+        generate = tool()
+
+        def node(properties, children=()):
+            data = struct.pack('<II', len(properties), len(children))
+            for name, value in properties.items():
+                data += name.encode().ljust(32, b'\0') + struct.pack('<I', len(value))
+                data += value + b'\0' * (-len(value) % 4)
+            return data + b''.join(children)
+        tree = node({'name': b'device-tree\0'}, [
+            node({'name': b'chosen\0'}),
+            node({'name': b'product\0', 'display-corner-radius': struct.pack('<II', 83, 2)})])
+        product = generate.adt_node(tree, ['device-tree', 'product'])
+        self.assertEqual(struct.unpack('<II', product['display-corner-radius']), (83, 2))
+        self.assertIsNone(generate.adt_node(tree, ['device-tree', 'arm-io']))
 
     def test_a_board_states_every_feature(self):
         labels = tomllib.loads((ROOT / 'features.toml').read_text())

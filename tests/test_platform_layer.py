@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 import tarfile
 import tempfile
+import tomllib
 import unittest
 
 from orchard.hardware import ROOT
@@ -133,6 +134,24 @@ class PlatformLayer(unittest.TestCase):
         first.mkdir(), second.mkdir()
         self.assertEqual(platform.build('apple-16k', first, bundle=self.bundle, busybox=self.busybox)['sha256'],
                          platform.build('apple-16k', second, bundle=self.bundle, busybox=self.busybox)['sha256'])
+
+    def test_the_layer_says_which_screens_are_rounded_or_notched(self):
+        receipt = platform.build('apple-16k', self.work, bundle=self.bundle, busybox=self.busybox)
+        with tarfile.open(self.work / receipt['file']) as archive:
+            member = archive.getmember('usr/lib/orchard/screens.json')
+            screens = json.load(archive.extractfile(member))
+        self.assertEqual(member.mode, 0o644)
+        self.assertEqual(screens['schema'], 1)
+        entries = {entry['compatible']: entry for entry in screens['screens']}
+        # The iPhone X (A11): Apple's outline, notch and corners; its device tree gives no radius.
+        self.assertEqual((entries['apple,d22']['width'], entries['apple,d22']['height']), (1125, 2436))
+        self.assertNotIn('corner_radius', entries['apple,d22'])
+        # A square screen has no entry.
+        self.assertNotIn('apple,j71b', entries)
+        # Only boards of this platform with a device tree compatible.
+        compatibles = {c for board in self.boards for c in tomllib.loads(
+            (ROOT / 'devices' / board / 'device.toml').read_text())['device'].get('dt_compatible', [])}
+        self.assertLessEqual(set(entries), compatibles)
 
     def test_a_missing_board_dtb_is_an_error(self):
         (self.bundle / 'dtbs/t8010-j71b.dtb').unlink()
