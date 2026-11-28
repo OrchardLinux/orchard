@@ -30,8 +30,21 @@ def lock(platform='apple-16k'):
     return dict(line.split('=', 1) for line in text.splitlines() if '=' in line)
 
 
-def _git(repository, *arguments):
-    return subprocess.run(['git', '-C', str(repository), *arguments], capture_output=True, text=True, timeout=300)
+def _git(repository, *arguments, timeout=300):
+    try:
+        return subprocess.run(['git', '-C', str(repository), *arguments], capture_output=True, text=True,
+                              timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        return subprocess.CompletedProcess(e.cmd, 124, '', f'timed out after {timeout} s')
+
+
+def _show(repository, name):
+    """`git cat-file blob NAME`, which fetches the file: a stalled fetch is tried again."""
+    for attempt in range(3):
+        shown = _git(repository, 'cat-file', 'blob', name, timeout=60)
+        if shown.returncode != 124:
+            break
+    return shown
 
 
 def _clone(url, commit):
@@ -69,7 +82,7 @@ def read(path, platform='apple-16k'):
         if repository is None:
             raise unittest.SkipTest(f'The kernel source ({selected["url"]} {selected["commit"][:12]}) cannot be '
                                     'fetched; set ORCHARD_KERNEL_SOURCE to a checkout of it')
-        shown = _git(repository, 'cat-file', 'blob', f'{selected["commit"]}:{path}')
+        shown = _show(repository, f'{selected["commit"]}:{path}')
         if shown.returncode:
             if 'does not exist' in shown.stderr or 'Not a valid object name' in shown.stderr:
                 raise AssertionError(f'{path} is not in the kernel source at {selected["commit"][:12]}')
