@@ -34,6 +34,8 @@ is missing or empty.
 - iPad Air (Wi-Fi): the gyroscope works. Its three axes are the
   accelerometer's, and a positive rate is a right-hand turn about each.
   Nothing on the desktop uses it yet. Tested by ricktav.
+- iPad Air and iPad mini 2: listed as having no Touch ID, which they do not
+  have, instead of "doesn't work yet".
 - Rounded corners and notches: every installed system now says how its screen
   is shaped, in `/usr/lib/orchard/screens.json`, so a desktop can keep its
   content out of the corners and the notch. The shapes are Apple's own (the
