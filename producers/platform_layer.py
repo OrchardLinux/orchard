@@ -241,6 +241,14 @@ def initrd(modules, release, busybox, *, hardware=None, storage_modules=STORAGE_
     entries['init'] = (stat.S_IFREG | 0o755, (hardware / 'boot/initramfs/root/init').read_bytes())
     entries['etc/orchard/usb-identity'] = (stat.S_IFREG | 0o644, (hardware / 'boot/session/usb-identity').read_bytes())
     entries['bin/busybox'] = (stat.S_IFREG | 0o755, Path(busybox).read_bytes())
+    # Pre-create the applets boot/initramfs/root/init uses so boot skips
+    # `busybox --install -s /bin` creating hundreds of symlinks on every start.
+    symlink = stat.S_IFLNK | 0o777
+    for applet in ('[', 'basename', 'cat', 'chmod', 'cp', 'dirname', 'echo', 'head',
+                   'kill', 'ln', 'ls', 'mkdir', 'mknod', 'modprobe', 'mount', 'od',
+                   'readlink', 'rm', 'sed', 'sh', 'sleep', 'switch_root', 'test', 'tr',
+                   'umount'):
+        entries[f'bin/{applet}'] = (symlink, b'busybox')
     entries['etc/orchard/modules'] = (stat.S_IFREG | 0o644, ('\n'.join(loaded) + '\n').encode())
     if usb:
         entries['etc/orchard/usb-modules'] = (stat.S_IFREG | 0o644, ('\n'.join(usb) + '\n').encode())
