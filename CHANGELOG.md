@@ -25,6 +25,20 @@ is missing or empty.
 - iPad Air (Wi-Fi): the gyroscope works. Its three axes are the
   accelerometer's, and a positive rate is a right-hand turn about each.
   Nothing on the desktop uses it yet. Tested by ricktav.
+- Rounded corners and notches: every installed system now says how its screen
+  is shaped, in `/usr/lib/orchard/screens.json`, so a desktop can keep its
+  content out of the corners and the notch. The shapes are Apple's own (the
+  device tree's corner radius, Xcode's screen masks) for all 21 iPhones and
+  iPads with rounded corners or a notch; each one reaches the file once its
+  Linux device tree is in orchard (the iPhone X now).
+
+### Hardware
+
+- `examples/hardware-check` checks the Bluetooth controller (registered, its
+  firmware line, no HCI timeout) and the accelerometer and gyroscope (readable,
+  1 g in total at rest) on any board that has them. `hardware-check motion`
+  prints both for 20 seconds while the device is turned, and
+  `hardware-check bluetooth` runs the Bluetooth check alone.
 
 ## [0.3.11] - 2026-11-28
 

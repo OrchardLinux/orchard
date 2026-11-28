@@ -11,6 +11,16 @@ modules of its platform (the platform layer, `orchard.image.platform`):
   the firmware's placeholder address this unit's own
   (`usr/lib/orchard/wifi-address`).
 
+- `usr/lib/orchard/screens.json` (written by the platform layer, not kept
+  here): the rounded corners and notch of every board's screen that has
+  them, under the board's device tree compatible, so a desktop keeps its
+  content clear of them. `corner_radius` is in points (`scale` physical
+  pixels each); `outline` is the lit area as an SVG path in physical pixels,
+  held upright, y down. Both come from Apple (the device tree's
+  `display-corner-radius`, Xcode's framebuffer mask) through
+  `devices/<board>/screen.json` (`tools/catalog/generate screens`). A board
+  without an entry has a plain rectangular screen.
+
 - `defaults/usr/share/wireplumber/`: a place for WirePlumber fragments, which
   WirePlumber reads from `/usr/share` but not from `/usr/lib`; there is none
   yet.

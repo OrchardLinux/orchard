@@ -3,8 +3,9 @@
 
 `usr/lib/modules/RELEASE/` holds the kernel (`vmlinuz`), orchard's initrd
 (`initrd`, see boot/initramfs/root), the DTB of every board of the platform
-(`dtb/`) and the modules. The regulatory database and the hardware defaults
+(`dtb/`) and the modules. The regulatory database, the hardware defaults
 of `system/defaults` (vendor configuration, the sound cards' UCM profiles)
+and `usr/lib/orchard/screens.json` (the screens' rounded corners and notches)
 complete it, and
 `usr/lib/orchard/platform.json` says what it is. The installer writes the
 layer into a root after the distro's root image, then writes the boot entry
@@ -271,6 +272,29 @@ def storage_modules(hardware, platform):
     return tuple(modules)
 
 
+def screens(hardware, board_dtbs):
+    """usr/lib/orchard/screens.json: the screen shape of every board of the platform that
+    Apple gives one for (devices/<board>/screen.json, from tools/catalog/generate screens),
+    under its device tree compatible, for any distribution's desktop. A board without an
+    entry has a plain rectangular screen."""
+    entries = []
+    for board in sorted(board_dtbs):
+        path = Path(hardware) / 'devices' / board / 'screen.json'
+        if not path.is_file():
+            continue
+        screen = json.loads(path.read_text())
+        described = tomllib.loads((path.parent / 'device.toml').read_text())
+        for compatible in described['device'].get('dt_compatible', []):
+            entry = {'compatible': compatible, 'scale': screen['scale']}
+            entry.update({key: screen[key] for key in ('corner_radius', 'width', 'height', 'outline') if key in screen})
+            entries.append(entry)
+    document = {'schema': 1,
+                'units': 'corner_radius: points (times scale for physical pixels); width, height and '
+                         'outline: physical pixels of the panel held upright, y down',
+                'screens': sorted(entries, key=lambda entry: entry['compatible'])}
+    return (json.dumps(document, indent=1) + '\n').encode()
+
+
 def files(bundle, platform, board_dtbs, *, busybox, hardware=None):
     """(kernel release, {path: (data, mode)}) of PLATFORM's layer from a staged kernel BUNDLE."""
     hardware = Path(hardware or ROOT)
@@ -298,6 +322,7 @@ def files(bundle, platform, board_dtbs, *, busybox, hardware=None):
                 raise ValueError(f'System defaults belong under /usr/lib, /usr/share/alsa/ucm2 or '
                                  f'/usr/share/wireplumber: {name}')
             result[name] = (path.read_bytes(), 0o755 if path.stat().st_mode & 0o111 else 0o644)
+    result['usr/lib/orchard/screens.json'] = (screens(hardware, board_dtbs), 0o644)
     # One implementation of the entries, for the installer and every later kernel update.
     result['usr/lib/orchard/boot-entries'] = ((hardware / 'boot/initramfs/install/boot-entries').read_bytes(), 0o755)
     description = {'schema': SCHEMA, 'platform': platform, 'kernel_release': release,
